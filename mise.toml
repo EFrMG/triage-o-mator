@@ -1,0 +1,5 @@
+[tools]
+go = "1.27.1"
+"go:golang.org/x/tools/gopls" = "0.23.0"
+node = "22.23.2"
+"npm:prettier" = "3.9.7"

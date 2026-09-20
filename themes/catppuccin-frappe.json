@@ -1,0 +1,13 @@
+{
+  "name": "Catppuccin Frappé",
+  "background": "#303446",
+  "foreground": "#c6d0f5",
+  "muted": "#a5adce",
+  "border": "#626880",
+  "accent": "#ca9ee6",
+  "selection": "#414559",
+  "success": "#a6d189",
+  "warning": "#e5c890",
+  "error": "#e78284",
+  "info": "#8caaee"
+}

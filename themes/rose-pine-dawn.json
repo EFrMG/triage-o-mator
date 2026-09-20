@@ -1,0 +1,13 @@
+{
+  "name": "Rosé Pine Dawn",
+  "background": "#faf4ed",
+  "foreground": "#464261",
+  "muted": "#797593",
+  "border": "#9893a5",
+  "accent": "#907aa9",
+  "selection": "#f2e9e1",
+  "success": "#56949f",
+  "warning": "#ea9d34",
+  "error": "#b4637a",
+  "info": "#286983"
+}

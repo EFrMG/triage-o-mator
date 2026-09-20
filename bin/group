@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""Create, curate and export local review groups. Never writes the item ledger."""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _groups import create_group, list_groups, load_group, locked, save_group, STATUSES
+from _triage import REPO, enrich_item, load_ledger, now_iso
+
+
+def packet(group, enrich=False, diff=False):
+    ledger = {(r["kind"], r["number"]): r for r in load_ledger()}
+    items = []
+    members = group["members"]
+    for i, member in enumerate(members, 1):
+        row = ledger.get((member["kind"], member["number"]))
+        item = dict(row) if row else dict(kind=member["kind"], number=member["number"], missing_from_ledger=True)
+        if enrich:
+            # One line per GitHub read, on stderr, so the TUI (and a terminal) can show how far along it is.
+            print(f"fetching {i}/{len(members)}: {member['kind']} #{member['number']}", file=sys.stderr, flush=True)
+            enrich_item(item, include_diff=diff)
+
+        items.append(item)
+
+    return dict(schema_version=1, exported_at=now_iso(), repo=REPO, group=group, items=items)
+
+
+def prose(text):
+    """GitHub text as clean Markdown: Windows line endings (the stray ^M) normalized, and runs of blank lines collapsed to one. Diffs are left byte-for-byte instead, since a \\r there is real content."""
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def paragraph(text):
+    """A cleaned block followed by its blank line, or nothing at all when the text is empty, so empty notes don't leave stacks of blank lines."""
+    text = prose(text)
+
+    return [text, ""] if text else []
+
+
+def markdown(data):
+    g = data["group"]
+    lines = [f"# {g['title']}", ""]
+    lines += paragraph(g["description"])
+    lines += [
+        f"Repository: {g['repo']} · Group: {g['id']} · Revision: {g['revision']}",
+        f"Status: {g['status']} · Assignee: {g['assignee'] or '(unassigned)'}",
+        f"Created by {g['created_by']} at {g['created_at']}",
+        f"Updated by {g['updated_by']} at {g['updated_at']}",
+        f"Exported at {data['exported_at']}",
+        "",
+        "Group readiness does not imply human approval of individual decisions.",
+        "",
+        "## Cross-references",
+        "",
+    ]
+
+    for member, item in zip(g["members"], data["items"]):
+        url = f"https://github.com/{g['repo']}/{'pull' if member['kind'] == 'pr' else 'issues'}/{member['number']}"
+        lines.append(f"- [{member['kind']} #{member['number']}]({url}) — {item.get('title', '(missing from ledger)')}")
+
+    for member, item in zip(g["members"], data["items"]):
+        lines += ["", f"## {member['kind']} #{member['number']}: {item.get('title', '(missing from ledger)')}", ""]
+        lines += paragraph(member["notes"])
+        lines += [f"Added by {member['added_by']} at {member['added_at']}", ""]
+
+        for field in ("state", "author", "labels", "category", "action", "confidence", "reason", "triaged_by", "triaged_at", "reviewed", "reviewed_by", "reviewed_at", "reviewer_notes", "last_synced_at", "additions", "deletions", "changed_files", "is_draft", "mergeable"):
+            if field in item:
+                lines.append(f"- {field}: {item[field]}")
+
+        if prose(item.get("agent_notes")):
+            lines += ["", "### Agent notes", "", prose(item["agent_notes"])]
+
+        if "body" in item:
+            lines += ["", "### Body", ""] + paragraph(item["body"] or "(no description)") + ["### Comments", ""]
+            comments = [prose(c) for c in item.get("comment_bodies", [])]
+            lines += [f"{i}.\n\n{comment}\n" for i, comment in enumerate(comments, 1)] or ["(no comments)"]
+
+        if "diff_text" in item:
+            # A fence longer than any backtick run in the diff cannot close early.
+            fence = "`" * max(3, max((len(m) + 1 for m in re.findall(r"`+", item["diff_text"])), default=3))
+            lines += ["", "### Diff", "", fence + "diff", item["diff_text"], fence]
+
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("list")
+    for command in ("create", "show", "update", "add", "remove", "export"):
+        p = sub.add_parser(command)
+        if command != "create":
+            p.add_argument("id")
+
+        if command in ("create", "update"):
+            p.add_argument("--title", required=command == "create")
+            p.add_argument("--description", default="" if command == "create" else None)
+            p.add_argument("--assignee", default="" if command == "create" else None)
+
+        if command == "update":
+            p.add_argument("--status", choices=STATUSES)
+
+        if command in ("create", "update", "add", "remove"):
+            p.add_argument("--by", required=True, help="contributor identity")
+
+        if command in ("update", "add", "remove"):
+            p.add_argument("--revision", type=int, help="reject edits against a stale revision")
+
+        if command in ("add", "remove"):
+            p.add_argument("--kind", choices=("issue", "pr"), required=True)
+            p.add_argument("--number", type=int, required=True)
+
+        if command == "add":
+            p.add_argument("--notes", default="", help="relationship, evidence, or review instructions; updates existing membership")
+
+        if command == "export":
+            p.add_argument("--format", choices=("json", "markdown"), default="markdown")
+            p.add_argument("--enrich", action="store_true", help="include current GitHub bodies and all comments (GET only)")
+            p.add_argument("--diff", action="store_true", help="include PR diffs; implies --enrich")
+            p.add_argument("--output", type=Path)
+
+    args = parser.parse_args()
+    if args.command == "list":
+        print(json.dumps(list_groups(), ensure_ascii=False))
+
+        return
+
+    if args.command in ("show", "export"):
+        group = load_group(args.id)
+        if args.command == "show":
+            print(json.dumps(group, ensure_ascii=False, indent=2))
+
+            return
+
+        data = packet(group, args.enrich or args.diff, args.diff)
+        text = markdown(data) if args.format == "markdown" else json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(text)
+        else:
+            print(text, end="")
+
+        return
+
+    if not args.by.strip():
+        raise ValueError("--by cannot be blank")
+
+    with locked():
+        if args.command == "create":
+            group = create_group(args.title, args.description, args.assignee, args.by)
+        else:
+            group = load_group(args.id)
+            if args.revision is not None and args.revision != group["revision"]:
+                raise ValueError("group changed since it was loaded; reload before saving")
+
+            if args.command == "update":
+                for field in ("title", "description", "assignee", "status"):
+                    value = getattr(args, field)
+                    if value is not None:
+                        group[field] = value
+            else:
+                if args.number < 1:
+                    raise ValueError("item number must be positive")
+
+                key = (args.kind, args.number)
+                member = next((m for m in group["members"] if (m["kind"], m["number"]) == key), None)
+                if args.command == "remove":
+                    if member is None:
+                        raise ValueError("item is not in this group")
+
+                    group["members"].remove(member)
+                else:
+                    if not any((r["kind"], r["number"]) == key for r in load_ledger()):
+                        raise ValueError("item is missing from the ledger; fetch/sync first")
+
+                    if member is None:
+                        member = dict(kind=args.kind, number=args.number, added_by=args.by, added_at=now_iso())
+                        group["members"].append(member)
+
+                    member.update(notes=args.notes, updated_by=args.by, updated_at=now_iso())
+
+            group["revision"] += 1
+            group.update(updated_by=args.by, updated_at=now_iso())
+
+        save_group(group)
+
+    print(json.dumps(group, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        sys.exit(f"error: {error}")

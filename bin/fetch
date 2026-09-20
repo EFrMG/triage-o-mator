@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""
+Fetch issues and PRs from GitHub into data/<owner>/<repo>/raw/ (a disposable cache, never git-tracked, safe to delete and re-run any time).
+
+Usage:
+    bin/fetch [--full]
+
+By default this is incremental: it asks GitHub only for items updated since the last fetch bin/sync consumed (open or closed, since closing or merging an item counts as an update), which is a page or two instead of the whole backlog. It falls back to a full fetch of every open item when there is no previous synced fetch, the repo in config/repo changed, the last full fetch is more than a day old, or --full is passed.
+
+The one thing an incremental fetch cannot see is an item that was deleted or transferred to another repo: it simply stops appearing, so it stays open in the ledger until the next full fetch, which is what marks vanished items closed. That is why full fetches still happen at least daily.
+
+This is read-only against GitHub. It does not fetch PR diff stats or full issue bodies (too expensive at many open items); `bin/batch` fetches those lazily, only for the items in a given batch.
+"""
+
+import argparse
+import json
+import sys
+import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _triage import REPO, RAW_DIR, here, now_iso, run_gh
+
+JQ_FILTER = (
+    ".[] | {"
+    'number, kind: (if .pull_request then "pr" else "issue" end), '
+    "title, url: .html_url, author: .user.login, "
+    "created_at, updated_at, state, state_reason, "
+    "labels: [.labels[].name], comments_count: .comments"
+    "}"
+)
+
+META_PATH = RAW_DIR / "fetch_meta.json"
+FULL_EVERY = timedelta(days=1)
+# Re-ask for a few minutes before the last synced fetch started, so an update racing that fetch is never missed; sync is idempotent, so the overlap is harmless.
+SINCE_MARGIN = timedelta(minutes=5)
+ISO = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def parse_iso(value):
+    return datetime.strptime(value, ISO).replace(tzinfo=timezone.utc)
+
+
+def load_meta():
+    try:
+        return json.loads(META_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def full_fetch_reason(meta, forced):
+    """Why this fetch must be full, or None if an incremental fetch is safe."""
+    if forced:
+        return "--full requested"
+
+    if meta.get("repo") != REPO:
+        return "no previous fetch for this repo"
+
+    if not meta.get("synced_through") or not meta.get("last_full_at"):
+        return "no previous synced fetch"
+
+    if meta.get("mode") == "full" and meta.get("fetch_id") != meta.get("synced_fetch_id"):
+        return "the previous full fetch was never synced"
+
+    if datetime.now(timezone.utc) - parse_iso(meta["last_full_at"]) > FULL_EVERY:
+        return "last full fetch is over a day old"
+
+    return None
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--full", action="store_true", help="re-fetch every open item instead of only recent changes")
+    args = ap.parse_args()
+
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    meta = load_meta()
+    started = now_iso()
+    reason = full_fetch_reason(meta, args.full)
+
+    if reason:
+        mode, since = "full", None
+        endpoint = f"repos/{REPO}/issues?state=open&per_page=100"
+        print(f"Fetching all open issues+PRs from {REPO} ({reason}) ...", file=sys.stderr)
+    else:
+        mode = "incremental"
+        since = (parse_iso(meta["synced_through"]) - SINCE_MARGIN).strftime(ISO)
+        endpoint = f"repos/{REPO}/issues?state=all&since={since}&per_page=100"
+        print(f"Fetching issues+PRs from {REPO} updated since {since} ...", file=sys.stderr)
+
+    stdout = run_gh(["api", "--paginate", endpoint, "--jq", JQ_FILTER])
+    lines = [l for l in stdout.splitlines() if l.strip()]
+
+    out_path = RAW_DIR / "issues_and_prs.jsonl"
+    out_path.write_text("\n".join(lines) + ("\n" if lines else ""))
+
+    issues = sum(1 for l in lines if json.loads(l)["kind"] == "issue")
+    prs = len(lines) - issues
+    if meta.get("repo") != REPO:
+        # Sync markers from another repo say nothing about this one.
+        meta = {}
+
+    # fetch_id tells fetches apart even within the same second; bin/sync copies it to synced_fetch_id once it has merged this fetch.
+    meta.update({"repo": REPO, "fetch_id": uuid.uuid4().hex, "fetched_at": started, "mode": mode, "since": since, "issues": issues, "prs": prs})
+    META_PATH.write_text(json.dumps(meta, indent=2) + "\n")
+
+    what = "open" if mode == "full" else "changed"
+    print(f"Fetched {issues} {what} issues + {prs} {what} PRs ({mode}) -> {out_path}", file=sys.stderr)
+    print(here("Next: bin/sync"), file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

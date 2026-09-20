@@ -1,0 +1,13 @@
+{
+  "name": "Tokyo Night Moon",
+  "background": "#222436",
+  "foreground": "#c8d3f5",
+  "muted": "#828bb8",
+  "border": "#636da6",
+  "accent": "#c099ff",
+  "selection": "#2f334d",
+  "success": "#c3e88d",
+  "warning": "#ffc777",
+  "error": "#ff757f",
+  "info": "#82aaff"
+}

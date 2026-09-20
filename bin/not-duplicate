@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""
+Record that two similar items are not duplicates of each other, so bin/similar --pairs (and the TUI's Possible Duplicates view) stop offering the pair.
+
+Usage:
+    bin/not-duplicate --key issue:1125 --key issue:2501 --by "Ada Lovelace" [--note "different hardware"]
+    bin/not-duplicate --list
+    bin/not-duplicate --remove --key issue:1125 --key issue:2501
+
+The verdicts live in data/<owner>/<repo>/not-duplicates.jsonl, one JSON object per line, git-tracked like the ledger so a reviewer sees who ruled what out and when. Nothing else is written: the items' own decisions stay exactly as they are.
+
+A verdict covers one pair. If a third similar item shows up later it pairs with each of these separately, and those pairs are offered as usual, so a settled comparison stays settled while new reports still get looked at.
+"""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+import _notdupes
+from _triage import here, ledger_key, load_ledger
+
+KEY_RE = re.compile(r"^(issue|pr):(\d+)$")
+
+
+def parse_keys(values):
+    if len(values) != 2:
+        sys.exit("error: give exactly two --key arguments, e.g. --key issue:1125 --key issue:2501")
+
+    keys = []
+    for value in values:
+        match = KEY_RE.match(value)
+        if not match:
+            sys.exit(f"error: {value!r} is not a key: use issue:N or pr:N")
+
+        keys.append((match.group(1), int(match.group(2))))
+
+    if keys[0][0] != keys[1][0]:
+        sys.exit("error: a pair is two items of the same kind (two issues, or two PRs)")
+
+    if keys[0][1] == keys[1][1]:
+        sys.exit("error: an item can't be a duplicate of itself")
+
+    return keys
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--key", action="append", default=[], help="an item as kind:number; give two")
+    ap.add_argument("--by", help="who ruled it out (git config user.name)")
+    ap.add_argument("--note", default="", help="why, in a few words")
+    ap.add_argument("--list", action="store_true", help="print the recorded verdicts instead")
+    ap.add_argument("--remove", action="store_true", help="take a verdict back, so the pair is offered again")
+    args = ap.parse_args()
+
+    if args.list:
+        print(json.dumps(_notdupes.load(), ensure_ascii=False))
+
+        return
+
+    keys = parse_keys(args.key)
+    if args.remove:
+        if not _notdupes.remove(keys[0][0], keys[0][1], keys[1][1]):
+            sys.exit(f"error: no verdict recorded for {args.key[0]} and {args.key[1]}")
+
+        print(json.dumps({"removed": [f"{k}:{n}" for k, n in keys]}, ensure_ascii=False))
+
+        return
+
+    if not (args.by or "").strip():
+        ap.error("--by is required: a verdict is a person's call, and reviewers need to know whose")
+
+    ledger = {ledger_key(rec) for rec in load_ledger()}
+    for kind, number in keys:
+        if (kind, number) not in ledger:
+            sys.exit(here(f"error: {kind}:{number} is not in the ledger — run bin/sync first"))
+
+    print(json.dumps(_notdupes.record(keys[0][0], keys[0][1], keys[1][1], args.by.strip(), args.note), ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

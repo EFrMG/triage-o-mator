@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""
+Suggest what to do next, from the current local state. Read-only and offline: it never calls GitHub and never writes anything.
+
+Usage:
+    bin/next           numbered suggestions, most urgent first
+    bin/next --json    the same, machine-readable, for agents
+
+Each suggestion says who should do it: [agent] steps an agent may run on its own (they only produce proposals), [human] steps that need a person (reviewing, marking groups ready, acting on GitHub). It points at the exact command or prompts/<name>.md playbook to follow. This is the answer to "what could be done next?" in AGENTS.md.
+"""
+
+import argparse
+import json
+import sys
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _groups import list_groups
+from _similar import TitleIndex
+from _triage import here, BATCHES_DIR, RAW_DIR, REPO, REPORTS_DIR, load_jsonl, load_ledger
+
+STALE_FETCH_HOURS = 6
+STRONG_PAIR = 0.8
+CODE_REVIEW_CATEGORIES = ("merge-ready", "trivial", "needs-revision", "needs-maintainer-call")
+
+
+def hours_since(iso):
+    try:
+        then = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+    return (datetime.now(timezone.utc) - then).total_seconds() / 3600
+
+
+def batch_states(by_key):
+    """Each batch's progress: how many proposals are filled in, and how many of those are still waiting to reach the ledger."""
+    states = []
+    for items_path in sorted(BATCHES_DIR.glob("*.items.jsonl")):
+        batch_id = items_path.name[: -len(".items.jsonl")]
+        keys = [(r["kind"], r["number"]) for r in load_jsonl(items_path)]
+        rows = load_jsonl(BATCHES_DIR / f"{batch_id}.decisions.jsonl")
+        filled = [r for r in rows if r.get("category") and r.get("action")]
+        waiting = [r for r in filled if not (by_key.get((r["kind"], r["number"])) or {}).get("category")]
+        done = sum(1 for k in keys if (by_key.get(k) or {}).get("category"))
+        states.append(dict(id=batch_id, items=len(keys), filled=len(filled), waiting=len(waiting), done=done))
+
+    return states
+
+
+def suggestions(ledger):
+    by_key = {(r["kind"], r["number"]): r for r in ledger}
+    open_items = [r for r in ledger if r["state"] == "open"]
+    out = []
+
+    def add(who, what, do, why):
+        do = here(do)  # pastable from wherever this was run
+        out.append(dict(who=who, what=what, do=do, why=why))
+
+    meta_path = RAW_DIR / "fetch_meta.json"
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    age = hours_since(meta.get("synced_through") or meta.get("fetched_at"))
+    if age is None or age > STALE_FETCH_HOURS:
+        add("agent", "Refresh the ledger from GitHub", "bin/fetch && bin/sync",
+            "never synced" if age is None else f"last sync was {age:.0f}h ago")
+
+    for b in batch_states(by_key):
+        if b["filled"] == 0 and b["done"] < b["items"]:
+            add("agent", f"Fill in batch {b['id']} ({b['items']} items)", "prompts/auto-triage.md (batch already made: skip creating one)",
+                "its decisions file is still blank")
+        elif b["waiting"]:
+            add("human", f"Check the {b['waiting']} agent proposals in batch {b['id']}",
+                f"TUI: Batches -> {b['id']} (review one by one, or A to apply the rest as unreviewed); or bin/apply data/{REPO}/batches/{b['id']}.decisions.jsonl --only-untriaged",
+                "proposals only reach the review queue once applied")
+        elif b["done"] == b["items"]:
+            add("human", f"Delete finished batch {b['id']}", f"bin/batch --delete {b['id']} (or d d in the TUI's Batches)",
+                "every item in it is in the ledger")
+
+    pending = [r for r in open_items if r["category"] and not r["reviewed"]]
+    if pending:
+        closes = sum(1 for r in pending if r["action"].startswith("close-"))
+        add("human", f"Review {len(pending)} triaged decisions ({closes} would close something)",
+            "TUI: Pending Review (a approves, Ctrl-S corrects); or bin/export-csv --pending-review, edit, bin/import-csv --by <you>",
+            "nothing is acted on until a human confirms it")
+
+    unreviewed_code = [r for r in open_items if r["kind"] == "pr" and r["category"] in CODE_REVIEW_CATEGORIES
+                       and not r["reviewed"] and not (r.get("agent_notes") or "").strip()]
+    if unreviewed_code:
+        merge_ready = sum(1 for r in unreviewed_code if r["category"] == "merge-ready")
+        sample = ", ".join(f"#{r['number']}" for r in sorted(unreviewed_code, key=lambda r: r["category"] != "merge-ready")[:5])
+        add("agent", f"Code-review {len(unreviewed_code)} triaged PRs nobody has read the diff of ({merge_ready} marked merge-ready)",
+            f"prompts/review-pr.md (e.g. {sample})", "their category was judged from the description alone")
+
+    pairs = [p for p in TitleIndex(ledger).pairs(min_score=STRONG_PAIR)
+             if not by_key[(p["item"]["kind"], p["item"]["number"])]["category"]]
+    if pairs:
+        sample = ", ".join(f"#{p['item']['number']}~#{p['original']['number']}" for p in pairs[:3])
+        add("agent", f"Check {len(pairs)} near-identical title pairs for duplicates", f"prompts/find-duplicates.md (e.g. {sample})",
+            f"titles score {STRONG_PAIR:.0%}+ and the newer item is untriaged")
+
+    groups = list_groups()
+    drafts = [g for g in groups if g["status"] == "draft" and g["members"]]
+    ready = [g for g in groups if g["status"] == "ready"]
+    for g in drafts:
+        add("human", f"Finish group \"{g['title']}\" ({len(g['members'])} items) and mark it ready",
+            f"TUI: b -> group -> e (status ready); or bin/group update {g['id']} --status ready --by <you>",
+            "maintainers only see ready groups at the top of the report")
+
+    for g in ready:
+        unsettled = [m for m in g["members"] if not (by_key.get((m["kind"], m["number"])) or {}).get("reviewed")]
+        if unsettled:
+            add("human", f"Review the {len(unsettled)} unreviewed members of ready group \"{g['title']}\"",
+                "TUI: b -> group -> Enter -> open each member", "a ready group reads best when its decisions are confirmed")
+
+    polished = REPORTS_DIR / f"{date.today().isoformat()}-polished.md"
+    if ready and not polished.exists():
+        titles = ", ".join(f'"{g["title"]}"' for g in ready[:2])
+        add("agent", f"Make the case for {len(ready)} ready group{'' if len(ready) == 1 else 's'}: {titles}", "prompts/polish-report.md",
+            "the report lists ready groups; it doesn't argue them, and a maintainer has to decide")
+
+    if pairs and not groups:
+        add("agent", "Organize related items into review groups for maintainers", "prompts/organize-groups.md",
+            "there are duplicate clusters and no groups yet")
+
+    untriaged = [r for r in open_items if not r["category"]]
+    if untriaged:
+        fresh = [r for r in untriaged if (hours_since(r.get("first_seen_at")) or 1e9) < 24]
+        if fresh:
+            add("agent", f"Triage {len(fresh)} items first seen in the last 24h", "prompts/auto-triage.md with bin/batch 25 --order newest",
+                "keeping up with inflow stops the backlog growing")
+
+        add("agent", f"Triage the backlog ({len(untriaged)} untriaged open items)", "prompts/auto-triage.md with bin/batch 25",
+            "oldest first clears the longest-waiting reports")
+
+    reports = sorted(REPORTS_DIR.glob("*.md"))
+    if not reports or reports[-1].stem != date.today().isoformat():
+        add("agent", "Write today's maintainer report", "prompts/maintainer-brief.md (runs bin/report)",
+            "no report yet today" if reports else "no report yet")
+
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--json", action="store_true", help="machine-readable output")
+    args = ap.parse_args()
+
+    ledger = load_ledger()
+    if not ledger:
+        items = [dict(who="agent", what="Build the ledger", do=here("bin/fetch && bin/sync"), why="the ledger is empty")]
+    else:
+        items = suggestions(ledger)
+
+    if args.json:
+        print(json.dumps(dict(repo=REPO, suggestions=items), ensure_ascii=False, indent=2))
+
+        return
+
+    print(f"Next steps for {REPO}:\n")
+    for i, s in enumerate(items, 1):
+        print(f"{i}. [{s['who']}] {s['what']}\n   do:  {s['do']}\n   why: {s['why']}")
+
+    if not items:
+        print("Nothing pending. Everything triaged is reviewed and every batch is applied.")
+
+
+if __name__ == "__main__":
+    main()

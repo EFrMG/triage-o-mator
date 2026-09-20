@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""
+Pull the next batch of untriaged items and enrich them with full body text (and, for PRs, diff stats) so an agent has enough context to categorize them without re-fetching anything by hand.
+
+Usage:
+    bin/batch [N] [--kind issue|pr] [--order oldest|newest] [--group ID] [--diff]
+    bin/batch --delete BATCH_ID
+    bin/batch --remove BATCH_ID --key issue:N [--key pr:M ...]
+
+Writes:
+    data/<owner>/<repo>/batches/<batch_id>.items.jsonl       full context, one item per line, including `duplicate_candidates` (the top title matches from bin/similar; leads to check, not proof)
+    data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl   template to fill in and pass to bin/apply
+
+The template has category/action/confidence/reason blanked out; fill those in per config/taxonomy.md (optionally also agent_notes, the longer evidence, and proposed_by, e.g. "agent:<contributor>"), then run:
+
+    bin/apply data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl
+
+--diff also fetches each PR's full diff into `diff_text` (one more read-only GitHub call per PR), for batches whose PRs will be code-reviewed per prompts/review-pr.md rather than judged from their description.
+
+--remove drops the given items from a batch (their lines in both files, so their proposals too), for items that shouldn't be in it after all. The ledger is untouched.
+
+--delete removes a batch's two working files. Decisions already applied from it stay in the ledger (still stamped with its batch_id); only unapplied proposals in its decisions file are lost.
+
+The triage-o-mator TUI runs this same script from its Batches screen (n creates, d deletes) and reads both files back, so batches made either way appear in the same list.
+"""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _groups import load_group
+from _similar import TitleIndex
+from _triage import BATCHES_DIR, enrich_item, here, load_ledger, new_batch_id
+
+# Only IDs new_batch_id() can produce, so --delete can never reach a path outside data/<owner>/<repo>/batches/.
+BATCH_ID_RE = re.compile(r"^b\d{8}-\d{6}(-\d+)?$")
+
+# Enough for a triager (or prompts/auto-triage.md) to spot and name a duplicate without drowning each item in noise.
+CANDIDATES_PER_ITEM = 3
+
+
+def remove_items(batch_id, keys):
+    """Drop items from a batch's items and decisions files, rewriting each file whole so a reader never sees half of it."""
+    if not BATCH_ID_RE.match(batch_id):
+        sys.exit(f"error: {batch_id!r} is not a batch ID (expected e.g. b20260919-000341)")
+
+    wanted = set()
+    for value in keys:
+        kind, _, number = value.partition(":")
+        if kind not in ("issue", "pr") or not number.isdigit():
+            sys.exit(f"error: --key {value!r} should look like issue:12 or pr:34")
+
+        wanted.add((kind, int(number)))
+
+    items_path = BATCHES_DIR / f"{batch_id}.items.jsonl"
+    if not items_path.exists():
+        sys.exit(f"error: no batch {batch_id} in {BATCHES_DIR}")
+
+    removed = 0
+    for path in (items_path, BATCHES_DIR / f"{batch_id}.decisions.jsonl"):
+        if not path.exists():
+            continue
+
+        kept = []
+        for line in path.read_text().splitlines():
+            row = json.loads(line) if line.strip() else None
+            if row is not None and (row["kind"], row["number"]) in wanted:
+                removed += path == items_path
+                continue
+
+            kept.append(line)
+
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text("".join(line + "\n" for line in kept))
+        tmp.replace(path)
+
+    print(f"Removed {removed} item(s) from batch {batch_id}.")
+
+
+def delete_batch(batch_id):
+    if not BATCH_ID_RE.match(batch_id):
+        sys.exit(f"error: {batch_id!r} is not a batch ID (expected e.g. b20260919-000341)")
+
+    paths = [BATCHES_DIR / f"{batch_id}.items.jsonl", BATCHES_DIR / f"{batch_id}.decisions.jsonl"]
+    existing = [p for p in paths if p.exists()]
+    if not existing:
+        sys.exit(f"error: no batch {batch_id} in {BATCHES_DIR}")
+
+    for p in existing:
+        p.unlink()
+
+    print(f"Deleted batch {batch_id}.")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "n", nargs="?", type=int, default=25, help="batch size (default 25)"
+    )
+    ap.add_argument("--kind", choices=["issue", "pr"], help="restrict to one kind")
+    ap.add_argument(
+        "--order",
+        choices=["oldest", "newest"],
+        default="oldest",
+        help="oldest-first clears backlog; newest-first keeps up with new inflow",
+    )
+    ap.add_argument("--group", help="only untriaged open members of this group")
+    ap.add_argument("--diff", action="store_true", help="include each PR's full diff (one more GitHub call per PR)")
+    ap.add_argument("--delete", metavar="BATCH_ID", help="delete a batch's items and decisions files instead of creating one")
+    ap.add_argument("--remove", metavar="BATCH_ID", help="drop the --key items from this batch instead of creating one")
+    ap.add_argument("--key", action="append", default=[], metavar="KIND:NUMBER", help="with --remove: an item to drop, e.g. issue:12 (repeatable)")
+    args = ap.parse_args()
+    if args.remove is not None:
+        if not args.key:
+            ap.error("--remove needs at least one --key")
+
+        remove_items(args.remove, args.key)
+
+        return
+
+    if args.delete is not None:
+        delete_batch(args.delete)
+
+        return
+
+    if args.n < 1:
+        ap.error("batch size must be positive")
+
+    ledger = load_ledger()
+    candidates = [r for r in ledger if r["state"] == "open" and not r["category"]]
+    if args.group:
+        group = load_group(args.group)
+        members = {(m["kind"], m["number"]): m for m in group["members"]}
+        candidates = [r for r in candidates if (r["kind"], r["number"]) in members]
+
+    if args.kind:
+        candidates = [r for r in candidates if r["kind"] == args.kind]
+
+    candidates.sort(key=lambda r: r["created_at"], reverse=(args.order == "newest"))
+    selected = candidates[: args.n]
+
+    if not selected:
+        print("Nothing to batch — no untriaged open items match the filters.")
+
+        return
+
+    batch_id = new_batch_id()
+    index = TitleIndex(ledger)
+    items_path = BATCHES_DIR / f"{batch_id}.items.jsonl"
+    template_path = BATCHES_DIR / f"{batch_id}.decisions.jsonl"
+
+    print(
+        f"Enriching {len(selected)} items (fetching body/comments from GitHub)...",
+        file=sys.stderr,
+    )
+    with items_path.open("w") as items_f, template_path.open("w") as tmpl_f:
+        for i, rec in enumerate(selected, 1):
+            enriched = enrich_item(dict(rec), include_diff=args.diff)
+            enriched["duplicate_candidates"] = index.similar((rec["kind"], rec["number"]), top=CANDIDATES_PER_ITEM)
+            if args.group:
+                enriched["group"] = {k: group[k] for k in ("id", "title", "description", "assignee", "status", "revision")}
+                enriched["group_member_notes"] = members[(rec["kind"], rec["number"])]["notes"]
+
+            items_f.write(json.dumps(enriched, ensure_ascii=False) + "\n")
+            tmpl_f.write(
+                json.dumps(
+                    {
+                        "number": rec["number"],
+                        "kind": rec["kind"],
+                        "category": "",
+                        "action": "",
+                        "confidence": "",
+                        "reason": "",
+                        "agent_notes": "",
+                        "proposed_by": "",
+                    }
+                )
+                + "\n"
+            )
+            print(
+                f"  [{i}/{len(selected)}] #{rec['number']} {rec['kind']}",
+                file=sys.stderr,
+            )
+
+    print(f"\nBatch {batch_id}: {len(selected)} items")
+    print(f"  context:  {items_path}")
+    print(f"  fill in:  {template_path}")
+    print(f"  taxonomy: config/taxonomy.md")
+    print(here(f"\nWhen filled in, run: bin/apply {template_path}"))
+
+
+if __name__ == "__main__":
+    main()

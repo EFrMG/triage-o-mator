@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""
+Fetch full body/comments (and, for PRs, diff) for a single issue/PR and print it as one JSON object on stdout. Read-only against GitHub.
+
+Usage:
+    bin/enrich-one --kind issue|pr --number N [--diff]
+
+This is the single-item counterpart to bin/batch's bulk enrichment; both share the same `enrich_item()` logic in bin/_triage.py, so there's exactly one definition of which fields we pull for an item. Intended for callers like the triage-o-mator TUI that want to lazily enrich one item at a time rather than pre-enriching a whole batch.
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _triage import enrich_item
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--kind", choices=["issue", "pr"], required=True)
+    ap.add_argument("--number", type=int, required=True)
+    ap.add_argument("--diff", action="store_true", help="also fetch PR diff text")
+    args = ap.parse_args()
+
+    rec = enrich_item(
+        {"number": args.number, "kind": args.kind}, include_diff=args.diff
+    )
+    print(json.dumps(rec, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

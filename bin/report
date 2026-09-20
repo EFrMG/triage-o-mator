@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""
+Generate a markdown triage report from the ledger.
+
+Usage:
+    bin/report            writes reports/<owner>/<repo>/<date>.md and prints it
+    bin/report --stdout    print only, don't write a file
+
+Written for lead maintainers first: groups contributors marked ready, then human-reviewed decisions ready to act on, then the review queue and backlog. "[notes]" marks items whose ledger row has agent_notes (a code review or duplicate comparison) worth reading before acting.
+"""
+
+import argparse
+import sys
+from collections import Counter
+from datetime import date
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _groups import list_groups
+from _triage import REPO, REPORTS_DIR, here, load_ledger
+
+
+ACT_LIMIT = 20
+
+
+def pct(n, total):
+    return f"{(100 * n / total):.0f}%" if total else "0%"
+
+
+def notes_mark(r):
+    return " [notes]" if (r.get("agent_notes") or "").strip() else ""
+
+
+def item_line(r, extra=""):
+    return f"- [{r['kind']} #{r['number']}]({r['url']}) {r['title']}{extra}{notes_mark(r)}"
+
+
+def ready_groups_section(groups, by_key):
+    """Groups a contributor marked ready: the packets a lead maintainer can take in one sitting."""
+    ready = [g for g in groups if g["status"] == "ready"]
+    if not ready:
+        return []
+
+    lines = [f"## Ready for maintainers ({len(ready)} group{'' if len(ready) == 1 else 's'})", "", "Marked ready by contributors. Readiness means the group is organized for a decision, not that every member's decision was human-reviewed; unreviewed members are called out.", ""]
+    for g in ready:
+        members = [(m, by_key.get((m["kind"], m["number"]))) for m in g["members"]]
+        unreviewed = sum(1 for _, r in members if r and r.get("category") and not r.get("reviewed"))
+        untriaged = sum(1 for _, r in members if r and not r.get("category"))
+        flags = ", ".join(x for x in (f"{unreviewed} unreviewed" if unreviewed else "", f"{untriaged} untriaged" if untriaged else "") if x)
+        lines.append(f"### {g['title']}")
+        lines.append("")
+        lines.append(f"Assignee: {g['assignee'] or '(unassigned)'} · {len(members)} items{' · ' + flags if flags else ''} · ID: `{g['id']}` (`bin/group export {g['id']}`)")
+        lines.append("")
+        if g["description"].strip():
+            lines += [g["description"].strip(), ""]
+
+        for m, r in members:
+            if r is None:
+                lines.append(f"- {m['kind']} #{m['number']} (missing from ledger)")
+
+                continue
+
+            decision = f"`{r['category']}/{r['action']}` {r['confidence']}".strip() if r.get("category") else "untriaged"
+            review = "reviewed" if r.get("reviewed") else "not reviewed"
+            note = f": {m['notes'].strip()}" if m["notes"].strip() else ""
+            lines.append(f"- [{r['kind']} #{r['number']}]({r['url']}) {r['title']} ({r['state']}; {decision}; {review}){notes_mark(r)}{note}")
+
+        lines.append("")
+
+    return lines
+
+
+def render(ledger):
+    open_items = [r for r in ledger if r["state"] == "open"]
+    issues = [r for r in open_items if r["kind"] == "issue"]
+    prs = [r for r in open_items if r["kind"] == "pr"]
+    triaged = [r for r in open_items if r["category"]]
+    untriaged = [r for r in open_items if not r["category"]]
+    reviewed = [r for r in triaged if r["reviewed"]]
+    pending_review = [r for r in triaged if not r["reviewed"]]
+
+    lines = []
+    lines.append(f"# Repository triage report. {date.today().isoformat()}")
+    lines.append("")
+    lines.append(f"Repo: `{REPO}`")
+    lines.append("")
+    lines.append("## Overview")
+    lines.append("")
+    lines.append(
+        f"- Open issues: **{len(issues)}**, open PRs: **{len(prs)}** ({len(open_items)} total)"
+    )
+    lines.append(
+        f"- Triaged: **{len(triaged)}** ({pct(len(triaged), len(open_items))})"
+    )
+    lines.append(
+        f"- Human-reviewed: **{len(reviewed)}** ({pct(len(reviewed), len(open_items))})"
+    )
+    lines.append(f"- Awaiting human review: **{len(pending_review)}**")
+    lines.append(f"- Untriaged backlog: **{len(untriaged)}**")
+    lines.append("")
+
+    groups = list_groups()
+    by_key = {(r["kind"], r["number"]): r for r in ledger}
+    lines += ready_groups_section(groups, by_key)
+
+    actionable = [r for r in reviewed if r["action"] not in ("", "no-action-needed")]
+    if actionable:
+        lines.append(f"## Human-reviewed, ready to act ({len(actionable)})")
+        lines.append("")
+        lines.append("Decisions a human confirmed. Nothing here has been done on GitHub yet.")
+        lines.append("")
+        by_action = {}
+        for r in actionable:
+            by_action.setdefault(r["action"], []).append(r)
+
+        for action, items in sorted(by_action.items(), key=lambda kv: -len(kv[1])):
+            lines.append(f"### {action} ({len(items)})")
+            lines.append("")
+            for r in sorted(items, key=lambda r: r["created_at"])[:ACT_LIMIT]:
+                lines.append(item_line(r, f" — {r['reason']} (reviewed by {r['reviewed_by'] or '?'})"))
+
+            if len(items) > ACT_LIMIT:
+                lines.append(f"- ...and {len(items) - ACT_LIMIT} more")
+
+            lines.append("")
+
+    for kind, items in (("Issue", issues), ("PR", prs)):
+        cats = Counter(r["category"] or "(untriaged)" for r in items)
+        if not cats:
+            continue
+
+        lines.append(f"## {kind} categories")
+        lines.append("")
+        lines.append("| category | count | % of open |")
+        lines.append("|---|---|---|")
+        for cat, n in cats.most_common():
+            lines.append(f"| {cat} | {n} | {pct(n, len(items))} |")
+
+        lines.append("")
+
+    if pending_review:
+        lines.append("## Awaiting human review, by recommended action")
+        lines.append("")
+        by_action = Counter(r["action"] or "(none)" for r in pending_review)
+        lines.append("| action | count |")
+        lines.append("|---|---|")
+        for action, n in by_action.most_common():
+            lines.append(f"| {action} | {n} |")
+
+        lines.append("")
+
+    merge_ready = [
+        r
+        for r in prs
+        if r["category"] == "merge-ready"
+        and r["confidence"] == "high"
+        and not r["reviewed"]
+    ]
+    if merge_ready:
+        lines.append(
+            f"## High-confidence merge-ready PRs awaiting review ({len(merge_ready)})"
+        )
+        lines.append("")
+        for r in sorted(merge_ready, key=lambda r: r["created_at"])[:30]:
+            lines.append(item_line(r, f" — {r['reason']}"))
+
+        if len(merge_ready) > 30:
+            lines.append(f"- ...and {len(merge_ready) - 30} more")
+
+        lines.append("")
+
+    close_candidates = [
+        r
+        for r in open_items
+        if r["action"] in ("close-duplicate", "close-stale", "close-out-of-scope", "close-resolved")
+        and not r["reviewed"]
+    ]
+    if close_candidates:
+        lines.append(f"## Close candidates awaiting review ({len(close_candidates)})")
+        lines.append("")
+        for r in sorted(close_candidates, key=lambda r: r["created_at"])[:30]:
+            lines.append(item_line(r, f" — `{r['action']}`: {r['reason']}"))
+
+        if len(close_candidates) > 30:
+            lines.append(f"- ...and {len(close_candidates) - 30} more")
+
+        lines.append("")
+
+    if untriaged:
+        lines.append(f"## Oldest untriaged items ({len(untriaged)} total, showing 15)")
+        lines.append("")
+        for r in sorted(untriaged, key=lambda r: r["created_at"])[:15]:
+            lines.append(
+                f"- [{r['kind']} #{r['number']}]({r['url']}) {r['title']} (opened {r['created_at'][:10]})"
+            )
+
+        lines.append("")
+
+    other_groups = [g for g in groups if g["status"] != "ready"]
+    if other_groups:
+        lines += [
+            "## Other review groups",
+            "",
+            "Drafts are still being organized; archived groups are kept for reference.",
+            "",
+        ]
+        for group in other_groups:
+            lines.append(
+                f"- **{group['title']}** ({group['status']}, {len(group['members'])} items) — assignee: {group['assignee'] or '(unassigned)'}; ID: `{group['id']}`"
+            )
+
+        lines.append("")
+
+    triagers = Counter(r["triaged_by"] or "(unknown)" for r in triaged)
+    reviewers = Counter(r["reviewed_by"] or "(unknown)" for r in reviewed)
+    if triagers or reviewers:
+        lines += ["## Contributors (open items)", "", "| who | triaged | reviewed |", "|---|---|---|"]
+        for who in sorted(set(triagers) | set(reviewers), key=lambda w: -(triagers[w] + reviewers[w])):
+            lines.append(f"| {who} | {triagers[who]} | {reviewers[who]} |")
+
+        lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--stdout", action="store_true", help="print only, don't write to reports/"
+    )
+    args = ap.parse_args()
+
+    ledger = load_ledger()
+    if not ledger:
+        sys.exit(here("error: ledger is empty. Run bin/fetch && bin/sync first."))
+
+    text = render(ledger)
+    print(text)
+
+    if not args.stdout:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        out_path = REPORTS_DIR / f"{date.today().isoformat()}.md"
+        out_path.write_text(text)
+        print(f"(written to {out_path})", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

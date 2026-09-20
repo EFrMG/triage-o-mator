@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""
+List likely duplicates of one ledger item, ranked by title similarity (offline; see bin/_similar.py for how scores work).
+
+Usage:
+    bin/similar --kind issue|pr --number N [--top 5] [--min-score 0.35] [--any-kind] [--enrich]
+    bin/similar --pairs [--min-score 0.5]
+    bin/similar --query "suspend lid" [--top 20] [--min-score 0.1] [--include-closed]
+
+Prints one JSON object: the item plus a `candidates` list (number, kind, title, state, category, action, reviewed, score), best first. Candidates are the same kind as the item unless --any-kind.
+
+--enrich also fetches the body and comments of the item and every candidate from GitHub (read-only), producing exactly the input prompts/find-duplicates.md expects. Without it, nothing leaves the machine.
+
+--pairs instead lists every pair of open, same-kind items scoring at least --min-score (default 0.5) across the whole ledger, best first, as {"pairs": [{"score", "item", "original"}]} where `item` is the newer of the two. Pairs ruled out with bin/not-duplicate are left out unless --include-checked.
+
+--query ranks open issues and PRs together by how well their titles match free text, as {"query", "candidates"}: for gathering everything about a topic into a group (prompts/organize-groups.md).
+
+The triage-o-mator TUI runs this (without --enrich) for the item you open, to show possible duplicates and power its Duplicates screen, and with --pairs for its Possible Duplicates view.
+"""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+import _notdupes
+from _similar import DEFAULT_MIN_SCORE, DEFAULT_PAIR_MIN_SCORE, DEFAULT_TOP, TitleIndex
+from _triage import enrich_item, here, load_ledger
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--kind", choices=["issue", "pr"])
+    ap.add_argument("--number", type=int)
+    ap.add_argument("--pairs", action="store_true", help="list likely duplicate pairs across all open items instead")
+    ap.add_argument("--include-checked", action="store_true", help="with --pairs: also list pairs already ruled out with bin/not-duplicate")
+    ap.add_argument("--top", type=int, default=DEFAULT_TOP, help=f"max candidates (default {DEFAULT_TOP})")
+    ap.add_argument("--min-score", type=float, help=f"minimum similarity 0-1 (default {DEFAULT_MIN_SCORE}, or {DEFAULT_PAIR_MIN_SCORE} with --pairs)")
+    ap.add_argument("--any-kind", action="store_true", help="also compare issues against PRs")
+    ap.add_argument("--query", help="rank open issues and PRs by title match against this text instead")
+    ap.add_argument("--include-closed", action="store_true", help="with --query: also rank closed items")
+    ap.add_argument("--enrich", action="store_true", help="fetch bodies/comments for the item and candidates (read-only GitHub calls)")
+    args = ap.parse_args()
+
+    ledger = load_ledger()
+    index = TitleIndex(ledger)
+    if args.pairs:
+        min_score = DEFAULT_PAIR_MIN_SCORE if args.min_score is None else args.min_score
+        pairs = index.pairs(min_score=min_score)
+        if not args.include_checked:
+            checked = _notdupes.checked()
+            pairs = [p for p in pairs if _notdupes.pair_key(p["item"]["kind"], p["item"]["number"], p["original"]["number"]) not in checked]
+
+        print(json.dumps({"pairs": pairs}, ensure_ascii=False))
+
+        return
+
+    if args.query is not None:
+        top = 20 if args.top == DEFAULT_TOP else args.top
+        min_score = 0.1 if args.min_score is None else args.min_score
+        found = index.search(args.query, top=top, min_score=min_score, open_only=not args.include_closed)
+        print(json.dumps({"query": args.query, "candidates": found}, ensure_ascii=False))
+
+        return
+
+    if args.kind is None or args.number is None:
+        ap.error("--kind and --number are required unless --pairs or --query")
+
+    if args.min_score is None:
+        args.min_score = DEFAULT_MIN_SCORE
+
+    key = (args.kind, args.number)
+    if key not in index.records:
+        sys.exit(here(f"error: {key} is not in the ledger — run bin/sync first"))
+
+    rec = index.records[key]
+    out = {k: rec.get(k, "") for k in ("number", "kind", "title", "state", "category", "action", "url")}
+    out["candidates"] = index.similar(key, top=args.top, min_score=args.min_score, any_kind=args.any_kind)
+
+    if args.enrich:
+        enrich_item(out)
+        for c in out["candidates"]:
+            enrich_item(c)
+
+    print(json.dumps(out, ensure_ascii=False, indent=None if not args.enrich else 2))
+
+
+if __name__ == "__main__":
+    main()

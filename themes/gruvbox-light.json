@@ -1,0 +1,13 @@
+{
+  "name": "Gruvbox Light",
+  "background": "#fbf1c7",
+  "foreground": "#3c3836",
+  "muted": "#665c54",
+  "border": "#a89984",
+  "accent": "#8f3f71",
+  "selection": "#ebdbb2",
+  "success": "#79740e",
+  "warning": "#b57614",
+  "error": "#9d0006",
+  "info": "#076678"
+}

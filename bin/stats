@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""Quick one-screen counts. Usage: bin/stats"""
+
+import sys
+from collections import Counter
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _triage import here, load_ledger
+
+ledger = load_ledger()
+if not ledger:
+    sys.exit(here("Ledger is empty. Run bin/fetch && bin/sync first."))
+
+open_items = [r for r in ledger if r["state"] == "open"]
+by_kind = Counter(r["kind"] for r in open_items)
+triaged = sum(1 for r in open_items if r["category"])
+reviewed = sum(1 for r in open_items if r["reviewed"])
+
+print(
+    f"Ledger total: {len(ledger)} (open: {len(open_items)}, closed: {len(ledger) - len(open_items)})"
+)
+print(f"Open by kind: {dict(by_kind)}")
+print(
+    f"Triaged: {triaged}/{len(open_items)}  |  Reviewed: {reviewed}/{len(open_items)}"
+)

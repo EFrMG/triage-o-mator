@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+
+# Compiled binary, negating a global_gitignore for such
+!/bin/
+/bin/triage-o-mator
+# Also where `go build` in tui/ leaves it
+/tui/triage-o-mator

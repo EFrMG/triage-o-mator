@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""
+Import a human-edited CSV (from bin/export-csv) back into the ledger.
+
+Usage:
+    bin/import-csv data/<owner>/<repo>/exports/ledger-2026-09-17.csv [--by NAME]
+
+Only these columns are pulled back into the ledger: category, action, confidence, reason, reviewed, reviewed_by, reviewer_notes. Everything else (title, state, labels, ...) is treated as GitHub-derived and ignored, so editing it in the spreadsheet has no effect: re-run bin/fetch && bin/sync if that data is stale.
+
+A row with `reviewed` set to a truthy value (true/1/yes/y) and no `reviewed_by` gets --by (default: whoever ran this) filled in automatically.
+"""
+
+import argparse
+import csv
+import getpass
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _triage import here, load_ledger, now_iso, save_ledger
+
+EDITABLE = {
+    "category",
+    "action",
+    "confidence",
+    "reason",
+    "reviewed",
+    "reviewed_by",
+    "reviewer_notes",
+}
+TRUTHY = {"true", "1", "yes", "y"}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("csv_path", type=Path)
+    ap.add_argument("--by", default=getpass.getuser())
+    args = ap.parse_args()
+
+    if not args.csv_path.exists():
+        sys.exit(f"error: {args.csv_path} not found")
+
+    ledger = load_ledger()
+    by_key = {(r["kind"], r["number"]): r for r in ledger}
+
+    changed = 0
+    with args.csv_path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            key = (row["kind"], int(row["number"]))
+            rec = by_key.get(key)
+            if rec is None:
+                print(here(f"warning: {key} not in ledger, skipping (run bin/sync?)"))
+
+                continue
+
+            was_reviewed = rec["reviewed"]
+            diffs = {
+                k: row[k]
+                for k in EDITABLE
+                if k in row and row[k] != str(rec.get(k, ""))
+            }
+            if not diffs:
+                continue
+
+            for k in EDITABLE:
+                if k not in row:
+                    continue
+
+                if k == "reviewed":
+                    rec["reviewed"] = row[k].strip().lower() in TRUTHY
+                else:
+                    rec[k] = row[k]
+
+            if rec["reviewed"] and not was_reviewed:
+                if not rec.get("reviewed_by"):
+                    rec["reviewed_by"] = args.by
+
+                rec["reviewed_at"] = now_iso()
+
+            changed += 1
+
+    save_ledger(list(by_key.values()))
+    print(f"Imported {args.csv_path.name}: {changed} rows changed.")
+
+
+if __name__ == "__main__":
+    main()

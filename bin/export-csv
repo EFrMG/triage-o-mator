@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""
+Export the ledger to CSV for manual review in a spreadsheet.
+
+Usage:
+    bin/export-csv [--open-only] [--pending-review]
+    -> data/<owner>/<repo>/exports/ledger-<date>.csv
+
+Edit category / action / confidence / reason / reviewed / reviewed_by / reviewer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. Don't reorder or delete the `number`/`kind` columns; they are the join key.
+"""
+
+import argparse
+import csv
+import sys
+from datetime import date
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _triage import EXPORTS_DIR, FIELDS, load_ledger
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--open-only", action="store_true")
+    ap.add_argument(
+        "--pending-review",
+        action="store_true",
+        help="only triaged-but-unreviewed items",
+    )
+    args = ap.parse_args()
+
+    ledger = load_ledger()
+    if args.open_only:
+        ledger = [r for r in ledger if r["state"] == "open"]
+
+    if args.pending_review:
+        ledger = [r for r in ledger if r["category"] and not r["reviewed"]]
+
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = EXPORTS_DIR / f"ledger-{date.today().isoformat()}.csv"
+    with out_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        for rec in ledger:
+            row = dict(rec)
+            row["labels"] = ",".join(row.get("labels") or [])
+            writer.writerow(row)
+
+    print(f"Exported {len(ledger)} rows -> {out_path}")
+
+
+if __name__ == "__main__":
+    main()

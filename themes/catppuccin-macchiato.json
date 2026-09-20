@@ -1,0 +1,13 @@
+{
+  "name": "Catppuccin Macchiato",
+  "background": "#24273a",
+  "foreground": "#cad3f5",
+  "muted": "#a5adcb",
+  "border": "#5b6078",
+  "accent": "#c6a0f6",
+  "selection": "#363a4f",
+  "success": "#a6da95",
+  "warning": "#eed49f",
+  "error": "#ed8796",
+  "info": "#8aadf4"
+}

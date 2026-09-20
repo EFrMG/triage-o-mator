@@ -1,0 +1,323 @@
+#!/usr/bin/env python3
+"""
+Apply a filled-in decisions file (from bin/batch) back into the ledger, or apply a single item's decision directly from flags.
+
+Usage:
+    bin/apply data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl [--by NAME] [--reviewed] [--only-untriaged]
+    bin/apply --number N --kind issue|pr --category C --action A \\
+        [--confidence L] [--reason TEXT] [--agent-notes TEXT] [--by NAME] [--reviewed] [--batch-id ID]
+    bin/apply --number N --kind issue|pr --approve [--by NAME]
+    bin/apply --approve --key issue:N --key pr:M ... [--by NAME]
+    bin/apply --number N --kind issue|pr --agent-notes TEXT
+    bin/apply (--number N --kind issue|pr | --key issue:N ...) --unapprove | --clear
+    any of the above with --dry-run to validate and report without writing the ledger
+
+Each line in the decisions file must have: number, kind, category, action, confidence, reason. Two optional keys: `agent_notes`, the agent's longer evidence (a code review, the duplicate comparison) kept in the ledger beside the one-line reason; and `proposed_by`, who proposed the row (e.g. "agent:<contributor>"), used as triaged_by when --by isn't given, so applying someone else's proposals later (the TUI's `A`) still credits whoever made them. A row without `agent_notes` leaves the item's existing notes alone. Unknown category/action values produce a warning (not a hard failure; the taxonomy can lag reality by a little) but are still applied, since blocking would lose triage work.
+
+By default this only records an agent's proposal (reviewed stays false). Pass --reviewed if a human is applying their own direct judgment right here, rather than reviewing an agent's batch afterwards.
+
+--number/--kind is a single-item alternative to a decisions file, for callers (e.g. the triage-o-mator TUI) applying one decision per call rather than writing a batch file. --approve marks an already-triaged item reviewed=true without changing its category/action, for a human just confirming an existing proposal as-is.
+
+--key KIND:NUMBER (repeatable) approves several items in one ledger write, for bulk approval (the TUI's ticked items); only --approve takes it.
+
+--unapprove takes back an approval: the decision stays, reviewed goes back to false. --clear takes back the decision itself: the item is untriaged again (category, action, confidence, reason, who and when, its batch, and any approval are blanked), while agent_notes and reviewer_notes stay, since they're evidence rather than the call. Both are what the TUI's `u` runs; items with nothing to take back are skipped and reported. The ledger's git diff is the record of what was taken back.
+
+Saving a changed decision (category, action, confidence or reason) on an item someone already approved resets its approval, so an edited call is never shown as reviewed by someone who didn't see it; saving the same decision again keeps it, and --reviewed / --approve approve the new one in the same step.
+
+--agent-notes on its own (no --category/--action/--approve) only replaces the item's agent_notes, leaving its decision and review state untouched: how prompts/review-pr.md attaches a code review to a PR someone already triaged.
+
+--batch-id stamps a single-item decision with the batch it was made in (default "tui"), so decisions made while working through a batch in the TUI stay attributable to that batch. --only-untriaged skips decisions-file rows whose item already has a category, so applying an agent's proposals never overwrites a decision someone already saved.
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _triage import TRIAGE_DEFAULTS, here, load_jsonl, load_ledger, load_taxonomy, now_iso, save_ledger
+
+REQUIRED = {"number", "kind", "category", "action"}
+
+DECISION_FIELDS = ("category", "action", "confidence", "reason")
+REVIEW_FIELDS = ("reviewed", "reviewed_by", "reviewed_at")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("decisions_path", type=Path, nargs="?", default=None)
+    ap.add_argument("--number", type=int, help="single-item mode: item number")
+    ap.add_argument(
+        "--kind", choices=["issue", "pr"], help="single-item mode: item kind"
+    )
+    ap.add_argument("--category", help="single-item mode: category")
+    ap.add_argument("--action", help="single-item mode: action")
+    ap.add_argument("--confidence", choices=["low", "medium", "high"], default="")
+    ap.add_argument("--reason", default="")
+    ap.add_argument(
+        "--agent-notes",
+        default=None,
+        help="single-item mode: agent's longer evidence/review notes (omit to keep existing notes)",
+    )
+    ap.add_argument(
+        "--approve",
+        action="store_true",
+        help="single-item mode: mark reviewed=true without changing category/action "
+        "(the item must already have both set)",
+    )
+    ap.add_argument(
+        "--unapprove",
+        action="store_true",
+        help="take back an approval: reviewed=false, the decision stays",
+    )
+    ap.add_argument(
+        "--clear",
+        action="store_true",
+        help="take back a decision: the item is untriaged again (agent_notes and reviewer_notes stay)",
+    )
+    ap.add_argument(
+        "--by",
+        default=None,
+        help="triaged_by/reviewed_by value (default: a row's proposed_by, else agent)",
+    )
+    ap.add_argument(
+        "--reviewed",
+        action="store_true",
+        help="mark these decisions as human-reviewed immediately",
+    )
+    ap.add_argument(
+        "--batch-id",
+        default="tui",
+        help="single-item mode: batch_id to stamp (default: tui)",
+    )
+    ap.add_argument(
+        "--only-untriaged",
+        action="store_true",
+        help="decisions-file mode: skip rows whose item already has a category",
+    )
+    ap.add_argument(
+        "--key",
+        action="append",
+        default=[],
+        metavar="KIND:NUMBER",
+        help="with --approve, --unapprove or --clear: an item to act on, e.g. issue:12 (repeatable)",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate and print what would be applied, without writing the ledger",
+    )
+    args = ap.parse_args()
+
+    undo = args.unapprove or args.clear
+    if args.approve + args.unapprove + args.clear > 1:
+        sys.exit("error: pick one of --approve, --unapprove and --clear")
+
+    if undo and (args.decisions_path is not None or args.category or args.action or args.agent_notes is not None or args.reviewed):
+        sys.exit("error: --unapprove and --clear only take --number/--kind or --key (plus --by, --dry-run)")
+
+    if args.key:
+        if not (args.approve or undo) or args.number is not None or args.decisions_path is not None or args.category or args.action:
+            sys.exit("error: --key only goes with --approve, --unapprove or --clear (and not with --number or a decisions file)")
+
+        decisions = []
+        for value in args.key:
+            kind, _, number = value.partition(":")
+            if kind not in ("issue", "pr") or not number.isdigit():
+                sys.exit(f"error: --key {value!r} should look like issue:12 or pr:34")
+
+            decisions.append({"number": int(number), "kind": kind})
+
+        batch_id = args.batch_id
+    elif args.decisions_path is not None:
+        if args.number is not None or args.category or args.action or args.approve or args.agent_notes is not None:
+            sys.exit(
+                "error: pass a decisions file OR --number/--kind (+ flags), not both"
+            )
+
+        if not args.decisions_path.exists():
+            sys.exit(f"error: {args.decisions_path} not found")
+
+        decisions = load_jsonl(args.decisions_path)
+        batch_id = args.decisions_path.stem.replace(".decisions", "")
+    elif args.number is not None:
+        if not args.kind:
+            sys.exit("error: --number requires --kind")
+
+        if undo:
+            decisions = [{"number": args.number, "kind": args.kind}]
+        elif args.approve and (args.category or args.action):
+            decisions = [
+                {
+                    "number": args.number,
+                    "kind": args.kind,
+                    "category": args.category,
+                    "action": args.action,
+                    "confidence": args.confidence,
+                    "reason": args.reason,
+                }
+            ]
+        elif args.approve:
+            decisions = [{"number": args.number, "kind": args.kind}]
+        elif args.agent_notes is not None and not args.category and not args.action:
+            decisions = [{"number": args.number, "kind": args.kind, "agent_notes": args.agent_notes, "notes_only": True}]
+        elif args.category and args.action:
+            decisions = [
+                {
+                    "number": args.number,
+                    "kind": args.kind,
+                    "category": args.category,
+                    "action": args.action,
+                    "confidence": args.confidence,
+                    "reason": args.reason,
+                }
+            ]
+        else:
+            sys.exit(
+                "error: --number requires --category and --action, --approve, or --agent-notes"
+            )
+
+        if args.agent_notes is not None and decisions[0].get("category"):
+            decisions[0]["agent_notes"] = args.agent_notes
+
+        batch_id = args.batch_id
+    else:
+        sys.exit("error: pass a decisions file or --number/--kind")
+
+    taxonomy = load_taxonomy()
+    valid_categories = set(taxonomy["issue_categories"]) | set(
+        taxonomy["pr_categories"]
+    )
+    valid_actions = set(taxonomy["actions"])
+
+    ledger = load_ledger()
+    by_key = {(r["kind"], r["number"]): r for r in ledger}
+
+    ts = now_iso()
+    applied, missing, blank, kept, warnings, nothing = 0, [], [], [], [], []
+
+    for d in decisions:
+        key = (d.get("kind"), d.get("number"))
+        if key not in by_key:
+            sys.exit(here(f"error: {key} is not in the ledger — run bin/sync first"))
+
+        rec = by_key[key]
+
+        if args.unapprove or args.clear:
+            if not (rec.get("reviewed") if args.unapprove else rec.get("category")):
+                nothing.append(key)
+
+                continue
+
+            fields = REVIEW_FIELDS
+            if args.clear:
+                fields += DECISION_FIELDS + ("triaged_at", "triaged_by", "batch_id")
+
+            for field in fields:
+                rec[field] = TRIAGE_DEFAULTS[field]
+
+            applied += 1
+
+            continue
+
+        if d.get("notes_only"):
+            rec["agent_notes"] = d["agent_notes"]
+            applied += 1
+
+            continue
+
+        # --approve with no category/action: review-only, leave the existing decision untouched.
+        if args.approve and not d.get("category") and not d.get("action"):
+            if not rec.get("category") or not rec.get("action"):
+                sys.exit(
+                    f"error: cannot --approve {key} — it has no category/action yet"
+                )
+
+            rec["reviewed"] = True
+            rec["reviewed_by"] = args.by or "agent"
+            rec["reviewed_at"] = ts
+            applied += 1
+
+            continue
+
+        if not REQUIRED.issubset(d):
+            missing.append(d)
+
+            continue
+
+        if not d.get("category") or not d.get("action"):
+            blank.append((d["kind"], d["number"]))
+
+            continue
+
+        if args.only_untriaged and rec.get("category"):
+            kept.append((d["kind"], d["number"]))
+
+            continue
+
+        if d["category"] not in valid_categories:
+            warnings.append(f"#{d['number']}: unrecognized category {d['category']!r}")
+
+        if d["action"] not in valid_actions:
+            warnings.append(f"#{d['number']}: unrecognized action {d['action']!r}")
+
+        changed = any(rec.get(f, "") != d.get(f, "") for f in DECISION_FIELDS)
+        rec["category"] = d["category"]
+        rec["action"] = d["action"]
+        rec["confidence"] = d.get("confidence", "")
+        rec["reason"] = d.get("reason", "")
+        if changed and rec.get("reviewed") and not (args.reviewed or args.approve):
+            # An approval was of the old call, not this one.
+            for field in REVIEW_FIELDS:
+                rec[field] = TRIAGE_DEFAULTS[field]
+        if "agent_notes" in d:
+            rec["agent_notes"] = d["agent_notes"] or ""
+
+        by = args.by or d.get("proposed_by") or "agent"
+        rec["triaged_at"] = ts
+        rec["triaged_by"] = by
+        rec["batch_id"] = batch_id
+        if args.reviewed or args.approve:
+            rec["reviewed"] = True
+            rec["reviewed_by"] = by
+            rec["reviewed_at"] = ts
+
+        applied += 1
+
+    if not args.dry_run:
+        save_ledger(list(by_key.values()))
+
+    label = (
+        str(args.decisions_path)
+        if args.decisions_path
+        else f"#{args.number} ({args.kind})"
+    )
+    if args.key:
+        label = ", ".join(args.key)
+
+    verb = "Unapproved" if args.unapprove else "Cleared" if args.clear else "Applied"
+    if args.dry_run:
+        verb = {"Unapproved": "Would unapprove", "Cleared": "Would clear", "Applied": "Would apply"}[verb]
+
+    print(f"{verb} {applied} decisions ({label}).{' Dry run: ledger not written.' if args.dry_run else ''}")
+    if nothing:
+        reason = "not reviewed" if args.unapprove else "not triaged"
+        print(f"Skipped {len(nothing)} {reason}, nothing to take back: {nothing[:10]}{' ...' if len(nothing) > 10 else ''}")
+    if blank:
+        print(
+            f"Skipped {len(blank)} rows still blank: {blank[:10]}{' ...' if len(blank) > 10 else ''}"
+        )
+
+    if kept:
+        print(
+            f"Kept {len(kept)} existing decisions (--only-untriaged): {kept[:10]}{' ...' if len(kept) > 10 else ''}"
+        )
+
+    if missing:
+        print(f"Skipped {len(missing)} rows missing required fields.")
+
+    for w in warnings:
+        print(f"warning: {w}")
+
+
+if __name__ == "__main__":
+    main()

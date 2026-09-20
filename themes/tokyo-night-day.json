@@ -1,0 +1,13 @@
+{
+  "name": "Tokyo Night Day",
+  "background": "#e1e2e7",
+  "foreground": "#3760bf",
+  "muted": "#6172b0",
+  "border": "#a1a6c5",
+  "accent": "#9854f1",
+  "selection": "#b4b5b9",
+  "success": "#587539",
+  "warning": "#8c6c3e",
+  "error": "#f52a65",
+  "info": "#2e7de9"
+}

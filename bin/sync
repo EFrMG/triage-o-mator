@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""
+Merge the raw fetch (data/<owner>/<repo>/raw/issues_and_prs.jsonl) into the ledger (data/<owner>/<repo>/ledger.jsonl), the git-tracked source of truth.
+
+- New items are added with blank triage fields.
+- Items already in the ledger get their GitHub-derived fields refreshed (title, state, labels, comments_count, updated_at) but keep whatever triage / review data is already recorded; sync never erases a categorization.
+- After a full fetch (every open item), items that were open in the ledger but are missing from it are assumed closed/merged/deleted and get state="closed" so they drop out of future untriaged batches.
+- After an incremental fetch (only items updated since the last sync), each returned item's own state is used instead, and items absent from it are left alone; closed items the ledger never saw are skipped.
+
+On success it records the fetch it consumed in data/<owner>/<repo>/raw/fetch_meta.json, which is what the next incremental bin/fetch counts from.
+
+Usage: bin/sync
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _triage import (
+    here,
+    RAW_DIR,
+    TRIAGE_DEFAULTS,
+    load_jsonl,
+    load_ledger,
+    now_iso,
+    save_ledger,
+)
+
+
+def main():
+    raw_path = RAW_DIR / "issues_and_prs.jsonl"
+    if not raw_path.exists():
+        sys.exit(here("error: no raw fetch found. Run bin/fetch first."))
+
+    raw_items = load_jsonl(raw_path)
+    meta_path = RAW_DIR / "fetch_meta.json"
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    incremental = meta.get("mode") == "incremental"
+    ledger = load_ledger()
+    by_key = {(r["kind"], r["number"]): r for r in ledger}
+    seen_open = set()
+    ts = now_iso()
+
+    added, updated, closed = 0, 0, 0
+    for item in raw_items:
+        key = (item["kind"], item["number"])
+        seen_open.add(key)
+        existing = by_key.get(key)
+        if existing is None and item.get("state") != "open":
+            continue
+
+        if existing is None:
+            rec = dict(TRIAGE_DEFAULTS)
+            rec.update(item)
+            rec["first_seen_at"] = ts
+            rec["last_synced_at"] = ts
+            by_key[key] = rec
+            added += 1
+        else:
+            if existing.get("state") == "open" and item.get("state") == "closed":
+                closed += 1
+
+            existing.update(item)  # refresh GitHub-derived fields in place
+            existing["last_synced_at"] = ts
+            updated += 1
+
+    if not incremental:
+        for key, rec in by_key.items():
+            if key not in seen_open and rec.get("state") == "open":
+                rec["state"] = "closed"
+                rec["last_synced_at"] = ts
+                closed += 1
+
+    save_ledger(list(by_key.values()))
+    if meta.get("fetched_at"):
+        meta["synced_through"] = meta["fetched_at"]
+        meta["synced_fetch_id"] = meta.get("fetch_id")
+        if not incremental:
+            meta["last_full_at"] = meta["fetched_at"]
+
+        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+
+    print(
+        f"Synced ({'incremental' if incremental else 'full'}): {added} new, {updated} refreshed, {closed} newly closed. "
+        f"Ledger now has {len(by_key)} items."
+    )
+    untriaged = sum(
+        1 for r in by_key.values() if r["state"] == "open" and not r["category"]
+    )
+    print(f"Open + untriaged: {untriaged}")
+
+
+if __name__ == "__main__":
+    main()

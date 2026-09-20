@@ -109,6 +109,12 @@ Categories and actions are defined in [`config/taxonomy.md`](config/taxonomy.md)
 
 ## Using the TUI
 
+For a quick overview, see the [TUTORIAL](TUTORIAL.md).
+
+<details>
+
+<summary>Open the whole workflow</summary>
+
 The sidebar lists filtered views of the ledger in **Untriaged Issues**, **Untriaged PRs**, **Pending Review**, **Merge-Ready PRs**, **Close Candidates**, **Oldest Untriaged**, **All Items**; followed by **Batches**, **Groups**, **Possible Duplicates**; and, set apart at the bottom, is **Switch Repo**.
 
 Before you pick anything, the main panel shows how far triage and review have come, and the top suggestions from `bin/next`, each marked `[agent]` or `[human]`.
@@ -191,6 +197,8 @@ Batches carry the same candidates (`duplicate_candidates` on each item), so an A
 The TUI waits to switch until you've saved or discarded your unsaved decisions and any running fetch or save has finished, because both belong to the repo you're leaving.
 
 A path with no install in it is something **Switch Repo** can create. `Enter` there shows what `bin/install-to --dry-run` says it would change, line by line, and writes nothing; `Enter` again makes exactly those changes, `s` shows the same plan for the other mode (tracked or solo), `j`/`k` scroll it, and `Esc` leaves the repository untouched. See [docs/install.md](docs/install.md#installing-from-inside-the-app).
+
+</details>
 
 ## Scripts
 

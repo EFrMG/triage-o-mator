@@ -296,6 +296,7 @@ func TestFooterContextsAndScreenBounds(t *testing.T) {
 
 func groupFixture(t *testing.T) (string, Group) {
 	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := t.TempDir()
 	for _, dir := range []string{"bin", "config", "data/owner/repo"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {

@@ -14,6 +14,8 @@ import (
 // batchFixture builds a throwaway repo root with the real bin/apply, a two-issue ledger, and one batch whose decisions file proposes a decision for issue #1 only.
 func batchFixture(t *testing.T) string {
 	t.Helper()
+	// An empty installs registry, not the machine's own.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := t.TempDir()
 	for _, dir := range []string{"bin", "config", "data/owner/repo/batches"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {

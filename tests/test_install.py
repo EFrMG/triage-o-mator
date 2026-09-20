@@ -34,6 +34,8 @@ class InstallTest(unittest.TestCase):
         self.target = self.base / "target"
         self.target.mkdir()
         self.git("init", "-q", ".")
+        # What this repository tracks, not what the machine ignores globally.
+        self.git("config", "core.excludesFile", "/dev/null")
         self.git("remote", "add", "origin", "git@github.com:acme/widgets.git")
         (self.target / "README.md").write_text("# Widgets\n")
 

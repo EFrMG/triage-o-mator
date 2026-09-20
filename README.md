@@ -41,6 +41,34 @@ Everything below is written from inside an install: paths like `data/<owner>/<re
 
 ## How it works
 
+<details>
+
+<summary>Open the screencaptures</summary>
+
+<img width="1920" height="1032" alt="flow-0" src="https://github.com/user-attachments/assets/f3a3d6cf-b1a7-4495-a803-1272a0c008b4" />
+
+<img width="1920" height="1038" alt="flow-1" src="https://github.com/user-attachments/assets/b6fc6a9d-28b4-488f-af3f-d1f9b4432203" />
+
+<img width="1920" height="1042" alt="flow-2" src="https://github.com/user-attachments/assets/97304631-32af-434b-9f39-118feda13fe9" />
+
+<img width="1920" height="1047" alt="flow-3" src="https://github.com/user-attachments/assets/267bd60e-7f1e-4ae3-b265-8e014a95949a" />
+
+<img width="1920" height="1042" alt="flow-4" src="https://github.com/user-attachments/assets/12840f9e-aa5b-4489-9b3f-baff652a7870" />
+
+<img width="1920" height="1043" alt="flow-5" src="https://github.com/user-attachments/assets/f6271092-87a7-4deb-85bf-3ebd01290256" />
+
+<img width="1920" height="1036" alt="flow-6" src="https://github.com/user-attachments/assets/264ebfc0-d341-4471-a9df-b5529a39676d" />
+
+<img width="1920" height="1042" alt="flow-7" src="https://github.com/user-attachments/assets/701b4879-9185-4b29-a463-8e6e0d6d574e" />
+
+<img width="1920" height="1031" alt="flow-8" src="https://github.com/user-attachments/assets/976e824f-2ee8-4556-a0c8-ee050748a1ee" />
+
+<img width="1920" height="1034" alt="flow-9" src="https://github.com/user-attachments/assets/199ae4a4-3bea-43ba-9778-14bd6fcc66fe" />
+
+<img width="1898" height="745" alt="agent-writing-maintainer-brief" src="https://github.com/user-attachments/assets/7af6cd85-f6be-4ca1-902c-f4dd77035e33" />
+
+</details>
+
 ```mermaid
 flowchart TD
     GH[("GitHub owner/repo")] -->|"bin/fetch: changes since last sync, or --full (read-only)"| RAW["raw/<br/>disposable cache"]

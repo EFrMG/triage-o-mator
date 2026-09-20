@@ -46,13 +46,13 @@ The TUI's key scheme, agreed 2026-09-19. Every binding is defined once in `tui/k
 
 **Batches and groups**
 
-| key       | meaning                                                                                                                                                                                                                      |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `n`       | new batch / new group                                                                                                                                                                                                        |
-| `e`       | edit the selection: group details, or a member's note                                                                                                                                                                        |
-| `d` / `D` | delete or remove the selection, with a second press: a batch, one batch item, a group member; among duplicates, `d` rules the hovered pair out for good (`bin/not-duplicate`) and `D` clears the handled pairs from the list |
-| `A`       | apply the batch's proposals, from the batch list and from inside a batch                                                                                                                                                     |
-| `x` / `X` | export a group / export it with bodies, comments and diffs                                                                                                                                                                   |
+| key       | meaning                                                                                                                                                                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `n`       | new batch / new group                                                                                                                                                                                                                                              |
+| `e`       | edit the selection: group details, or a member's note                                                                                                                                                                                                              |
+| `d` / `D` | delete or remove the selection, with a second press: a batch, one batch item, a group member, or a whole group from the group list; among duplicates, `d` rules the hovered pair out for good (`bin/not-duplicate`) and `D` clears the handled pairs from the list |
+| `A`       | apply the batch's proposals, from the batch list and from inside a batch                                                                                                                                                                                           |
+| `x` / `X` | export a group / export it with bodies, comments and diffs                                                                                                                                                                                                         |
 
 **Forms and editors**
 

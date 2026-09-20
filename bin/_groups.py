@@ -99,6 +99,11 @@ def save_group(group):
             os.unlink(name)
 
 
+def delete_group(group_id):
+    """Remove the group's file. Nothing else goes: the ledger, its decisions and any batches built from the group are untouched, and data/ is git-tracked, so a deletion can be recovered from history. Call inside locked()."""
+    group_path(group_id).unlink()
+
+
 def create_group(title, description, assignee, by):
     now = now_iso()
 

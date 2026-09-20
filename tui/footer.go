@@ -171,7 +171,7 @@ func (m model) groupFooter() []footerGroup {
 	actions := group("Group", bind("", keys.New))
 	if g != nil {
 		if !m.groups.detail {
-			actions.hints = append(actions.hints, bind("", keys.Edit))
+			actions.hints = append(actions.hints, bind("", keys.Edit), bind("delete group", keys.Delete))
 		}
 
 		actions.hints = append(actions.hints, bind("", keys.Export), bind("", keys.ExportFull))

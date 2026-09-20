@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -266,6 +268,52 @@ func TestRemovingAGroupMemberNeedsASecondPress(t *testing.T) {
 
 	if m = press(m, "j"); m.groups.confirm != "" {
 		t.Fatal("any other key should cancel the removal")
+	}
+}
+
+func TestDeletingAGroupFromTheListNeedsASecondPress(t *testing.T) {
+	root, g := groupFixture(t)
+	out, err := runScript(root, "group", "add", g.ID, "--kind", "pr", "--number", "1", "--by", "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := json.Unmarshal([]byte(out), &g); err != nil || len(g.Members) != 1 {
+		t.Fatalf("fixture member not added: %s", out)
+	}
+
+	m := testPRModel()
+	m.installRoot = root
+	m.lastGroupID = g.ID
+	m.groups = groupUI{open: true, records: []Group{g}, ticked: map[Key]bool{}}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if m = next.(model); cmd != nil || !strings.Contains(m.status, "1 member") || !strings.Contains(m.status, "Press d again") {
+		t.Fatalf("the first d should only ask, naming what would go: %q", m.status)
+	}
+
+	if m = press(m, "j"); m.groups.confirm != "" {
+		t.Fatal("any other key should cancel the deletion")
+	}
+
+	m = press(m, "d")
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	m = send(next.(model), cmd())
+	if len(m.groups.records) != 0 || m.sidebar.groupCount != 0 || !strings.Contains(m.status, "deleted") {
+		t.Fatalf("the second d should delete the group: %d left, %q", len(m.groups.records), m.status)
+	}
+
+	if m.lastGroupID != "" {
+		t.Fatal("a deleted group must not stay the quick-add target")
+	}
+
+	if _, err := runScript(root, "group", "show", g.ID); err == nil {
+		t.Fatal("the group file survived the deletion")
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "data", "owner", "repo", "ledger.jsonl"))
+	if err != nil || string(data) != "{\"kind\":\"pr\",\"number\":1}\n" {
+		t.Fatal("deleting a group changed the item ledger")
 	}
 }
 

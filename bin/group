@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _groups import create_group, list_groups, load_group, locked, save_group, STATUSES
+from _groups import create_group, delete_group, list_groups, load_group, locked, save_group, STATUSES
 from _triage import REPO, enrich_item, load_ledger, now_iso
 
 
@@ -89,11 +89,17 @@ def markdown(data):
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+def check_revision(group, revision):
+    """Optimistic locking: a caller that read the group earlier passes the revision it saw, and loses the race rather than overwriting someone else's edit."""
+    if revision is not None and revision != group["revision"]:
+        raise ValueError("group changed since it was loaded; reload before saving")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
-    for command in ("create", "show", "update", "add", "remove", "export"):
+    for command in ("create", "show", "update", "add", "remove", "delete", "export"):
         p = sub.add_parser(command)
         if command != "create":
             p.add_argument("id")
@@ -109,7 +115,7 @@ def main():
         if command in ("create", "update", "add", "remove"):
             p.add_argument("--by", required=True, help="contributor identity")
 
-        if command in ("update", "add", "remove"):
+        if command in ("update", "add", "remove", "delete"):
             p.add_argument("--revision", type=int, help="reject edits against a stale revision")
 
         if command in ("add", "remove"):
@@ -148,6 +154,17 @@ def main():
 
         return
 
+    if args.command == "delete":
+        # No --by: a deletion leaves nothing behind to attribute it to. The group it removed is printed instead, so the run that did it still carries the record.
+        with locked():
+            group = load_group(args.id)
+            check_revision(group, args.revision)
+            delete_group(args.id)
+
+        print(json.dumps(dict(deleted=group), ensure_ascii=False, indent=2))
+
+        return
+
     if not args.by.strip():
         raise ValueError("--by cannot be blank")
 
@@ -156,8 +173,7 @@ def main():
             group = create_group(args.title, args.description, args.assignee, args.by)
         else:
             group = load_group(args.id)
-            if args.revision is not None and args.revision != group["revision"]:
-                raise ValueError("group changed since it was loaded; reload before saving")
+            check_revision(group, args.revision)
 
             if args.command == "update":
                 for field in ("title", "description", "assignee", "status"):

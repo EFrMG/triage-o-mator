@@ -191,6 +191,31 @@ class GroupTests(unittest.TestCase):
         self.run_cli("show", gid, ok=False)
         self.assertEqual(self.original, self.ledger.read_bytes())
 
+    def test_delete_takes_the_group_and_nothing_else(self):
+        gid = self.create()["id"]
+        self.run_cli("add", gid, "--kind", "issue", "--number", "1", "--notes", "Root cause", "--by", "Alice")
+
+        stale = self.run_cli("delete", gid, "--revision", "1", ok=False)
+        self.assertIn("changed since", stale.stderr)
+        self.assertIn(gid, json.loads(self.run_cli("list").stdout)[0]["id"], "a stale delete must not remove the group")
+
+        deleted = json.loads(self.run_cli("delete", gid, "--revision", "2").stdout)["deleted"]
+        self.assertEqual(deleted["members"][0]["notes"], "Root cause", "the deleted group is the run's only record of it")
+        self.assertEqual(json.loads(self.run_cli("list").stdout), [])
+        self.assertFalse((self.root / f"data/owner/repo/groups/{gid}.json").exists())
+        self.run_cli("show", gid, ok=False)
+        self.run_cli("delete", gid, ok=False)
+        self.assertEqual(self.original, self.ledger.read_bytes())
+
+    def test_delete_refuses_another_repos_group_and_paths(self):
+        gid = self.create()["id"]
+        self.run_cli("delete", "../ledger", ok=False)
+        (self.root / "config/repo").write_text("other/repo\n")
+        self.run_cli("delete", gid, ok=False)
+        (self.root / "config/repo").write_text("owner/repo\n")
+
+        self.assertEqual(len(json.loads(self.run_cli("list").stdout)), 1, "the group survived a delete aimed from another repository")
+
     def test_concurrent_writers_keep_both_members(self):
         gid = self.create()["id"]
         procs = [

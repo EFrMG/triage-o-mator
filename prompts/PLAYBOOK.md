@@ -128,6 +128,6 @@ Several contributors (and their agents) share one ledger and one set of groups t
 
 ## Grouped review
 
-`bin/group` owns durable repo-scoped group metadata in `data/<owner>/<repo>/groups/*.json`. Use it for group creation, membership/notes, assignment, readiness, and export; the TUI calls the same script. Group writes never change item decisions or approval. Keep these group records in Git; exported packets remain disposable. See [docs/groups.md](docs/groups.md) for the workflow and concurrency limits.
+`bin/group` owns durable repo-scoped group metadata in `data/<owner>/<repo>/groups/*.json`. Use it for group creation, membership/notes, assignment, readiness, and export; the TUI calls the same script. Group writes never change item decisions or approval. `bin/group delete` removes a group and the notes in it (the decisions stay in the ledger); marking a group ready and deleting one are both a contributor's call, not an agent's. Keep these group records in Git; exported packets remain disposable. See [docs/groups.md](docs/groups.md) for the workflow and concurrency limits.
 
 `bin/batch --group ID` narrows a triage pass to untriaged open members while including group context. `bin/report` summarizes groups. Never interpret group status `ready` as permission to set `reviewed: true` or mutate GitHub.

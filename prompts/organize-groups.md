@@ -2,7 +2,7 @@
 
 **Use when** someone asks to "organize groups", "prepare something maintainers can decide on", "group the duplicates of #N", "collect everything about suspend", or `bin/next` suggests it.
 
-**Produces** draft review groups (`data/<owner>/<repo>/groups/*.json`, via `bin/group`). Each one gathers related issues and PRs around **one decision** a lead maintainer can make in a single sitting, with the evidence already laid out. Groups never change item decisions or approval, and you never mark a group `ready`: a contributor does that after checking it (see `docs/groups.md`).
+**Produces** draft review groups (`data/<owner>/<repo>/groups/*.json`, via `bin/group`). Each one gathers related issues and PRs around **one decision** a lead maintainer can make in a single sitting, with the evidence already laid out. Groups never change item decisions or approval, and you never mark a group `ready` or delete one (`bin/group delete`): a contributor does both, after checking the group (see `docs/groups.md`). If a group you made is wrong, fix it in place or say so; removing a record someone else may be working from is theirs to decide.
 
 ## What a good group looks like
 

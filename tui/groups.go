@@ -88,8 +88,11 @@ func groupsRun(root string, onLine func(string), args ...string) groupsLoadedMsg
 		}
 
 		status = "Group saved."
-		if args[0] == "export" {
+		switch args[0] {
+		case "export":
 			status = "Exported review packet to " + args[len(args)-1]
+		case "delete":
+			status = "Group deleted."
 		}
 	}
 
@@ -201,6 +204,11 @@ func (m model) onGroupsLoaded(msg groupsLoadedMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.selectedID != "" {
 		m.lastGroupID = msg.selectedID
+	}
+
+	// A deleted group cannot stay the quick-add target: B would run bin/group add against a file that is gone.
+	if m.lastGroupID != "" && m.lastGroup() == nil {
+		m.lastGroupID = ""
 	}
 
 	m.groups.editing = ""
@@ -453,7 +461,16 @@ func (m model) handleGroupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.groups.member = minInt(m.groups.member+1, len(g.Members)-1)
 		}
 	case key.Matches(msg, keys.Delete):
-		if !m.groups.detail || g == nil || m.groups.member >= len(g.Members) {
+		if g == nil {
+			return m, nil
+		}
+
+		// In the list the selection is the group itself, so d deletes it; inside a group the selection is a member, so d removes that instead.
+		if !m.groups.detail {
+			return m.requestDeleteGroup(*g)
+		}
+
+		if m.groups.member >= len(g.Members) {
 			return m, nil
 		}
 
@@ -862,6 +879,27 @@ func countMembers(g Group, keys []Key) int {
 	}
 
 	return n
+}
+
+// requestDeleteGroup deletes the whole group on a second d: the group's file and the notes written into it go, and nothing else does. Every decision it collected was written to the ledger by bin/apply and stays there, and data/ is git-tracked, so the group itself can be brought back from history.
+func (m model) requestDeleteGroup(g Group) (tea.Model, tea.Cmd) {
+	if m.groups.confirm != "d" {
+		m.groups.confirm = "d"
+		members := fmt.Sprintf("%d members", len(g.Members))
+		if len(g.Members) == 1 {
+			members = "1 member"
+		}
+
+		m.status = fmt.Sprintf("Delete the group %q (%s) and its notes? Decisions stay in the ledger. Press d again to delete.", g.Title, members)
+
+		return m, nil
+	}
+
+	m.groups.confirm = ""
+	m.groups.busy = true
+	m.groups.ticked = map[Key]bool{}
+
+	return m, groupsCmd(m.installRoot, "delete", g.ID, "--revision", strconv.Itoa(g.Revision))
 }
 
 // tickedMembers returns g's ticked members, in member order.

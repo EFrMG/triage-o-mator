@@ -14,7 +14,7 @@ It does not modify the live repo. It reads issues and PRs via `gh` and writes ca
 
 > Built against and first deployed on [omacom/omarchy](https://github.com/omacom/omarchy) while not being exclusive to it.
 
-One installs it **into the repository you triage**: this checkout is the program, and each target repository gets its own `triage-o-mator/` directory holding its ledger, groups, reports and taxonomy. That directory is meant to be committed to that repository, so triage is shared the way everything else in it is, through pull requests its maintainers can read line by line. One could also use it solo.
+One installs it **into the repository you triage**: this checkout is the program, and each target repository gets its own `triage-o-mator/` directory holding its ledger, groups, reports and taxonomy. That directory is meant to be committed to that repository, so triage is shared the way everything else in it is, through pull requests its maintainers can read the pending items and batches in progress of triage, groups of related items, and even Markdown briefs of such after careful review. One could also use it solo.
 
 ## Install
 

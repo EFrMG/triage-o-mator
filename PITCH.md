@@ -7,9 +7,17 @@
 
 This is how a less technical README I dislike reading would read, which given that I make myself no favors by excluding such I had to write.
 
----
+<details>
 
-## The problem
+<summary>See some screencaptures</summary>
+
+<img width="1920" height="1032" alt="flow-0" src="https://github.com/user-attachments/assets/f3a3d6cf-b1a7-4495-a803-1272a0c008b4" />
+
+<img width="1920" height="1038" alt="flow-1" src="https://github.com/user-attachments/assets/b6fc6a9d-28b4-488f-af3f-d1f9b4432203" />
+
+</details>
+
+  ## The problem
 
 Popular open source projects collect Issues and PRs faster than anyone can read them.
 

@@ -70,23 +70,34 @@ Everything below is written from inside an install: paths like `data/<owner>/<re
 </details>
 
 ```mermaid
-flowchart TD
-    GH[("GitHub owner/repo")] -->|"bin/fetch: changes since last sync, or --full (read-only)"| RAW["raw/<br/>disposable cache"]
-    RAW -->|bin/sync| LEDGER[("ledger.jsonl<br/>source of truth")]
-    LEDGER --> TUI["triage-o-mator TUI"]
-    TUI -->|"Batches: bin/batch"| BATCH["batches/&lt;id&gt;<br/>items + decisions"]
-    AGENT["AI agent following<br/>prompts/*.md"] -.->|fills decisions| BATCH
-    BATCH -->|"A: bin/apply"| LEDGER
-    TUI -->|"Ctrl-S save / a approve: bin/apply"| LEDGER
-    TUI -->|"b / B: bin/group"| GROUPS[("groups/*.json")]
-    LEDGER -->|"bin/similar (offline)"| DUPS["duplicate candidates"]
-    DUPS -->|"D: compare, mark, group"| TUI
-    DUPS --> BATCH
-    LEDGER <-->|"bin/export-csv / bin/import-csv"| CSV["spreadsheet review"]
-    LEDGER -->|bin/report| REPORT["reports/&lt;owner&gt;/&lt;repo&gt;/&lt;date&gt;.md"]
+flowchart LR
+    GH(["GitHub owner/repo"])
+    RAW["raw/<br/>disposable cache"]
+    LEDGER[("ledger.jsonl<br/>source of truth")]
+    TUI["triage-o-mator TUI"]
+    AGENT["AI agent following<br/>prompts/*.md"]
+    BATCH["batches/&lt;id&gt;<br/>items + decisions"]
+    GROUPS[("groups/*.json")]
+    CSV["spreadsheet review"]
+    REPORT["reports/&lt;date&gt;.md"]
+
+    GH -->|bin/fetch| RAW
+    RAW -->|bin/sync| LEDGER
+
+    LEDGER <-->|"reads<br/>bin/apply"| TUI
+    LEDGER <-->|"bin/export-csv<br/>bin/import-csv"| CSV
+    LEDGER -->|bin/report| REPORT
+
+    TUI -->|"b / B<br/>bin/group"| GROUPS
+    TUI -->|"D: bin/similar<br/>(offline)"| DUPS["duplicate candidates"]
+    TUI <-->|"bin/batch<br/>A: bin/apply"| BATCH
+    AGENT -.->|fills decisions| BATCH
+
+    style GROUPS stroke-width:2px
+    style LEDGER stroke-width:2px
 ```
 
-Paths in the diagram are inside the install, in the current repo's `data/<owner>/<repo>/` folder.
+Paths in the diagram are inside the install, in the current repo's `data/<owner>/<repo>/` folder. `bin/fetch` pulls the changes since the last sync, or everything with `--full`; `bin/similar` reads the ledger and never calls out.
 
 The TUI never writes `data/<owner>/<repo>/ledger.jsonl` or group files itself: every save, approval, and batch goes through the scripts, and every GitHub call they make is a read.
 

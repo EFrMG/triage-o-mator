@@ -109,22 +109,6 @@ Yes, and so reports coupled with our revolutionary `polish-report` prompt, turns
 
 Spreadsheet work with CSV files is also supported!
 
-## How it fits together
-
-```mermaid
-flowchart TD
-    GH[("GitHub")] -->|"bin/fetch (read-only, incremental)"| LEDGER[("triage-o-mator/data/&lt;owner&gt;/&lt;repo&gt;/ledger.jsonl<br/>inside the repo being triaged")]
-    LEDGER --> TUI["triage-o-mator TUI"]
-    TUI -->|"bin/batch"| BATCH["batches"]
-    AGENT["AI agent following<br/>the install's AGENTS.md"] -.->|proposals| BATCH
-    BATCH -->|"bin/apply"| LEDGER
-    TUI -->|"save / approve: bin/apply"| LEDGER
-    TUI -->|"bin/group"| GROUPS[("review groups")]
-    LEDGER -->|"bin/similar (offline)"| TUI
-    LEDGER -->|"bin/report"| REPORT["dated reports"]
-    REPORT -.->|"polish-report.md"| DECISION["decisions with the case for and against"]
-```
-
 ## Quality and safety
 
 - **Go and Python test suites** cover the TUI's layout at several terminal sizes, its keyboard flows and each screen, plus the scripts' behavior and the install layout, in throwaway checkouts and repositories with a fake `gh`. None of them can touch a real install or GitHub.

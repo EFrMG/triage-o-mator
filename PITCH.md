@@ -7,15 +7,15 @@
 
 This is how a less technical README I dislike reading would read, which given that I make myself no favors by excluding such I had to write.
 
-<details>
+![flow-1-b](captures/flow-1-b.png)
 
-<summary>See some screencaptures</summary>
+![flow-2](captures/flow-2.png)
 
-<img width="1920" height="1032" alt="flow-0" src="https://github.com/user-attachments/assets/f3a3d6cf-b1a7-4495-a803-1272a0c008b4" />
+![flow-4-a](captures/flow-4-a.png)
 
-<img width="1920" height="1038" alt="flow-1" src="https://github.com/user-attachments/assets/b6fc6a9d-28b4-488f-af3f-d1f9b4432203" />
+![flow-8](captures/flow-8.png)
 
-</details>
+![agent-writing-maintainer-brief](captures/agent-writing-maintainer-brief.png)
 
 ## The problem
 

@@ -43,8 +43,10 @@ def render(item):
         out.append(f"group: {item['group']['title']} · member notes: {item.get('group_member_notes') or '(none)'}")
 
     out += ["", "--- body", (item.get("body") or "(no description)").strip()]
+    authors = item.get("comment_authors") or []
     for i, comment in enumerate(item.get("comment_bodies") or [], 1):
-        out += ["", f"--- comment {i}", comment.strip()]
+        author = f" by @{authors[i - 1]}" if i <= len(authors) and authors[i - 1] else ""
+        out += ["", f"--- comment {i}{author}", comment.strip()]
 
     candidates = item.get("duplicate_candidates") or []
     out += ["", "--- duplicate candidates (title similarity only; an empty list proves nothing)"]

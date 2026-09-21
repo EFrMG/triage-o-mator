@@ -107,17 +107,18 @@ type enrichedMsg struct {
 
 // EnrichedItem is JSON output from bin/enrich-one (body / comments / diff).
 type EnrichedItem struct {
-	Number        int      `json:"number"`
-	Kind          string   `json:"kind"`
-	Body          string   `json:"body"`
-	CommentBodies []string `json:"comment_bodies"`
-	Additions     int      `json:"additions"`
-	Deletions     int      `json:"deletions"`
-	ChangedFiles  int      `json:"changed_files"`
-	IsDraft       bool     `json:"is_draft"`
-	Mergeable     string   `json:"mergeable"`
-	DiffLoaded    bool     `json:"-"`
-	DiffText      string   `json:"diff_text"`
+	Number         int      `json:"number"`
+	Kind           string   `json:"kind"`
+	Body           string   `json:"body"`
+	CommentBodies  []string `json:"comment_bodies"`
+	CommentAuthors []string `json:"comment_authors"`
+	Additions      int      `json:"additions"`
+	Deletions      int      `json:"deletions"`
+	ChangedFiles   int      `json:"changed_files"`
+	IsDraft        bool     `json:"is_draft"`
+	Mergeable      string   `json:"mergeable"`
+	DiffLoaded     bool     `json:"-"`
+	DiffText       string   `json:"diff_text"`
 }
 
 func enrichItemCmd(installRoot string, key Key, withDiff bool) tea.Cmd {

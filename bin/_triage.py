@@ -210,16 +210,12 @@ def enrich_item(rec, include_diff=False):
             ]
         )
         data = json.loads(out)
-        rec["body"] = data.get("body", "")
-        rec["comment_bodies"] = [c["body"] for c in data.get("comments", [])]
     else:
         fields = (
             "title,body,comments,additions,deletions,changedFiles,isDraft,mergeable"
         )
         out = run_gh(["pr", "view", str(number), "--repo", REPO, "--json", fields])
         data = json.loads(out)
-        rec["body"] = data.get("body", "")
-        rec["comment_bodies"] = [c["body"] for c in data.get("comments", [])]
         rec["additions"] = data.get("additions")
         rec["deletions"] = data.get("deletions")
         rec["changed_files"] = data.get("changedFiles")
@@ -227,5 +223,10 @@ def enrich_item(rec, include_diff=False):
         rec["mergeable"] = data.get("mergeable")
         if include_diff:
             rec["diff_text"] = run_gh(["pr", "diff", str(number), "--repo", REPO])
+
+    comments = data.get("comments", [])
+    rec["body"] = data.get("body", "")
+    rec["comment_bodies"] = [c.get("body", "") for c in comments]
+    rec["comment_authors"] = [(c.get("author") or {}).get("login", "") for c in comments]
 
     return rec

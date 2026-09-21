@@ -17,7 +17,7 @@ This is how a less technical README I dislike reading would read, which given th
 
 </details>
 
-  ## The problem
+## The problem
 
 Popular open source projects collect Issues and PRs faster than anyone can read them.
 

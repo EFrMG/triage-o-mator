@@ -187,17 +187,24 @@ func renderDiff(diff string, width int) string {
 	return renderMarkdown(fence+"diff\n"+strings.TrimRight(diff, "\n")+"\n"+fence, width)
 }
 
-// renderComments renders each comment on its own, under a colored separator naming its position.
-func renderComments(comments []string, width int) string {
+// renderComments renders each comment on its own, under a colored separator naming its position and, when enrichment provided it, its author.
+func renderComments(comments, authors []string, width int) string {
 	if len(comments) == 0 {
 		return mutedText("(no comments)")
 	}
 
 	parts := make([]string, len(comments))
 	for i, c := range comments {
-		label := fmt.Sprintf(" comment %d of %d ", i+1, len(comments))
-		rule := strings.Repeat("─", maxInt(width-ansi.StringWidth(label)-2, 0))
-		separator := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Render("──" + label + rule)
+		prefix := fmt.Sprintf("── comment %d of %d ", i+1, len(comments))
+		suffix := ""
+		if i < len(authors) && strings.TrimSpace(authors[i]) != "" {
+			available := maxInt(width-ansi.StringWidth(prefix)-4, 1)
+			author := ansi.Truncate("@"+strings.TrimPrefix(strings.TrimSpace(authors[i]), "@"), available, "…")
+			suffix = " " + author + " ──"
+		}
+
+		rule := strings.Repeat("─", maxInt(width-ansi.StringWidth(prefix)-ansi.StringWidth(suffix), 0))
+		separator := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Render(ansi.Truncate(prefix+rule+suffix, width, ""))
 		parts[i] = separator + "\n" + renderMarkdown(c, width)
 	}
 

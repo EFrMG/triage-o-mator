@@ -231,12 +231,22 @@ func (m model) repoPromptView() string {
 	}
 
 	w := m.menuWidth()
-	accent := softAccent()
+	accent := strongAccent()
 	if m.repoPick < 0 {
 		accent = focusedBorderColor
 	}
 
-	input := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accent).Padding(0, 1).Width(minInt(w-2, 60)).Render(m.repoInput.View())
+	inputWidth := minInt(w, 60)
+	inputModel := m.repoInput
+	innerWidth := maxInt(inputWidth-4, 1) // two border cells and one padding cell on each side
+	inputModel.Width = innerWidth
+	if inputModel.Value() != "" {
+		// At the end of entered text, bubbles/textinput adds the cursor cell beyond Width.
+		inputModel.Width = maxInt(innerWidth-1, 1)
+	}
+
+	// Lip Gloss includes horizontal padding in Width, while the border sits outside it.
+	input := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accent).Padding(0, 1).Width(inputWidth - 2).Render(inputModel.View())
 	subtitle := "current: " + m.repo
 	if m.noInstall() {
 		subtitle = "no install open"
@@ -258,7 +268,8 @@ func (m model) repoPromptView() string {
 			cards[i] = [2]string{first, second}
 		}
 
-		rows = append(rows, inset(mutedText("Tab, then j/k to pick one; type to filter, or an owner/repo to start it here")), cardList(cards, m.repoPick, m.cardWidth(), m.mainHeight()-len(rows)-4))
+		rows = append(rows, inset(mutedText("Tab, then j/k to pick one; type to filter, or an owner/repo to start it here")), "")
+		rows = append(rows, cardList(cards, m.repoPick, m.cardWidth(), m.mainHeight()-len(rows)-4))
 	} else if m.noInstall() {
 		rows = append(rows, inset(mutedText("No installs recorded on this machine yet. Type the path of a repository to install into one.")))
 	} else {

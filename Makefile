@@ -13,9 +13,9 @@ test:
 
 check: test
 	cd tui && go vet ./... && gopls check *.go
-	prettier --check README.md AGENTS.md TUTORIAL.md prompts/*.md docs/*.md themes/*.json themes/README.md
+	prettier --check README.md AGENTS.md PITCH.md prompts/*.md docs/*.md themes/*.json themes/README.md
 	test -z "$$(gofmt -l tui)"
 
 format:
 	gofmt -w tui
-	prettier --write README.md AGENTS.md TUTORIAL.md prompts/*.md docs/*.md themes/*.json themes/README.md
+	prettier --write README.md AGENTS.md PITCH.md prompts/*.md docs/*.md themes/*.json themes/README.md

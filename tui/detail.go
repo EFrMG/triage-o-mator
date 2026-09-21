@@ -22,10 +22,11 @@ const (
 
 // detailSection is one tab of the item view. Its text renders (Markdown through glamour, the diff highlighted) only when it's shown, and again only when the width or theme changed, since rendering a long thread is the expensive part.
 type detailSection struct {
-	name     string
-	kind     sectionKind
-	source   string
-	comments []string
+	name           string
+	kind           sectionKind
+	source         string
+	comments       []string
+	commentAuthors []string
 	// loaded is false until the text arrived; requested marks a diff fetch in flight.
 	loaded, requested bool
 	viewport          viewport.Model
@@ -108,7 +109,7 @@ func (d *detailModel) populate(e EnrichedItem) {
 		case "Body":
 			s.source, s.loaded = e.Body, true
 		case "Comments":
-			s.comments, s.loaded = e.CommentBodies, true
+			s.comments, s.commentAuthors, s.loaded = e.CommentBodies, e.CommentAuthors, true
 		case "Diff":
 			s.source, s.loaded = e.DiffText, e.DiffLoaded
 			s.requested = s.requested && !s.loaded
@@ -140,16 +141,19 @@ func (d *detailModel) OnEnriched(msg enrichedMsg) {
 	d.populate(msg.data)
 }
 
-// TabLabel names tab i, with the size of the change on the Diff tab ("Diff +17 −1"). Comments carry no count: each comment's separator says "comment 2 of 8", and an empty tab is dimmed.
-func (d detailModel) TabLabel(i int) string {
+// renderTabLabel names tab i. The Diff tab shows additions in the theme's success color and deletions in its error color; comments carry no count because each comment's separator says "comment 2 of 8".
+func (d detailModel) renderTabLabel(i int, style lipgloss.Style) string {
 	s := d.sections[i]
 	if s.kind == diffSection {
 		if d.enriched.Additions+d.enriched.Deletions > 0 {
-			return fmt.Sprintf("%s +%d −%d", s.name, d.enriched.Additions, d.enriched.Deletions)
+			additions := style.Foreground(lipgloss.Color(currentTheme.Success)).Render(fmt.Sprintf("+%d", d.enriched.Additions))
+			deletions := style.Foreground(lipgloss.Color(currentTheme.Error)).Render(fmt.Sprintf("−%d", d.enriched.Deletions))
+
+			return style.Render(s.name+" ") + additions + style.Render(" ") + deletions
 		}
 	}
 
-	return s.name
+	return style.Render(s.name)
 }
 
 // TabBar draws the tabs side by side with an underline marking the active one; focused (the content has the keys) colors it with the accent, otherwise it's quieter. Empty tabs are dimmed.
@@ -163,19 +167,28 @@ func (d detailModel) TabBar(width int, focused bool) string {
 
 	var labels, rules []string
 	for i, s := range d.sections {
-		// Two spaces after the digit: fonts draw circled digits wider than their cell, into the space after them.
-		label := fmt.Sprintf(" %s  %s ", circledDigit(i+1), d.TabLabel(i))
-		style := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground))
-		rule := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Border)).Render(strings.Repeat("─", ansi.StringWidth(label)))
+		color := lipgloss.Color(currentTheme.Foreground)
+		style := lipgloss.NewStyle().Foreground(color)
 		switch {
 		case i == d.active:
-			style = style.Foreground(activeColor).Bold(true)
-			rule = lipgloss.NewStyle().Foreground(activeColor).Render(strings.Repeat("━", ansi.StringWidth(label)))
+			color = activeColor
+			style = style.Foreground(color).Bold(true)
 		case s.empty():
-			style = style.Foreground(muted).Faint(true)
+			color = muted
+			style = style.Foreground(color).Faint(true)
 		}
 
-		labels = append(labels, style.Render(label))
+		brackets := style.Foreground(themeOpacity(string(color), opacityMedium))
+		number := style.Foreground(themeOpacity(string(color), opacityStrong))
+		badge := brackets.Render("[") + number.Render(fmt.Sprint(i+1)) + brackets.Render("]")
+		label := style.Render(" ") + badge + style.Render(" ") + d.renderTabLabel(i, style) + style.Render(" ")
+		ruleColor, ruleGlyph := lipgloss.Color(currentTheme.Border), "─"
+		if i == d.active {
+			ruleColor, ruleGlyph = themeOpacity(string(activeColor), opacityStrong), "━"
+		}
+
+		rule := lipgloss.NewStyle().Foreground(ruleColor).Render(strings.Repeat(ruleGlyph, ansi.StringWidth(label)))
+		labels = append(labels, label)
 		rules = append(rules, rule)
 	}
 
@@ -318,7 +331,7 @@ func (d *detailModel) renderActive() {
 	case !s.loaded:
 		text = mutedText("Loading…")
 	case s.kind == commentsSection:
-		text = renderComments(s.comments, d.width)
+		text = renderComments(s.comments, s.commentAuthors, d.width)
 	case s.kind == diffSection && strings.TrimSpace(s.source) == "":
 		text = mutedText("(empty diff)")
 	case s.kind == diffSection:
@@ -351,13 +364,4 @@ func (d detailModel) View() string {
 	}
 
 	return s.viewport.View()
-}
-
-// circledDigit is ① to ⑨ for a tab's number, the key that jumps to it.
-func circledDigit(n int) string {
-	if n < 1 || n > 9 {
-		return fmt.Sprint(n)
-	}
-
-	return string(rune('①' + n - 1))
 }

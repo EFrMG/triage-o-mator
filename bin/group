@@ -79,7 +79,16 @@ def markdown(data):
         if "body" in item:
             lines += ["", "### Body", ""] + paragraph(item["body"] or "(no description)") + ["### Comments", ""]
             comments = [prose(c) for c in item.get("comment_bodies", [])]
-            lines += [f"{i}.\n\n{comment}\n" for i, comment in enumerate(comments, 1)] or ["(no comments)"]
+            authors = item.get("comment_authors", [])
+            if comments:
+                for i, comment in enumerate(comments, 1):
+                    if i > 1:
+                        lines.append("")
+
+                    author = f" @{authors[i - 1]}" if i <= len(authors) and authors[i - 1] else ""
+                    lines += [f"{i}.{author}", "", comment]
+            else:
+                lines.append("(no comments)")
 
         if "diff_text" in item:
             # A fence longer than any backtick run in the diff cannot close early.

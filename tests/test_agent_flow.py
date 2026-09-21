@@ -119,6 +119,7 @@ class AgentFlowTests(CheckoutTest):
         self.assertEqual((item["number"], item["kind"]), (1, "issue"))
         self.assertIn("body", item)
         self.assertIn("comment_bodies", item)
+        self.assertEqual(item["comment_authors"], ["commenter"])
 
     def test_batch_diff_and_read_batch(self):
         batch_id = self.make_batch("5", "--kind", "pr", "--diff")

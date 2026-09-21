@@ -20,7 +20,7 @@ with open(os.path.join(root, "gh_calls.log"), "a") as f:
 if sys.argv[1] == "api":
     print(open(os.path.join(root, "gh_response.jsonl")).read(), end="")
 else:
-    print(json.dumps({"body": "Body", "comments": []}))
+    print(json.dumps({"body": "Body", "comments": [{"body": "A comment", "author": {"login": "commenter"}}]}))
 """
 
 

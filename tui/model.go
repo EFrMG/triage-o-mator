@@ -112,6 +112,7 @@ type model struct {
 
 func newModel(installRoot, repo string, taxonomy Taxonomy, reviewer string, items []Item) model {
 	repoInput := textinput.New()
+	repoInput.Prompt = ""
 	repoInput.Placeholder = "filter, owner/repo, or /path/to/an/install"
 	repoInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	repoInput.CharLimit = 200

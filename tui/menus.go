@@ -28,7 +28,7 @@ type cardMark struct {
 	color string
 }
 
-// markedCard draws one entry across the full width of its pane, flush with the pane's borders: first line bold (accent when selected), second muted, with mark leading that second line. The selected one is filled with the selection background across all four rows, framed by soft-accent lines drawn at the outer edge of its top and bottom rows (▔ and ▁), so the fill reaches them without the half-row gap a mid-row ─ would leave.
+// markedCard draws one entry across the full width of its pane, flush with the pane's borders: first line bold (accent when selected), second muted, with mark leading that second line. The selected one is filled with the selection background across all four rows, framed by low-contrast accent lines drawn at the outer edge of its top and bottom rows (▔ and ▁), so the fill reaches them without the half-row gap a mid-row ─ would leave.
 // The mark is drawn as its own span on the same background, since a styled span inside the line would end the line's style at its reset.
 func markedCard(first, second string, mark cardMark, selected bool, width int) string {
 	width = maxInt(width, 6)
@@ -38,12 +38,13 @@ func markedCard(first, second string, mark cardMark, selected bool, width int) s
 	markStyle := lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color(mark.color)).Bold(true)
 	top, bottom := strings.Repeat(" ", width), strings.Repeat(" ", width)
 	if selected {
-		bg := lipgloss.Color(currentTheme.Selection)
+		bg := themeOpacity(currentTheme.Selection, opacityMedium)
 		firstStyle = firstStyle.Foreground(focusedBorderColor).Background(bg)
 		secondStyle = secondStyle.Foreground(lipgloss.Color(currentTheme.Foreground)).Background(bg)
 		markStyle = markStyle.Background(bg)
-		edge := lipgloss.NewStyle().Foreground(softAccent()).Background(bg)
+		edge := lipgloss.NewStyle().Foreground(themeOpacity(currentTheme.Accent, opacitySoft)).Background(bg)
 		top, bottom = edge.Render(strings.Repeat("▔", width)), edge.Render(strings.Repeat("▁", width))
+		second = continueStyleAfterReset(second, lipgloss.Color(currentTheme.Foreground), bg)
 	}
 
 	secondLine := secondStyle.Width(width).Render(ansi.Truncate(second, inner, "…"))
@@ -54,6 +55,23 @@ func markedCard(first, second string, mark cardMark, selected bool, width int) s
 	}
 
 	return top + "\n" + firstStyle.Render(ansi.Truncate(first, inner, "…")) + "\n" + secondLine + "\n" + bottom
+}
+
+// continueStyleAfterReset keeps nested styled spans, such as a progress bar, from dropping the selected card's foreground and background for the text that follows them.
+func continueStyleAfterReset(text string, foreground, background lipgloss.Color) string {
+	marker := "\x00"
+	rendered := lipgloss.NewStyle().Foreground(foreground).Background(background).Render(marker)
+	i := strings.Index(rendered, marker)
+	if i < 0 {
+		return text
+	}
+
+	sequence := rendered[:i]
+	for _, reset := range []string{"\x1b[0m", "\x1b[m", "\x1b[49m", "\x1b[39m"} {
+		text = strings.ReplaceAll(text, reset, reset+sequence)
+	}
+
+	return text
 }
 
 // cardList stacks cards into height rows, scrolled so the selected one is visible; selected -1 means none is (Switch Repo while typing), and the list stays at the top. width is the pane's full inner width: cards reach its borders.

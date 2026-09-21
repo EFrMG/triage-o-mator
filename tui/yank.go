@@ -99,7 +99,12 @@ func (m model) itemBlock(item Item, enriched EnrichedItem, withBody bool) string
 	if withBody && len(enriched.CommentBodies) > 0 {
 		fmt.Fprintf(&b, "\nComments (%d):\n", len(enriched.CommentBodies))
 		for i, comment := range enriched.CommentBodies {
-			fmt.Fprintf(&b, "%d. %s\n", i+1, truncate(comment, bodyLimit/2))
+			author := ""
+			if i < len(enriched.CommentAuthors) && enriched.CommentAuthors[i] != "" {
+				author = " @" + strings.TrimPrefix(enriched.CommentAuthors[i], "@")
+			}
+
+			fmt.Fprintf(&b, "%d.%s %s\n", i+1, author, truncate(comment, bodyLimit/2))
 		}
 	}
 

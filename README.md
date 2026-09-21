@@ -18,7 +18,7 @@ One installs it **into the repository you triage**: this checkout is the program
 
 ## Install
 
-You need [`gh`](https://cli.github.com/) (authenticated: `gh auth status`), `python3`, and [mise](https://mise.jdx.dev/) for the pinned Go toolchain.
+You need an authenticated [`gh`](https://cli.github.com/), [mise](https://mise.jdx.dev/) and [Python3](https://www.python.org/).
 
 ```sh
 git clone https://github.com/efrmg/triage-o-mator
@@ -45,27 +45,29 @@ Everything below is written from inside an install: paths like `data/<owner>/<re
 
 <summary>Open the screencaptures</summary>
 
-<img width="1920" height="1032" alt="flow-0" src="https://github.com/user-attachments/assets/f3a3d6cf-b1a7-4495-a803-1272a0c008b4" />
+![flow-0](captures/flow-0.png)
 
-<img width="1920" height="1038" alt="flow-1" src="https://github.com/user-attachments/assets/b6fc6a9d-28b4-488f-af3f-d1f9b4432203" />
+![flow-1-a](captures/flow-1-a.png)
+![flow-1-b](captures/flow-1-b.png)
 
-<img width="1920" height="1042" alt="flow-2" src="https://github.com/user-attachments/assets/97304631-32af-434b-9f39-118feda13fe9" />
+![flow-2](captures/flow-2.png)
 
-<img width="1920" height="1047" alt="flow-3" src="https://github.com/user-attachments/assets/267bd60e-7f1e-4ae3-b265-8e014a95949a" />
+![flow-3](captures/flow-3.png)
 
-<img width="1920" height="1042" alt="flow-4" src="https://github.com/user-attachments/assets/12840f9e-aa5b-4489-9b3f-baff652a7870" />
+![flow-4-a](captures/flow-4-a.png)
+![flow-4-b](captures/flow-4-b.png)
 
-<img width="1920" height="1043" alt="flow-5" src="https://github.com/user-attachments/assets/f6271092-87a7-4deb-85bf-3ebd01290256" />
+![flow-5](captures/flow-5.png)
 
-<img width="1920" height="1036" alt="flow-6" src="https://github.com/user-attachments/assets/264ebfc0-d341-4471-a9df-b5529a39676d" />
+![flow-6](captures/flow-6.png)
 
-<img width="1920" height="1042" alt="flow-7" src="https://github.com/user-attachments/assets/701b4879-9185-4b29-a463-8e6e0d6d574e" />
+![flow-7](captures/flow-7.png)
 
-<img width="1920" height="1031" alt="flow-8" src="https://github.com/user-attachments/assets/976e824f-2ee8-4556-a0c8-ee050748a1ee" />
+![flow-8](captures/flow-8.png)
 
-<img width="1920" height="1034" alt="flow-9" src="https://github.com/user-attachments/assets/199ae4a4-3bea-43ba-9778-14bd6fcc66fe" />
+![flow-9](captures/flow-9.png)
 
-<img width="1898" height="745" alt="agent-writing-maintainer-brief" src="https://github.com/user-attachments/assets/7af6cd85-f6be-4ca1-902c-f4dd77035e33" />
+![agent-writing-maintainer-brief](captures/agent-writing-maintainer-brief.png)
 
 </details>
 
@@ -114,102 +116,21 @@ Every open issue and PR gets one row in `data/<owner>/<repo>/ledger.jsonl` (JSON
 | `reviewed` / `reviewed_by` / `reviewed_at` | whether a human has confirmed it                                  |
 | `reviewer_notes`                           | free-text notes from the reviewer                                 |
 
-Categorization and review are deliberately two separate stages: see [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md#two-stage-review) as for why.
+Categorization and review are deliberately two separate stages; [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md#two-stage-review) explains why.
 
 Categories and actions are defined in [`config/taxonomy.md`](config/taxonomy.md) (human-readable, with rationale) and [`config/taxonomy.json`](config/taxonomy.json) (the machine-checked list `bin/apply` and the TUI read). It is expected to evolve; see the note at the top of `taxonomy.md` before changing it.
 
 ## Using the TUI
 
-For a quick overview, see the [TUTORIAL](TUTORIAL.md).
+The sidebar separates untriaged issues and PRs, decisions awaiting review, merge-ready and close candidates, groups, batches, possible duplicates, and the full ledger. The overview shows progress and suggestions from `bin/next`; the footer shows the keys available on the current screen, and `?` explains them.
 
-<details>
+The basic loop is: open an item, read its body, comments and PR diff, choose a category and recommended action, then save with `Ctrl-S`. Decisions are saved to the ledger as unreviewed. Agent-filled batches use the same path: inspect and save proposals individually, or apply the rest as unreviewed decisions and work through **Pending Review**.
 
-<summary>Open the whole workflow</summary>
+In **Pending Review**, `a` marks a saved decision reviewed by a human. This confirms the ledger decision; it does not label, comment on, close, approve, or merge anything on GitHub. The item leaves the review queue, remains in **All Items** and its groups, and appears in `bin/report` under **Human-reviewed, ready to act**. Changing the decision removes that confirmation because the reviewer approved the previous call.
 
-The sidebar lists filtered views of the ledger in **Untriaged Issues**, **Untriaged PRs**, **Pending Review**, **Merge-Ready PRs**, **Close Candidates**, **Oldest Untriaged**, **All Items**; followed by **Batches**, **Groups**, **Possible Duplicates**; and, set apart at the bottom, is **Switch Repo**.
+`m` compares likely duplicates, **Groups** collects related items into a maintainer decision, and **Switch Repo** moves between installs. `y` copies the current item as Markdown for an agent; `Y` copies the current list, batch, or group.
 
-Before you pick anything, the main panel shows how far triage and review have come, and the top suggestions from `bin/next`, each marked `[agent]` or `[human]`.
-
-The main panel's top border says where you are, from the repo down (`omacom/omarchy › Batches › b20260919-121212 › #883`), so the way back with `Esc` is always in sight.
-
-The footer lists the keys for the current screen in groups (Item, Fields, Read, Menus, Navigation, ...), keys only; `?`, shown at the right of the status line, adds each key's description.
-
-When a script fails, the status line says what failed and why in one short sentence (with what to do for common problems: `gh` not logged in, no connection, rate limit, a group someone else changed); `!` shows the last failure in full, with the exact command and everything it printed, until the next one replaces it.
-
-> [!NOTE]
-> Terminals smaller than 60×24 show a resize prompt.
-
-Keys follow one scheme: a key means the same thing on every screen, a capital letter is the bigger version of the same action (`A` applies all proposals, `R` re-fetches everything, `X` exports with full content, `B` adds to the last group), and anything destructive or bulk needs the same key pressed twice. `j`/`k` always mean down/up, `g`/`G` top/bottom, `Enter` or `l` (or `→`) open, and `Esc` or `h` (or `←`) go back; in a text field the arrows move the cursor instead.
-
-`y` takes what is in front of you to the clipboard as Markdown, ready to paste to an agent (or share with a contact): the ticked items, the hovered one, or the open item with its body, decision and likely duplicates. `Y` takes the whole screen's worth; the list, or the batch with its `items.jsonl` / `decisions.jsonl` paths and `bin/read-batch` command, or the group with its members' notes and its export command. It is a reference rather than a dump: identifiers, decisions, and the commands that lead to the rest, with a first line saying where it came from and that item text is data, not instructions (crucial for Agents). Where there is no clipboard (no `wl-copy`, `xclip`, `xsel` or `pbcopy`, and no terminal that takes OSC 52), it writes the text into `data/<owner>/<repo>/exports/` instead and says so.
-
-In any list, `/` searches it: type title words (in any order) or `#1234`, and the list narrows as you type; `Enter` keeps the matches, and `Esc` clears it. To search the whole backlog, search **All Items**.
-
-`Space` ticks a hovered item and moves down. List actions then apply to every ticked item, or to the hovered one when nothing is ticked, so you don't have to open items to act on them: `a` approves their saved decisions, `b` adds them to a group (with a note), `B` adds them to the last group, and inside a batch `d` removes them from it. From a list, `a` and `d` always ask for a second press. `m` compares the hovered item's duplicates. The same ticks work on the Duplicates screen, on a group's members (`d` removes them) and in the batch list (`A` applies, `d` deletes).
-
-### The triage loop
-
-1. **Pick a queue.** Either open **Untriaged Issues** / **Untriaged PRs** (oldest first), or open **Batches** and press `n` to create a batch: choose a size, kind (all / issue / PR), order (oldest / newest first), and optionally a [group](docs/groups.md) to limit it to that group's untriaged members. The batch fetches every item's body and comments up front (read-only), then opens as a list with an `x/N triaged` progress count.
-
-2. **Read.** `Enter` opens an item. Its header carries the author, state, labels and likely duplicates; below it, tabs run across the top: Body, Agent notes (when there are any), Comments, and for PRs the Diff, with their counts. `H`/`L` switch tabs and `1`–`4` jump straight to one. The active tab shows beside the decision form; `Enter` fills the screen with the tab's content, and `Enter` again brings the form back. Bodies, comments and notes render as Markdown, and the diff is highlighted. `j`/`k`, `g`/`G`, and `Ctrl-D`/`Ctrl-U` scroll.
-
-> Reading comments is crucial: workarounds, "same here", and links to the real duplicate usually live there.
-
-3. **Check for duplicates.** The item header lists its most similar titles (`Possible duplicates: #49760 02%, ...`). `m` opens the [Duplicates screen](#duplicates), which compares the item with those candidates and can mark them duplicates of it.
-
-4. **Decide.** `l` (or `→`) moves from the content to the form and `h` (or `←`) back; `Tab` / `Shift-Tab` move through category, action, confidence, and reason; on the first three, `J` / `K` do the same (into the reason too, where they're letters again), `j`/`k` (or `↑`/`↓`) change the value, from `config/taxonomy.json`'s exact lists, `Enter` confirms it and moves to the next field, and `l` (or `→`) opens a list of all of them: `Enter` or `l` (or `→`) there picks one and moves to the next field, `Esc` or `h` (or `←`) closes it. Only the reason is free text: while it's focused, printable keys are typed into it, `Enter` **saves**, and `Esc` leaves it.
-
-5. **Save.** `Ctrl-S` records the decision through `bin/apply`, attributed to your `git config user.name`. An untriaged item opens with placeholder values, so if you haven't changed them, or the reason is empty, the first `Ctrl-S` warns; press it again to save anyway. A save takes you back to the list you opened the item from, with the cursor one item below (from the duplicates screen or a group, back there). Unsaved edits are kept per item for the session, so you can compare several items before deciding; lists mark such an item `unsaved`, in place of its decision, and `q` asks before discarding them.
-
-6. **Review.** Decisions start unreviewed. In every list, a decided item is marked `[agent]` when an agent's proposal was applied (`triaged_by` is `agent` or `agent:<name>`) and `[human]` when a person saved it, so you can see at a glance which calls nobody has looked at yet. In **Pending Review** (or any view), `a` marks the saved decision as reviewed, on an open item, or on the hovered and ticked ones straight from the list. If the item has unsaved edits, the first `a` warns that only the saved decision will be approved. Changing a decision someone already approved takes the approval back, since it was for the old call. `u` undoes one step, after a second press: on an approved item it takes the approval back, and on an unreviewed one it clears the decision, so the item is untriaged again (with its batch proposal, if there is one); notes stay. It works on hovered and ticked items too; right after an approval it acts on the items just approved, even when they've left the list (as in **Pending Review**), taking the approval back first and their decisions on the next round. The ledger's `git diff` shows what was undone (`bin/apply --unapprove` / `--clear`).
-
-7. **Group.** **Groups** in the sidebar, or `b` from an item or a list, opens [Groups](docs/groups.md) to collect related issues and PRs with notes, an assignee, and exportable review packets; `B` adds the current item to the last group you used.
-
-`o` opens the item on GitHub, `r` fetches recent changes and syncs (on every screen), `R` re-fetches everything, `t` opens the [theme picker](themes/README.md), `Esc` / `h` goes back one level, `q` quits, and `Ctrl-C` always quits.
-
-> [!NOTE]
-> An incremental fetch can't see issues or PRs that were **deleted or transferred** to another repo: they just stop appearing, so they stay open in the ledger until the next full fetch (at most a day later, or right away with `R`) marks them closed.
-
-### Batches and agent proposals
-
-A batch is the same `data/<owner>/<repo>/batches/<id>.items.jsonl` / `.decisions.jsonl` pair `bin/batch` writes, so batches created from the TUI and from the command line show up in the same list. Decisions you save while working through a batch are stamped with its ID.
-
-If an agent has filled in a batch's decisions file (see [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) and [`prompts/auto-triage.md`](prompts/auto-triage.md)), the batch list counts its proposals, items show `proposed: category/action`, and opening one prefills the form with the proposal. From there you can:
-
-- review one at a time: adjust if needed and `Ctrl-S` to record it as your own decision;
-- or press `A` twice, in **Batches** or inside the open batch, to apply every remaining proposal as an unreviewed decision, credited to whoever proposed it, then review them in **Pending Review**.
-
-> Items someone already triaged are never overwritten this way.
-
-Press `d` twice in **Batches** to delete a batch you're done with. Its files are gitignored working copies, so this can't be undone, but every decision already saved or applied from it stays in the ledger with its `batch_id`; only proposals you haven't applied are lost, and the first `d` tells you how many.
-
-### Duplicates
-
-`bin/similar` ranks every other item of the same kind by title similarity, offline, from the ledger alone. Titles sharing rare terms score high and titles sharing common ones don't, but a score is only a reason to compare two items, never proof: "Consider setting X by default" and "Consider setting Y by default" can score high and be unrelated. It only sees titles, so duplicates worded differently won't show up.
-
-To find duplicates across the whole backlog instead of one item at a time, open **Possible Duplicates** in the sidebar. It lists every pair of open issues (or open PRs) whose titles score 50% or more, strongest first, the older item first since that is the one a comparison keeps. `Enter` (or `m`) opens the Duplicates screen for the pair, on the older item with the newer one selected, and `Esc` comes back to the list. `d`, twice, rules the hovered pair out: `bin/not-duplicate` records "checked, not duplicates" in git-tracked `data/<owner>/<repo>/not-duplicates.jsonl`, so the pair stays off this list in later sessions and for everyone who pulls it. A verdict covers that pair only, so if a third similar item turns up it pairs with each of them and those comparisons are offered as usual; `bin/not-duplicate --remove` takes a verdict back. `D`, twice, clears the pairs marked `handled` from the list on screen; they are already excluded next time, since their items are decided. Neither key changes a decision in the ledger. Once either side is marked `duplicate` / `duplicate-pr` or closed, a pair is marked `handled` and leaves the count; it stays listed until you open the view again, so nothing vanishes from under the cursor as you work through it.
-
-On the Duplicates screen (`m` on an item, or `Enter` on a pair):
-
-- The item being compared is the top card, above a rule and always in view: the supposed **original**, the one that usually stays. It carries its date, state and decision instead of a similarity, and the cursor reaches it like any candidate (`k` from the first one below, or `g`).
-- `Enter` opens whichever card the cursor is on, the original included, to read in full; `Esc` comes back to the comparison. `o` opens that item on GitHub.
-- `m` marks the hovered candidate as a duplicate **of the original on top**, prefilling that candidate's own decision (`duplicate` or `duplicate-pr`, `close-duplicate`, and a reason naming the original). `M` swaps the two, making the hovered candidate the original (with its own candidates, the previous original among them), so the comparison runs the other way and `m` closes the item that was on top. Both cards show when each item was opened, and marking a candidate older than the original says so, since the older report is usually the one to keep. Nothing is saved until you check the confidence and reason and press `Ctrl-S`, which works on the comparison screen too: it saves and stays there, so one sitting can resolve several candidates against the same original.
-- `d`, twice, rules the hovered candidate out against the item on top, recording the same verdict as in the pairs list; candidates already ruled out say so on their card.
-- `Space` ticks candidates and `b` creates a [group](docs/groups.md) with the item and the ticked candidates (or the selected one), each with its similarity in the notes. It then becomes your last group, so `B` adds more from anywhere, and it can be exported and handed off like any other group.
-
-Batches carry the same candidates (`duplicate_candidates` on each item), so an Agent can name a duplicate it would otherwise never see. For a closer look, ask your agent "is #N a duplicate?": [`prompts/find-duplicates.md`](prompts/find-duplicates.md) has it read the full bodies, comments (and, for PRs, diffs) of the item and its candidates.
-
-### Switching repos and installs
-
-`config/repo` names the repo an install works on (from its repository's `upstream` remote when it has one, otherwise `origin`, unless `bin/install-to --repo` said otherwise), and each repo keeps its own ledger, batches, groups, exports, and fetch cache in `data/<owner>/<repo>/`, with reports in `reports/<owner>/<repo>/`.
-
-**Switch Repo** lists this install's repos first, then the repos of every other install `bin/install-to` has recorded for you, each showing where it is. Picking one from elsewhere moves the whole session to that install: its taxonomy, its theme, its ledgers and groups. The text field above the list (`Tab` or `↑`/`↓` move between them) filters it as you type; an absolute path opens an install directly (the path of the repository holding one works too), and an `owner/repo` that isn't listed starts that repo in the current install, empty, with a full fetch.
-
-The TUI waits to switch until you've saved or discarded your unsaved decisions and any running fetch or save has finished, because both belong to the repo you're leaving.
-
-A path with no install in it is something **Switch Repo** can create. `Enter` there shows what `bin/install-to --dry-run` says it would change, line by line, and writes nothing; `Enter` again makes exactly those changes, `s` shows the same plan for the other mode (tracked or solo), `j`/`k` scroll it, and `Esc` leaves the repository untouched. See [docs/install.md](docs/install.md#installing-from-inside-the-app).
-
-</details>
+See the [TUI tutorial](docs/tutorial.md) for the complete workflow and [keybindings](docs/keybindings.md) for every key. Group review is covered separately in [docs/groups.md](docs/groups.md), and installing or switching repositories in [docs/install.md](docs/install.md).
 
 ## Scripts
 
@@ -271,11 +192,7 @@ Everything an agent produces is a proposal. Decisions land unreviewed (never wit
 
 ### Working as a team
 
-Contributors share the ledger and groups through Git, each usually with an agent. Because the install's data lives in the repository being triaged, that sharing is the repository's own workflow: pull to get each other's decisions, and push changing `triage-o-mator/data/<owner>/<repo>/` to hand a pass to maintainers. Everyone runs `bin/install-to` against their clone once to wire up their own symlinks; nothing tracked changes when they do.
-
-Agents triage, check duplicates, review PR code, and draft groups; contributors review decisions and mark groups `ready`; lead maintainers read `bin/report` (ready groups and human-confirmed decisions first) and the brief.
-
-See [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md#working-as-a-team) for the conventions that keep this from colliding, and [docs/install.md](docs/install.md) for the case where the repository isn't yours to commit to.
+Agents propose decisions and draft groups; contributors review them and mark groups ready; lead maintainers read `bin/report` and the brief. The ledger and groups travel through the repository's normal Git workflow. See the [team conventions](prompts/PLAYBOOK.md#working-as-a-team) and [installation guide](docs/install.md#working-as-a-team-through-it) for setup and coordination.
 
 ### Notes on security
 
@@ -301,13 +218,13 @@ mise exec -- make build
 mise exec -- make run ROOT=/path/to/a/repository/triage-o-mator # the TUI against one of your installs
 ```
 
-Working on the tool's own code is a different job from triaging a backlog, and [AGENTS.md](AGENTS.md) here is about that job; the playbook agents follow when triaging is [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md), which installs carry as their own `AGENTS.md`. The checkout is never a workspace: it holds no `config/repo`, and the scripts refuse to run outside an install, so there is nowhere here for a ledger, groups or reports to come from. A fork's pull request therefore cannot carry triage data belonging to whatever repositories that contributor triages; it lives in each of those repositories' own install. Tests build throwaway checkouts and installs in temporary directories, and a fake `gh`; none of them touch a real install or GitHub.
+See [AGENTS.md](AGENTS.md) for development conventions and [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) for the playbook installed into repositories being triaged. Tests use throwaway installs and a fake `gh`; they never touch a real install or GitHub.
 
 ## Not built (yet)
 
 Deliberately out of scope for now, to keep the first versions of this tool read-only and low-risk:
 
-- **Applying decisions back to GitHub**: auto-labeling based on `category`, posting `comment-request-info` / `comment-explain-close` text, closing `close-duplicate` / `close-stale` / `close-out-of-scope` / `close-resolved` items. The TUI reserves the `c` key for posting a comment from within a review session; for now it only shows a "not available yet" message. Once there's confidence in the categorization quality (id est, a meaningful chunk of the ledger has gone through real human review), this is the natural next step, yet it writes to a repo other people interact with, so it should default to `--dry-run`, only ever touch `reviewed: true` rows, and get explicit sign-off before it is used with that intent.
+- **Applying decisions back to GitHub**: labels, comments, closes, merges, and PR approvals are not implemented. A future implementation should default to `--dry-run`, act only on human-reviewed decisions, and require explicit sign-off.
 - **Body-aware duplicate detection**: `bin/similar` compares titles only, since bodies cost an API call per item. Comparing bodies across the whole backlog would need a local body cache or embeddings.
 - **Webhook-driven fetch**: fetches are incremental but still pulled on launch / `r`, not pushed by GitHub.
 - **Concurrent item-ledger editing**: Groups support assignment, handoffs, atomic local writes, and stale-revision checks. Item decisions still use a single-ledger workflow, as `data/<owner>/<repo>/ledger.jsonl` is not designed for concurrent writers, and batches do not coordinate who is already looking at what. Running this with a small team would need some way to hand out non-overlapping batches and resolve conflicting decisions on the same item; this remains separate from group-based collaboration.

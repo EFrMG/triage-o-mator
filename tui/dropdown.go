@@ -69,16 +69,31 @@ func (d dropdown) View(width int) string {
 		rows = append(rows, mutedText(fmt.Sprintf("  %d of %d", d.cursor+1, len(d.options))))
 	}
 
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(softAccent()).Render(strings.Join(rows, "\n"))
+	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(strongAccent()).Render(strings.Join(rows, "\n"))
 }
 
-// softAccent is the accent blended halfway toward the background: terminals have no opacity, so this is how a border is drawn "at 50%".
-func softAccent() lipgloss.Color {
-	a, errA := colorful.Hex(currentTheme.Accent)
+// Opacity rungs keep blended UI elements on one visual scale. opacitySoft is reserved for the next level that needs it.
+const (
+	opacityQuiet  = 0.25
+	opacitySoft   = 0.45
+	opacityMedium = 0.65
+	opacityStrong = 0.80
+)
+
+// themeOpacity blends a theme color toward the background: terminals have no opacity, so this produces the same visual effect for text and borders.
+func themeOpacity(color string, opacity float64) lipgloss.Color {
+	a, errA := colorful.Hex(color)
 	b, errB := colorful.Hex(currentTheme.Background)
 	if errA != nil || errB != nil {
-		return lipgloss.Color(currentTheme.Border)
+		return lipgloss.Color(color)
 	}
 
-	return lipgloss.Color(a.BlendLab(b, 0.5).Clamped().Hex())
+	opacity = max(0, min(opacity, 1))
+
+	return lipgloss.Color(a.BlendLab(b, 1-opacity).Clamped().Hex())
+}
+
+// strongAccent is the accent drawn at the strongest blended rung against the theme background.
+func strongAccent() lipgloss.Color {
+	return themeOpacity(currentTheme.Accent, opacityStrong)
 }

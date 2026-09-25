@@ -50,6 +50,38 @@ Everything below is written from inside an install: paths like `data/<owner>/<re
 
 ## How it works
 
+<details>
+
+<summary>Open the screencaptures</summary>
+
+![flow-0](captures/flow-0.png)
+
+![flow-1-a](captures/flow-1-a.png)
+![flow-1-b](captures/flow-1-b.png)
+
+![flow-2](captures/flow-2.png)
+
+![flow-3](captures/flow-3.png)
+
+![flow-4-a](captures/flow-4-a.png)
+![flow-4-b](captures/flow-4-b.png)
+
+![flow-5](captures/flow-5.png)
+
+![flow-6](captures/flow-6.png)
+
+![flow-7](captures/flow-7.png)
+
+![flow-8](captures/flow-8.png)
+
+![flow-9](captures/flow-9.png)
+
+![flow-10](captures/flow-9.png)
+
+![agent-writing-maintainer-brief](captures/agent-writing-maintainer-brief.png)
+
+</details>
+
 The ledger tracks item facts and local triage decisions. The cache keeps larger, versioned observations for offline analysis. Groups and reports turn reviewed work into a handoff for maintainers.
 
 ```mermaid

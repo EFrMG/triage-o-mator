@@ -51,7 +51,6 @@ func TestPublishedCommentReloadsThroughScriptAndRejectsOlderResponse(t *testing.
 	}
 	t.Setenv("PATH", filepath.Join(root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	m.detail.populate(EnrichedItem{CommentBodies: []string{"old comment"}})
-	m.detail.JumpSection(1)
 	m.form.reason.SetValue("unsaved triage reason")
 	m.form.dirty = true
 	oldGeneration := m.detail.generation
@@ -61,17 +60,33 @@ func TestPublishedCommentReloadsThroughScriptAndRejectsOlderResponse(t *testing.
 	if cmd == nil || m.comment.open {
 		t.Fatal("publish did not dismiss composer and request reload")
 	}
+	if m.detail.sections[m.detail.active].kind != commentsSection {
+		t.Fatal("publish did not return to Comments")
+	}
 	m = send(m, cmd())
 	if m.detail.enriched.CommentBodies[0] != "newly published" || !strings.Contains(m.status, "comments refreshed") {
 		t.Fatalf("new comment not loaded: %+v, %s", m.detail.enriched, m.status)
 	}
-	if m.detail.active != 1 || !m.form.dirty || m.form.Reason() != "unsaved triage reason" {
-		t.Fatal("reload changed selected tab or decision draft")
+	if m.detail.sections[m.detail.active].kind != commentsSection || !m.form.dirty || m.form.Reason() != "unsaved triage reason" {
+		t.Fatal("reload changed Comments tab or decision draft")
 	}
 
 	m = send(m, enrichedMsg{root: root, repo: m.repo, key: m.detail.key, generation: oldGeneration, data: EnrichedItem{CommentBodies: []string{"stale"}}})
 	if m.detail.enriched.CommentBodies[0] != "newly published" {
 		t.Fatal("old enrichment overwrote published comment")
+	}
+}
+
+func TestPublishedCommentSelectsCommentsAfterAgentNotes(t *testing.T) {
+	m := commentEditorFixture(t)
+	it := m.detail.item
+	it.AgentNotes = "Review notes"
+	m.detail.SetItem(it)
+
+	next, _ := m.Update(commentMsg{root: m.installRoot, repo: m.repo, publish: true, out: `{"comment":{"url":"https://github.com/owner/repo/issues/1#issuecomment-42"}}`})
+	m = next.(model)
+	if m.detail.active != 2 || m.detail.sections[m.detail.active].kind != commentsSection {
+		t.Fatal("publish selected the wrong tab when Agent notes are present")
 	}
 }
 

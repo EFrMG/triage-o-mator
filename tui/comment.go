@@ -163,6 +163,13 @@ func (m model) finishComment(msg commentMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		for i, section := range m.detail.sections {
+			if section.kind == commentsSection {
+				m.detail.JumpSection(i)
+				break
+			}
+		}
+
 		delete(m.detail.cache, c.key)
 		m.status = "Comment published."
 		cmd := m.refreshLiveDetail()

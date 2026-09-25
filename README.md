@@ -21,15 +21,14 @@ One installs it **into the repository you triage**: this checkout is the program
 You need an authenticated [`gh`](https://cli.github.com/), [mise](https://mise.jdx.dev/) and [Python3](https://www.python.org/).
 
 ```sh
-git clone https://github.com/efrmg/triage-o-mator
-cd triage-o-mator
-./install.sh /absolute/path/to/your/repository # mise install, make build, bin/install-to
+gh repo clone efrmg/triage-o-mator && cd triage-o-mator
+./install.sh /path/to/your/repository # mise install, make build, bin/install-to
 ```
 
 Then run it from the repository:
 
 ```sh
-cd /absolute/path/to/your/repository
+cd /path/to/your/repository
 triage-o-mator/bin/triage-o-mator # And she's ON!
 ```
 
@@ -40,8 +39,7 @@ Installing into a repository you don't control, adopting an install later, insta
 Working from a fork? The install can live in your fork while reading the upstream backlog. For example, from this built tool checkout:
 
 ```sh
-bin/install-to /absolute/path/to/your/omarchy --repo omacom/omarchy --dry-run
-bin/install-to /absolute/path/to/your/omarchy --repo omacom/omarchy
+bin/install-to /path/to/your/omarchy --repo omacom/omarchy
 ```
 
 Here the local clone can be `efrmg/omarchy`; `--repo` explicitly chooses whose issues and PRs to read. The [fork walkthrough](docs/install.md#working-from-a-fork) covers an existing install, tracked versus solo work, and sharing the results. No upstream write access is required.
@@ -76,7 +74,7 @@ Everything below is written from inside an install: paths like `data/<owner>/<re
 
 ![flow-9](captures/flow-9.png)
 
-![flow-10](captures/flow-9.png)
+![flow-10](captures/flow-10.png)
 
 ![agent-writing-maintainer-brief](captures/agent-writing-maintainer-brief.png)
 
@@ -86,17 +84,22 @@ The ledger tracks item facts and local triage decisions. The cache keeps larger,
 
 ```mermaid
 flowchart LR
-    GH[GitHub backlog] -->|fetch and sync| LEDGER[(ledger.jsonl)]
-    GH -->|explicit read| CACHE[(local evidence cache)]
-    CACHE -->|offline search and sources| AGENT[agent analysis]
-    LEDGER -->|batch and review| TUI[terminal UI]
-    AGENT -->|unreviewed proposal| LEDGER
-    TUI -->|group script| GROUPS[(review groups)]
-    LEDGER --> REPORT[maintainer report]
-    GROUPS --> REPORT
+    GH["GitHub backlog<br/>(read only)"]
+    LOCAL["Local working data<br/>ledger + evidence cache"]
+    TRIAGE["Triage in the TUI<br/>or an agent batch"]
+    PROPOSAL["Unreviewed proposal<br/>saved in the ledger"]
+    REVIEWED["Human-reviewed decision<br/>saved in the ledger"]
+    HANDOFF["Groups and reports<br/>for maintainers"]
+
+    GH -->|"read-only scripts"| LOCAL
+    LOCAL --> TRIAGE
+    TRIAGE -->|"save for review"| PROPOSAL
+    TRIAGE -->|"human saves + approves"| REVIEWED
+    PROPOSAL -->|"human confirms or revises"| REVIEWED
+    REVIEWED --> HANDOFF
 ```
 
-An item first enters the ledger when observed open. Later syncs retain its row after closure, along with its triage and review history. `bin/sync` does not import every item that closed before that first observation. The TUI saves ledger and group changes through scripts; GitHub operations are reads.
+An item first enters the ledger when observed open. Later syncs retain its row after closure, along with its triage and review history. `bin/sync` does not import every item that closed before that first observation. Every GitHub path shown is read-only and runs through a script. The TUI invokes the owning scripts for managed data, and agent proposals stay unreviewed until a human confirms them.
 
 Each ledger row includes:
 

@@ -125,7 +125,7 @@ Spreadsheet work with CSV files is also supported!
 ## Getting started
 
 ```sh
-git clone https://github.com/efrmg/triage-o-mator && cd triage-o-mator
+gh repo clone efrmg/triage-o-mator && cd triage-o-mator
 ./install.sh /path/to/your/repository # builds, then installs
 cd /path/to/your/repository && ./triage-o-mator/bin/triage-o-mator
 ```

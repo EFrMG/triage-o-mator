@@ -7,8 +7,7 @@ The checkout is the program; the install is the work. Nothing runs outside an in
 ## Install it
 
 ```sh
-git clone https://github.com/efrmg/triage-o-mator
-cd triage-o-mator
+gh repo clone efrmg/triage-o-mator && cd triage-o-mator
 ./install.sh /absolute/path/to/your/repository
 ```
 
@@ -59,7 +58,7 @@ The local checkout, the backlog being read, and the destination for triage commi
 Start by cloning the fork. This example uses `efrmg/omarchy`; substitute your own fork and local path as needed:
 
 ```sh
-git clone https://github.com/efrmg/omarchy.git /absolute/path/to/omarchy
+gh repo clone efrmg/omarchy /absolute/path/to/omarchy
 ```
 
 Then, from the built triage-o-mator checkout, install into that clone with an explicit backlog target:

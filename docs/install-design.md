@@ -7,7 +7,7 @@ This is the design note the install layout was implemented from.
 You clone and build triage-o-mator once, then install it into each repository you triage:
 
 ```sh
-git clone https://github.com/efrmg/triage-o-mator && cd triage-o-mator
+gh repo clone efrmg/triage-o-mator && cd triage-o-mator
 ./install.sh /absolute/path/to/target-repo # mise install, make build, bin/install-to
 ```
 

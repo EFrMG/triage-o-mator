@@ -47,7 +47,8 @@ Printable keys remain text while editing a text field. Destructive actions and b
 | `b` / `B` | add to a group (pick one, write a note) / add to the last group; works on hovered and ticked items                                                  |
 | `o`       | open on GitHub                                                                                                                                      |
 | `u`       | undo one step, with a second press: take back an approval, or clear an unreviewed decision                                                          |
-| `c`       | post a comment (reserved)                                                                                                                           |
+| `c`       | compose a GitHub comment; `Ctrl-P` toggles Markdown preview; `Ctrl-S` approves and publishes                                                        |
+| `C`       | compose in `$EDITOR`; save and exit to load the Markdown preview; also works from comment preview                                                   |
 
 `s` and `S` remain letters in text fields. `Ctrl-S` remains an optional save alias, including while typing; saving and approving a decision does not require Ctrl.
 

@@ -106,7 +106,7 @@ class InstallToTests(InstallTest):
         self.install_to("--yes")
         self.assertEqual(path.read_text(), upgraded)
 
-        for name in ("cache/snapshots/one.json", "cache/objects/raw.diff", "local/ledger.jsonl.lock", "evidence/retained.json", "actions/example.json", "inbox/example.json"):
+        for name in ("cache/snapshots/one.json", "cache/objects/raw.diff", "local/ledger.jsonl.lock", "writes/request.json", "evidence/retained.json", "actions/example.json", "inbox/example.json"):
             artifact = self.install / "data/acme/widgets" / name
             artifact.parent.mkdir(parents=True, exist_ok=True)
             artifact.write_text("{}\n")
@@ -114,6 +114,7 @@ class InstallToTests(InstallTest):
         tracked = self.tracked()
         self.assertNotIn("triage-o-mator/data/acme/widgets/cache/objects/raw.diff", tracked)
         self.assertNotIn("triage-o-mator/data/acme/widgets/local/ledger.jsonl.lock", tracked)
+        self.assertNotIn("triage-o-mator/data/acme/widgets/writes/request.json", tracked)
         for name in ("evidence/retained.json", "actions/example.json", "inbox/example.json"):
             self.assertIn("triage-o-mator/data/acme/widgets/" + name, tracked)
 

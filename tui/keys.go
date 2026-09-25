@@ -44,14 +44,15 @@ type keyMap struct {
 	MarkDup      key.Binding
 	Track        key.Binding
 	// SwapDup (M) is the one capital that isn't a bigger m: on the Duplicates screen it swaps the two sides, making the hovered candidate the original, so duplicates can be marked in either direction.
-	SwapDup    key.Binding
-	Group      key.Binding
-	QuickGroup key.Binding
-	Open       key.Binding
-	Undo       key.Binding
-	Comment    key.Binding
-	Yank       key.Binding
-	YankAll    key.Binding
+	SwapDup       key.Binding
+	Group         key.Binding
+	QuickGroup    key.Binding
+	Open          key.Binding
+	Undo          key.Binding
+	Comment       key.Binding
+	CommentEditor key.Binding
+	Yank          key.Binding
+	YankAll       key.Binding
 
 	// Batches and groups.
 	New    key.Binding
@@ -106,21 +107,22 @@ var keys = keyMap{
 	UntriagedOrder: key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "age order")),
 	ErrorDetails:   key.NewBinding(key.WithKeys("!"), key.WithHelp("!", "last error")),
 
-	Save:         key.NewBinding(key.WithKeys("s", "ctrl+s"), key.WithHelp("s", "save")),
-	SaveApprove:  key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "save & approve")),
-	Corpus:       key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "local dataset")),
-	CorpusBudget: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "item limit")),
-	CorpusRun:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "run/resume")),
-	CorpusStop:   key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "cancel download")),
-	Approve:      key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "approve")),
-	MarkDup:      key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "duplicates")),
-	Track:        key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "track comments")),
-	SwapDup:      key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "make it the original")),
-	Group:        key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "groups")),
-	QuickGroup:   key.NewBinding(key.WithKeys("B"), key.WithHelp("B", "last group")),
-	Open:         key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "GitHub")),
-	Undo:         key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "undo")),
-	Comment:      key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment (not yet available)")),
+	Save:          key.NewBinding(key.WithKeys("s", "ctrl+s"), key.WithHelp("s", "save")),
+	SaveApprove:   key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "save & approve")),
+	Corpus:        key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "local dataset")),
+	CorpusBudget:  key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "item limit")),
+	CorpusRun:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "run/resume")),
+	CorpusStop:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "cancel download")),
+	Approve:       key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "approve")),
+	MarkDup:       key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "duplicates")),
+	Track:         key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "track comments")),
+	SwapDup:       key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "make it the original")),
+	Group:         key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "groups")),
+	QuickGroup:    key.NewBinding(key.WithKeys("B"), key.WithHelp("B", "last group")),
+	Open:          key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "GitHub")),
+	Undo:          key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "undo")),
+	CommentEditor: key.NewBinding(key.WithKeys("C"), key.WithHelp("C", "$EDITOR comment")),
+	Comment:       key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
 	// Yank / YankAll take context out of the app for an agent to read: y what is in front of you, Y the whole screen's worth, in the same relationship as every other lowercase/uppercase pair.
 	Yank:    key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "take context")),
 	YankAll: key.NewBinding(key.WithKeys("Y"), key.WithHelp("Y", "take all of it")),

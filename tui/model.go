@@ -83,6 +83,7 @@ type model struct {
 	corpusLifecycle, corpusObserverLifecycle *readLifecycle
 	evidenceRequest                          uint64
 	form                                     decisionForm
+	comment                                  commentComposer
 
 	// drafts holds unsaved decision edits per item, so switching between items to compare them before committing with ctrl+s doesn't lose work.
 	// Cleared for a key once bin/apply confirms that key was saved.
@@ -119,6 +120,8 @@ type model struct {
 	lastError errorDetails
 	// statusError is the last message set through fail, so it shows as an error for as long as it's on screen.
 	statusError string
+	// statusWarning is the last message set through warn, so it stays yellow while displayed.
+	statusWarning string
 	// refreshStatus is the running fetch's message, restored when a message shown on top of it expires.
 	refreshStatus string
 	refreshing    bool
@@ -383,7 +386,7 @@ func (m *model) openItem(it Item) tea.Cmd {
 
 	var cmds []tea.Cmd
 	if needsFetch {
-		cmds = append(cmds, enrichItemCmd(m.installRoot, it.Key(), false))
+		cmds = append(cmds, m.enrichDetailCmd(false))
 	}
 
 	if _, ok := m.similar[it.Key()]; !ok {
@@ -473,6 +476,7 @@ func (m model) formPanelWidth() int {
 }
 
 func (m *model) layout() {
+	m.layoutComment()
 	listW, _ := m.panelWidths()
 	if m.listReady {
 		m.list.SetSize(listW, maxInt(m.mainHeight()-listHeaderHeight, 1))
@@ -641,6 +645,8 @@ func (m model) View() string {
 	switch {
 	case m.width < 60 || m.height < 24:
 		body = "Please resize to at least 60 × 24."
+	case m.comment.open:
+		body = m.commentView()
 	case m.lastError.open:
 		body = m.errorView()
 	case m.themePicker.open:

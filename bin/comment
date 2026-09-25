@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Preview and explicitly approve one GitHub conversation comment."""
+
+import argparse
+import hashlib
+import json
+import re
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+
+from _storage import atomic_writer, locked
+from _triage import DATA_DIR, now_iso, read_repo
+
+
+def api(host, method, endpoint, payload=None):
+    args = ["gh", "api", "--hostname", host, "--method", method, endpoint]
+    if payload is not None:
+        args.extend(["--input", "-"])
+
+    result = subprocess.run(args, input=json.dumps(payload) if payload is not None else None, text=True, capture_output=True, timeout=60)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "GitHub request failed")
+
+    return json.loads(result.stdout)
+
+
+def save(path, record):
+    with atomic_writer(path) as out:
+        json.dump(record, out, ensure_ascii=False, indent=2)
+        out.write("\n")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-repo", required=True)
+    parser.add_argument("--host", default="github.com")
+    parser.add_argument("--kind", choices=["issue", "pr"], required=True)
+    parser.add_argument("--number", type=int, required=True)
+    body = parser.add_mutually_exclusive_group(required=True)
+    body.add_argument("--body")
+    body.add_argument("--body-file", type=Path)
+    parser.add_argument("--request-id", help="reuse the dry-run request ID when publishing")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--publish", action="store_true")
+    parser.add_argument("--approve", help="SHA-256 from the reviewed dry-run plan")
+    args = parser.parse_args()
+
+    # Older argparse versions strip a literal '--' even from '--body=--', returning an empty list for this single-value option.
+    if args.body == []:
+        args.body = "--"
+
+    repo = read_repo()
+    if args.expected_repo != repo:
+        raise ValueError("configured repository changed; preview again")
+    if not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)*", args.host):
+        raise ValueError("host must be a lowercase hostname")
+    if args.number <= 0:
+        raise ValueError("number must be positive")
+
+    text = args.body if args.body is not None else args.body_file.read_text(encoding="utf-8")
+    if not text.strip() or len(text) > 65536 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in text):
+        raise ValueError("comment must contain text, contain no control characters, and be at most 65536 characters")
+
+    request_id = args.request_id or str(uuid.uuid4())
+    if str(uuid.UUID(request_id)) != request_id:
+        raise ValueError("request ID must be a canonical UUID")
+
+    target = f"https://{args.host}/{repo}/{'pull' if args.kind == 'pr' else 'issues'}/{args.number}"
+    plan = dict(version=1, request_id=request_id, operation="comment", host=args.host, repo=repo, kind=args.kind, number=args.number, target=target, body=text, state_change="none")
+    digest = hashlib.sha256(json.dumps(plan, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    if not args.publish:
+        print(json.dumps(dict(plan=plan, approval=digest), ensure_ascii=False, indent=2))
+        return
+
+    if not args.request_id or args.approve != digest:
+        raise ValueError("publishing requires the request ID and approval hash of the exact reviewed dry-run plan")
+
+    path = DATA_DIR / "writes" / f"{request_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with locked(path):
+        if path.exists():
+            record = json.loads(path.read_text())
+            if record["approval"] != digest:
+                raise ValueError("request ID already belongs to another plan")
+
+            print(json.dumps(record, ensure_ascii=False))
+            if record["comment"]["status"] != "succeeded":
+                raise ValueError("previous attempt did not finish successfully; inspect its record and GitHub before creating a new request")
+
+            return
+
+        # Verify the live target before any write; a moved repository or a kind mismatch requires a new preview.
+        item = api(args.host, "GET", f"repos/{repo}/issues/{args.number}")
+        if not isinstance(item, dict) or item.get("html_url") != target or item.get("number") != args.number or ("pull_request" in item) != (args.kind == "pr"):
+            raise ValueError("live target differs from the approved target")
+
+        record = dict(plan=plan, approval=digest, started_at=now_iso(), comment=dict(status="unknown"), state_change=dict(status="not_requested"))
+        # Durable before POST: process death and transport errors must never invite an automatic duplicate comment.
+        save(path, record)
+        try:
+            result = api(args.host, "POST", f"repos/{repo}/issues/{args.number}/comments", dict(body=text))
+            if not isinstance(result, dict) or not result.get("id") or not result.get("html_url"):
+                raise ValueError("GitHub returned an unrecognized comment response")
+
+            record["comment"] = dict(status="succeeded", id=result["id"], url=result["html_url"])
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            record["comment"] = dict(status="unknown", error=str(exc))
+            record["finished_at"] = now_iso()
+            save(path, record)
+            print(json.dumps(record, ensure_ascii=False))
+            raise ValueError("comment outcome is unknown; inspect GitHub before attempting another request") from exc
+
+        record["finished_at"] = now_iso()
+        save(path, record)
+        print(json.dumps(record, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        sys.exit(f"error: {exc}")

@@ -26,6 +26,10 @@ func (m *model) fail(msg string) {
 	m.status, m.statusError = msg, msg
 }
 
+func (m *model) warn(msg string) {
+	m.status, m.statusWarning = msg, msg
+}
+
 // statusIsError reports whether the status line shows an error: one set through fail, or one whose wording says so.
 func (m model) statusIsError() bool {
 	return (m.statusError != "" && m.status == m.statusError) || isErrorStatus(m.status)
@@ -40,7 +44,7 @@ func isErrorStatus(s string) bool {
 // statusPinned reports whether the current status is still in force: a confirmation waiting for a second key press, or work still running that it describes.
 func (m model) statusPinned() bool {
 	return m.confirmQuit || m.confirmSave || m.confirmApprove || m.confirmSwitch || m.batches.confirm != "" || m.listConfirm != "" || m.groups.confirm != "" ||
-		m.groups.busy || m.batches.busy || m.dups.busy
+		m.groups.busy || m.batches.busy || m.dups.busy || m.comment.busy
 }
 
 // idleStatus is what the status line falls back to when a message expires: the running fetch, if any, otherwise nothing.

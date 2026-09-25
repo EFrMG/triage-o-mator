@@ -109,9 +109,12 @@ func reloadLedgerCmd(installRoot, repo string) tea.Cmd {
 
 // enrichedMsg carries the result of a lazy bin/enrich-one call for one item.
 type enrichedMsg struct {
-	key  Key
-	data EnrichedItem
-	err  error
+	afterComment bool
+	root, repo   string
+	generation   uint64
+	key          Key
+	data         EnrichedItem
+	err          error
 }
 
 // EnrichedItem is JSON output from bin/enrich-one (body / comments / diff).
@@ -152,25 +155,25 @@ type evidenceComponent struct {
 	Object    json.RawMessage `json:"object"`
 }
 
-func enrichItemCmd(installRoot string, key Key, withDiff bool) tea.Cmd {
+func enrichItemCmd(installRoot, repo string, key Key, generation uint64, withDiff bool) tea.Cmd {
 	return func() tea.Msg {
-		args := []string{"--kind", key.Kind, "--number", strconv.Itoa(key.Number)}
+		args := []string{"--expected-repo", repo, "--kind", key.Kind, "--number", strconv.Itoa(key.Number)}
 		if withDiff {
 			args = append(args, "--diff")
 		}
 
 		out, err := runScript(installRoot, "enrich-one", args...)
 		if err != nil {
-			return enrichedMsg{key: key, err: err}
+			return enrichedMsg{root: installRoot, repo: repo, generation: generation, key: key, err: err}
 		}
 
 		var data EnrichedItem
 		if err := json.Unmarshal([]byte(out), &data); err != nil {
-			return enrichedMsg{key: key, err: fmt.Errorf("parsing enrich-one output: %w", err)}
+			return enrichedMsg{root: installRoot, repo: repo, generation: generation, key: key, err: fmt.Errorf("parsing enrich-one output: %w", err)}
 		}
 
 		data.DiffLoaded = withDiff
-		return enrichedMsg{key: key, data: data}
+		return enrichedMsg{root: installRoot, repo: repo, generation: generation, key: key, data: data}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -424,4 +425,26 @@ func (d detailModel) View() string {
 	}
 
 	return s.viewport.View()
+}
+
+func (m model) enrichDetailCmd(withDiff bool) tea.Cmd {
+	return enrichItemCmd(m.installRoot, m.repo, m.detail.key, m.detail.generation, withDiff)
+}
+
+// refreshLiveDetail invalidates live details, but fetches them immediately only while the item is open. Fixed evidence views stay untouched.
+func (m *model) refreshLiveDetail() tea.Cmd {
+	if m.detail.key.Number <= 0 || m.detail.blockLegacy || m.detail.enriched.Evidence != nil {
+		return nil
+	}
+
+	delete(m.detail.cache, m.detail.key)
+	m.detail.generation++
+	m.detail.loading = false
+	m.detail.loadErr = nil
+	if m.focus != FocusDetail {
+		return nil
+	}
+
+	m.detail.loading = true
+	return m.enrichDetailCmd(m.detail.enriched.DiffLoaded)
 }

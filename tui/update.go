@@ -20,6 +20,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case commentEditorMsg:
+		return m.finishCommentEditor(msg)
+	case commentMsg:
+		return m.finishComment(msg)
 	case notificationsMsg:
 		return m.finishNotifications(msg)
 	case notificationDoneMsg:
@@ -98,11 +102,13 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "Ledger synced; tracked comment check failed. ! shows details."
 			}
 		}
+		m.detail.cache = make(map[Key]EnrichedItem)
+		detailCmd := m.refreshLiveDetail()
 		if m.notifications.open {
 			next, notificationCmd := m.openNotifications()
-			return next, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), notificationCmd)
+			return next, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), notificationCmd, detailCmd)
 		}
-		return m, reloadLedgerCmd(m.installRoot, m.repo)
+		return m, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), detailCmd)
 	case trackDoneMsg:
 		return m.finishTracking(msg)
 
@@ -156,11 +162,20 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case enrichedMsg:
+		if msg.root != "" && (msg.root != m.installRoot || msg.repo != m.repo || msg.generation != m.detail.generation || msg.key != m.detail.key) {
+			return m, nil
+		}
 		if m.detail.blockLegacy || m.detail.enriched.Evidence != nil {
 			return m, nil
 		}
 
 		m.detail.OnEnriched(msg)
+		if msg.afterComment {
+			m.status = "Comment published; comments refreshed."
+			if msg.err != nil {
+				m.fail("Comment published, but reloading comments failed. ! shows details.")
+			}
+		}
 		if msg.err != nil && m.detail.key == msg.key {
 			// The item says so where its content would be; ! has the details.
 			m.recordError(fmt.Sprintf("Couldn't load %s #%d", msg.key.Kind, msg.key.Number), msg.err)
@@ -238,6 +253,10 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.actionHistoryLifecycle.stop()
 		m.attentionLifecycle.stop()
 		return m, tea.Quit
+	}
+
+	if m.comment.open {
+		return m.handleCommentKey(msg)
 	}
 
 	if m.confirmQuit {
@@ -893,7 +912,7 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.diffIfNeeded()
 	case key.Matches(msg, keys.Enter):
 		if m.detail.ToggleActiveSection() {
-			return m, enrichItemCmd(m.installRoot, m.detail.key, true)
+			return m, m.enrichDetailCmd(true)
 		}
 	case key.Matches(msg, keys.Down):
 		m.detail.LineDown(1)
@@ -929,8 +948,10 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 			return m, openURLCmd(it.URL)
 		}
+	case key.Matches(msg, keys.CommentEditor):
+		return m.openExternalComment()
 	case key.Matches(msg, keys.Comment):
-		m.status = "Posting comments is not available yet... This tool stays read-only against GitHub (for now)."
+		return m.openComment()
 	}
 
 	return m, nil
@@ -939,7 +960,7 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // diffIfNeeded fetches the PR diff the first time its tab is shown.
 func (m model) diffIfNeeded() tea.Cmd {
 	if m.detail.NeedsActiveDiff() {
-		return enrichItemCmd(m.installRoot, m.detail.key, true)
+		return m.enrichDetailCmd(true)
 	}
 
 	return nil

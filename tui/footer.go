@@ -58,6 +58,14 @@ func (m model) footerGroups() []footerGroup {
 	}
 
 	switch {
+	case m.comment.open:
+		if m.comment.busy {
+			return []footerGroup{group("Comment", hint{"", "working…"})}
+		}
+		if m.comment.previewing {
+			return []footerGroup{group("Comment", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.CommentEditor), hint{"Ctrl-S", "publish"}, hint{"Esc", "edit"})}
+		}
+		return []footerGroup{group("Comment", hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", "publish"}, hint{"Esc", "discard"})}
 	case m.confirmQuit:
 		return []footerGroup{group("Quit", bind("discard drafts", keys.Quit), hint{"any key", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.lastError.open:
@@ -156,7 +164,7 @@ func (m model) footerGroups() []footerGroup {
 }
 
 func (m model) itemFooter() []footerGroup {
-	item := group("Item", bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Approve), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Yank))
+	item := group("Item", bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Approve), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Yank))
 	read := group("Read", bind("tabs", keys.TabPrev, keys.TabNext), bind("", keys.TabJump), bind("expand", keys.Enter), bind("scroll", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("page", keys.HalfDown, keys.HalfUp))
 	if m.detail.AnySectionFull() {
 		return []footerGroup{item, read, m.menusGroup(), m.navigationGroup()}
@@ -312,7 +320,7 @@ func (m model) statusRow() string {
 	statusColor := currentTheme.Success
 	if m.statusIsError() {
 		statusColor = currentTheme.Error
-	} else if m.refreshing || m.statusPinned() {
+	} else if (m.statusWarning != "" && m.status == m.statusWarning) || m.refreshing || m.statusPinned() {
 		statusColor = currentTheme.Warning
 	}
 

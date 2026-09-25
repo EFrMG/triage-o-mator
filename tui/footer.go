@@ -43,7 +43,7 @@ func (m model) navigationGroup() footerGroup {
 }
 
 func (m model) menusGroup() footerGroup {
-	g := group("Menus", bind("", keys.Yank), bind("", keys.Group), bind("", keys.Theme), bind("", keys.Refresh), bind("", keys.RefreshFull))
+	g := group("Menus", bind("", keys.Yank), bind("", keys.Group), bind("", keys.Corpus), bind("", keys.Theme), bind("", keys.Refresh), bind("", keys.RefreshFull))
 	if m.lastError.text != "" {
 		g.hints = append(g.hints, bind("", keys.ErrorDetails))
 	}
@@ -62,6 +62,19 @@ func (m model) footerGroups() []footerGroup {
 		return []footerGroup{group("Quit", bind("discard drafts", keys.Quit), hint{"any key", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.lastError.open:
 		return []footerGroup{group("Error", bind("scroll", keys.Down, keys.Up), bind("page", keys.HalfDown, keys.HalfUp)), group("Navigation", bind("close", keys.Back), bind("exit", keys.ForceQuit))}
+	case m.notificationPR.open:
+		return []footerGroup{group("PR", hint{"Tab/1–4", "tabs"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}), group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
+	case m.attention.open:
+		return []footerGroup{group("Comments", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
+	case m.actionHistory.open:
+		return []footerGroup{group("Explanations", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
+	case m.notifications.open:
+		return []footerGroup{group("Notifications", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open item or page"}, hint{"v", "viewed"}, hint{"d", "dismiss"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+	case m.corpus.open:
+		if m.corpus.busy {
+			return []footerGroup{group("Download", bind("stop", keys.CorpusStop)), group("Navigation", bind("close", keys.Back, keys.Corpus))}
+		}
+		return []footerGroup{group("Dataset", hint{"d", "download/update"}, bind("resume", keys.CorpusRun), hint{"y", "copy agent prompt"}, hint{"u", "size"}), group("Limits", bind("items per run", keys.CorpusBudget)), group("Navigation", bind("scroll", keys.Down, keys.Up), bind("close", keys.Back, keys.Corpus))}
 	case m.themePicker.open && m.themePicker.searching:
 		return []footerGroup{group("Search", hint{"type", "theme name"}, hint{"↑/↓", "preview"}, bind("keep", keys.Enter), bind("clear", keys.Cancel)), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.themePicker.open:
@@ -93,13 +106,13 @@ func (m model) footerGroups() []footerGroup {
 	case m.searching:
 		return []footerGroup{group("Search", hint{"type", "title words or #number"}, hint{"↑/↓", "move"}, bind("keep", keys.Enter), bind("clear", keys.Cancel)), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.typingReason():
-		return []footerGroup{group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("save", keys.Save, keys.Confirm)), group("Navigation", bind("back", keys.Cancel), bind("exit", keys.ForceQuit))}
+		return []footerGroup{group("Edit", bind("fields; then s saves for review", keys.FieldNext, keys.FieldPrev), bind("save & approve", keys.Confirm)), group("Navigation", bind("back", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.groups.open:
 		return m.groupFooter()
 	case m.dups.open:
 		return []footerGroup{
 			group("Duplicate", bind("mark as duplicate", keys.MarkDup), bind("", keys.SwapDup), bind("", keys.Tick), bind("group ticked", keys.Group)),
-			group("Item", bind("read", keys.Enter), bind("", keys.Save), bind("", keys.Open)),
+			group("Item", bind("read", keys.Enter), bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Open)),
 			group("Select", bind("move", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom)),
 			group("Menus", bind("", keys.Theme)),
 			m.navigationGroup(),
@@ -126,7 +139,7 @@ func (m model) footerGroups() []footerGroup {
 	}
 
 	// An item list: list actions apply to the ticked items, or the hovered one.
-	items := group("Items", bind("", keys.Approve), bind("", keys.Undo), bind("", keys.Group), bind("", keys.QuickGroup), bind("", keys.MarkDup), bind("", keys.Yank, keys.YankAll))
+	items := group("Items", bind("", keys.Approve), bind("", keys.Undo), bind("", keys.Group), bind("", keys.QuickGroup), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.Yank, keys.YankAll))
 	if len(m.ticked) > 0 {
 		items.name = fmt.Sprintf("%d ticked", len(m.ticked))
 	}
@@ -140,7 +153,7 @@ func (m model) footerGroups() []footerGroup {
 }
 
 func (m model) itemFooter() []footerGroup {
-	item := group("Item", bind("", keys.Save), bind("", keys.Approve), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Yank))
+	item := group("Item", bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Approve), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Yank))
 	read := group("Read", bind("tabs", keys.TabPrev, keys.TabNext), bind("", keys.TabJump), bind("expand", keys.Enter), bind("scroll", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("page", keys.HalfDown, keys.HalfUp))
 	if m.detail.AnySectionFull() {
 		return []footerGroup{item, read, m.menusGroup(), m.navigationGroup()}

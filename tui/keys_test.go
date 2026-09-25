@@ -224,25 +224,14 @@ func TestGroupEditorStatusIsAChoice(t *testing.T) {
 	}
 }
 
-func TestOldOverloadsAreGone(t *testing.T) {
+func TestGroupAddKeyOpensFromCurrentItem(t *testing.T) {
 	root, g := groupFixture(t)
 	m := testPRModel()
 	m.installRoot = root
 	key := m.detail.key
 	m.groups = groupUI{open: true, records: []Group{g}, sources: []Key{key}}
-	if m = press(m, "a"); m.groups.editing != "" {
-		t.Fatal("a in Groups must no longer add the current item")
-	}
-
 	if m = press(m, "b"); m.groups.editing != "add" {
 		t.Fatal("b in Groups should add the item Groups was opened from")
-	}
-
-	m = testPRModel()
-	m.similar[m.detail.key] = []dupCandidate{{Number: 9, Kind: "pr"}, {Number: 10, Kind: "pr"}}
-	m.dups = dupUI{open: true, source: m.detail.key, checked: map[Key]bool{}, selected: 1}
-	if m = press(m, "g"); m.dups.selected != sourceRow || m.groups.busy {
-		t.Fatal("g on the Duplicates screen should jump to the top card, not create a group")
 	}
 }
 

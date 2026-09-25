@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/glamour"
@@ -187,8 +188,8 @@ func renderDiff(diff string, width int) string {
 	return renderMarkdown(fence+"diff\n"+strings.TrimRight(diff, "\n")+"\n"+fence, width)
 }
 
-// renderComments renders each comment on its own, under a colored separator naming its position and, when enrichment provided it, its author.
-func renderComments(comments, authors []string, width int) string {
+// renderComments renders each comment on its own, under a colored separator naming its position and, when enrichment provided it, its author, with the creation date below the body on the right.
+func renderComments(comments, authors, dates []string, width int) string {
 	if len(comments) == 0 {
 		return mutedText("(no comments)")
 	}
@@ -206,6 +207,12 @@ func renderComments(comments, authors []string, width int) string {
 		rule := strings.Repeat("─", maxInt(width-ansi.StringWidth(prefix)-ansi.StringWidth(suffix), 0))
 		separator := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Render(ansi.Truncate(prefix+rule+suffix, width, ""))
 		parts[i] = separator + "\n" + renderMarkdown(c, width)
+		if i < len(dates) {
+			if date, err := time.Parse(time.RFC3339, dates[i]); err == nil {
+				label := ansi.Truncate(date.UTC().Format("2006-01-02 15:04 UTC"), maxInt(width, 1), "")
+				parts[i] += "\n" + mutedText(strings.Repeat(" ", maxInt(width-ansi.StringWidth(label), 0))+label)
+			}
+		}
 	}
 
 	return strings.Join(parts, "\n\n")

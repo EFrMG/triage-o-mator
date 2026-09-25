@@ -6,9 +6,10 @@ Usage:
     bin/batch [N] [--kind issue|pr] [--order oldest|newest] [--group ID] [--diff]
     bin/batch --delete BATCH_ID
     bin/batch --remove BATCH_ID --key issue:N [--key pr:M ...]
+    bin/batch [N] --cache-mode offline|cache-preferred|refresh [--snapshot ID]
 
 Writes:
-    data/<owner>/<repo>/batches/<batch_id>.items.jsonl       full context, one item per line, including `duplicate_candidates` (the top title matches from bin/similar; leads to check, not proof)
+    data/<owner>/<repo>/batches/<batch_id>.items.jsonl       full context, one item per line, including `duplicate_candidates` (the top title matches from bin/similar, minus pairs already ruled out; leads to check, not proof)
     data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl   template to fill in and pass to bin/apply
 
 The template has category/action/confidence/reason blanked out; fill those in per config/taxonomy.md (optionally also agent_notes, the longer evidence, and proposed_by, e.g. "agent:<contributor>"), then run:
@@ -31,8 +32,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+import _notdupes
 from _groups import load_group
+from _storage import atomic_writer
 from _similar import TitleIndex
+from _evidence import DEFAULT_MAX_AGE
 from _triage import BATCHES_DIR, enrich_item, here, load_ledger, new_batch_id
 
 # Only IDs new_batch_id() can produce, so --delete can never reach a path outside data/<owner>/<repo>/batches/.
@@ -73,9 +77,7 @@ def remove_items(batch_id, keys):
 
             kept.append(line)
 
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text("".join(line + "\n" for line in kept))
-        tmp.replace(path)
+        write_lines(path, kept)
 
     print(f"Removed {removed} item(s) from batch {batch_id}.")
 
@@ -95,6 +97,12 @@ def delete_batch(batch_id):
     print(f"Deleted batch {batch_id}.")
 
 
+def write_lines(path, lines):
+    with atomic_writer(path) as out:
+        for line in lines:
+            out.write(line + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -112,7 +120,24 @@ def main():
     ap.add_argument("--delete", metavar="BATCH_ID", help="delete a batch's items and decisions files instead of creating one")
     ap.add_argument("--remove", metavar="BATCH_ID", help="drop the --key items from this batch instead of creating one")
     ap.add_argument("--key", action="append", default=[], metavar="KIND:NUMBER", help="with --remove: an item to drop, e.g. issue:12 (repeatable)")
+    ap.add_argument("--cache-mode", choices=("offline", "cache-preferred", "refresh"), help="opt into cached evidence; omitted keeps legacy GitHub enrichment")
+    ap.add_argument("--snapshot", help="use one fixed snapshot; requires --cache-mode offline and every selected item in that snapshot")
+    ap.add_argument("--host", default="github.com")
+    ap.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE)
+    ap.add_argument("--request-budget", type=int, default=100, help="maximum requests per selected item in cache mode")
     args = ap.parse_args()
+    if args.remove is not None and args.delete is not None:
+        ap.error("choose only one batch operation")
+
+    if args.snapshot and args.cache_mode != "offline":
+        ap.error("--snapshot requires --cache-mode offline")
+
+    if args.host != "github.com" and not args.cache_mode:
+        ap.error("--host requires --cache-mode")
+
+    if args.max_age < 0 or args.request_budget < 1:
+        ap.error("--max-age must be nonnegative and --request-budget positive")
+
     if args.remove is not None:
         if not args.key:
             ap.error("--remove needs at least one --key")
@@ -147,43 +172,46 @@ def main():
 
         return
 
+    verdicts = _notdupes.TitleVerdicts()
     batch_id = new_batch_id()
     index = TitleIndex(ledger)
     items_path = BATCHES_DIR / f"{batch_id}.items.jsonl"
     template_path = BATCHES_DIR / f"{batch_id}.decisions.jsonl"
 
     print(
-        f"Enriching {len(selected)} items (fetching body/comments from GitHub)...",
+        f"Enriching {len(selected)} items ({args.cache_mode or 'legacy GitHub reads'})...",
         file=sys.stderr,
     )
-    with items_path.open("w") as items_f, template_path.open("w") as tmpl_f:
-        for i, rec in enumerate(selected, 1):
-            enriched = enrich_item(dict(rec), include_diff=args.diff)
-            enriched["duplicate_candidates"] = index.similar((rec["kind"], rec["number"]), top=CANDIDATES_PER_ITEM)
-            if args.group:
-                enriched["group"] = {k: group[k] for k in ("id", "title", "description", "assignee", "status", "revision")}
-                enriched["group_member_notes"] = members[(rec["kind"], rec["number"])]["notes"]
+    items, decisions = [], []
+    for i, rec in enumerate(selected, 1):
+        if args.cache_mode:
+            from _reader import enrich_cached
+            from _acquire import ReadFailure
 
-            items_f.write(json.dumps(enriched, ensure_ascii=False) + "\n")
-            tmpl_f.write(
-                json.dumps(
-                    {
-                        "number": rec["number"],
-                        "kind": rec["kind"],
-                        "category": "",
-                        "action": "",
-                        "confidence": "",
-                        "reason": "",
-                        "agent_notes": "",
-                        "proposed_by": "",
-                    }
-                )
-                + "\n"
-            )
-            print(
-                f"  [{i}/{len(selected)}] #{rec['number']} {rec['kind']}",
-                file=sys.stderr,
-            )
+            try:
+                enriched = enrich_cached(dict(rec), args.cache_mode, host=args.host, max_age=args.max_age, budget=args.request_budget, include_diff=args.diff, snapshot_id=args.snapshot)
+            except ReadFailure as error:
+                raise ValueError(str(error)) from error
+
+            if enriched["evidence"]["stats"].get("stopped"):
+                raise ValueError(f"batch acquisition stopped: {enriched['evidence']['stats']['stopped']}; cached checkpoints remain")
+        else:
+            enriched = enrich_item(dict(rec), include_diff=args.diff)
+
+        enriched["duplicate_candidates"] = verdicts.candidates(index, (rec["kind"], rec["number"]), top=CANDIDATES_PER_ITEM)
+        if args.group:
+            enriched["group"] = {k: group[k] for k in ("id", "title", "description", "assignee", "status", "revision")}
+            enriched["group_member_notes"] = members[(rec["kind"], rec["number"])]["notes"]
+
+        items.append(enriched)
+        decisions.append({
+            "number": rec["number"], "kind": rec["kind"], "category": "", "action": "", "confidence": "", "reason": "",
+            "agent_notes": "", "proposed_by": "",
+        })
+        print(f"  [{i}/{len(selected)}] #{rec['number']} {rec['kind']}", file=sys.stderr)
+
+    write_lines(items_path, [json.dumps(row, ensure_ascii=False) for row in items])
+    write_lines(template_path, [json.dumps(row, ensure_ascii=False) for row in decisions])
 
     print(f"\nBatch {batch_id}: {len(selected)} items")
     print(f"  context:  {items_path}")
@@ -193,4 +221,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, OSError, TypeError, KeyError) as error:
+        sys.exit(f"error: {error}")

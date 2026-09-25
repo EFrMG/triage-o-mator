@@ -9,10 +9,11 @@ By default this is incremental: it asks GitHub only for items updated since the 
 
 The one thing an incremental fetch cannot see is an item that was deleted or transferred to another repo: it simply stops appearing, so it stays open in the ledger until the next full fetch, which is what marks vanished items closed. That is why full fetches still happen at least daily.
 
-This is read-only against GitHub. It does not fetch PR diff stats or full issue bodies (too expensive at many open items); `bin/batch` fetches those lazily, only for the items in a given batch.
+This is read-only against GitHub. It retains list bodies but not PR detail or discussion. --cache-inventory captures verified provenance and imports list summaries for offline use.
 """
 
 import argparse
+import hashlib
 import json
 import sys
 import uuid
@@ -21,11 +22,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _triage import REPO, RAW_DIR, here, now_iso, run_gh
+from _storage import atomic_writer, locked
+from _acquire import ReadFailure
 
 JQ_FILTER = (
     ".[] | {"
     'number, kind: (if .pull_request then "pr" else "issue" end), '
-    "title, url: .html_url, author: .user.login, "
+    "title, body, url: .html_url, author: .user.login, "
     "created_at, updated_at, state, state_reason, "
     "labels: [.labels[].name], comments_count: .comments"
     "}"
@@ -72,12 +75,48 @@ def full_fetch_reason(meta, forced):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--full", action="store_true", help="re-fetch every open item instead of only recent changes")
+    ap.add_argument("--expected-repo", help="refuse if the configured repository changed")
+    ap.add_argument("--json", action="store_true", help="emit the inventory import result on stdout")
+    ap.add_argument("--cache-inventory", action="store_true", help="capture versioned inventory and import partial summaries into the evidence cache")
+    ap.add_argument("--host", default="github.com", help="explicit host for --cache-inventory")
+    ap.add_argument("--request-budget", type=int, default=100, help="request budget for --cache-inventory, including repository verification")
     args = ap.parse_args()
+    if args.expected_repo is not None and args.expected_repo != REPO:
+        ap.error("configured repository does not match --expected-repo")
 
+    if args.json and not args.cache_inventory:
+        ap.error("--json requires --cache-inventory")
+    if not args.cache_inventory and (args.host != "github.com" or args.request_budget != 100):
+        ap.error("--host and --request-budget require --cache-inventory")
+
+    # Serialize acquisition with sync, but never hold the ledger lock during GitHub requests.
+    with locked(META_PATH):
+        if args.cache_inventory:
+            from _cache import EvidenceCache
+            from _evidence import repository
+
+            cache = EvidenceCache(repository(REPO, host=args.host))
+            cache.initialize()
+            with locked(cache.path("acquisition")):
+                fetch(args, cache)
+        else:
+            fetch(args)
+
+
+def fetch(args, cache=None):
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     meta = load_meta()
+    if "inventory" in meta:
+        from _evidence import version
+
+        version(meta["inventory"], "inventory-observation")
+        if not cache and meta["inventory"]["repository"]["host"] != "github.com":
+            raise ValueError("this inventory uses an explicit non-default host; continue with --cache-inventory --host HOST")
+
     started = now_iso()
     reason = full_fetch_reason(meta, args.full)
+    if cache and (meta.get("inventory") or {}).get("repository", {}).get("host") != args.host:
+        reason = "no previous verified inventory for this host"
 
     if reason:
         mode, since = "full", None
@@ -89,11 +128,18 @@ def main():
         endpoint = f"repos/{REPO}/issues?state=all&since={since}&per_page=100"
         print(f"Fetching issues+PRs from {REPO} updated since {since} ...", file=sys.stderr)
 
-    stdout = run_gh(["api", "--paginate", endpoint, "--jq", JQ_FILTER])
-    lines = [l for l in stdout.splitlines() if l.strip()]
+    observation = None
+    if cache:
+        from _inventory import capture
+
+        rows, observation = capture(cache, endpoint, args.request_budget)
+        lines = [json.dumps(row, ensure_ascii=False) for row in rows]
+    else:
+        stdout = run_gh(["api", "--paginate", endpoint, "--jq", JQ_FILTER])
+        lines = [l for l in stdout.splitlines() if l.strip()]
 
     out_path = RAW_DIR / "issues_and_prs.jsonl"
-    out_path.write_text("\n".join(lines) + ("\n" if lines else ""))
+    payload = "\n".join(lines) + ("\n" if lines else "")
 
     issues = sum(1 for l in lines if json.loads(l)["kind"] == "issue")
     prs = len(lines) - issues
@@ -102,8 +148,28 @@ def main():
         meta = {}
 
     # fetch_id tells fetches apart even within the same second; bin/sync copies it to synced_fetch_id once it has merged this fetch.
-    meta.update({"repo": REPO, "fetch_id": uuid.uuid4().hex, "fetched_at": started, "mode": mode, "since": since, "issues": issues, "prs": prs})
-    META_PATH.write_text(json.dumps(meta, indent=2) + "\n")
+    meta.update({"repo": REPO, "fetch_id": uuid.uuid4().hex, "fetched_at": started, "mode": mode, "since": since, "issues": issues, "prs": prs, "raw_sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest()})
+    meta.pop("inventory", None)
+    if observation:
+        from _inventory import prepare
+
+        meta["inventory"] = observation
+        prepare(cache, meta, payload)
+
+    # Publish metadata first: a crash between replacements leaves a detectable hash mismatch, including when upgrading a legacy fetch without a checksum.
+    with atomic_writer(META_PATH) as out:
+        out.write(json.dumps(meta, indent=2) + "\n")
+
+    with atomic_writer(out_path) as out:
+        out.write(payload)
+
+    if cache:
+        from _inventory import publish
+
+        imported = publish(cache, meta, payload)
+        print(f"Cached {imported['items']} list summaries; snapshot {imported['snapshot_id']}", file=sys.stderr)
+        if args.json:
+            print(json.dumps(dict(imported, repository=observation["repository"], status="imported" if imported["snapshot_id"] else "empty")))
 
     what = "open" if mode == "full" else "changed"
     print(f"Fetched {issues} {what} issues + {prs} {what} PRs ({mode}) -> {out_path}", file=sys.stderr)
@@ -111,4 +177,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, OSError, TypeError, KeyError, ReadFailure) as error:
+        sys.exit(f"error: {error}")

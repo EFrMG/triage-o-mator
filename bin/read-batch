@@ -42,6 +42,13 @@ def render(item):
     if item.get("group"):
         out.append(f"group: {item['group']['title']} · member notes: {item.get('group_member_notes') or '(none)'}")
 
+    if item.get("evidence"):
+        evidence = item["evidence"]
+        out.append(f"evidence snapshot: {evidence.get('snapshot_id') or '(none)'} · diagnostics recorded at batch creation, not current GitHub state")
+        for component, problems in evidence.get("problems", {}).items():
+            if problems:
+                out.append(f"  {component}: {', '.join(problems)}")
+
     out += ["", "--- body", (item.get("body") or "(no description)").strip()]
     authors = item.get("comment_authors") or []
     for i, comment in enumerate(item.get("comment_bodies") or [], 1):
@@ -86,4 +93,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, OSError, TypeError, KeyError) as error:
+        sys.exit(f"error: {error}")

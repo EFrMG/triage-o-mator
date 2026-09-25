@@ -38,12 +38,14 @@ type decisionForm struct {
 
 	dirty bool
 	saved bool // true right after a successful save, until the item changes again
-	// touched is false while category/action/confidence are still the placeholder defaults LoadItem seeds for an untriaged item; saving untouched defaults needs a second Ctrl-S.
+	// touched is false while category/action/confidence are still the placeholder defaults LoadItem seeds for an untriaged item; saving untouched defaults needs a repeated save action.
 	touched bool
 	// proposed is true while the fields show a batch proposal that hasn't been saved to the ledger yet.
 	proposed bool
 	// proposalNotes is that proposal's agent_notes, saved along with the decision so accepting a proposal in the TUI keeps the agent's evidence.
-	proposalNotes string
+	proposalNotes    string
+	proposalBy       string
+	proposalSnapshot decisionSnapshot
 	// badCategory / badAction hold a proposal's value that isn't in config/taxonomy.json. The field shows it, flagged, until you pick a real value, and saving is refused meanwhile, instead of silently showing (and saving) the first option.
 	badCategory, badAction string
 	// pick is the list a choice field opens on Enter.
@@ -124,6 +126,8 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 	f.badCategory, f.badAction = unlisted(f.categories(), p.Category), unlisted(f.taxonomy.Actions, p.Action)
 	f.touched = true
 	f.proposed = true
+	f.proposalBy = p.ProposedBy
+	f.proposalSnapshot = f.Snapshot()
 }
 
 // MarkDuplicate prefills the form as a duplicate of #number (duplicate or duplicate-pr, close-duplicate), leaving confidence for the reviewer to set. It errors if the taxonomy has no such values.
@@ -173,6 +177,8 @@ func (f *decisionForm) LoadItem(it Item) {
 	f.touched = it.Category != ""
 	f.proposed = false
 	f.proposalNotes = ""
+	f.proposalBy = ""
+	f.proposalSnapshot = decisionSnapshot{}
 	f.badCategory, f.badAction = "", ""
 	f.pick.open = false
 	f.reason.Blur()

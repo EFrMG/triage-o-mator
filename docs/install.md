@@ -41,15 +41,55 @@ target-repo/
     data/<owner>/<repo>/ledger.jsonl                   tracked
     data/<owner>/<repo>/groups/, not-duplicates.jsonl  tracked
     data/<owner>/<repo>/raw|batches|exports/           ignored
+    data/<owner>/<repo>/cache|local/                   ignored
     reports/<owner>/<repo>/<date>.md                   tracked
     .gitignore                               generated tracked
     .triage-install.json                     generated ignored (machine-local: where the tool lives)
 
 ```
 
-Every agentic tool reads `AGENTS.md` and Claude Code reads `CLAUDE.md`, so the install carries both and they lead to the same playbook. What is committed is what your team needs from each other: decisions, groups, duplicate verdicts, reports, and the taxonomy you agreed on. What is not is either wired to a machine (symlinks, the marker) or re-creatable on demand (the GitHub cache, batches, exports).
+The install carries `AGENTS.md` and `CLAUDE.md`, both leading to the same playbook. Decisions, groups, duplicate verdicts, reports and taxonomy are committed. Symlinks, the install marker, working files and cache are ignored; preserve the cache separately when retained evidence depends on it.
 
 `config/repo` defaults to what the repository's `upstream` remote points at when it has one, falling back to `origin`. This makes a clone of your fork triage the original repository's backlog. Pass `--repo owner/repo` to triage something else from here. An existing install keeps its recorded repo; if it was created from a fork before upstream detection was added, re-run `bin/install-to /path/to/repository --repo owner/repo` once to correct it.
+
+## Working from a fork
+
+The local checkout, the backlog being read, and the destination for triage commits can be different. For example, you can keep the install and its commits in `efrmg/omarchy` while reading issues and PRs from `omacom/omarchy`. Upstream item numbers always remain upstream item numbers; the tool does not copy those items into your fork.
+
+Start by cloning the fork. This example uses `efrmg/omarchy`; substitute your own fork and local path as needed:
+
+```sh
+git clone https://github.com/efrmg/omarchy.git /absolute/path/to/omarchy
+```
+
+Then, from the built triage-o-mator checkout, install into that clone with an explicit backlog target:
+
+```sh
+bin/install-to /absolute/path/to/omarchy --repo omacom/omarchy --dry-run
+bin/install-to /absolute/path/to/omarchy --repo omacom/omarchy
+```
+
+The preview shows the install location, backlog target, mode, and files that will change. Each repository's data lives under its own `data/<owner>/<repo>/` directory.
+
+Verify the selected backlog and launch from the fork. The config command should print `omacom/omarchy`:
+
+```sh
+cd /absolute/path/to/omarchy
+cat triage-o-mator/config/repo
+triage-o-mator/bin/triage-o-mator
+```
+
+Choose how to share your work:
+
+- **Tracked:** the default for a new install. Keep the ledger, groups, and reports in a dedicated branch of your fork, inspect the diff, and share a PR when appropriate. Upstream adoption would be a separate decision by its maintainers.
+- **Solo:** add `--solo` to both the preview and install commands to keep the install out of the clone's Git history. Share reports and group packets instead. Ignored data is not backed up by committing the fork.
+- **Adopt an existing solo install:** use `--adopt --repo omacom/omarchy`, previewing with `--dry-run` first. Adoption stages the install's tracked files; inspect `git diff --cached` before committing.
+
+A remote named `upstream` is optional when `--repo` is explicit. If you want automatic detection for a new install, inspect `git remote -v` and add `git remote add upstream https://github.com/omacom/omarchy.git` only if that remote is absent. The installer does not fetch the remote or update your branch. Existing installs retain their recorded target until explicitly changed.
+
+Use `--repo efrmg/omarchy` only when you intend to triage the fork's own backlog. Access to the upstream backlog is sufficient for this read-only workflow; permission to push to your fork does not grant permission to change upstream issues or PRs. When reviewing code, verify the PR's actual upstream base revision rather than assuming the fork's checked-out branch is current.
+
+To correct a backlog target later, re-run `bin/install-to` with the intended `--repo`. Re-running preserves the install's mode and retains the previous target's data in its own directory; it does not reassign those ledger rows to the new target.
 
 ## A repository you don't control
 
@@ -63,7 +103,7 @@ When they want it, `bin/install-to <path> --adopt` turns that into an install th
 
 `bin/install-to .` from the checkout installs the tool into its own repository, so the project triages its own backlog with the code in your working tree: the install is `triage-o-mator/triage-o-mator/`, its `bin/` symlinks back to `../bin`, and its ledger and reports are committed to this repository like any other adopted install. The `AGENTS.md` block it writes is a shorter one, since the checkout's `AGENTS.md` is already the playbook the usual block points at.
 
-This is the one case where the checkout holds triage data, and it stays inside the install: the checkout's own `/data/` and `/reports/` remain ignored, so a fork still cannot commit a ledger for whatever else its owner triages.
+This is the one case where the checkout holds triage data, and it stays inside the nested install. No script uses top-level `/data/` or `/reports/` paths in the checkout.
 
 ## Opening the app without an install
 
@@ -85,6 +125,8 @@ Re-running `bin/install-to` on an existing install is always safe, and is how yo
 - **hand it over**: the install's data is portable, its symlinks are not. Whoever receives it (or clones the repository that adopted it) runs `bin/install-to` against it from their own checkout.
 
 `--dry-run` prints every change first and writes nothing.
+
+Upgrades also maintain a separate cache/local ignore block, preserving rules outside the managed markers. This may change the tracked install `.gitignore`; inspect its diff. Malformed markers and unsupported future install versions are refused before changes. Stop older writers before upgrading, and see [evidence-cache compatibility and backups](evidence-reference.md#upgrade-and-backup).
 
 Moving an install's data somewhere else is a plain directory move: `data/<owner>/<repo>/` and `reports/<owner>/<repo>/` are the whole record, and an install picks them up wherever it finds them.
 

@@ -15,7 +15,7 @@ One group, one question. Typical shapes:
 | competing PRs     | "Which of these K PRs implementing Y should land?"                           | all of them, the best candidate first                               |
 | design decision   | "Should the project do Z by default?" (e.g. lid behaviour, a new dependency) | the requests, the reports it would fix, any PRs that already try it |
 
-Keep a group to 2–15 members. Split it if it asks more than one question, and don't create one for a single item.
+Keep each group focused on one substantive question and base context. A coherent set can exceed 15 members; read large sets in bounded chunks. Split by question, not display size, and do not create a group for a single item.
 
 ## 1. Look before creating
 
@@ -75,4 +75,12 @@ Leave the group in `draft`. Report back:
 - which members still lack a decision or a review;
 - the export command for a closer look: `bin/group export GROUP_ID`.
 
+For a reusable evidence packet, export with `--enrich --cache-mode offline` (or `--diff` for PR code) and `--output data/<owner>/<repo>/exports/review.md`. Use `--format json` to retain structured component references. Read the coverage diagnostics for every member and report missing/partial/stale components; packet publication does not prove the evidence is complete. `cache-preferred` and `refresh` permit explicit read-only acquisition when needed. The saved packet keeps its group revision and per-item snapshot references after later updates; it is not a live view or a portable archive of all source objects. Use different filenames to preserve different observations. `--output` protects a previous packet if acquisition fails; ordinary shell redirection does not.
+
 Then say that a contributor should check it and mark it ready (`e` in the TUI's Groups, or `bin/group update GROUP_ID --status ready --by <them>`). Ready groups are what `bin/report` puts first for lead maintainers. Don't commit: the group files are for the contributor to review and commit.
+
+### Optional pinned PR candidate sets
+
+When an explicit evidence snapshot or frozen corpus is available, use `bin/cache candidates --snapshot ID` or `bin/cache candidates --corpus ID` for bounded offline discovery. Read the observations, holds, suppressed signals and excluded pairs, and follow the returned checkpoint/time/options for remaining pages. A set requires direct discovery signals between every member pair; it is not a duplicate verdict. A pair recorded with `bin/not-duplicate` stays excluded until someone withdraws that record.
+
+Save a selected suggestion with `bin/group create-candidate --file candidates.json --candidate ID --by agent:<contributor>`. This revalidates the pinned suggestion and creates a draft group with its original provenance. It does not choose a survivor. Review operative changes, direct relationships, unique work and preservation requirements before recommending a decision in the group notes. Missing source evidence remains unknown. See [candidate discovery](../docs/groups.md#pinned-candidate-discovery) for scope limits and available signals.

@@ -94,11 +94,12 @@ var tabs = []Tab{
 	}},
 }
 
-// batchesIndex, groupsIndex, pairsIndex, and switchRepoIndex follow the real tabs: the sidebar's non-tab "Batches", "Groups", "Possible Duplicates", and "Switch Repo" rows.
+// The non-tab sidebar rows follow the real tabs: Batches, Groups, Possible Duplicates, Notifications, and Switch Repo.
 // Overview isn't a tab at all: it is what the main area shows by default before any tab is entered (see model.View).
 var (
-	batchesIndex    = len(tabs)
-	groupsIndex     = len(tabs) + 1
-	pairsIndex      = len(tabs) + 2
-	switchRepoIndex = len(tabs) + 3
+	batchesIndex       = len(tabs)
+	groupsIndex        = len(tabs) + 1
+	pairsIndex         = len(tabs) + 2
+	notificationsIndex = len(tabs) + 3
+	switchRepoIndex    = len(tabs) + 4
 )

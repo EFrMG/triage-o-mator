@@ -6,15 +6,16 @@ Usage:
     bin/apply data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl [--by NAME] [--reviewed] [--only-untriaged]
     bin/apply --number N --kind issue|pr --category C --action A \\
         [--confidence L] [--reason TEXT] [--agent-notes TEXT] [--by NAME] [--reviewed] [--batch-id ID]
-    bin/apply --number N --kind issue|pr --approve [--by NAME]
-    bin/apply --approve --key issue:N --key pr:M ... [--by NAME]
+    bin/apply --number N --kind issue|pr --approve --by NAME
+    bin/apply --approve --key issue:N --key pr:M ... --by NAME
+    with --reviewed or --approve: --reviewed-by NAME separates the reviewer from --by
     bin/apply --number N --kind issue|pr --agent-notes TEXT
     bin/apply (--number N --kind issue|pr | --key issue:N ...) --unapprove | --clear
     any of the above with --dry-run to validate and report without writing the ledger
 
 Each line in the decisions file must have: number, kind, category, action, confidence, reason. Two optional keys: `agent_notes`, the agent's longer evidence (a code review, the duplicate comparison) kept in the ledger beside the one-line reason; and `proposed_by`, who proposed the row (e.g. "agent:<contributor>"), used as triaged_by when --by isn't given, so applying someone else's proposals later (the TUI's `A`) still credits whoever made them. A row without `agent_notes` leaves the item's existing notes alone. Unknown category/action values produce a warning (not a hard failure; the taxonomy can lag reality by a little) but are still applied, since blocking would lose triage work.
 
-By default this only records an agent's proposal (reviewed stays false). Pass --reviewed if a human is applying their own direct judgment right here, rather than reviewing an agent's batch afterwards.
+By default this records a human's or agent's first-pass decision without granting review. Pass --reviewed when a human explicitly saves and confirms a decision together. --reviewed-by names that reviewer separately from --by (the decision author); otherwise --by names both. Review operations require an explicit reviewer, never a fallback to "agent".
 
 --number/--kind is a single-item alternative to a decisions file, for callers (e.g. the triage-o-mator TUI) applying one decision per call rather than writing a batch file. --approve marks an already-triaged item reviewed=true without changing its category/action, for a human just confirming an existing proposal as-is.
 
@@ -23,6 +24,8 @@ By default this only records an agent's proposal (reviewed stays false). Pass --
 --unapprove takes back an approval: the decision stays, reviewed goes back to false. --clear takes back the decision itself: the item is untriaged again (category, action, confidence, reason, who and when, its batch, and any approval are blanked), while agent_notes and reviewer_notes stay, since they're evidence rather than the call. Both are what the TUI's `u` runs; items with nothing to take back are skipped and reported. The ledger's git diff is the record of what was taken back.
 
 Saving a changed decision (category, action, confidence or reason) on an item someone already approved resets its approval, so an edited call is never shown as reviewed by someone who didn't see it; saving the same decision again keeps it, and --reviewed / --approve approve the new one in the same step.
+
+Saving and approving an unchanged decision preserves its original triager, triage timestamp and batch. A changed decision gets the new author's attribution.
 
 --agent-notes on its own (no --category/--action/--approve) only replaces the item's agent_notes, leaving its decision and review state untouched: how prompts/review-pr.md attaches a code review to a PR someone already triaged.
 
@@ -77,13 +80,14 @@ def main():
     ap.add_argument(
         "--by",
         default=None,
-        help="triaged_by/reviewed_by value (default: a row's proposed_by, else agent)",
+        help="decision author (default: a row's proposed_by, else agent); also the reviewer unless --reviewed-by is given",
     )
     ap.add_argument(
         "--reviewed",
         action="store_true",
         help="mark these decisions as human-reviewed immediately",
     )
+    ap.add_argument("--reviewed-by", help="human confirming the decision with --reviewed or --approve (defaults to --by)")
     ap.add_argument(
         "--batch-id",
         default="tui",
@@ -107,6 +111,13 @@ def main():
         help="validate and print what would be applied, without writing the ledger",
     )
     args = ap.parse_args()
+
+    if args.reviewed_by is not None and not (args.reviewed or args.approve):
+        ap.error("--reviewed-by requires --reviewed or --approve")
+
+    reviewer = (args.reviewed_by or args.by or "").strip()
+    if (args.reviewed or args.approve) and not reviewer:
+        ap.error("review operations require --by NAME or --reviewed-by NAME to identify the human reviewer")
 
     undo = args.unapprove or args.clear
     if args.approve + args.unapprove + args.clear > 1:
@@ -233,7 +244,7 @@ def main():
                 )
 
             rec["reviewed"] = True
-            rec["reviewed_by"] = args.by or "agent"
+            rec["reviewed_by"] = reviewer
             rec["reviewed_at"] = ts
             applied += 1
 
@@ -273,12 +284,14 @@ def main():
             rec["agent_notes"] = d["agent_notes"] or ""
 
         by = args.by or d.get("proposed_by") or "agent"
-        rec["triaged_at"] = ts
-        rec["triaged_by"] = by
-        rec["batch_id"] = batch_id
+        if changed or not (args.reviewed or args.approve):
+            rec["triaged_at"] = ts
+            rec["triaged_by"] = by
+            rec["batch_id"] = batch_id
+
         if args.reviewed or args.approve:
             rec["reviewed"] = True
-            rec["reviewed_by"] = by
+            rec["reviewed_by"] = reviewer
             rec["reviewed_at"] = ts
 
         applied += 1

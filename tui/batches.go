@@ -30,6 +30,7 @@ type proposal struct {
 	Confidence string `json:"confidence"`
 	Reason     string `json:"reason"`
 	AgentNotes string `json:"agent_notes"`
+	ProposedBy string `json:"proposed_by"`
 }
 
 type batchRecord struct {
@@ -113,6 +114,11 @@ func loadBatches(root, repo string) ([]batchRecord, error) {
 			rec.Keys = append(rec.Keys, key)
 			if row.DiffText != nil {
 				row.EnrichedItem.DiffText, row.EnrichedItem.DiffLoaded = *row.DiffText, true
+			}
+
+			if row.Evidence != nil {
+				// Missing code in a fixed packet stays missing; opening a tab must not silently fetch different evidence.
+				row.EnrichedItem.DiffLoaded = true
 			}
 
 			rec.Enriched[key] = row.EnrichedItem
@@ -709,7 +715,7 @@ func (m *model) openBatch(id string) {
 	}
 
 	for key, e := range b.Enriched {
-		if _, ok := m.detail.cache[key]; !ok {
+		if _, ok := m.detail.cache[key]; !ok || e.Evidence != nil {
 			m.detail.cache[key] = e
 		}
 	}

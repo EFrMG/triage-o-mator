@@ -1,78 +1,12 @@
 """Incremental fetch/sync, batch IDs, duplicate candidates, and per-repo data folders, in isolated checkouts with a fake gh; never touches real data or GitHub."""
 
 import json
-import os
-import shutil
 import subprocess
-import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-
-# The fake gh logs every call and answers `gh api` with whatever JSON lines the test put in gh_response.jsonl; `gh issue/pr view` (enrichment) gets a fixed body.
-FAKE_GH = """#!/usr/bin/env python3
-import json, os, sys
-root = os.environ["FAKE_GH_DIR"]
-with open(os.path.join(root, "gh_calls.log"), "a") as f:
-    f.write(json.dumps(sys.argv[1:]) + "\\n")
-if sys.argv[1] == "api":
-    print(open(os.path.join(root, "gh_response.jsonl")).read(), end="")
-else:
-    print(json.dumps({"body": "Body", "comments": [{"body": "A comment", "author": {"login": "commenter"}}]}))
-"""
 
 
-def item(number, title, state="open", kind="issue"):
-    return {"number": number, "kind": kind, "title": title, "url": "", "author": "someone", "created_at": f"2025-01-{number:02d}T00:00:00Z", "updated_at": "", "state": state, "state_reason": None, "labels": [], "comments_count": 0}
-
-
-class CheckoutTest(unittest.TestCase):
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
-        shutil.copytree(ROOT / "bin", self.root / "bin", ignore=shutil.ignore_patterns("triage-o-mator", "__pycache__"))
-        shutil.copytree(ROOT / "config", self.root / "config")
-        # What bin/install-to writes to mark an install; the scripts refuse to run anywhere else.
-        (self.root / ".triage-install.json").write_text('{"tool": "%s"}\n' % ROOT)
-        (self.root / "config/repo").write_text("owner/repo\n")
-        (self.root / "data/owner/repo").mkdir(parents=True)
-        mock = self.root / "mock"
-        mock.mkdir()
-        (mock / "gh").write_text(FAKE_GH)
-        (mock / "gh").chmod(0o755)
-        self.env = dict(os.environ, PATH=str(mock) + os.pathsep + os.environ["PATH"], FAKE_GH_DIR=str(mock))
-        self.mock = mock
-
-    def respond(self, items):
-        (self.mock / "gh_response.jsonl").write_text("".join(json.dumps(i) + "\n" for i in items))
-
-    def run_cli(self, command, *args):
-        result = subprocess.run([str(self.root / "bin" / command), *args], cwd=self.root, env=self.env, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-
-        return result.stdout + result.stderr
-
-    def last_endpoint(self):
-        calls = [json.loads(l) for l in (self.mock / "gh_calls.log").read_text().splitlines()]
-
-        return [c for c in calls if c[0] == "api"][-1][2]
-
-    def meta(self):
-        return json.loads((self.root / "data/owner/repo/raw/fetch_meta.json").read_text())
-
-    def set_meta(self, **changes):
-        meta = self.meta()
-        meta.update(changes)
-        (self.root / "data/owner/repo/raw/fetch_meta.json").write_text(json.dumps(meta))
-
-    def ledger(self):
-        path = self.root / "data/owner/repo/ledger.jsonl"
-
-        return {(r["kind"], r["number"]): r for r in map(json.loads, path.read_text().splitlines())}
-
+from support import CheckoutTest, item
 
 class IncrementalFetchTests(CheckoutTest):
     def full_sync(self, items):
@@ -169,7 +103,7 @@ class BatchAndSimilarTests(CheckoutTest):
         out = self.run_cli("batch", "2", "--kind", "issue") + self.run_cli("batch", "1", "--kind", "issue")
         ids = [line.split()[1].rstrip(":") for line in out.splitlines() if line.startswith("Batch ")]
         self.run_cli("batch", "--delete", ids[0])
-        remaining = sorted(p.name for p in (self.root / "data/owner/repo/batches").iterdir())
+        remaining = sorted(p.name for p in (self.root / "data/owner/repo/batches").glob("*.jsonl"))
         self.assertEqual(remaining, [f"{ids[1]}.decisions.jsonl", f"{ids[1]}.items.jsonl"])
         for bad in ["../ledger", "b20260101-000000/../../x", ids[0]]:
             result = subprocess.run([str(self.root / "bin/batch"), "--delete", bad], cwd=self.root, env=self.env, capture_output=True, text=True)

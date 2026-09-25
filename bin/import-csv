@@ -80,6 +80,7 @@ def main():
             changed += 1
 
     save_ledger(list(by_key.values()))
+
     print(f"Imported {args.csv_path.name}: {changed} rows changed.")
 
 

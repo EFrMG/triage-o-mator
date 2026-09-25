@@ -2,9 +2,9 @@ package main
 
 import "github.com/charmbracelet/bubbles/key"
 
-// Every key the TUI understands is defined here, once. Handlers match against these bindings and the footer renders its hints from them, so the two can't drift apart. The scheme (docs/keybindings.md): one key means one thing on every screen, a capital letter is the bigger version of the same action, destructive and bulk actions need a second press of the same key, and item actions work on whatever item is in front of you.
+// Every key the TUI understands is defined here, once. Handlers match against these bindings and the footer renders its hints from them, so the two can't drift apart. Context-specific handlers may reuse keys; text fields consume printable input before shortcuts.
 type keyMap struct {
-	// Global: any screen, except while typing in a text field.
+	// General browsing, outside modal handlers and text fields.
 	Help        key.Binding
 	Theme       key.Binding
 	Refresh     key.Binding
@@ -31,9 +31,15 @@ type keyMap struct {
 	ErrorDetails key.Binding
 
 	// Item actions: the open item, or in a list the ticked items (else the hovered one).
-	Save    key.Binding
-	Approve key.Binding
-	MarkDup key.Binding
+	Save         key.Binding
+	SaveApprove  key.Binding
+	Corpus       key.Binding
+	CorpusBudget key.Binding
+	CorpusRun    key.Binding
+	CorpusStop   key.Binding
+	Approve      key.Binding
+	MarkDup      key.Binding
+	Track        key.Binding
 	// SwapDup (M) is the one capital that isn't a bigger m: on the Duplicates screen it swaps the two sides, making the hovered candidate the original, so duplicates can be marked in either direction.
 	SwapDup    key.Binding
 	Group      key.Binding
@@ -95,15 +101,21 @@ var keys = keyMap{
 	Search:       key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 	ErrorDetails: key.NewBinding(key.WithKeys("!"), key.WithHelp("!", "last error")),
 
-	Save:       key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("Ctrl-S", "save")),
-	Approve:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "approve")),
-	MarkDup:    key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "duplicates")),
-	SwapDup:    key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "make it the original")),
-	Group:      key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "groups")),
-	QuickGroup: key.NewBinding(key.WithKeys("B"), key.WithHelp("B", "last group")),
-	Open:       key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "GitHub")),
-	Undo:       key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "undo")),
-	Comment:    key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment (not yet available)")),
+	Save:         key.NewBinding(key.WithKeys("s", "ctrl+s"), key.WithHelp("s", "save")),
+	SaveApprove:  key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "save & approve")),
+	Corpus:       key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "local dataset")),
+	CorpusBudget: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "item limit")),
+	CorpusRun:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "run/resume")),
+	CorpusStop:   key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "cancel download")),
+	Approve:      key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "approve")),
+	MarkDup:      key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "duplicates")),
+	Track:        key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "track comments")),
+	SwapDup:      key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "make it the original")),
+	Group:        key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "groups")),
+	QuickGroup:   key.NewBinding(key.WithKeys("B"), key.WithHelp("B", "last group")),
+	Open:         key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "GitHub")),
+	Undo:         key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "undo")),
+	Comment:      key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment (not yet available)")),
 	// Yank / YankAll take context out of the app for an agent to read: y what is in front of you, Y the whole screen's worth, in the same relationship as every other lowercase/uppercase pair.
 	Yank:    key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "take context")),
 	YankAll: key.NewBinding(key.WithKeys("Y"), key.WithHelp("Y", "take all of it")),

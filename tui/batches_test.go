@@ -23,16 +23,7 @@ func batchFixture(t *testing.T) string {
 		}
 	}
 
-	for _, name := range []string{"apply", "batch", "_triage.py", "_install.py", "_groups.py", "_similar.py", "_notdupes.py"} {
-		data, err := os.ReadFile(filepath.Join("..", "bin", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if err := os.WriteFile(filepath.Join(root, "bin", name), data, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	copyFixtureScripts(t, root, "apply", "batch")
 
 	taxonomy, err := os.ReadFile(filepath.Join("..", "config", "taxonomy.json"))
 	if err != nil {
@@ -94,6 +85,58 @@ func batchModel(t *testing.T, root string) model {
 	}
 
 	return send(m, batchesLoadedMsg{records: records})
+}
+
+func TestFixedBatchKeepsItsEvidenceAndMissingDiffOffline(t *testing.T) {
+	root := batchFixture(t)
+	path := filepath.Join(batchesDir(root, "owner/repo"), "b20260101-000000.items.jsonl")
+	data := `{"number":1,"kind":"pr","body":"frozen body","evidence":{"snapshot_id":"fixed-id","problems":{"summary":[],"diff":["missing"]}}}` + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(strings.Replace(path, ".items.", ".decisions.", 1), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	records, err := loadBatches(root, "owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := batchModel(t, root)
+	m.batches.records = records
+	k := Key{Kind: "pr", Number: 1}
+	m.detail.cache[k] = EnrichedItem{Body: "live body", DiffText: "live diff", DiffLoaded: true}
+	m.openBatch(records[0].ID)
+	if m.detail.SetItem(Item{Kind: "pr", Number: 1}) {
+		t.Fatal("fixed packet requested online enrichment")
+	}
+	if m.detail.enriched.Body != "frozen body" || m.detail.enriched.DiffText != "" || !m.detail.enriched.DiffLoaded {
+		t.Fatalf("fixed packet mixed with live evidence: %+v", m.detail.enriched)
+	}
+	m.detail.OnEnriched(enrichedMsg{key: k, data: EnrichedItem{Body: "late live body"}})
+	if m.detail.enriched.Body != "frozen body" {
+		t.Fatal("late live response replaced fixed evidence")
+	}
+	m.detail.width = 80
+	m.detail.renderActive()
+	if !strings.Contains(m.detail.sections[0].viewport.View(), "diff: missing") {
+		t.Fatal("missing evidence diagnostics")
+	}
+}
+
+func TestFixedBatchDistinguishesMissingAndEmptyDiff(t *testing.T) {
+	d := newDetailModel()
+	d.SetItem(Item{Kind: "pr", Number: 1})
+	d.Resize(100, 30)
+	d.populate(EnrichedItem{CachedRead: true, DiffLoaded: true, Evidence: &batchEvidence{Mode: "offline", SnapshotID: "test", Problems: map[string][]string{"diff": {"missing"}}}})
+	d.JumpSection(2)
+	if !strings.Contains(d.View(), "No cached payload") || d.NeedsActiveDiff() {
+		t.Fatal("missing evidence looks empty or starts a fetch")
+	}
+	d.populate(EnrichedItem{CachedRead: true, DiffLoaded: true, Evidence: &batchEvidence{Mode: "offline", SnapshotID: "empty", Components: map[string]*evidenceComponent{"diff": {Status: "complete", FetchedAt: "2026-09-22", Object: json.RawMessage(`{"sha256":"test"}`)}}}})
+	if !strings.Contains(d.View(), "(empty diff)") || !strings.Contains(d.View(), "observed 2026-09-22") {
+		t.Fatalf("verified empty diff lost distinction: %s", d.View())
+	}
 }
 
 func ledgerRow(t *testing.T, root string, number int) map[string]any {
@@ -375,6 +418,30 @@ func TestAgentNotesShowFromProposalAndSurviveSave(t *testing.T) {
 	for _, s := range m.detail.sections {
 		if s.name == agentNotesSection {
 			t.Fatal("an item without notes should have no Agent notes section")
+		}
+	}
+}
+
+// copyFixtureScripts includes shared modules so throwaway installs follow the scripts' evolving dependencies.
+func copyFixtureScripts(t *testing.T, root string, scripts ...string) {
+	t.Helper()
+	modules, err := filepath.Glob(filepath.Join("..", "bin", "_*.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range modules {
+		scripts = append(scripts, filepath.Base(path))
+	}
+
+	for _, name := range scripts {
+		data, err := os.ReadFile(filepath.Join("..", "bin", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(filepath.Join(root, "bin", name), data, 0o755); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

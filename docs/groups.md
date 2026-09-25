@@ -61,6 +61,10 @@ bin/group export GROUP_ID --diff --format json --output data/<owner>/<repo>/expo
 
 `export --enrich` fetches bodies and comments; `--diff` implies enrichment and adds PR diffs. These remain read-only GitHub calls. Without those flags, exports work offline and use current ledger facts. Missing ledger references are explicitly marked, not silently dropped. A packet contains all members, including closed and reviewed items.
 
+Add `--cache-mode offline|cache-preferred|refresh` to enrichment to use the [shared evidence reader](evidence-reference.md#similarity-and-group-consumers). For example, `bin/group export GROUP_ID --diff --cache-mode offline --format json --output data/<owner>/<repo>/exports/review.json` requires no GitHub calls. Available text and per-item snapshot references are fixed in the export; missing/partial/stale evidence is reported, not filled with live reads. `--snapshot ID` requires offline mode and every member in that snapshot. Markdown exposes coverage gaps as well as group/decision context; JSON also carries full component references. A successfully written file does not imply complete evidence or approval.
+
+`--output` is atomically replaced only after acquisition/rendering finishes, so an interrupted export cannot expose a partly written new packet. See [export recovery](storage.md#group-exports). TUI `x`/`X` defaults are unchanged; choose cached group exports through the CLI for now.
+
 ## Data and collaboration
 
 Each group records a schema version, stable UUID, repository, title, description, assignee, status, revision, creation/update identities and timestamps, and a membership list keyed by `(kind, number)`. Memberships include notes and contributor timestamps. Identities are attributed text, not authenticated identities. Use your signed Git commits to attest contributions instead.
@@ -72,3 +76,37 @@ The TUI never writes group JSON or the item ledger directly: it calls `bin/group
 To hand work to another contributor, share the relevant `data/<owner>/<repo>/groups/*.json` files through Git and/or send an exported review packet. Group files live in their repo's folder and also record the repo, so a checkout pointed at another repository neither displays nor edits them. Group records do not replace the ledger or import exported decisions automatically.
 
 This provides persistent group handoffs, assignment, and conflict detection within one checkout. It does **not** provide a shared server, authenticated access control, distributed locking between Git clones, or concurrent item-ledger writes. Separate contributors should reconcile group-file conflicts through Git review; coordinate ledger changes as before.
+
+Ordinary edits preserve historical structured fields already present in older group files. New review packets omit those retired fields and focus on the group's current membership, notes, assignment and status.
+
+## Pinned candidate discovery
+
+Generate review-set suggestions from an explicit immutable snapshot or a frozen corpus's pinned progress:
+
+```sh
+bin/cache candidates --compact --corpus CORPUS_ID --limit 20 > candidates.json
+# Or: bin/cache candidates --snapshot SNAPSHOT_ID --limit 20
+bin/group create-candidate --file candidates.json --candidate CANDIDATE_ID --by agent:contributor
+```
+
+Use a `candidate-set` ID from the returned page. `--compact` keeps selected proposal IDs and bounds pair previews while summarizing all-scope diagnostics; omit it when the full observations and negative-verdict records are needed. Saving reconstructs and verifies the complete suggestion from pinned evidence and current negative verdicts under the group transaction; altered result text is not trusted. The new group is a draft with generic membership and a checksummed `candidate_origin`. It has no duplicate verdict, survivor decision or approval. Repeating the explicit creation command creates another group; inspect existing groups before saving it again. Creation needs the cache; later group reads/exports retain provenance even if the cache becomes unavailable. Membership edits leave the original proposal intact as historical provenance, not a claim about the edited set. JSON and Markdown exports include that origin.
+
+`pr-candidate-sets-v1` uses these independent discovery signals:
+
+- Shared exact file paths, excluding known lockfile basenames and paths containing `vendor`, `generated`, `node_modules` or `dist`.
+- Shared closing-issue identities, including their repository identity, from the pinned `closing_issues` component.
+- Title similarity, with `--title-threshold 0.8` by default.
+
+Every pair in a proposed set must share a direct signal; graph connectivity alone is insufficient. `--max-frequency 10` suppresses broad file/link signals. Missing, partial, stale and suppressed evidence remains explicit, and recorded `not-duplicate` verdicts exclude their pairs. These are discovery leads, not duplicate verdicts or survivor choices.
+
+Discovery reads only the selected snapshot or pinned corpus progress and never fetches replacements. Continuations bind the evidence, verdicts and options. The current scope limit is 5,000 members and 256 MiB of declared summary, file and closing-link payloads; larger scopes fail without partial suggestions. No existing group or decision is rewritten.
+
+## Pairs already ruled out
+
+`bin/not-duplicate --key issue:12 --key issue:34 --by "Reviewer" --note "why"` records that a human compared two items and found them distinct, in git-tracked `data/<owner>/<repo>/not-duplicates.jsonl`. `--list` prints the records and `--remove` withdraws one.
+
+`similar` item candidates, `similar --pairs`, `next` and newly created batches all exclude recorded pairs. Filtering happens before the item candidate limit, so a ruled-out match does not displace another lead. Title-pair enumeration examines every qualifying open pair rather than capping each item's neighbors at ten. These are still title leads, not semantic conclusions or a complete duplicate search.
+
+For explicit inspection, `similar --kind K --number N --include-checked` and `similar --pairs --include-checked` retain the ruled-out candidates with their attributed `negative_verdict`. `--query` is free-text topic search with no source pair, so pair verdicts never remove its results. Filtered-out candidates are not enriched; combining `--include-checked` with enrichment explicitly includes the ruled-out items.
+
+New TUI item suggestions inherit script filtering. An already-open comparison can retain a ruled-out card for inspection, marked as such; its cached item header no longer advertises that pair.

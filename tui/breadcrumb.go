@@ -28,6 +28,11 @@ func (m model) breadcrumb() []string {
 		return append(crumbs, "Switch Repo")
 	}
 
+	if m.corpus.open {
+		crumbs = append(crumbs, "Local dataset")
+		return crumbs
+	}
+
 	if m.batches.open {
 		crumbs = append(crumbs, "Batches")
 		if m.batches.editing {

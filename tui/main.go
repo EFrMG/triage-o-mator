@@ -81,8 +81,20 @@ func pickerModel() (model, error) {
 }
 
 func run(m model) {
+	m.actionHistoryLifecycle = &readLifecycle{}
+	m.attentionLifecycle = &readLifecycle{}
+	m.notificationsLifecycle = &readLifecycle{}
+	m.evidenceLifecycle = &readLifecycle{}
+	m.corpusLifecycle, m.corpusObserverLifecycle = &readLifecycle{}, &readLifecycle{}
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if _, err := p.Run(); err != nil {
+	_, err := p.Run()
+	m.actionHistoryLifecycle.stop()
+	m.attentionLifecycle.stop()
+	m.notificationsLifecycle.stop()
+	m.evidenceLifecycle.stop()
+	m.corpusLifecycle.stop()
+	m.corpusObserverLifecycle.stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}

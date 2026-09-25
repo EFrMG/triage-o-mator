@@ -160,6 +160,23 @@ class GroupTests(unittest.TestCase):
 
         self.assertEqual(self.original, self.ledger.read_bytes())
 
+    def test_legacy_comparison_data_stays_in_group_file_but_not_review_packet(self):
+        group = self.create()
+        path = self.root / "data/owner/repo/groups" / f"{group['id']}.json"
+        group["comparison"] = {"retired": "historical claim"}
+        group["comparison_findings"] = [{"retired": "finding"}]
+        path.write_text(json.dumps(group))
+
+        self.run_cli("update", group["id"], "--description", "Ready for a maintainer", "--by", "Alice")
+        stored = json.loads(path.read_text())
+        packet = json.loads(self.run_cli("export", group["id"], "--format", "json").stdout)
+
+        self.assertIn("comparison", stored)
+        self.assertIn("comparison_findings", stored)
+        self.assertNotIn("comparison", packet["group"])
+        self.assertNotIn("comparison_findings", packet["group"])
+        self.assertEqual(packet["group"]["description"], "Ready for a maintainer")
+
     def test_validation_membership_and_repo_isolation(self):
         gid = self.create()["id"]
         self.run_cli("update", gid, "--title", " ", "--by", "Alice", ok=False)

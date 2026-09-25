@@ -12,6 +12,7 @@ On success it records the fetch it consumed in data/<owner>/<repo>/raw/fetch_met
 Usage: bin/sync
 """
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -26,9 +27,16 @@ from _triage import (
     now_iso,
     save_ledger,
 )
+from _storage import atomic_writer, locked
 
 
 def main():
+    # The fetch metadata lock serializes sync against an inventory capture; no ledger lock is taken.
+    with locked(RAW_DIR / "fetch_meta.json"):
+        sync()
+
+
+def sync():
     raw_path = RAW_DIR / "issues_and_prs.jsonl"
     if not raw_path.exists():
         sys.exit(here("error: no raw fetch found. Run bin/fetch first."))
@@ -36,7 +44,11 @@ def main():
     raw_items = load_jsonl(raw_path)
     meta_path = RAW_DIR / "fetch_meta.json"
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    if meta.get("raw_sha256") and hashlib.sha256(raw_path.read_bytes()).hexdigest() != meta["raw_sha256"]:
+        sys.exit(here("error: incomplete raw fetch publication; run bin/fetch --full again before bin/sync"))
+
     incremental = meta.get("mode") == "incremental"
+
     ledger = load_ledger()
     by_key = {(r["kind"], r["number"]): r for r in ledger}
     seen_open = set()
@@ -44,6 +56,8 @@ def main():
 
     added, updated, closed = 0, 0, 0
     for item in raw_items:
+        # Inventory bodies stay in disposable raw evidence, not the compact decision ledger. Preserve existing user-owned extra fields.
+        item = {k: v for k, v in item.items() if k not in TRIAGE_DEFAULTS and k not in ("body", "inventory_ids")}
         key = (item["kind"], item["number"])
         seen_open.add(key)
         existing = by_key.get(key)
@@ -61,7 +75,7 @@ def main():
             if existing.get("state") == "open" and item.get("state") == "closed":
                 closed += 1
 
-            existing.update(item)  # refresh GitHub-derived fields in place
+            existing.update(item)
             existing["last_synced_at"] = ts
             updated += 1
 
@@ -73,13 +87,15 @@ def main():
                 closed += 1
 
     save_ledger(list(by_key.values()))
+
     if meta.get("fetched_at"):
         meta["synced_through"] = meta["fetched_at"]
         meta["synced_fetch_id"] = meta.get("fetch_id")
         if not incremental:
             meta["last_full_at"] = meta["fetched_at"]
 
-        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+        with atomic_writer(meta_path) as out:
+            out.write(json.dumps(meta, indent=2) + "\n")
 
     print(
         f"Synced ({'incremental' if incremental else 'full'}): {added} new, {updated} refreshed, {closed} newly closed. "

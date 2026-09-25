@@ -99,12 +99,20 @@ func (m model) similarLabel() string {
 	}
 
 	parts := make([]string, 0, 3)
-	for i, c := range candidates {
-		if i == 3 {
+	for _, c := range candidates {
+		if c.Kind == m.detail.key.Kind && m.ruledOut(c.Kind, c.Number, m.detail.key.Number) {
+			continue
+		}
+
+		if len(parts) == 3 {
 			break
 		}
 
 		parts = append(parts, fmt.Sprintf("#%d %.0f%%", c.Number, c.Score*100))
+	}
+
+	if len(parts) == 0 {
+		return "Possible duplicates: none by title after recorded exclusions"
 	}
 
 	return "Possible duplicates: " + strings.Join(parts, ", ") + " (m to compare)"
@@ -163,8 +171,8 @@ func (m *model) closeDuplicates(toDetail bool) tea.Cmd {
 }
 
 func (m model) handleDupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Ctrl-S can warn here as it does in the item (untouched defaults, no reason); any other key takes the warning back.
-	if m.confirmSave && !key.Matches(msg, keys.Save) {
+	// Saving can warn here as it does in the item (untouched defaults, no reason); any other key takes the warning back.
+	if m.confirmSave && !key.Matches(msg, keys.Save, keys.SaveApprove) {
 		m.confirmSave = false
 		m.status = ""
 	}
@@ -219,6 +227,8 @@ func (m model) handleDupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openFromDuplicates(m.selectedDupKey())
 	case key.Matches(msg, keys.Save):
 		return m.saveFromDuplicates()
+	case key.Matches(msg, keys.SaveApprove):
+		return m.saveDuplicateDecision(true)
 	case key.Matches(msg, keys.Open):
 		if it, ok := m.findItem(m.selectedDupKey()); ok {
 			m.status = "Opening " + it.URL + "…"
@@ -277,7 +287,7 @@ func (m model) handleDupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// markCandidateDuplicate prefills the candidate's own decision as a duplicate of the item on the top card, and opens it so the confidence and reason can be checked. Nothing is written until Ctrl-S, here or on the item.
+// markCandidateDuplicate prefills the candidate's own decision as a duplicate of the item on the top card, and opens it so the confidence and reason can be checked. Nothing is written until s or S, here or on the item.
 func (m model) markCandidateDuplicate(c dupCandidate) (tea.Model, tea.Cmd) {
 	original, ok := m.findItem(m.dups.source)
 	if !ok {
@@ -298,7 +308,7 @@ func (m model) markCandidateDuplicate(c dupCandidate) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	m.status = fmt.Sprintf("Prefilled #%d as a duplicate of #%d. Check confidence and reason, then Ctrl-S to save.", c.Number, original.Number)
+	m.status = fmt.Sprintf("Prefilled #%d as a duplicate of #%d. Check confidence and reason, then s to save or S to save and approve.", c.Number, original.Number)
 	// The older report is usually the one to keep, so say when this closes it in favour of a later one.
 	if it, found := m.findItem(c.Key()); found && it.CreatedAt != "" && original.CreatedAt != "" && it.CreatedAt < original.CreatedAt {
 		m.status = fmt.Sprintf("#%d (%s) is older than #%d (%s): check which one should stay. Prefilled as a duplicate anyway; Esc leaves it unsaved.", c.Number, shortDate(it.CreatedAt), original.Number, shortDate(original.CreatedAt))
@@ -361,13 +371,17 @@ func (m model) openFromDuplicates(key Key) (tea.Model, tea.Cmd) {
 
 // saveFromDuplicates saves the decision in the form without leaving the screen, as long as it belongs to an item on it: m prefills one here, and the comparison is where you are when it's ready to save.
 func (m model) saveFromDuplicates() (tea.Model, tea.Cmd) {
+	return m.saveDuplicateDecision(false)
+}
+
+func (m model) saveDuplicateDecision(approve bool) (tea.Model, tea.Cmd) {
 	if !m.onDupScreen(m.detail.key) {
 		m.status = "Nothing to save here: m marks the selected candidate, or Enter opens an item to decide on it."
 
 		return m, nil
 	}
 
-	return m.requestSave()
+	return m.requestDecisionSave(approve)
 }
 
 // onDupScreen reports whether key is one of the items on this screen: the original on top, or one of its candidates.

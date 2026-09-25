@@ -61,7 +61,7 @@ class TitleIndex:
 
         return {t: w / norm for t, w in vec.items()}
 
-    def similar(self, key, top=DEFAULT_TOP, min_score=DEFAULT_MIN_SCORE, any_kind=False):
+    def similar(self, key, top=DEFAULT_TOP, min_score=DEFAULT_MIN_SCORE, any_kind=False, excluded=()):
         """Rank other ledger items by title similarity to `key`, same kind unless any_kind."""
         vec = self.vectors.get(key)
         if vec is None:
@@ -76,7 +76,7 @@ class TitleIndex:
             (
                 (s, other)
                 for other, s in scores.items()
-                if other != key and s >= min_score and (any_kind or other[0] == key[0])
+                if other != key and other not in excluded and s >= min_score and (any_kind or other[0] == key[0])
             ),
             key=lambda pair: (-pair[0], pair[1][1]),
         )
@@ -100,13 +100,13 @@ class TitleIndex:
         return [candidate(self.records[key], s) for s, key in ranked[:top]]
 
     def pairs(self, min_score=DEFAULT_PAIR_MIN_SCORE):
-        """Every pair of open, same-kind items scoring at least min_score, best first. In each pair `item` is the newer one (higher number), which is usually the duplicate, and `original` the older."""
+        """Every pair of open, same-kind items scoring at least min_score, best first. In each pair `item` is the newer one (higher number), and `original` the older; these display names do not select a survivor."""
         best = {}
         for key, rec in self.records.items():
             if rec.get("state") != "open":
                 continue
 
-            for c in self.similar(key, top=10, min_score=min_score):
+            for c in self.similar(key, top=len(self.records), min_score=min_score):
                 if c["state"] != "open":
                     continue
 

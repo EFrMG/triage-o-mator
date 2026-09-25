@@ -21,10 +21,21 @@ const (
 )
 
 type model struct {
-	installRoot string
-	repo        string
-	taxonomy    Taxonomy
-	reviewer    string
+	notificationPR          notificationPRUI
+	notifications           notificationsUI
+	notificationsLifecycle  *readLifecycle
+	notificationsGeneration uint64
+	trackingBusy            bool
+	actionHistory           actionHistoryUI
+	actionHistoryLifecycle  *readLifecycle
+	actionHistoryGeneration uint64
+	attention               attentionUI
+	attentionLifecycle      *readLifecycle
+	attentionGeneration     uint64
+	installRoot             string
+	repo                    string
+	taxonomy                Taxonomy
+	reviewer                string
 
 	items   []Item
 	groups  groupUI
@@ -51,11 +62,16 @@ type model struct {
 	// activeBatch, when non-empty, is the data/<owner>/<repo>/batches/<id> whose items are loaded into list/detail instead of tabs[activeTab].
 	activeBatch string
 	// activePairs is set while the Possible Duplicates view is the displayed list; pairs holds bin/similar --pairs output (pairsLoaded once computed).
-	activePairs bool
-	pairs       []dupPair
-	pairsLoaded bool
-	detail      detailModel
-	form        decisionForm
+	activePairs                              bool
+	pairs                                    []dupPair
+	pairsLoaded                              bool
+	detail                                   detailModel
+	evidenceLifecycle                        *readLifecycle
+	corpus                                   corpusUI
+	corpusEpoch                              uint64
+	corpusLifecycle, corpusObserverLifecycle *readLifecycle
+	evidenceRequest                          uint64
+	form                                     decisionForm
 
 	// drafts holds unsaved decision edits per item, so switching between items to compare them before committing with ctrl+s doesn't lose work.
 	// Cleared for a key once bin/apply confirms that key was saved.
@@ -77,8 +93,9 @@ type model struct {
 
 	// confirmQuit is set when quitting with unsaved drafts pending, so a second explicit quit is required rather than silently discarding them.
 	confirmQuit bool
-	// confirmSave / confirmApprove arm a second Ctrl-S / a press after a warning (saving untouched defaults or an empty reason; approving while edits are unsaved). Any other key disarms them.
+	// confirmSave / confirmApprove arm a second save shortcut / a press after a warning (saving untouched defaults or an empty reason; approving while edits are unsaved). confirmSaveApproval distinguishes saving from saving and approving so switching operations needs a fresh confirmation.
 	confirmSave, confirmApprove bool
+	confirmSaveApproval         bool
 
 	focus Focus
 
@@ -198,12 +215,17 @@ func (m model) Init() tea.Cmd {
 		return statusTick()
 	}
 
-	return tea.Batch(fetchSyncCmd(m.installRoot, false), nextCmd(m.installRoot, m.repo), sidebarCountsCmd(m.installRoot, m.repo), notDuplicatesCmd(m.installRoot, m.repo), statusTick())
+	return tea.Batch(fetchSyncCmd(m.installRoot, m.repo, false), nextCmd(m.installRoot, m.repo), sidebarCountsCmd(m.installRoot, m.repo), notDuplicatesCmd(m.installRoot, m.repo), statusTick())
 }
 
 // enterSidebarSelection handles Enter / l while the sidebar has focus: activate a real tab, open Possible Duplicates, Batches or Groups, or open the Switch Repo prompt.
 func (m *model) enterSidebarSelection() tea.Cmd {
 	switch m.sidebar.selected {
+	case notificationsIndex:
+		m.commitDraftIfDirty()
+		next, cmd := m.openNotifications()
+		*m = next.(model)
+		return cmd
 	case pairsIndex:
 		return m.openPairs()
 	case batchesIndex:
@@ -451,23 +473,49 @@ func (m model) itemView() string {
 	w, h := m.detailInnerWidth(), m.detailBodyHeight()
 	title := fmt.Sprintf("%s #%d", m.detail.key.Kind, m.detail.key.Number)
 	meta := []string{}
-	if it, ok := m.findItem(m.detail.key); ok {
+	if m.notificationPR.open {
+		it := m.detail.item
+		if it.Title != "" {
+			title += " · " + it.Title
+		}
+		if it.State != "" {
+			stateColor := currentTheme.Muted
+			if strings.EqualFold(it.State, "closed") {
+				stateColor = currentTheme.Error
+			}
+			meta = append(meta, lipgloss.NewStyle().Foreground(lipgloss.Color(stateColor)).Render(singleLine(it.State)))
+		}
+	} else if it, ok := m.findItem(m.detail.key); ok {
 		title += " · " + it.Title
 		labels := "no labels"
 		if len(it.Labels) > 0 {
 			labels = strings.Join(it.Labels, ", ")
 		}
 
-		meta = append(meta, orPlaceholder(it.Author, "?"), it.State, labels, "updated "+shortDate(it.UpdatedAt))
+		author := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Info)).Render(singleLine(orPlaceholder(it.Author, "?")))
+		stateColor := currentTheme.Muted
+		switch strings.ToLower(it.State) {
+		case "open":
+			stateColor = currentTheme.Success
+		case "closed":
+			stateColor = currentTheme.Error
+		}
+
+		state := lipgloss.NewStyle().Foreground(lipgloss.Color(stateColor)).Render(singleLine(it.State))
+		meta = append(meta, author, state, mutedText(singleLine(labels)), mutedText("updated "+singleLine(shortDate(it.UpdatedAt))))
 	}
 
-	meta = append(meta, m.similarLabel())
-	if g := m.lastGroup(); g != nil {
-		meta = append(meta, m.lastGroupLabel())
+	if m.notificationPR.open {
+		meta = append(meta, mutedText("refreshed PR details · read only · saved notification may differ"))
+	} else {
+		meta = append(meta, mutedText(singleLine(m.similarLabel())))
+		if g := m.lastGroup(); g != nil {
+			meta = append(meta, mutedText(singleLine(m.lastGroupLabel())))
+		}
 	}
 
 	header := lipgloss.NewStyle().Bold(true).Render(ansi.Truncate(singleLine(title), w, "…")) + "\n" +
-		mutedText(ansi.Truncate(singleLine(strings.Join(meta, " · ")), w, "…"))
+		ansi.Truncate(strings.Join(meta, mutedText(" · ")), w, "…")
 	tabs := m.detail.TabBar(w, m.form.focused == fieldContent || m.detail.full)
 	content := lipgloss.NewStyle().Width(m.detail.width).Height(m.detail.height).MaxHeight(m.detail.height).Render(m.detail.View())
 
@@ -538,12 +586,22 @@ func (m model) View() string {
 		body = m.errorView()
 	case m.themePicker.open:
 		body = m.themePickerView()
+	case m.notificationPR.open:
+		body = m.titled(panelStyle(true).Width(m.width-2).Height(m.mainHeight()).Padding(0, 1).Render(m.itemView()), true)
+	case m.attention.open:
+		body = m.withSidebar(m.attentionView(), true)
+	case m.actionHistory.open:
+		body = m.withSidebar(m.actionHistoryView(), true)
+	case m.notifications.open:
+		body = m.withSidebar(m.notificationsView(), true)
 	case m.groups.open:
 		body = m.groupsView()
 	case m.batches.open:
 		body = m.batchesView()
 	case m.dups.open:
 		body = m.dupsView()
+	case m.corpus.open:
+		body = m.withSidebar(m.corpusView(), true)
 	case m.focus == FocusDetail:
 		body = m.titled(panelStyle(true).Width(m.width-2).Height(m.mainHeight()).Padding(0, 1).Render(m.itemView()), true)
 	default:
@@ -579,7 +637,7 @@ func (m model) View() string {
 	return repaint(screenStyle().Width(m.width).Height(m.height).Render(fitScreen(body+"\n"+status+"\n"+footer, m.width, m.height)))
 }
 
-// switchBusy explains why Switch Repo must wait, or returns "": work still running would report back into the wrong repo. Unsaved drafts don't block it; handleRepoInputKey asks before discarding them, since they're keyed by issue number and would land on the other repo's items.
+// switchBusy gates legacy work without cancellation/reply identities. Explicit evidence/corpus processes are stopped on switch and their stale replies are rejected. Unsaved drafts still require discard confirmation.
 func (m model) switchBusy() string {
 	if m.refreshing || m.groups.busy || m.batches.busy || m.dups.busy || m.detail.loading {
 		return "wait for the current fetch or save to finish."
@@ -609,6 +667,20 @@ func (m *model) switchInstall(root, repo string) tea.Cmd {
 
 // switchRepo points the TUI at repo's own data folder, dropping every per-repo cache (ledger, content, duplicates, groups, batches), and fetches it.
 func (m *model) switchRepo(repo string) tea.Cmd {
+	m.notificationsLifecycle.stop()
+	m.notificationsGeneration++
+	m.notifications = notificationsUI{}
+	m.actionHistoryLifecycle.stop()
+	m.actionHistoryGeneration++
+	m.actionHistory = actionHistoryUI{}
+	m.attentionLifecycle.stop()
+	m.attentionGeneration++
+	m.attention = attentionUI{}
+	m.evidenceLifecycle.stop()
+	m.corpusLifecycle.stop()
+	m.corpusObserverLifecycle.stop()
+	m.corpusEpoch++
+	m.corpus = corpusUI{}
 	items, err := LoadLedger(m.installRoot, repo)
 	if err != nil {
 		m.failErr("Couldn't read the ledger", err)
@@ -621,11 +693,13 @@ func (m *model) switchRepo(repo string) tea.Cmd {
 	m.similar = make(map[Key][]dupCandidate)
 	m.notDuplicates = nil
 	m.detail = newDetailModel()
+	m.trackingBusy = false
+	m.evidenceRequest++
 	m.groups, m.batches, m.dups = groupUI{}, batchUI{}, dupUI{}
 	m.lastGroupID, m.activeBatch = "", ""
 	m.activePairs, m.pairs, m.pairsLoaded = false, nil, false
 
-	m.sidebar.pairCount, m.sidebar.batchCount, m.sidebar.groupCount = -1, -1, -1
+	m.sidebar.pairCount, m.sidebar.batchCount, m.sidebar.groupCount, m.sidebar.notificationCount = -1, -1, -1, -1
 	m.sidebar.RecomputeCounts(items)
 	m.listReady, m.overview, m.focus = false, true, FocusSidebar
 
@@ -633,7 +707,7 @@ func (m *model) switchRepo(repo string) tea.Cmd {
 	m.status = fmt.Sprintf("Switched to %s. Fetching…", repo)
 	m.refreshStatus = m.status
 
-	return tea.Batch(fetchSyncCmd(m.installRoot, false), sidebarCountsCmd(m.installRoot, repo), notDuplicatesCmd(m.installRoot, repo))
+	return tea.Batch(fetchSyncCmd(m.installRoot, repo, false), sidebarCountsCmd(m.installRoot, repo), notDuplicatesCmd(m.installRoot, repo))
 }
 
 // emptyListView replaces bubbles/list's own empty state, which says "No items" twice (status bar and body), with the list title and one centered message.

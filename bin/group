@@ -10,9 +10,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _groups import create_group, delete_group, list_groups, load_group, locked, save_group, STATUSES
 from _triage import REPO, enrich_item, load_ledger, now_iso
+from _enrichment import add_cache_arguments, validate_cache_arguments, enrich_selected
+from _storage import atomic_writer, locked as output_locked
 
 
-def packet(group, enrich=False, diff=False):
+def packet(group, enrich=False, diff=False, options=None):
     ledger = {(r["kind"], r["number"]): r for r in load_ledger()}
     items = []
     members = group["members"]
@@ -20,13 +22,21 @@ def packet(group, enrich=False, diff=False):
         row = ledger.get((member["kind"], member["number"]))
         item = dict(row) if row else dict(kind=member["kind"], number=member["number"], missing_from_ledger=True)
         if enrich:
-            # One line per GitHub read, on stderr, so the TUI (and a terminal) can show how far along it is.
-            print(f"fetching {i}/{len(members)}: {member['kind']} #{member['number']}", file=sys.stderr, flush=True)
-            enrich_item(item, include_diff=diff)
+            # One line per selected member on stderr, so progress does not pollute the packet on stdout.
+            operation = f"{options.cache_mode} evidence" if options and options.cache_mode else "fetching"
+            print(f"{operation} {i}/{len(members)}: {member['kind']} #{member['number']}", file=sys.stderr, flush=True)
+            if options:
+                enrich_selected(item, options)
+            else:
+                enrich_item(item, include_diff=diff)
 
         items.append(item)
 
-    return dict(schema_version=1, exported_at=now_iso(), repo=REPO, group=group, items=items)
+    # Older group files may still contain removed comparison records. Preserve those files, but keep review packets focused on the current handoff fields.
+    handoff_fields = ("schema_version", "id", "repo", "title", "description", "assignee", "status", "revision", "created_by", "created_at", "updated_by", "updated_at", "members", "candidate_origin")
+    handoff = {field: group[field] for field in handoff_fields if field in group}
+
+    return dict(schema_version=1, exported_at=now_iso(), repo=REPO, group=handoff, items=items)
 
 
 def prose(text):
@@ -60,8 +70,15 @@ def markdown(data):
         "",
     ]
 
+    if "candidate_origin" in g:
+        lines += ["## Pinned candidate origin", "", "Frozen discovery provenance only; later membership edits do not update this original proposal. No semantic verdict or approval.", ""]
+        origin_text = json.dumps(g["candidate_origin"], ensure_ascii=False, indent=2)
+        fence = "`" * max(3, max((len(m) + 1 for m in re.findall(r"`+", origin_text)), default=3))
+        lines += [fence + "json", origin_text, fence, ""]
+
     for member, item in zip(g["members"], data["items"]):
-        url = f"https://github.com/{g['repo']}/{'pull' if member['kind'] == 'pr' else 'issues'}/{member['number']}"
+        host = item.get("evidence", {}).get("repository", {}).get("host", "github.com")
+        url = f"https://{host}/{g['repo']}/{'pull' if member['kind'] == 'pr' else 'issues'}/{member['number']}"
         lines.append(f"- [{member['kind']} #{member['number']}]({url}) — {item.get('title', '(missing from ledger)')}")
 
     for member, item in zip(g["members"], data["items"]):
@@ -69,15 +86,34 @@ def markdown(data):
         lines += paragraph(member["notes"])
         lines += [f"Added by {member['added_by']} at {member['added_at']}", ""]
 
-        for field in ("state", "author", "labels", "category", "action", "confidence", "reason", "triaged_by", "triaged_at", "reviewed", "reviewed_by", "reviewed_at", "reviewer_notes", "last_synced_at", "additions", "deletions", "changed_files", "is_draft", "mergeable"):
+        for field in ("missing_from_ledger", "state", "author", "labels", "category", "action", "confidence", "reason", "triaged_by", "triaged_at", "reviewed", "reviewed_by", "reviewed_at", "reviewer_notes", "last_synced_at", "additions", "deletions", "changed_files", "is_draft", "mergeable"):
             if field in item:
                 lines.append(f"- {field}: {item[field]}")
 
         if prose(item.get("agent_notes")):
             lines += ["", "### Agent notes", "", prose(item["agent_notes"])]
 
+        evidence = item.get("evidence")
+        if evidence:
+            revision = evidence.get("revision") or {}
+            lines += ["", "### Evidence (fixed observation)", "",
+                      f"Snapshot: {evidence.get('snapshot_id') or '(none)'}",
+                      f"Source: {evidence['repository']['host']}/{evidence['repository']['full_name']}",
+                      f"Recorded revision: updated {revision.get('updated_at')} · base {revision.get('base_sha')} · head {revision.get('head_sha')}",
+                      "Coverage/freshness below was assessed at export time, not against current GitHub state. A complete observation is not approval or a duplicate verdict.", ""]
+            for name, problems in evidence["problems"].items():
+                component = evidence["components"].get(name) or {}
+                lines.append(f"- {name}: {', '.join(problems) or component.get('status', 'missing')} · observed {component.get('fetched_at') or '(unknown)'}")
+                if component.get("error"):
+                    lines.append(f"  Details: {component['error']}")
+
         if "body" in item:
-            lines += ["", "### Body", ""] + paragraph(item["body"] or "(no description)") + ["### Comments", ""]
+            lines += ["", "### Body", "", prose(item["body"]) or "(no description in available evidence)"]
+        elif evidence:
+            lines += ["", "### Body", "", "(body unavailable in the selected evidence)"]
+
+        if "comment_bodies" in item or evidence:
+            lines += ["", "### Comments", ""]
             comments = [prose(c) for c in item.get("comment_bodies", [])]
             authors = item.get("comment_authors", [])
             if comments:
@@ -88,7 +124,11 @@ def markdown(data):
                     author = f" @{authors[i - 1]}" if i <= len(authors) and authors[i - 1] else ""
                     lines += [f"{i}.{author}", "", comment]
             else:
-                lines.append("(no comments)")
+                component = (evidence["components"].get("comments") or {}) if evidence else {}
+                if evidence and component.get("status") != "complete":
+                    lines.append("(comments unavailable or incomplete; not a verified empty discussion)")
+                else:
+                    lines.append("(no comments in the selected observation)" if evidence else "(no comments)")
 
         if "diff_text" in item:
             # A fence longer than any backtick run in the diff cannot close early.
@@ -106,8 +146,14 @@ def check_revision(group, revision):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-repo", help="refuse a changed install target")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
+    candidate = sub.add_parser("create-candidate", help="revalidate a pinned discovery suggestion and save a draft review group")
+    candidate.add_argument("--file", type=Path, required=True)
+    candidate.add_argument("--candidate", required=True)
+    candidate.add_argument("--by", required=True)
+
     for command in ("create", "show", "update", "add", "remove", "delete", "export"):
         p = sub.add_parser(command)
         if command != "create":
@@ -139,46 +185,57 @@ def main():
             p.add_argument("--enrich", action="store_true", help="include current GitHub bodies and all comments (GET only)")
             p.add_argument("--diff", action="store_true", help="include PR diffs; implies --enrich")
             p.add_argument("--output", type=Path)
+            add_cache_arguments(p)
 
     args = parser.parse_args()
+    if args.expected_repo is not None and args.expected_repo != REPO:
+        parser.error("install repository changed; reload before reading groups")
+
+    if args.command == "export":
+        validate_cache_arguments(parser, args, args.enrich or args.diff)
+
     if args.command == "list":
         print(json.dumps(list_groups(), ensure_ascii=False))
-
         return
 
     if args.command in ("show", "export"):
         group = load_group(args.id)
         if args.command == "show":
             print(json.dumps(group, ensure_ascii=False, indent=2))
-
             return
 
-        data = packet(group, args.enrich or args.diff, args.diff)
+        data = packet(group, args.enrich or args.diff, args.diff, options=args)
         text = markdown(data) if args.format == "markdown" else json.dumps(data, ensure_ascii=False, indent=2) + "\n"
         if args.output:
+            if args.output.is_symlink() or (args.output.parent / "local").is_symlink():
+                raise ValueError("export output and local storage must not be symlinks")
+
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(text)
+            with output_locked(args.output):
+                with atomic_writer(args.output) as out:
+                    out.write(text)
         else:
             print(text, end="")
-
         return
 
     if args.command == "delete":
-        # No --by: a deletion leaves nothing behind to attribute it to. The group it removed is printed instead, so the run that did it still carries the record.
         with locked():
             group = load_group(args.id)
             check_revision(group, args.revision)
             delete_group(args.id)
 
         print(json.dumps(dict(deleted=group), ensure_ascii=False, indent=2))
-
         return
 
     if not args.by.strip():
         raise ValueError("--by cannot be blank")
 
     with locked():
-        if args.command == "create":
+        if args.command == "create-candidate":
+            from _candidates import create_from_packet
+
+            group = create_from_packet(json.loads(args.file.read_text()), args.candidate, args.by)
+        elif args.command == "create":
             group = create_group(args.title, args.description, args.assignee, args.by)
         else:
             group = load_group(args.id)

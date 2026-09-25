@@ -6,7 +6,7 @@ Usage:
     bin/next           numbered suggestions, most urgent first
     bin/next --json    the same, machine-readable, for agents
 
-Each suggestion says who should do it: [agent] steps an agent may run on its own (they only produce proposals), [human] steps that need a person (reviewing, marking groups ready, acting on GitHub). It points at the exact command or prompts/<name>.md playbook to follow. This is the answer to "what could be done next?" in AGENTS.md.
+Each suggestion says who should do it: [agent] steps prepare evidence or proposals within the requested scope, [human] steps need a person (reviewing, marking groups ready, acting on GitHub). A suggestion is not authorization for an unbounded download. It points at the exact command or prompts/<name>.md playbook to follow. This is the answer to "what could be done next?" in AGENTS.md.
 """
 
 import argparse
@@ -18,7 +18,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _groups import list_groups
 from _similar import TitleIndex
-from _triage import here, BATCHES_DIR, RAW_DIR, REPO, REPORTS_DIR, load_jsonl, load_ledger
+from _notdupes import TitleVerdicts
+from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, load_jsonl, load_ledger
 
 STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
@@ -92,7 +93,7 @@ def suggestions(ledger):
         add("agent", f"Code-review {len(unreviewed_code)} triaged PRs nobody has read the diff of ({merge_ready} marked merge-ready)",
             f"prompts/review-pr.md (e.g. {sample})", "their category was judged from the description alone")
 
-    pairs = [p for p in TitleIndex(ledger).pairs(min_score=STRONG_PAIR)
+    pairs = [p for p in TitleVerdicts().pairs(TitleIndex(ledger), min_score=STRONG_PAIR)
              if not by_key[(p["item"]["kind"], p["item"]["number"])]["category"]]
     if pairs:
         sample = ", ".join(f"#{p['item']['number']}~#{p['original']['number']}" for p in pairs[:3])
@@ -124,6 +125,10 @@ def suggestions(ledger):
             "there are duplicate clusters and no groups yet")
 
     untriaged = [r for r in open_items if not r["category"]]
+    if open_items:
+        add("agent", "Prepare reusable evidence for a focused analysis", "prompts/prepare-analysis.md",
+            "optional: inspect existing references offline first; agree scope and request budget before any download (cache coverage is not assessed here)")
+
     if untriaged:
         fresh = [r for r in untriaged if (hours_since(r.get("first_seen_at")) or 1e9) < 24]
         if fresh:
@@ -152,6 +157,14 @@ def main():
     else:
         items = suggestions(ledger)
 
+    if any((DATA_DIR / "external-closures").glob("pr-*.json")) or any((DATA_DIR / "cache" / "watches").glob("pr-*.json")):
+        items.insert(0, dict(
+            who="agent",
+            what="Inspect retained closure or watch context for a requested reassessment",
+            do=here("prompts/review-appeal.md"),
+            why="local record filenames exist; contents and attention status are not audited here; reading does not enroll, acknowledge, resolve or approve",
+        ))
+
     if args.json:
         print(json.dumps(dict(repo=REPO, suggestions=items), ensure_ascii=False, indent=2))
 
@@ -166,4 +179,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        sys.exit(f"error: {error}")

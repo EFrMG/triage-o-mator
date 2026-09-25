@@ -470,3 +470,24 @@ func TestRuleOutFromComparison(t *testing.T) {
 		t.Fatalf("ruling a pair out must not decide either item: %v", row)
 	}
 }
+
+func TestNewSuggestionsExcludeRecordedPairsAndCachedHeaderHonorsVerdicts(t *testing.T) {
+	root := dupFixture(t)
+	if _, err := runScript(root, "not-duplicate", "--key", "issue:1", "--key", "issue:2", "--by", "reviewer"); err != nil {
+		t.Fatal(err)
+	}
+
+	key := Key{Kind: "issue", Number: 1}
+	msg := similarCmd(root, "owner/repo", key)().(similarLoadedMsg)
+	if msg.err != nil || len(msg.candidates) != 0 {
+		t.Fatalf("a new title query must exclude the recorded pair: %+v", msg)
+	}
+
+	m := batchModel(t, root)
+	m.detail.key = key
+	m.similar[key] = []dupCandidate{{Kind: "issue", Number: 2, Score: 1}}
+	m.notDuplicates = notDuplicatesCmd(root, "owner/repo")().(notDuplicatesMsg).pairs
+	if strings.Contains(m.similarLabel(), "#2") {
+		t.Fatalf("cached candidates must not advertise a settled pair: %s", m.similarLabel())
+	}
+}

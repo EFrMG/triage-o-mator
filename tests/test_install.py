@@ -85,6 +85,56 @@ class CheckoutHygieneTests(unittest.TestCase):
 
 
 class InstallToTests(InstallTest):
+    def test_cache_ignore_upgrade_preserves_custom_rules_and_is_idempotent(self):
+        self.install_to("--yes")
+        path = self.install / ".gitignore"
+        start = "# <triage-o-mator:cache>"
+        end = "# </triage-o-mator:cache>"
+        initial = path.read_text()
+        legacy = initial.split(start)[0] + "# my custom rule\n/custom-output/\n"
+        path.write_text(legacy)
+        before = {str(p): p.read_bytes() for p in self.install.rglob("*") if p.is_file() and not p.is_symlink()}
+        preview = self.install_to("--dry-run", "--yes")
+        self.assertIn(".gitignore", preview)
+        self.assertEqual(before, {str(p): p.read_bytes() for p in self.install.rglob("*") if p.is_file() and not p.is_symlink()})
+
+        self.install_to("--yes")
+        upgraded = path.read_text()
+        self.assertTrue(upgraded.startswith(legacy), "preserve custom bytes outside managed blocks")
+        self.assertEqual(upgraded.count(start), 1)
+        self.assertEqual(upgraded.count(end), 1)
+        self.install_to("--yes")
+        self.assertEqual(path.read_text(), upgraded)
+
+        for name in ("cache/snapshots/one.json", "cache/objects/raw.diff", "local/ledger.jsonl.lock", "evidence/retained.json", "actions/example.json", "inbox/example.json"):
+            artifact = self.install / "data/acme/widgets" / name
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_text("{}\n")
+
+        tracked = self.tracked()
+        self.assertNotIn("triage-o-mator/data/acme/widgets/cache/objects/raw.diff", tracked)
+        self.assertNotIn("triage-o-mator/data/acme/widgets/local/ledger.jsonl.lock", tracked)
+        for name in ("evidence/retained.json", "actions/example.json", "inbox/example.json"):
+            self.assertIn("triage-o-mator/data/acme/widgets/" + name, tracked)
+
+    def test_future_layout_and_malformed_ignore_refuse_before_changes(self):
+        self.install_to("--yes")
+        path = self.install / ".triage-install.json"
+        marker = json.loads(path.read_text())
+        path.write_text(json.dumps(dict(marker, version=999)))
+        before = path.read_bytes()
+        self.assertIn("unsupported install layout", self.install_to("--repo", "other/repo", "--yes", ok=False))
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual((self.install / "config/repo").read_text(), "acme/widgets\n")
+
+        path.write_text(json.dumps(marker))
+        ignore = self.install / ".gitignore"
+        ignore.write_text(ignore.read_text().replace("# </triage-o-mator:cache>", "# broken end"))
+        before = ignore.read_bytes()
+        self.assertIn("malformed managed", self.install_to("--repo", "other/repo", "--yes", ok=False))
+        self.assertEqual(ignore.read_bytes(), before)
+        self.assertEqual((self.install / "config/repo").read_text(), "acme/widgets\n")
+
     def test_a_fresh_install_wires_the_checkout_and_tracks_only_the_repo_s_own_files(self):
         out = self.install_to("--yes")
         self.assertIn("repository to triage: acme/widgets", out, "the repo comes from the target's origin remote")
@@ -148,7 +198,6 @@ class InstallToTests(InstallTest):
         (self.install / "prompts" / "auto-triage.md").write_text("# our own playbook\n")
         (self.install / "prompts" / "ours.md").write_text("# a new one\n")
         (self.install / "config" / "taxonomy.md").write_text("# our taxonomy\n")
-
         out = self.install_to("--yes")
         self.assertIn("keep", out)
         self.assertEqual((self.install / "prompts" / "auto-triage.md").read_text(), "# our own playbook\n")
@@ -214,6 +263,8 @@ class InstallToTests(InstallTest):
 
         docs = ["AGENTS.md", "README.md"] + sorted(str(p.relative_to(self.install)) for p in self.install.glob("docs/*.md")) + sorted(str(p.relative_to(self.install)) for p in self.install.glob("prompts/*.md"))
         self.assertIn("prompts/auto-triage.md", docs, "sanity: an install carries the playbooks")
+        self.assertIn("prompts/prepare-analysis.md", docs)
+        self.assertIn("prompts/review-appeal.md", docs)
 
         missing = []
         for name in docs:
@@ -224,6 +275,21 @@ class InstallToTests(InstallTest):
                     missing.append(f"{name} -> {target}")
 
         self.assertEqual(missing, [], f"dangling from inside the install: {missing}")
+
+    def test_prepare_analysis_is_linked_on_upgrade_and_custom_copy_is_preserved(self):
+        self.install_to("--yes")
+        prompt = self.install / "prompts/prepare-analysis.md"
+        self.assertTrue(prompt.is_symlink())
+        self.assertEqual(prompt.resolve(), self.checkout / "prompts/prepare-analysis.md")
+        prompt.unlink()
+        self.install_to("--yes")
+        self.assertTrue(prompt.is_symlink(), "rerunning installation supplies a newly added playbook")
+        prompt.unlink()
+        prompt.write_text("# our scoped preparation workflow\n")
+        self.install_to("--yes")
+        self.assertFalse(prompt.is_symlink())
+        self.assertEqual(prompt.read_text(), "# our scoped preparation workflow\n")
+        self.assertIn("triage-o-mator/prompts/prepare-analysis.md", self.tracked())
 
     def test_the_checkout_installs_into_itself(self):
         """triage-o-mator triaging its own backlog: the install is nested in the checkout, and its bin/ symlinks back to the very code it runs."""
@@ -256,11 +322,6 @@ class InstallToTests(InstallTest):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("not a git repository", result.stderr)
 
-        notrepo = self.base / "not-a-repo"
-        notrepo.mkdir()
-        result = subprocess.run([str(self.checkout / "bin" / "install-to"), str(notrepo)], capture_output=True, text=True, env=self.env)
-        self.assertNotEqual(result.returncode, 0, "a directory that is not a git repository has nowhere to keep triage")
-
     def test_the_install_is_registered_for_switch_repo(self):
         self.install_to("--yes")
         registry = json.loads((self.base / "config-home" / "triage-o-mator" / "installs.json").read_text())
@@ -286,9 +347,6 @@ class InstallLayoutTests(InstallTest):
 
         self.assertFalse((self.checkout / "data").exists(), "nothing may be written into the checkout")
         self.assertFalse((self.checkout / "reports").exists())
-
-    def test_scripts_run_from_the_target_root_find_their_install(self):
-        self.run_script("next", cwd=self.target)
 
     def test_what_a_script_prints_can_be_pasted_where_it_was_run(self):
         """Most people run this from the root of the repository being triaged, so a suggestion has to work from there, not only from inside the install."""

@@ -60,11 +60,13 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 
 // fetchSyncDoneMsg reports the result of a background `bin/fetch && bin/sync`; bin/fetch is incremental unless full is set (or it decides a full fetch is due).
 type fetchSyncDoneMsg struct {
-	err     error
-	summary string
+	err, trackingErr error
+	summary          string
+	unreadTotal      int
+	repo             string
 }
 
-func fetchSyncCmd(installRoot string, full bool) tea.Cmd {
+func fetchSyncCmd(installRoot, repo string, full bool) tea.Cmd {
 	return func() tea.Msg {
 		var args []string
 		if full {
@@ -72,15 +74,22 @@ func fetchSyncCmd(installRoot string, full bool) tea.Cmd {
 		}
 
 		if _, err := runScript(installRoot, "fetch", args...); err != nil {
-			return fetchSyncDoneMsg{err: err}
+			return fetchSyncDoneMsg{repo: repo, err: err}
 		}
 
 		out, err := runScript(installRoot, "sync")
 		if err != nil {
-			return fetchSyncDoneMsg{err: err}
+			return fetchSyncDoneMsg{repo: repo, err: err}
 		}
 
-		return fetchSyncDoneMsg{summary: out}
+		tracked, trackingErr := runScript(installRoot, "cache", "--expected-repo", repo, "track-check", "--request-budget", "100")
+		var count struct {
+			UnreadTotal int `json:"unread_total"`
+		}
+		if trackingErr == nil {
+			trackingErr = json.Unmarshal([]byte(tracked), &count)
+		}
+		return fetchSyncDoneMsg{repo: repo, summary: out, trackingErr: trackingErr, unreadTotal: count.UnreadTotal}
 	}
 }
 
@@ -107,18 +116,40 @@ type enrichedMsg struct {
 
 // EnrichedItem is JSON output from bin/enrich-one (body / comments / diff).
 type EnrichedItem struct {
-	Number         int      `json:"number"`
-	Kind           string   `json:"kind"`
-	Body           string   `json:"body"`
-	CommentBodies  []string `json:"comment_bodies"`
-	CommentAuthors []string `json:"comment_authors"`
-	Additions      int      `json:"additions"`
-	Deletions      int      `json:"deletions"`
-	ChangedFiles   int      `json:"changed_files"`
-	IsDraft        bool     `json:"is_draft"`
-	Mergeable      string   `json:"mergeable"`
-	DiffLoaded     bool     `json:"-"`
-	DiffText       string   `json:"diff_text"`
+	Number         int            `json:"number"`
+	Kind           string         `json:"kind"`
+	Title          string         `json:"title"`
+	State          string         `json:"state"`
+	URL            string         `json:"url"`
+	Body           string         `json:"body"`
+	CommentBodies  []string       `json:"comment_bodies"`
+	CommentAuthors []string       `json:"comment_authors"`
+	CommentDates   []string       `json:"comment_dates"`
+	Additions      int            `json:"additions"`
+	Deletions      int            `json:"deletions"`
+	ChangedFiles   int            `json:"changed_files"`
+	IsDraft        bool           `json:"is_draft"`
+	Mergeable      string         `json:"mergeable"`
+	DiffLoaded     bool           `json:"-"`
+	DiffText       string         `json:"diff_text"`
+	Evidence       *batchEvidence `json:"evidence,omitempty"`
+	CachedRead     bool           `json:"-"`
+}
+
+type batchEvidence struct {
+	SnapshotID string              `json:"snapshot_id"`
+	Problems   map[string][]string `json:"problems"`
+	Mode       string              `json:"mode"`
+	Stats      struct {
+		Requests int `json:"requests"`
+	} `json:"stats"`
+	Components map[string]*evidenceComponent `json:"components"`
+}
+
+type evidenceComponent struct {
+	Status    string          `json:"status"`
+	FetchedAt string          `json:"fetched_at"`
+	Object    json.RawMessage `json:"object"`
 }
 
 func enrichItemCmd(installRoot string, key Key, withDiff bool) tea.Cmd {
@@ -156,7 +187,8 @@ type applyDoneMsg struct {
 
 // applyDecisionCmd saves one decision; batchID, when set, stamps it with the batch it was made in (bin/apply defaults to "tui").
 // agentNotes, when non-empty, carries a batch proposal's notes into the ledger along with the decision saved from it; empty leaves the item's existing notes alone.
-func applyDecisionCmd(installRoot string, key Key, category, action, confidence, reason, agentNotes, by, batchID string) tea.Cmd {
+// reviewedBy records an explicit human confirmation with the save; by remains the decision author, which can be the author of an unchanged batch proposal.
+func applyDecisionCmd(installRoot string, key Key, category, action, confidence, reason, agentNotes, by, batchID, reviewedBy string) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{
 			"--number", strconv.Itoa(key.Number), "--kind", key.Kind,
@@ -176,9 +208,13 @@ func applyDecisionCmd(installRoot string, key Key, category, action, confidence,
 			args = append(args, "--agent-notes", agentNotes)
 		}
 
+		if reviewedBy != "" {
+			args = append(args, "--reviewed", "--reviewed-by", reviewedBy)
+		}
+
 		_, err := runScript(installRoot, "apply", args...)
 
-		return applyDoneMsg{key: key, err: err}
+		return applyDoneMsg{key: key, err: err, approval: reviewedBy != "", approved: []Key{key}}
 	}
 }
 

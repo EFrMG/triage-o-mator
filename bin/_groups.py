@@ -2,13 +2,12 @@
 
 import fcntl
 import json
-import os
 import re
-import tempfile
 import uuid
 from contextlib import contextmanager
 
 from _triage import DATA_DIR, REPO, now_iso
+from _storage import atomic_writer
 
 GROUPS_DIR = DATA_DIR / "groups"
 STATUSES = ("draft", "ready", "archived")
@@ -22,8 +21,10 @@ def group_path(group_id):
 
 
 def validate(group):
-    group_path(group["id"])
-    if group.get("schema_version") != 1 or group.get("repo") != REPO:
+    if not isinstance(group.get("id"), str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", group["id"]):
+        raise ValueError("invalid group ID")
+
+    if type(group.get("schema_version")) is not int or group.get("schema_version") != 1 or group.get("repo") != REPO:
         raise ValueError("group schema or repository does not match")
 
     if not isinstance(group.get("title"), str) or not group["title"].strip():
@@ -36,7 +37,7 @@ def validate(group):
     if group.get("status") not in STATUSES:
         raise ValueError("invalid group status")
 
-    if not isinstance(group.get("revision"), int) or group["revision"] < 1:
+    if type(group.get("revision")) is not int or group["revision"] < 1:
         raise ValueError("invalid revision")
 
     seen = set()
@@ -49,6 +50,12 @@ def validate(group):
             raise ValueError("duplicate member or invalid notes")
 
         seen.add(key)
+
+    if "candidate_origin" in group:
+        from _candidates import validate_origin
+
+        validate_origin(group)
+
 
 
 def load_group(group_id):
@@ -85,18 +92,9 @@ def locked():
 def save_group(group):
     validate(group)
     path = group_path(group["id"])
-    fd, name = tempfile.mkstemp(prefix=".group-", dir=GROUPS_DIR)
-    try:
-        with os.fdopen(fd, "w") as out:
-            json.dump(group, out, ensure_ascii=False, indent=2)
-            out.write("\n")
-            out.flush()
-            os.fsync(out.fileno())
-
-        os.replace(name, path)
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
+    with atomic_writer(path) as out:
+        json.dump(group, out, ensure_ascii=False, indent=2)
+        out.write("\n")
 
 
 def delete_group(group_id):

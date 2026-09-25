@@ -10,18 +10,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// rowCount is len(tabs) real tabs plus the trailing "Batches", "Groups", "Possible Duplicates", and "Switch Repo" rows.
-func rowCount() int { return len(tabs) + 4 }
+// rowCount is len(tabs) real tabs plus Batches, Groups, Possible Duplicates, Notifications, and Switch Repo.
+func rowCount() int { return len(tabs) + 5 }
 
 type sidebarModel struct {
 	selected int
 	counts   []int // len(tabs), item count per tab
 	// pairCount is the Possible Duplicates count, or -1 until that view has been computed once; batchCount and groupCount likewise until they're loaded, at startup (sidebarCountsCmd).
-	pairCount, batchCount, groupCount int
+	pairCount, batchCount, groupCount, notificationCount int
 }
 
 func newSidebar() sidebarModel {
-	return sidebarModel{counts: make([]int, len(tabs)), pairCount: -1, batchCount: -1, groupCount: -1}
+	return sidebarModel{counts: make([]int, len(tabs)), pairCount: -1, batchCount: -1, groupCount: -1, notificationCount: -1}
 }
 
 func (s *sidebarModel) RecomputeCounts(items []Item) {
@@ -64,6 +64,7 @@ func (s sidebarModel) View(focused bool) string {
 	renderRow(batchesIndex, withCount("≡ Batches", s.batchCount))
 	renderRow(groupsIndex, withCount("◇ Groups", s.groupCount))
 	renderRow(pairsIndex, withCount("≈ Possible Duplicates", s.pairCount))
+	renderRow(notificationsIndex, withCount("! Notifications", s.notificationCount))
 	b.WriteString("\n")
 	renderRow(switchRepoIndex, "⇄ Switch Repo")
 

@@ -45,6 +45,9 @@ func (m model) statusPinned() bool {
 
 // idleStatus is what the status line falls back to when a message expires: the running fetch, if any, otherwise nothing.
 func (m model) idleStatus() string {
+	if m.corpus.busy {
+		return "Corpus operation running."
+	}
 	if m.refreshing {
 		return m.refreshStatus
 	}
@@ -79,5 +82,13 @@ func (m model) onStatusTick() (tea.Model, tea.Cmd) {
 		m.statusAt = time.Now()
 	}
 
+	if m.corpus.open && m.corpus.busy && m.corpus.action == "run" && !m.corpus.observing && m.corpus.progressProblem == "" {
+		m.corpus.observing = true
+		if m.corpusObserverLifecycle == nil {
+			m.corpusObserverLifecycle = &readLifecycle{}
+		}
+		m.corpusObserverLifecycle.current = &readProcess{}
+		return m, tea.Batch(statusTick(), corpusCommand(m.installRoot, m.repo, m.corpusEpoch, m.corpus, "observe", m.corpusObserverLifecycle.current))
+	}
 	return m, statusTick()
 }

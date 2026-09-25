@@ -4,7 +4,8 @@ import csv
 import json
 import subprocess
 
-from test_fetch_similar import CheckoutTest, item
+
+from support import CheckoutTest, item
 
 
 class AgentFlowTests(CheckoutTest):
@@ -120,6 +121,7 @@ class AgentFlowTests(CheckoutTest):
         self.assertIn("body", item)
         self.assertIn("comment_bodies", item)
         self.assertEqual(item["comment_authors"], ["commenter"])
+        self.assertEqual(item["comment_dates"], ["2026-09-22T12:34:00Z"])
 
     def test_batch_diff_and_read_batch(self):
         batch_id = self.make_batch("5", "--kind", "pr", "--diff")
@@ -150,6 +152,48 @@ class AgentFlowTests(CheckoutTest):
         suggestions = json.loads(self.run_cli("next", "--json"))["suggestions"]
         self.assertTrue(any(s["who"] == "human" and "Delete finished batch" in s["what"] for s in suggestions))
         self.assertTrue(any(s["who"] == "human" and "1 would close something" in s["what"] for s in suggestions))
+
+    def test_next_offers_optional_preparation_without_fetch_or_cache_initialization(self):
+        calls = self.mock / "gh_calls.log"
+        before = calls.read_bytes()
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        content = ledger.read_bytes()
+        suggestions = json.loads(self.run_cli("next", "--json"))["suggestions"]
+        prep = [s for s in suggestions if "prompts/prepare-analysis.md" in s["do"]]
+        self.assertEqual(len(prep), 1)
+        self.assertEqual(prep[0]["who"], "agent")
+        self.assertIn("offline first", prep[0]["why"])
+        self.assertIn("request budget", prep[0]["why"])
+        self.assertEqual(calls.read_bytes(), before)
+        self.assertEqual(ledger.read_bytes(), content)
+        self.assertFalse((self.root / "data/owner/repo/cache").exists())
+
+    def test_next_does_not_offer_backlog_preparation_without_open_items(self):
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        rows = [dict(json.loads(line), state="closed") for line in ledger.read_text().splitlines()]
+        self.write_rows(ledger, rows)
+        self.assertNotIn("prompts/prepare-analysis.md", self.run_cli("next"))
+
+    def test_next_routes_retained_appeal_context_without_ledger_or_payload_reads(self):
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text("")
+        calls = self.mock / "gh_calls.log"
+        before = calls.read_bytes()
+        self.assertNotIn("prompts/review-appeal.md", self.run_cli("next"))
+
+        for directory in ("external-closures", "cache/watches"):
+            record = self.root / "data/owner/repo" / directory / "pr-99.json"
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text("unavailable retained record")
+            suggestions = json.loads(self.run_cli("next", "--json"))["suggestions"]
+            appeal = [s for s in suggestions if "prompts/review-appeal.md" in s["do"]]
+            self.assertEqual(len(appeal), 1)
+            self.assertIn("not audited", appeal[0]["why"])
+            self.assertEqual(record.read_text(), "unavailable retained record")
+            self.assertEqual(ledger.read_bytes(), b"")
+            self.assertEqual(calls.read_bytes(), before)
+            self.assertFalse((self.root / "data/owner/repo/cache/cache.json").exists())
+            record.unlink()
 
     def test_pr_without_code_review_is_suggested_for_review(self):
         self.run_cli("apply", "--number", "3", "--kind", "pr", "--category", "merge-ready", "--action", "approve-merge-candidate")
@@ -236,3 +280,27 @@ class AgentFlowTests(CheckoutTest):
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "comment-request-info", "--reason", "crash", "--by", "bob")
         row = self.ledger()[("issue", 1)]
         self.assertEqual((row["action"], row["reviewed"], row["reviewed_by"]), ("comment-request-info", False, ""))
+
+    def test_explicit_reviewer_is_separate_from_proposal_author(self):
+        args = ("apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "label-only", "--reason", "Reproduced.", "--by", "agent:alice", "--reviewed", "--reviewed-by", "bob")
+        before = self.ledger()
+        self.run_cli(*args, "--dry-run")
+        self.assertEqual(self.ledger(), before)
+
+        calls_before = (self.mock / "gh_calls.log").read_text()
+        self.run_cli(*args)
+        row = self.ledger()[("issue", 1)]
+        self.assertEqual((row["triaged_by"], row["reviewed_by"], row["reviewed"]), ("agent:alice", "bob", True))
+        self.assertEqual(row["triaged_at"], row["reviewed_at"])
+        self.assertEqual((self.mock / "gh_calls.log").read_text(), calls_before, "saving and approving must stay local")
+
+    def test_review_requires_explicit_attribution(self):
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "label-only")
+        before = self.ledger()
+        for flags in (("--approve",), ("--approve", "--by", " "), ("--reviewed-by", "bob")):
+            result = subprocess.run([str(self.root / "bin/apply"), "--number", "1", "--kind", "issue", *flags], cwd=self.root, env=self.env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.ledger(), before)
+
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--approve", "--reviewed-by", "bob")
+        self.assertEqual(self.ledger()[("issue", 1)]["reviewed_by"], "bob")

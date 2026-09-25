@@ -7,9 +7,11 @@ Usage:
     bin/similar --pairs [--min-score 0.5]
     bin/similar --query "suspend lid" [--top 20] [--min-score 0.1] [--include-closed]
 
-Prints one JSON object: the item plus a `candidates` list (number, kind, title, state, category, action, reviewed, score), best first. Candidates are the same kind as the item unless --any-kind.
+Prints one JSON object: the item plus a `candidates` list (number, kind, title, state, category, action, reviewed, score), best first. Candidates are the same kind as the item unless --any-kind. Pairs ruled out with bin/not-duplicate are excluded before --top; --include-checked retains them with their recorded verdict.
 
 --enrich also fetches the body and comments of the item and every candidate from GitHub (read-only), producing exactly the input prompts/find-duplicates.md expects. Without it, nothing leaves the machine.
+
+--diff implies --enrich and includes PR code. --cache-mode offline|cache-preferred|refresh opts enrichment into shared evidence with fixed per-item snapshot references and explicit gaps. --snapshot ID requires offline mode and every selected item in that snapshot; it never changes title-based selection or falls back to live reads. Enrichment is not supported with --pairs or --query. Even fixed-snapshot enrichment does not reassess negative verdicts; use cache candidates for explicit pinned revision comparison.
 
 --pairs instead lists every pair of open, same-kind items scoring at least --min-score (default 0.5) across the whole ledger, best first, as {"pairs": [{"score", "item", "original"}]} where `item` is the newer of the two. Pairs ruled out with bin/not-duplicate are left out unless --include-checked.
 
@@ -26,7 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 import _notdupes
 from _similar import DEFAULT_MIN_SCORE, DEFAULT_PAIR_MIN_SCORE, DEFAULT_TOP, TitleIndex
-from _triage import enrich_item, here, load_ledger
+from _triage import here, load_ledger
+from _enrichment import add_cache_arguments, validate_cache_arguments, enrich_selected
 
 
 def main():
@@ -34,23 +37,31 @@ def main():
     ap.add_argument("--kind", choices=["issue", "pr"])
     ap.add_argument("--number", type=int)
     ap.add_argument("--pairs", action="store_true", help="list likely duplicate pairs across all open items instead")
-    ap.add_argument("--include-checked", action="store_true", help="with --pairs: also list pairs already ruled out with bin/not-duplicate")
+    ap.add_argument("--include-checked", action="store_true", help="also include ruled-out item candidates or pairs, with their attributed verdict")
     ap.add_argument("--top", type=int, default=DEFAULT_TOP, help=f"max candidates (default {DEFAULT_TOP})")
     ap.add_argument("--min-score", type=float, help=f"minimum similarity 0-1 (default {DEFAULT_MIN_SCORE}, or {DEFAULT_PAIR_MIN_SCORE} with --pairs)")
     ap.add_argument("--any-kind", action="store_true", help="also compare issues against PRs")
     ap.add_argument("--query", help="rank open issues and PRs by title match against this text instead")
     ap.add_argument("--include-closed", action="store_true", help="with --query: also rank closed items")
     ap.add_argument("--enrich", action="store_true", help="fetch bodies/comments for the item and candidates (read-only GitHub calls)")
+    ap.add_argument("--diff", action="store_true", help="include PR diffs for the item and candidates; implies --enrich")
+    add_cache_arguments(ap)
     args = ap.parse_args()
+    enrich = args.enrich or args.diff
+    validate_cache_arguments(ap, args, enrich)
+    if (args.pairs or args.query is not None) and enrich:
+        ap.error("enrichment is supported only for --kind/--number, not --pairs or --query")
+
+    if args.query is not None and args.include_checked:
+        ap.error("--include-checked requires an item or --pairs; free-text search has no pair to exclude")
+    if args.top < 1:
+        ap.error("--top must be positive")
 
     ledger = load_ledger()
     index = TitleIndex(ledger)
     if args.pairs:
         min_score = DEFAULT_PAIR_MIN_SCORE if args.min_score is None else args.min_score
-        pairs = index.pairs(min_score=min_score)
-        if not args.include_checked:
-            checked = _notdupes.checked()
-            pairs = [p for p in pairs if _notdupes.pair_key(p["item"]["kind"], p["item"]["number"], p["original"]["number"]) not in checked]
+        pairs = _notdupes.TitleVerdicts().pairs(index, min_score, args.include_checked)
 
         print(json.dumps({"pairs": pairs}, ensure_ascii=False))
 
@@ -76,15 +87,20 @@ def main():
 
     rec = index.records[key]
     out = {k: rec.get(k, "") for k in ("number", "kind", "title", "state", "category", "action", "url")}
-    out["candidates"] = index.similar(key, top=args.top, min_score=args.min_score, any_kind=args.any_kind)
+    verdicts = _notdupes.TitleVerdicts()
+    out["candidates"] = verdicts.candidates(index, key, include_checked=args.include_checked,
+                                           top=args.top, min_score=args.min_score, any_kind=args.any_kind)
 
-    if args.enrich:
-        enrich_item(out)
+    if enrich:
+        enrich_selected(out, args)
         for c in out["candidates"]:
-            enrich_item(c)
+            enrich_selected(c, args)
 
-    print(json.dumps(out, ensure_ascii=False, indent=None if not args.enrich else 2))
+    print(json.dumps(out, ensure_ascii=False, indent=None if not enrich else 2))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        sys.exit(f"error: {error}")

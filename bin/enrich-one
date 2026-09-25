@@ -5,7 +5,7 @@ Fetch full body/comments (and, for PRs, diff) for a single issue/PR and print it
 Usage:
     bin/enrich-one --kind issue|pr --number N [--diff]
 
-This is the single-item counterpart to bin/batch's bulk enrichment; both share the same `enrich_item()` logic in bin/_triage.py, so there's exactly one definition of which fields we pull for an item. Intended for callers like the triage-o-mator TUI that want to lazily enrich one item at a time rather than pre-enriching a whole batch.
+The default remains bin/batch's legacy `enrich_item()` path. Explicit --cache-mode opts into the shared evidence reader, preserving available compatibility fields (including --diff) and adding diagnostics. Remaining consumers have not migrated yet.
 """
 
 import argparse
@@ -14,7 +14,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import enrich_item
+from _evidence import DEFAULT_MAX_AGE
+from _triage import REPO, enrich_item
 
 
 def main():
@@ -22,7 +23,34 @@ def main():
     ap.add_argument("--kind", choices=["issue", "pr"], required=True)
     ap.add_argument("--number", type=int, required=True)
     ap.add_argument("--diff", action="store_true", help="also fetch PR diff text")
+    ap.add_argument("--cache-mode", choices=("offline", "cache-preferred", "refresh"), help="opt into the shared evidence reader; legacy behavior is unchanged when omitted")
+    ap.add_argument("--host", default="github.com", help="explicit host for cache mode only")
+    ap.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE, help="cache freshness window in seconds")
+    ap.add_argument("--request-budget", type=int, default=100)
+    ap.add_argument("--snapshot", help="fixed evidence snapshot; requires --cache-mode offline")
+    ap.add_argument("--expected-repo", help="refuse a changed install target before any acquisition")
     args = ap.parse_args()
+
+    if args.expected_repo is not None and args.expected_repo != REPO:
+        ap.error("install repository changed; reopen the item before acquiring evidence")
+
+    if args.snapshot and args.cache_mode != "offline":
+        ap.error("--snapshot requires --cache-mode offline")
+
+    if args.cache_mode:
+        from _reader import enrich_cached
+        from _acquire import ReadFailure
+
+        try:
+            rec = enrich_cached({"number": args.number, "kind": args.kind}, args.cache_mode, host=args.host, max_age=args.max_age, budget=args.request_budget, include_diff=args.diff, snapshot_id=args.snapshot)
+        except (ValueError, OSError, TypeError, KeyError, ReadFailure) as error:
+            sys.exit(f"error: {error}")
+
+        print(json.dumps(rec, ensure_ascii=False))
+        return
+
+    if args.host != "github.com":
+        ap.error("--host requires --cache-mode; legacy enrichment is not host-aware")
 
     rec = enrich_item(
         {"number": args.number, "kind": args.kind}, include_diff=args.diff

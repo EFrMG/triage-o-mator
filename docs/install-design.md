@@ -28,6 +28,7 @@ target-repo/
     data/<owner>/<repo>/ledger.jsonl                   tracked
     data/<owner>/<repo>/groups/, not-duplicates.jsonl  tracked
     data/<owner>/<repo>/raw|batches|exports/           ignored
+    data/<owner>/<repo>/cache|local/                   ignored
     reports/<owner>/<repo>/<date>.md                   tracked
     .gitignore                               generated tracked
     .triage-install.json                     generated ignored (machine-local: where the tool lives)
@@ -35,13 +36,13 @@ target-repo/
 
 You then work from the target repo: `triage-o-mator/bin/triage-o-mator` for the TUI, `triage-o-mator/bin/next`, and so on.
 
-The rule behind what is symlinked and what is copied: **code and defaults are symlinked** so every install upgrades the moment you rebuild the tool; **policy and data are copied or created** because they belong to the target repo and are meant to be reviewed in its diffs.
+Code and shared defaults are symlinked so installs follow the built checkout. Team-owned policy and records are copied or created; machine-local cache and transaction state are ignored.
 
 ## Write access, or not
 
 `config/repo` defaults to the target's `upstream` remote when present, then its `origin`, so both a maintainer's clone and a contributor's fork need no flag: the triage record lives with the code while its GitHub reads target the original repository.
 
-**Adopted (default, you have write access).** The directory is committed to the target repo. Contributors get decisions by pulling; they hand work to maintainers by opening a normal PR that changes `triage-o-mator/data/<owner>/<repo>/ledger.jsonl` and `groups/`. Review of a triage pass is a diff review, which is what the ledger's JSON Lines format was chosen for. The installer also adds a short block to the target's `AGENTS.md` (and `CLAUDE.md` if present) so agents working in that repo find the playbook.
+**Adopted (default, you have write access).** The directory is committed to the target repo. Contributors get decisions by pulling; they hand work to maintainers by opening a normal PR that changes `triage-o-mator/data/<owner>/<repo>/ledger.jsonl` and `groups/`. Review of a triage pass is a diff review, which is what the ledger's JSON Lines format was chosen for. The installer also adds a short block to the target's `AGENTS.md`, or to `CLAUDE.md` when that is the file the repository keeps.
 
 **Solo (`--solo`, a repo you don't control).** You are usually in a fork or a plain clone. The installer writes `triage-o-mator/` to `.git/info/exclude` instead of the repo's `.gitignore`: a local, untracked ignore, so the install changes **no tracked file** of a repo that isn't yours. It skips the `AGENTS.md` block for the same reason (`--agents-md` forces it, and warns that it will show up as a local modification). You triage, and what you hand to maintainers is `bin/report` output and group packets, not commits. If the maintainers would rather ignore the directory openly, a `triage-o-mator/` line in their `.gitignore` is equivalent and visible to everyone.
 
@@ -61,10 +62,12 @@ The rule behind what is symlinked and what is copied: **code and defaults are sy
 
 This is why `triage-o-mator/.gitignore` is **generated**: the installer knows exactly which files it symlinked and lists them between markers on each run, so symlinks stay out of Git (an absolute symlink committed to a repo is broken for everyone else) while your own prompts stay in.
 
+A separate managed block ignores only `cache/` and machine-local `local/` directories. Both managed blocks are regenerated idempotently; text outside them is preserved. Malformed markers and unsupported future install versions are refused before changes. See [the evidence reference](evidence-reference.md#upgrade-and-backup) for backup limits.
+
 The checkout's `/data/` and `/reports/` ignore rules went too, once it was clear nothing could write either path there: `WORK_ROOT` is always an install and the scripts exit outside one, so the guarantee is structural rather than a gitignore entry. They had been kept as a guard for checkouts from before the cutover, and there were none left.
 
 ## Known sharp edges
 
 - **Absolute symlinks** break when the tool checkout moves or is deleted; a dangling symlink otherwise surfaces as a bare "No such file or directory". `bin/*` and the TUI should detect it and say "the triage-o-mator checkout has moved — re-run bin/install-to".
 - **Windows** has no usable symlinks without developer mode. Out of scope for now; document it.
-- **Ledger concurrency is unchanged.** Installs make sharing easier, not concurrent editing safer: `ledger.jsonl` still has a single-writer workflow (README, "Not built (yet)").
+- **Ledger concurrency is unchanged.** Installs make sharing easier, not concurrent editing safer: `ledger.jsonl` still has a single-writer workflow (README, "Not Implemented (yet)").

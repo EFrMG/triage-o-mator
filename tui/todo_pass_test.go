@@ -32,7 +32,7 @@ func TestQuitFromOpenChoiceList(t *testing.T) {
 	}
 }
 
-// The sidebar lists Batches, Groups, then Possible Duplicates, with Switch Repo alone after a blank line, and loads the Batches and Groups counts at startup.
+// The sidebar lists Batches, Groups, Possible Duplicates and Notifications, with Switch Repo alone after a blank line, and loads the Batches and Groups counts at startup.
 func TestSidebarOrderAndStartupCounts(t *testing.T) {
 	root := batchFixture(t)
 	data, err := os.ReadFile(filepath.Join("..", "bin", "group"))
@@ -49,11 +49,20 @@ func TestSidebarOrderAndStartupCounts(t *testing.T) {
 
 	view := m.sidebar.View(false)
 	batches, groups, pairs, repo := strings.Index(view, "Batches (1)"), strings.Index(view, "Groups (0)"), strings.Index(view, "Possible Duplicates"), strings.Index(view, "Switch Repo")
-	if batches < 0 || !(batches < groups && groups < pairs && pairs < repo) {
+	notifications := strings.Index(view, "Notifications")
+	if batches < 0 || !(batches < groups && groups < pairs && pairs < notifications && notifications < repo) {
 		t.Fatalf("sidebar order is off:\n%s", view)
 	}
 
-	if !strings.Contains(view, "Possible Duplicates\n\n") {
+	// The Notifications row may carry an unread count, so check the line after it rather than an exact suffix.
+	lines := strings.Split(view, "\n")
+	row := -1
+	for i, line := range lines {
+		if strings.Contains(line, "Notifications") {
+			row = i
+		}
+	}
+	if row < 0 || row+1 >= len(lines) || strings.TrimSpace(lines[row+1]) != "" {
 		t.Fatalf("Switch Repo should follow a blank line:\n%s", view)
 	}
 }

@@ -304,16 +304,7 @@ func groupFixture(t *testing.T) (string, Group) {
 		}
 	}
 
-	for _, name := range []string{"group", "_groups.py", "_triage.py", "_install.py"} {
-		data, err := os.ReadFile(filepath.Join("..", "bin", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if err := os.WriteFile(filepath.Join(root, "bin", name), data, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
+	copyFixtureScripts(t, root, "group")
 
 	if err := os.WriteFile(filepath.Join(root, MarkerName), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)

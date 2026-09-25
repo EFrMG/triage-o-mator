@@ -20,6 +20,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case notificationsMsg:
+		return m.finishNotifications(msg)
+	case notificationDoneMsg:
+		return m.finishNotificationChange(msg)
+	case actionHistoryMsg:
+		return m.finishActionHistory(msg)
+	case attentionMsg:
+		return m.finishAttention(msg)
+	case corpusMsg:
+		return m.finishCorpus(msg)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true
@@ -66,19 +76,35 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onStatusTick()
 
 	case fetchSyncDoneMsg:
+		if msg.repo != "" && msg.repo != m.repo {
+			return m, nil
+		}
 		m.refreshing = false
 		if msg.err != nil {
 			m.failErr("Couldn't fetch from GitHub", msg.err)
 
 			return m, nil
 		}
+		if msg.trackingErr == nil {
+			m.sidebar.notificationCount = msg.unreadTotal
+		} else {
+			m.recordError("Tracked comment check failed", msg.trackingErr)
+		}
 
 		// A confirmation waiting for its second key press keeps the status line; the sync result isn't worth hiding it for.
 		if !m.statusPinned() {
 			m.status = "Synced. Loading ledger…"
+			if msg.trackingErr != nil {
+				m.status = "Ledger synced; tracked comment check failed. ! shows details."
+			}
 		}
-
+		if m.notifications.open {
+			next, notificationCmd := m.openNotifications()
+			return next, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), notificationCmd)
+		}
 		return m, reloadLedgerCmd(m.installRoot, m.repo)
+	case trackDoneMsg:
+		return m.finishTracking(msg)
 
 	case ledgerReloadedMsg:
 		if msg.repo != m.repo {
@@ -94,6 +120,11 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.items = msg.items
 		m.sidebar.RecomputeCounts(m.items)
 		m.refreshActiveList()
+		if m.form.saved && !m.form.dirty {
+			if it, ok := m.findItem(m.detail.key); ok {
+				m.form.LoadItem(it)
+			}
+		}
 		if m.status == "Synced. Loading ledger…" {
 			m.status = "Ready."
 		}
@@ -125,6 +156,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case enrichedMsg:
+		if m.detail.blockLegacy || m.detail.enriched.Evidence != nil {
+			return m, nil
+		}
+
 		m.detail.OnEnriched(msg)
 		if msg.err != nil && m.detail.key == msg.key {
 			// The item says so where its content would be; ! has the details.
@@ -133,6 +168,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Landed on the Diff tab while the item was still loading: fetch the diff now.
 		return m, m.diffIfNeeded()
+	case evidenceReadMsg:
+		return m.finishEvidenceRead(msg)
 
 	case applyDoneMsg:
 		if msg.err != nil {
@@ -146,7 +183,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		if !msg.approval {
+		if !msg.approval || msg.snapshot != nil {
 			if draft, ok := m.drafts[msg.key]; ok && (msg.snapshot == nil || draft == *msg.snapshot) {
 				delete(m.drafts, msg.key)
 			}
@@ -159,14 +196,25 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.status = "Saved."
-		} else {
+		}
+
+		if msg.approval {
 			m.status = "Approved."
+			if msg.snapshot != nil {
+				m.status = "Saved and approved."
+			}
 			if msg.count > 1 {
 				m.status = fmt.Sprintf("Approved %d decisions.", msg.count)
 			}
 
 			m.clearTicks()
 			m.lastStep = msg.approved
+			for _, k := range msg.approved {
+				if k == m.detail.key && !m.form.dirty && !m.form.proposed {
+					// A clean form can follow our own approval on reload; drafts keep the revision they were based on.
+					m.form.saved = true
+				}
+			}
 			// Until the ledger reload lands, a u must already see these as approved.
 			for i := range m.items {
 				for _, k := range msg.approved {
@@ -186,6 +234,9 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Modal states intercept every key, in priority order, before any global keybinding; otherwise, typing "r" (or "q", "a", "h", "?", ...) into a text field would trigger refresh, quit, approve, back, etc. instead of being typed. ForceQuit is the one exception: it must always work.
 	if key.Matches(msg, keys.ForceQuit) {
+		m.notificationsLifecycle.stop()
+		m.actionHistoryLifecycle.stop()
+		m.attentionLifecycle.stop()
 		return m, tea.Quit
 	}
 
@@ -199,6 +250,22 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.lastError.open {
 		return m.handleErrorKey(msg)
+	}
+	if m.notificationPR.open {
+		return m.handleNotificationPRKey(msg)
+	}
+
+	if m.attention.open {
+		return m.handleAttentionKey(msg)
+	}
+	if m.actionHistory.open {
+		return m.handleActionHistoryKey(msg)
+	}
+	if m.notifications.open {
+		return m.handleNotificationsKey(msg)
+	}
+	if m.corpus.open {
+		return m.handleCorpusKey(msg)
 	}
 
 	if (key.Matches(msg, keys.Yank) || key.Matches(msg, keys.YankAll)) && !m.typingText() && !m.themePicker.open && !m.editingRepo {
@@ -234,7 +301,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleDupKey(msg)
 	}
 
-	if m.confirmSave && !key.Matches(msg, keys.Save) && !m.typingReason() {
+	if m.confirmSave && !key.Matches(msg, keys.Save, keys.SaveApprove) && !m.typingReason() {
 		m.confirmSave = false
 		m.status = ""
 	}
@@ -315,6 +382,21 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, keys.Refresh), key.Matches(msg, keys.RefreshFull):
 		return m.startRefresh(key.Matches(msg, keys.RefreshFull))
+	case key.Matches(msg, keys.Corpus):
+		if m.noInstall() {
+			return m, nil
+		}
+		m.corpus.open = true
+		if !m.corpus.busy {
+			m.corpus.operation++
+			if m.corpusObserverLifecycle == nil {
+				m.corpusObserverLifecycle = &readLifecycle{}
+			}
+			m.corpusObserverLifecycle.stop()
+			m.corpusObserverLifecycle.current = &readProcess{}
+			return m, corpusCommand(m.installRoot, m.repo, m.corpusEpoch, m.corpus, "restore", m.corpusObserverLifecycle.current)
+		}
+		return m, nil
 	case key.Matches(msg, keys.Group):
 		return m.openGroups()
 	case key.Matches(msg, keys.Search) && m.focus == FocusList && m.listReady:
@@ -342,6 +424,10 @@ func (m model) typingReason() bool {
 
 // startRefresh fetches from GitHub and syncs, unless a fetch is already running. r means this on every screen.
 func (m model) startRefresh(full bool) (tea.Model, tea.Cmd) {
+	if m.corpus.busy {
+		m.status = "Wait for or cancel the corpus operation before refreshing."
+		return m, nil
+	}
 	if m.refreshing {
 		return m, nil
 	}
@@ -354,7 +440,7 @@ func (m model) startRefresh(full bool) (tea.Model, tea.Cmd) {
 
 	m.refreshStatus = m.status
 
-	return m, fetchSyncCmd(m.installRoot, full)
+	return m, fetchSyncCmd(m.installRoot, m.repo, full)
 }
 
 // requestQuit quits immediately if nothing would be lost, otherwise asks for a second explicit quit before discarding in-memory drafts.
@@ -704,6 +790,10 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if li, ok := m.list.SelectedItem().(listItem); ok {
 			return m.openDuplicatesFor(li.Key(), true)
 		}
+	case key.Matches(msg, keys.Track):
+		if li, ok := m.list.SelectedItem().(listItem); ok {
+			return m.startTracking(li.Key())
+		}
 	case key.Matches(msg, keys.Delete):
 		if m.activeBatch != "" {
 			return m.requestBatchRemove()
@@ -717,6 +807,13 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleReasonKey handles keys while typing the reason: printable keys are text, so only field movement, save, and Esc act.
 func (m model) handleReasonKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Letter shortcuts are text here. Enter saves and approves the completed decision; Ctrl-S remains an optional save-for-review alias.
+	save := msg.String() == "ctrl+s" || key.Matches(msg, keys.Confirm)
+	if m.confirmSave && !save {
+		m.confirmSave = false
+		m.status = ""
+	}
+
 	switch {
 	case key.Matches(msg, keys.Cancel):
 		m.goBack()
@@ -730,8 +827,9 @@ func (m model) handleReasonKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.form.PrevField()
 
 		return m, nil
-	// The reason is the form's last field, so Enter there submits, like Ctrl-S.
-	case key.Matches(msg, keys.Save), key.Matches(msg, keys.Confirm):
+	case key.Matches(msg, keys.Confirm):
+		return m.requestDecisionSave(true)
+	case msg.String() == "ctrl+s":
 		return m.requestSave()
 	}
 
@@ -807,6 +905,8 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail.HalfPageUp()
 	case key.Matches(msg, keys.Save):
 		return m.requestSave()
+	case key.Matches(msg, keys.SaveApprove):
+		return m.requestDecisionSave(true)
 	case key.Matches(msg, keys.Approve):
 		return m.requestApprove()
 	case key.Matches(msg, keys.Undo):
@@ -815,6 +915,8 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, keys.MarkDup):
 		return m.openDuplicates()
+	case key.Matches(msg, keys.Track):
+		return m.startTracking(m.detail.key)
 	case key.Matches(msg, keys.QuickGroup):
 		return m.quickAddLastGroup([]Key{m.detail.key})
 	case key.Matches(msg, keys.Open):
@@ -843,8 +945,18 @@ func formFieldIsEnum(f formField) bool {
 	return f == fieldCategory || f == fieldAction || f == fieldConfidence
 }
 
-// requestSave saves the decision, but first warns (and requires a second Ctrl-S) when the fields are still the untouched defaults or the reason is empty, so a stray keypress can't record "bug / label-only / low" with no justification.
+// requestSave saves the decision, but first warns (and requires a repeated save action) when the fields are still the untouched defaults or the reason is empty, so a stray keypress can't record "bug / label-only / low" with no justification.
 func (m model) requestSave() (tea.Model, tea.Cmd) {
+	return m.requestDecisionSave(false)
+}
+
+func (m model) requestDecisionSave(approve bool) (tea.Model, tea.Cmd) {
+	if approve && strings.TrimSpace(m.reviewer) == "" {
+		m.fail("Can't approve without a reviewer name. Set git config user.name and reopen the TUI.")
+
+		return m, nil
+	}
+
 	if bad := m.form.InvalidValues(); bad != "" {
 		m.fail("Can't save " + bad + ": not in config/taxonomy.json. Pick a value first.")
 
@@ -860,31 +972,43 @@ func (m model) requestSave() (tea.Model, tea.Cmd) {
 		problems = append(problems, "no reason")
 	}
 
-	if len(problems) > 0 && !m.confirmSave {
+	if len(problems) > 0 && (!m.confirmSave || m.confirmSaveApproval != approve) {
 		m.confirmSave = true
+		m.confirmSaveApproval = approve
 		msg := strings.Join(problems, ", ")
-		m.status = strings.ToUpper(msg[:1]) + msg[1:] + ": Ctrl-S again to save anyway."
+		action := "s again to save anyway."
+		if m.typingReason() {
+			action = "Ctrl-S again to save for review anyway."
+		}
+		if approve {
+			action = "S again to save and approve anyway."
+			if m.typingReason() {
+				action = "Enter again to save and approve anyway."
+			}
+		}
+
+		m.status = strings.ToUpper(msg[:1]) + msg[1:] + ": " + action
 
 		return m, nil
 	}
 
 	m.confirmSave = false
 
-	return m, m.saveDecisionCmd()
+	return m, m.saveDecisionCmd(approve)
 }
 
 // requestApprove approves the saved decision. bin/apply --approve ignores the form, so unsaved edits need a second press to make clear they won't be part of what gets approved.
 func (m model) requestApprove() (tea.Model, tea.Cmd) {
 	it, ok := m.findItem(m.detail.key)
 	if !ok || it.Untriaged() {
-		m.status = "Nothing to approve yet: save a decision with Ctrl-S first."
+		m.status = "Nothing to approve yet: s saves for review; S saves and approves."
 
 		return m, nil
 	}
 
 	if m.form.dirty && !m.confirmApprove {
 		m.confirmApprove = true
-		m.status = fmt.Sprintf("Unsaved edits won't be approved. Press a again to approve the saved %s/%s, or Ctrl-S to save first.", it.Category, it.Action)
+		m.status = fmt.Sprintf("Unsaved edits won't be approved. Press a again to approve the saved %s/%s, or S to save and approve your edits.", it.Category, it.Action)
 
 		return m, nil
 	}
@@ -894,9 +1018,20 @@ func (m model) requestApprove() (tea.Model, tea.Cmd) {
 	return m, approveCmd(m.installRoot, m.detail.key, m.reviewer)
 }
 
-func (m model) saveDecisionCmd() tea.Cmd {
+func (m model) saveDecisionCmd(approve bool) tea.Cmd {
 	snapshot := m.form.Snapshot()
-	cmd := applyDecisionCmd(m.installRoot, m.detail.key, m.form.Category(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, m.reviewer, m.activeBatch)
+	by, reviewedBy := m.reviewer, ""
+	if approve {
+		reviewedBy = m.reviewer
+		if m.form.proposed && snapshot == m.form.proposalSnapshot {
+			by = m.form.proposalBy
+			if by == "" {
+				by = "agent"
+			}
+		}
+	}
+
+	cmd := applyDecisionCmd(m.installRoot, m.detail.key, m.form.Category(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, by, m.activeBatch, reviewedBy)
 
 	return func() tea.Msg { msg := cmd().(applyDoneMsg); msg.snapshot = &snapshot; return msg }
 }

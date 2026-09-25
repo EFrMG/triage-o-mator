@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 # Re-exported: bin/ scripts and bin/_groups.py import now_iso and REPO_RE from here.
 from _install import CODE_ROOT, REPO_RE, WORK_ROOT, now_iso, require_install  # noqa: F401
+from _storage import atomic_writer
 
 # Every script works on one repository's triage data, which only an install has.
 require_install(WORK_ROOT)
@@ -135,7 +136,7 @@ def load_jsonl(path):
 def save_jsonl(path, records, field_order=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     order = field_order or FIELDS
-    with path.open("w") as f:
+    with atomic_writer(path) as f:
         for rec in records:
             ordered = {k: rec.get(k, "") for k in order}
             # Preserve any extra fields (e.g. body, diff stats) not in the canonical order, appended after it, so nothing is silently lost.
@@ -228,5 +229,6 @@ def enrich_item(rec, include_diff=False):
     rec["body"] = data.get("body", "")
     rec["comment_bodies"] = [c.get("body", "") for c in comments]
     rec["comment_authors"] = [(c.get("author") or {}).get("login", "") for c in comments]
+    rec["comment_dates"] = [c.get("createdAt") or "" for c in comments]
 
     return rec

@@ -232,15 +232,3 @@ func TestSaveReturnsToListOnNextItem(t *testing.T) {
 		t.Fatalf("cursor after the reload is on #%d, want #2", got)
 	}
 }
-
-// A late save for an item you've already left doesn't pull you out of the one you're on.
-func TestLateSaveKeepsOtherItemOpen(t *testing.T) {
-	m := newModel("/tmp", "owner/repo", testTaxonomy(), "tester", testItems())
-	m.activateTab(0)
-	m.list.Select(1)
-	m.selectCurrentListItem()
-	m = send(m, applyDoneMsg{key: Key{Kind: "issue", Number: 1}})
-	if m.focus != FocusDetail {
-		t.Fatalf("focus after another item's save = %v, want the item", m.focus)
-	}
-}

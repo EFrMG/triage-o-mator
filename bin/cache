@@ -1,0 +1,373 @@
+#!/usr/bin/env python3
+"""Initialize, inspect, or acquire selected-item evidence. REST GETs and one fixed GraphQL query; never changes the ledger."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _triage import REPO
+from _cache import EvidenceCache
+from _evidence import DEFAULT_MAX_AGE
+from _evidence import repository
+from _acquire import PROFILES, ReadFailure
+from _reader import read_evidence
+from _jobs import inspect_jobs
+from _storage import locked
+
+
+def read_json(path):
+    def pairs(values):
+        result = {}
+        for key, value in values:
+            if key in result:
+                raise ValueError(f"duplicate JSON field: {key}")
+
+            result[key] = value
+
+        return result
+
+    def constant(value):
+        raise ValueError(f"invalid JSON constant: {value}")
+
+    return json.loads(Path(path).read_text(encoding="utf-8"), object_pairs_hook=pairs, parse_constant=constant)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", default="github.com", help="explicit cache namespace host (default: github.com; not inferred from gh login)")
+    parser.add_argument("--expected-repo", help="refuse a changed install target before any operation")
+    commands = parser.add_subparsers(dest="command", required=True)
+    init = commands.add_parser("init", help="initialize versioned local cache metadata; existing data is not migrated or deleted")
+    init.add_argument("--dry-run", action="store_true", help="validate and preview without creating files or locks")
+    commands.add_parser("usage", help="report local cache bytes and acquisition limit offline")
+    select = commands.add_parser("select", help="remember the dataset for offline comparison and agent handoff")
+    select.add_argument("corpus_id")
+    handoff = commands.add_parser("handoff", help="show the selected dataset, scope, gaps and offline commands")
+    handoff.add_argument("--corpus")
+    commands.add_parser("status", help="validate stored snapshots and print coverage, not freshness or approval")
+    commands.add_parser("rebuild-index", help="verify all immutable evidence and rebuild current-item pointers offline")
+    commands.add_parser("jobs", help="inspect validated page-job progress and persisted cooldowns offline")
+    for name in ("track-add", "track-remove", "track-read", "track-list", "track-check"):
+        command = commands.add_parser(name, help="manage or check local issue/PR comment notifications")
+        if name in ("track-add", "track-remove", "track-read"):
+            command.add_argument("--kind", choices=("issue", "pr"), required=True)
+            command.add_argument("--number", type=int, required=True)
+        if name == "track-read":
+            command.add_argument("--checked-at", required=True)
+            command.add_argument("--new-count", type=int, required=True)
+        if name in ("track-add", "track-check"):
+            command.add_argument("--request-budget", type=int, default=100)
+        if name == "track-list":
+            command.add_argument("--offset", type=int, default=0)
+            command.add_argument("--limit", type=int, default=20)
+    commands.add_parser("notification-state", help="read local presentation state for retained notifications")
+    for name in ("notification-view", "notification-dismiss"):
+        command = commands.add_parser(name, help="mark a retained notification viewed or dismiss it locally")
+        command.add_argument("--source", choices=("watch", "action"), required=True)
+        command.add_argument("--number", type=int, required=True)
+        command.add_argument("--checkpoint", required=True)
+    commands.add_parser("import-inventory", help="import a versioned raw inventory offline; no ledger or sync checkpoint changes")
+    show = commands.add_parser("show", help="validate one immutable snapshot and its objects, then print its manifest")
+    show.add_argument("snapshot_id")
+    catalog = commands.add_parser("discover", help="bounded offline inventory candidates or saved corpus plans; no payload audit")
+    catalog.add_argument("--kind", choices=("inventories", "corpora"), required=True)
+    catalog.add_argument("--offset", type=int, default=0)
+    catalog.add_argument("--limit", type=int, default=20)
+    catalog.add_argument("--checkpoint", help="catalog membership token; required beyond the first page")
+    from _evidence import COMPONENTS
+
+    from _search import SEARCH_COMPONENTS
+
+    search = commands.add_parser("search", help="bounded offline literal source search; not duplicate classification")
+    scope = search.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--snapshot")
+    scope.add_argument("--corpus")
+    search.add_argument("--query", required=True)
+    search.add_argument("--component", choices=SEARCH_COMPONENTS, required=True)
+    search.add_argument("--offset", type=int, default=0)
+    search.add_argument("--limit", type=int, default=20)
+    search.add_argument("--checkpoint")
+    search.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE)
+
+    candidates = commands.add_parser("candidates", help="offline PR candidate sets from pinned discovery signals; never duplicate verdicts")
+    scope = candidates.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--snapshot")
+    scope.add_argument("--corpus")
+    candidates.add_argument("--offset", type=int, default=0)
+    candidates.add_argument("--limit", type=int, default=20)
+    candidates.add_argument("--checkpoint")
+    candidates.add_argument("--as-of")
+    candidates.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE)
+    candidates.add_argument("--title-threshold", type=float, default=0.8)
+    candidates.add_argument("--max-frequency", type=int, default=10)
+    candidates.add_argument("--compact", action="store_true", help="summarize all-scope diagnostics and bound selected pair previews")
+
+    for name in ("list", "chunk"):
+        command = commands.add_parser(name, help="bounded offline snapshot metadata" if name == "list" else "bounded offline component text from a fixed snapshot")
+        command.add_argument("--snapshot", required=True)
+        command.add_argument("--offset", type=int, default=0)
+        command.add_argument("--limit", type=int, default=20)
+        command.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE)
+        if name == "chunk":
+            command.add_argument("--kind", choices=("issue", "pr"), required=True)
+            command.add_argument("--number", type=int, required=True)
+            command.add_argument("--component", choices=sorted(COMPONENTS), required=True)
+            command.add_argument("--byte-offset", type=int, default=0)
+            command.add_argument("--max-bytes", type=int, default=16384)
+    corpus_create = commands.add_parser("corpus-create", help="freeze an offline selection from an imported full inventory snapshot")
+    corpus_create.add_argument("--snapshot", required=True)
+    corpus_create.add_argument("--scope", choices=("open-prs", "open-issues", "open-items"), default="open-prs")
+    corpus_create.add_argument("--profile", choices=PROFILES, default="pr-comparison")
+    corpus_create.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE)
+    corpus_create.add_argument("--reuse-corpus", help="freeze reusable item references from a prior dataset; acquisition rechecks current revisions")
+    corpus_list = commands.add_parser("corpus-list", help="page corpus metadata offline; continuation is guarded against progress changes")
+    corpus_list.add_argument("corpus_id")
+    corpus_list.add_argument("--offset", type=int, default=0)
+    corpus_list.add_argument("--limit", type=int, default=20)
+    corpus_list.add_argument("--checkpoint", help="expected checkpoint from a previous page; required for nonzero offset")
+    for name in ("corpus-status", "corpus-progress", "corpus-run"):
+        command = commands.add_parser(name, help="inspect frozen membership/progress offline" if name == "corpus-status" else "bounded offline checkpoint metadata (not a payload audit)" if name == "corpus-progress" else "acquire/resume a frozen selection with one shared request budget")
+        command.add_argument("corpus_id")
+        if name == "corpus-run":
+            command.add_argument("--request-budget", type=int, default=100)
+            command.add_argument("--item-limit", type=int, help="maximum members attempted in this run")
+            command.add_argument("--keep-complete", action="store_true", help="continue unfinished members without refreshing completed pinned evidence, even when old")
+            command.add_argument("--compact", action="store_true", help="return bounded checkpoint metadata, not a final payload audit")
+            command.add_argument("--bulk", action="store_true", help="batch backlog comments, files, and closing links through GraphQL and PR code through one Git fetch")
+
+    for name in ("attention-list", "attention-read", "attention-source"):
+        command = commands.add_parser(name, help="bounded offline watch attention reader; never acknowledges or acquires")
+        command.add_argument("--checkpoint")
+        if name != "attention-list":
+            command.add_argument("--number", type=int, required=True)
+            command.add_argument("--section", choices=("context", "history", "references") if name == "attention-read" else ("context", "history"), required=True)
+            command.add_argument("--entry", required=name == "attention-source")
+        if name == "attention-source":
+            command.add_argument("--reference", type=int, default=0)
+            command.add_argument("--byte-offset", type=int, default=0)
+            command.add_argument("--max-bytes", type=int, default=4096)
+        else:
+            command.add_argument("--offset", type=int, default=0)
+            command.add_argument("--limit", type=int, default=10)
+
+    for name in ("action-list", "action-read", "action-source"):
+        command = commands.add_parser(name, help="bounded offline imported-action history; no enrollment, acknowledgment or acquisition")
+        command.add_argument("--checkpoint")
+        if name != "action-list":
+            command.add_argument("--number", type=int, required=True)
+            command.add_argument("--entry", required=name == "action-source")
+        if name == "action-read":
+            command.add_argument("--section", choices=("context", "entries", "sources"), required=True)
+        if name == "action-source":
+            command.add_argument("--reference", type=int, default=0, help="source index; -1 reads the complete attributed entry without a payload audit")
+            command.add_argument("--byte-offset", type=int, default=0)
+            command.add_argument("--max-bytes", type=int, default=4096)
+        else:
+            command.add_argument("--offset", type=int, default=0)
+            command.add_argument("--limit", type=int, default=10)
+
+    for action in ("import", "show"):
+        command = commands.add_parser("closure-" + action, help="offline external closure history; never changes watches, holds or decisions")
+        command.add_argument("--number", type=int, required=True)
+        if action == "import":
+            from _external_closures import KINDS
+
+            command.add_argument("--snapshot", required=True)
+            command.add_argument("--by", required=True)
+            command.add_argument("--claim", required=True, help="JSON claim file; attributed explanation, not authenticated provenance")
+            command.add_argument("--closure-event", type=int)
+            command.add_argument("--comment", type=int, action="append", default=[])
+            command.add_argument("--kind", choices=KINDS, default="import")
+            command.add_argument("--predecessor")
+            command.add_argument("--reason")
+            command.add_argument("--checkpoint", help="full current history checksum; required for changes to existing history")
+
+    for name in ("watch-enroll", "watch-show", "watch-capture", "watch-poll", "watch-status", "watch-history", "watch-source"):
+        command = commands.add_parser(name, help="explicit closed-PR watch; saved observations are not acknowledgment or authority")
+        command.add_argument("--number", type=int, required=True)
+        if name == "watch-enroll":
+            command.add_argument("--snapshot", required=True)
+            command.add_argument("--by", required=True)
+            command.add_argument("--closure-at")
+            command.add_argument("--closure-comment", type=int)
+            command.add_argument("--closure-event", type=int)
+            command.add_argument("--survivor", type=int)
+            command.add_argument("--provenance", help="operator-supplied description; omitted means unknown")
+        if name in ("watch-capture", "watch-poll"):
+            command.add_argument("--request-budget", type=int, default=100)
+        if name == "watch-poll":
+            continuation = command.add_mutually_exclusive_group()
+            continuation.add_argument("--checkpoint", help="current watch token for continuing an unfinished poll")
+            continuation.add_argument("--restart", action="store_true", help="explicitly restart with fresh acquisition; retained observations remain")
+        if name in ("watch-history", "watch-source"):
+            command.add_argument("--checkpoint")
+            command.add_argument("--entry", required=name == "watch-source", help="source revision ID; history then pages its raw references")
+        if name == "watch-history":
+            command.add_argument("--offset", type=int, default=0)
+            command.add_argument("--limit", type=int, default=20)
+        if name == "watch-source":
+            command.add_argument("--reference", type=int, default=0)
+            command.add_argument("--byte-offset", type=int, default=0)
+            command.add_argument("--max-bytes", type=int, default=4096)
+
+    for name in ("read", "fetch"):
+        command = commands.add_parser(name, help="read selected evidence offline" if name == "read" else "acquire selected evidence using read-only GitHub requests")
+        command.add_argument("--kind", choices=("issue", "pr"), required=True)
+        command.add_argument("--number", type=int, required=True)
+        command.add_argument("--profile", choices=PROFILES, default="discussion")
+        command.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE, help="freshness window in seconds (default: 86400)")
+        if name == "read":
+            command.add_argument("--snapshot", help="read this immutable snapshot, never latest or GitHub")
+        if name == "fetch":
+            command.add_argument("--mode", choices=("cache-preferred", "refresh"), default="cache-preferred")
+            command.add_argument("--request-budget", type=int, default=100)
+
+    args = parser.parse_args()
+
+    if not REPO:
+        parser.error("config/repo is required")
+
+    if args.expected_repo is not None and args.expected_repo != REPO:
+        parser.error("install repository changed; reopen the corpus menu before continuing")
+
+    try:
+        cache = EvidenceCache(repository(REPO, host=args.host))
+        if args.command == "usage":
+            result = cache.usage()
+        elif args.command.startswith("track-"):
+            from _tracked import add, remove, mark_read, listing, check
+
+            if args.command == "track-add":
+                result = add(cache, args.kind, args.number, args.request_budget)
+            elif args.command == "track-remove":
+                result = remove(cache, args.kind, args.number)
+            elif args.command == "track-read":
+                result = mark_read(cache, args.kind, args.number, args.checked_at, args.new_count)
+            elif args.command == "track-list":
+                result = listing(cache, args.offset, args.limit)
+            else:
+                result = check(cache, args.request_budget)
+        elif args.command.startswith("notification-"):
+            from _notification_state import change, listing
+
+            result = listing(cache) if args.command == "notification-state" else change(cache, args.source, args.number, args.command.removeprefix("notification-"), args.checkpoint)
+        elif args.command in ("select", "handoff"):
+            from _dataset import select, handoff
+
+            result = select(cache, args.corpus_id) if args.command == "select" else handoff(cache, args.corpus)
+        elif args.command.startswith("closure-"):
+            from _closure_store import import_closure, inspect
+
+            if args.command == "closure-show":
+                result = inspect(cache, args.number)
+            else:
+                result = import_closure(cache, args.number, args.snapshot, args.by, read_json(args.claim),
+                                        event=args.closure_event, comments=args.comment, kind=args.kind,
+                                        predecessor=args.predecessor, reason=args.reason, checkpoint=args.checkpoint)
+        elif args.command.startswith("action-"):
+            from _action_history import listing, read_page, source
+
+            if args.command == "action-list":
+                result = listing(cache, args.offset, args.limit, args.checkpoint)
+            elif args.command == "action-read":
+                result = read_page(cache, args.number, args.section, args.offset, args.limit, args.checkpoint, args.entry)
+            else:
+                result = source(cache, args.number, args.entry, args.reference, args.checkpoint, args.byte_offset, args.max_bytes)
+        elif args.command.startswith("attention-"):
+            from _attention import listing, read_page, source
+
+            if args.command == "attention-list":
+                result = listing(cache, args.offset, args.limit, args.checkpoint)
+            elif args.command == "attention-read":
+                result = read_page(cache, args.number, args.section, args.offset, args.limit, args.checkpoint, args.entry)
+            else:
+                result = source(cache, args.number, args.section, args.entry, args.reference, args.checkpoint, args.byte_offset, args.max_bytes)
+        elif args.command.startswith("watch-"):
+            from _watch import enroll, inspect, capture
+
+            if args.command == "watch-enroll":
+                result = enroll(cache, args.number, args.snapshot, args.by, args.closure_at, args.closure_comment, args.closure_event, args.survivor, args.provenance)
+            elif args.command == "watch-show":
+                result = inspect(cache, args.number)
+            elif args.command == "watch-capture":
+                result = capture(cache, args.number, args.request_budget)
+            elif args.command in ("watch-poll", "watch-status"):
+                from _watch_poll import poll, status
+
+                result = poll(cache, args.number, args.request_budget, args.checkpoint, args.restart) if args.command == "watch-poll" else status(cache, args.number)
+            else:
+                from _watch_history import history, source
+
+                if args.command == "watch-history":
+                    result = history(cache, args.number, args.offset, args.limit, args.checkpoint, args.entry)
+                else:
+                    result = source(cache, args.number, args.entry, args.reference, args.checkpoint, args.byte_offset, args.max_bytes)
+        elif args.command == "candidates":
+            from _candidates import compact_report, discover
+
+            result = discover(cache, args.snapshot, args.corpus, args.offset, args.limit, args.checkpoint,
+                              args.max_age, args.as_of, args.title_threshold, args.max_frequency)
+            if args.compact:
+                result = compact_report(result)
+        elif args.command == "search":
+            from _search import search
+
+            result = search(cache, args.query, args.component, args.snapshot, args.corpus,
+                            args.offset, args.limit, args.checkpoint, args.max_age)
+        elif args.command == "discover":
+            from _catalog import discover
+
+            result = discover(cache, args.kind, args.offset, args.limit, args.checkpoint)
+        elif args.command in ("list", "chunk"):
+            from _chunks import listing, read
+
+            if args.command == "list":
+                result = listing(cache, args.snapshot, args.offset, args.limit, args.max_age)
+            else:
+                result = read(cache, args.snapshot, args.kind, args.number, args.component,
+                              args.offset, args.limit, args.byte_offset, args.max_bytes, args.max_age)
+        elif args.command.startswith("corpus-"):
+            from _corpus import create, inspect, progress, run
+
+            if args.command == "corpus-list":
+                from _chunks import corpus_listing
+
+                result = corpus_listing(cache, args.corpus_id, args.offset, args.limit, args.checkpoint)
+            elif args.command == "corpus-create":
+                result = create(cache, args.snapshot, args.scope, args.profile, args.max_age, args.reuse_corpus)
+            elif args.command == "corpus-status":
+                result = inspect(cache, args.corpus_id)
+            elif args.command == "corpus-progress":
+                result = progress(cache, args.corpus_id)
+            else:
+                result = run(cache, args.corpus_id, args.request_budget, compact=args.compact, keep_complete=args.keep_complete, item_limit=args.item_limit, bulk=args.bulk)
+        elif args.command == "init":
+            result = cache.initialize(dry_run=args.dry_run)
+        elif args.command == "status":
+            result = cache.status()
+        elif args.command == "show":
+            result = cache.load(args.snapshot_id)
+        elif args.command == "rebuild-index":
+            result = cache.rebuild_index()
+        elif args.command == "jobs":
+            if cache.metadata() is None:
+                result = inspect_jobs(cache)
+            else:
+                with locked(cache.path("acquisition")):
+                    result = inspect_jobs(cache)
+        elif args.command == "import-inventory":
+            from _inventory import import_inventory
+
+            result = import_inventory(cache)
+        else:
+            result = read_evidence(args.kind, args.number, profile=args.profile, mode=getattr(args, "mode", "offline"), host=args.host, max_age=args.max_age, budget=getattr(args, "request_budget", 100), snapshot_id=getattr(args, "snapshot", None))
+
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    except (ValueError, OSError, TypeError, KeyError, ReadFailure) as error:
+        sys.exit(f"error: {error}")
+
+
+if __name__ == "__main__":
+    main()

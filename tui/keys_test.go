@@ -11,11 +11,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// openFixtureItem opens #1 from Untriaged Issues in the batch fixture, on its content.
+// openFixtureItem opens #1 from Untriaged in the batch fixture, on its content.
 func openFixtureItem(t *testing.T) model {
 	t.Helper()
 	m := batchModel(t, batchFixture(t))
-	m.activateTab(0)
+	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
 
 	return m
@@ -361,7 +361,7 @@ func TestGroupsOpenFromTheSidebar(t *testing.T) {
 	}
 
 	view := ansi.Strip(m.View())
-	if !strings.Contains(view, "◇ Groups (1)") || !strings.Contains(view, g.Title) || !strings.Contains(view, "Untriaged Issues") {
+	if !strings.Contains(view, "◇ Groups (1)") || !strings.Contains(view, g.Title) || !strings.Contains(view, "Untriaged") {
 		t.Fatalf("Groups should show its cards beside the sidebar:\n%s", view)
 	}
 

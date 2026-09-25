@@ -110,7 +110,8 @@ func TestOpenReportsOpenerFailure(t *testing.T) {
 func TestEmptyListShowsOneCenteredMessage(t *testing.T) {
 	m := batchModel(t, batchFixture(t))
 	m = send(m, tea.WindowSizeMsg{Width: 120, Height: 30})
-	m.activateTab(1) // Untriaged PRs: the fixture has none
+	m.untriagedKind = untriagedPR
+	m.activateTab(untriagedTab) // The fixture has no PRs.
 	view := m.View()
 	if strings.Count(view, "Nothing here yet.") != 1 || strings.Contains(view, "No items") {
 		t.Fatalf("expected exactly one empty-state message:\n%s", view)

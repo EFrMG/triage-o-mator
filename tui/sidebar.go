@@ -24,12 +24,6 @@ func newSidebar() sidebarModel {
 	return sidebarModel{counts: make([]int, len(tabs)), pairCount: -1, batchCount: -1, groupCount: -1, notificationCount: -1}
 }
 
-func (s *sidebarModel) RecomputeCounts(items []Item) {
-	for i, t := range tabs {
-		s.counts[i] = len(t.Filter(items))
-	}
-}
-
 func (s *sidebarModel) Next() { s.selected = (s.selected + 1) % rowCount() }
 func (s *sidebarModel) Prev() { s.selected = (s.selected - 1 + rowCount()) % rowCount() }
 

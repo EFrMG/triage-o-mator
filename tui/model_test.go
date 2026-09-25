@@ -27,7 +27,7 @@ func testItems() []Item {
 // Selecting a different item, then coming back, must not lose an unsaved edit.
 func TestDraftSurvivesSwitchingItems(t *testing.T) {
 	m := newModel("/tmp", "owner/repo", testTaxonomy(), "tester", testItems())
-	m.activateTab(0) // "Untriaged Issues"
+	m.activateTab(untriagedTab)
 
 	m.list.Select(0) // item #1
 	m.selectCurrentListItem()
@@ -126,7 +126,7 @@ func TestQuitConfirmation(t *testing.T) {
 // Regression test for a real panic: activate a tab, move the sidebar cursor down onto "Switch Repo" (without pressing Enter, the cursor and the displayed list are independent), then let a background sync complete. refreshActiveList used to index tabs[] with the sidebar cursor instead of the actually-displayed tab, and "Switch Repo" sits one past the end of tabs, so this panicked with "index out of range".
 func TestRefreshActiveListSurvivesCursorOnSwitchRepo(t *testing.T) {
 	m := newModel("/tmp", "owner/repo", testTaxonomy(), "tester", testItems())
-	m.activateTab(0) // displays "Untriaged Issues"
+	m.activateTab(untriagedTab)
 
 	for m.sidebar.selected != switchRepoIndex {
 		m.sidebar.Next()

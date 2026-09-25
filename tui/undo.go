@@ -131,7 +131,7 @@ func (m model) onUndoDone(msg undoDoneMsg) (tea.Model, tea.Cmd) {
 
 	if msg.items != nil {
 		m.items = msg.items
-		m.sidebar.RecomputeCounts(m.items)
+		m.recomputeSidebarCounts()
 		m.refreshActiveList()
 	}
 

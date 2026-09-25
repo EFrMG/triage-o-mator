@@ -188,7 +188,7 @@ func TestMenuScreensStayInBounds(t *testing.T) {
 		m = send(m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		m, _ = openBatchesNow(t, m)
 		assertBounds(t, m.View(), size[0], size[1])
-		if size[0] >= 100 && !strings.Contains(m.View(), "Untriaged Issues") {
+		if size[0] >= 100 && !strings.Contains(m.View(), "Untriaged") {
 			t.Fatal("Batches should keep the sidebar visible")
 		}
 
@@ -227,7 +227,7 @@ func TestSidebarIsCenteredAndOverviewNoteWraps(t *testing.T) {
 	m := batchModel(t, batchFixture(t))
 	m = send(m, tea.WindowSizeMsg{Width: 110, Height: 30})
 	lines := strings.Split(ansi.Strip(m.View()), "\n")
-	if strings.Contains(lines[1], "Untriaged Issues") {
+	if strings.Contains(lines[1], "Untriaged") {
 		t.Fatal("the sidebar's entries should be centered vertically, not start at the top")
 	}
 

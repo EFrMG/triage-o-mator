@@ -27,6 +27,13 @@ Printable keys remain text while editing a text field. Destructive actions and b
 | `H` `L`, `1`–`4`                      | previous / next tab in the item view; jump to a tab by number      |
 | `Space`                               | tick an item for a bulk action, in every list                      |
 
+**Untriaged list**
+
+| key | meaning                                     |
+| --- | ------------------------------------------- |
+| `i` | cycle the item kind: issues, PRs, or both   |
+| `O` | reverse age order between oldest and newest |
+
 **Item actions**
 
 `f` opens Local dataset. There, `d` downloads or updates the open backlog, `r` resumes, `n` changes the item limit, `u` measures cache size, `y` copies the agent prompt, and `x` stops the current operation. `j`/`k` scrolls the status; `Esc`/`h` closes the menu without stopping. Repository switches and TUI exit cancel owned corpus processes. See [dataset download](evidence.md#download-from-the-tui).

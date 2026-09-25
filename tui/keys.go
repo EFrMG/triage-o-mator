@@ -27,6 +27,9 @@ type keyMap struct {
 	TabJump  key.Binding
 	Tick     key.Binding
 	Search   key.Binding
+	// UntriagedKind cycles Issues, PRs and Both; UntriagedOrder reverses the age order of that one combined queue.
+	UntriagedKind  key.Binding
+	UntriagedOrder key.Binding
 	// ErrorDetails (!) shows the last failure in full.
 	ErrorDetails key.Binding
 
@@ -86,20 +89,22 @@ var keys = keyMap{
 	// Back is Esc or h (or ←, as → opens). Not Ctrl-H: some terminals send it for Backspace, and inside a text field it deletes a character. Text fields take their keys before these, so ← and → still move the cursor there.
 	Back: key.NewBinding(key.WithKeys("esc", "h", "left"), key.WithHelp("Esc/h", "back")),
 
-	Up:           key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k", "up")),
-	Down:         key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j", "down")),
-	Top:          key.NewBinding(key.WithKeys("g", "home"), key.WithHelp("g", "top")),
-	Bottom:       key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "bottom")),
-	HalfDown:     key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("Ctrl-D", "half page down")),
-	HalfUp:       key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("Ctrl-U", "half page up")),
-	Enter:        key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "open")),
-	Forward:      key.NewBinding(key.WithKeys("l", "right"), key.WithHelp("l", "open")),
-	TabPrev:      key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "previous tab")),
-	TabNext:      key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "next tab")),
-	TabJump:      key.NewBinding(key.WithKeys("1", "2", "3", "4"), key.WithHelp("1-4", "jump to tab")),
-	Tick:         key.NewBinding(key.WithKeys(" "), key.WithHelp("Space", "tick")),
-	Search:       key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
-	ErrorDetails: key.NewBinding(key.WithKeys("!"), key.WithHelp("!", "last error")),
+	Up:             key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k", "up")),
+	Down:           key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j", "down")),
+	Top:            key.NewBinding(key.WithKeys("g", "home"), key.WithHelp("g", "top")),
+	Bottom:         key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "bottom")),
+	HalfDown:       key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("Ctrl-D", "half page down")),
+	HalfUp:         key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("Ctrl-U", "half page up")),
+	Enter:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "open")),
+	Forward:        key.NewBinding(key.WithKeys("l", "right"), key.WithHelp("l", "open")),
+	TabPrev:        key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "previous tab")),
+	TabNext:        key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "next tab")),
+	TabJump:        key.NewBinding(key.WithKeys("1", "2", "3", "4"), key.WithHelp("1-4", "jump to tab")),
+	Tick:           key.NewBinding(key.WithKeys(" "), key.WithHelp("Space", "tick")),
+	Search:         key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+	UntriagedKind:  key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "item kind")),
+	UntriagedOrder: key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "age order")),
+	ErrorDetails:   key.NewBinding(key.WithKeys("!"), key.WithHelp("!", "last error")),
 
 	Save:         key.NewBinding(key.WithKeys("s", "ctrl+s"), key.WithHelp("s", "save")),
 	SaveApprove:  key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "save & approve")),

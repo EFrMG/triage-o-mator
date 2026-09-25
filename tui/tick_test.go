@@ -31,7 +31,7 @@ func TestTickAndBulkApproveFromAList(t *testing.T) {
 	}
 
 	m := batchModel(t, root)
-	m.activateTab(2) // Pending Review
+	m.activateTab(pendingReviewTab)
 	m = press(m, " ")
 	m = press(m, " ")
 	if len(m.ticked) != 2 || !strings.HasSuffix(m.list.Title, "· 2 ticked") {
@@ -68,7 +68,7 @@ func TestTicksBelongToTheListOnScreen(t *testing.T) {
 		t.Fatal("a rebuilt list should keep its ticks")
 	}
 
-	m.activateTab(6)
+	m.activateTab(allItemsTab)
 	if len(m.ticked) != 0 {
 		t.Fatal("opening another list should clear the ticks")
 	}

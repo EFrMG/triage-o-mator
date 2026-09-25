@@ -16,6 +16,13 @@ func byCreatedAtAsc(items []Item) []Item {
 	return out
 }
 
+func byCreatedAtDesc(items []Item) []Item {
+	out := append([]Item(nil), items...)
+	sort.Slice(out, func(a, b int) bool { return out[a].CreatedAt > out[b].CreatedAt })
+
+	return out
+}
+
 func openOnly(items []Item) []Item {
 	var out []Item
 	for _, it := range items {
@@ -49,13 +56,16 @@ func untriagedOpen(items []Item) []Item {
 	return byCreatedAtAsc(out)
 }
 
+const (
+	untriagedTab = iota
+	pendingReviewTab
+	mergeReadyTab
+	closeCandidatesTab
+	allItemsTab
+)
+
 var tabs = []Tab{
-	{Name: "Untriaged Issues", Filter: func(items []Item) []Item {
-		return untriagedOpen(filterKind(items, "issue"))
-	}},
-	{Name: "Untriaged PRs", Filter: func(items []Item) []Item {
-		return untriagedOpen(filterKind(items, "pr"))
-	}},
+	{Name: "Untriaged", Filter: untriagedOpen},
 	{Name: "Pending Review", Filter: func(items []Item) []Item {
 		var out []Item
 		for _, it := range openOnly(items) {
@@ -86,12 +96,26 @@ var tabs = []Tab{
 
 		return byCreatedAtAsc(out)
 	}},
-	{Name: "Oldest Untriaged", Filter: func(items []Item) []Item {
-		return untriagedOpen(items)
-	}},
 	{Name: "All Items", Filter: func(items []Item) []Item {
 		return byCreatedAtAsc(items)
 	}},
+}
+
+func (m *model) cycleUntriagedKind() {
+	m.untriagedKind = (m.untriagedKind + 1) % 3
+	m.updateUntriagedView()
+}
+
+func (m *model) toggleUntriagedOrder() {
+	m.untriagedNewest = !m.untriagedNewest
+	m.updateUntriagedView()
+}
+
+func (m *model) updateUntriagedView() {
+	m.clearTicks()
+	m.recomputeSidebarCounts()
+	m.refreshActiveList()
+	m.status = "Showing " + m.tabName(untriagedTab) + "."
 }
 
 // The non-tab sidebar rows follow the real tabs: Batches, Groups, Possible Duplicates, Notifications, and Switch Repo.

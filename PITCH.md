@@ -51,7 +51,7 @@ A repository you don't control can carry the install locally instead using `--so
 
 _triage-o-mator_ is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) app over the ledger:
 
-- **Queues in the sidebar:** Untriaged Issues and PRs, Pending Review, Merge-Ready PRs, Close Candidates, Oldest Untriaged, All Items, then Batches, **Groups** and Possible Duplicates.
+- **Queues in the sidebar:** Untriaged—with kind and age-order controls—Pending Review, Merge-Ready PRs, Close Candidates, All Items, then Batches, **Groups** and Possible Duplicates.
 - **A full-screen reader** with Body, Agent notes, Comments and Diff tabs.
 - **A decision form** whose category, action and confidence cycle through the taxonomy's exact values; with a one-sentence reason for free text.
 - **Unsaved drafts per item** for the session, so you can compare several reports before deciding.

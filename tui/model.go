@@ -20,6 +20,14 @@ const (
 	FocusDetail
 )
 
+type untriagedKind int
+
+const (
+	untriagedBoth untriagedKind = iota
+	untriagedIssue
+	untriagedPR
+)
+
 type model struct {
 	notificationPR          notificationPRUI
 	notifications           notificationsUI
@@ -59,6 +67,9 @@ type model struct {
 	// activeTab is which tabs[] entry is actually loaded into list/detail, distinct from sidebar.selected, which is just the sidebar's cursor and can point past the end of tabs (at "Switch Repo") without the displayed list changing.
 	// Anything that re-reads "the current tab" (e.g. refreshActiveList after a background sync) must use this, not sidebar.selected, or it can index tabs[] out of range.
 	activeTab int
+	// untriagedKind and untriagedNewest are the two views of the single Untriaged tab. Both kinds and oldest-first are the defaults used for clearing the backlog.
+	untriagedKind   untriagedKind
+	untriagedNewest bool
 	// activeBatch, when non-empty, is the data/<owner>/<repo>/batches/<id> whose items are loaded into list/detail instead of tabs[activeTab].
 	activeBatch string
 	// activePairs is set while the Possible Duplicates view is the displayed list; pairs holds bin/similar --pairs output (pairsLoaded once computed).
@@ -168,7 +179,7 @@ func newModel(installRoot, repo string, taxonomy Taxonomy, reviewer string, item
 	themeTextarea(&m.form.reason)
 	themeInput(&m.repoInput)
 	themeInput(&m.searchInput)
-	m.sidebar.RecomputeCounts(items)
+	m.recomputeSidebarCounts()
 
 	return m
 }
@@ -256,9 +267,9 @@ func (m *model) activateTab(idx int) {
 	m.sidebar.selected = idx
 	m.activeTab = idx
 	listW, _ := m.panelWidths()
-	items := tabs[idx].Filter(m.items)
+	items := m.tabItems(idx)
 	m.resetSearch()
-	m.list = newItemList(items, tabs[idx].Name, listW, m.mainHeight())
+	m.list = newItemList(items, m.tabName(idx), listW, m.mainHeight())
 	m.listAll = m.list.Items()
 
 	m.listReady = true
@@ -297,10 +308,58 @@ func (m *model) refreshActiveList() {
 		return
 	}
 
-	items := tabs[m.activeTab].Filter(m.items)
+	items := m.tabItems(m.activeTab)
 	m.setListEntries(toListItems(items))
-	m.list.Title = fmt.Sprintf("%s (%d)", tabs[m.activeTab].Name, len(items))
+	m.list.Title = fmt.Sprintf("%s (%d)", m.tabName(m.activeTab), len(items))
 	m.applyTicks()
+}
+
+func (m model) tabItems(idx int) []Item {
+	if idx != untriagedTab {
+		return tabs[idx].Filter(m.items)
+	}
+
+	items := m.items
+	switch m.untriagedKind {
+	case untriagedIssue:
+		items = filterKind(items, "issue")
+	case untriagedPR:
+		items = filterKind(items, "pr")
+	}
+
+	items = untriagedOpen(items)
+	if m.untriagedNewest {
+		return byCreatedAtDesc(items)
+	}
+
+	return items
+}
+
+func (m model) tabName(idx int) string {
+	if idx != untriagedTab {
+		return tabs[idx].Name
+	}
+
+	kind := "Both"
+	switch m.untriagedKind {
+	case untriagedIssue:
+		kind = "Issues"
+	case untriagedPR:
+		kind = "PRs"
+	}
+
+	order := "Oldest"
+	if m.untriagedNewest {
+		order = "Newest"
+	}
+
+	return fmt.Sprintf("Untriaged · %s · %s", kind, order)
+}
+
+func (m *model) recomputeSidebarCounts() {
+	for i := range tabs {
+		m.sidebar.counts[i] = len(m.tabItems(i))
+	}
 }
 
 func toListItems(items []Item) []list.Item {
@@ -372,7 +431,7 @@ func (m *model) selectCurrentListItem() tea.Cmd {
 	return cmd
 }
 
-const sidebarContentWidth = 30 // fits "> Untriaged Issues (000)" (25 chars) plus padding, with room for larger counts
+const sidebarContentWidth = 30 // fits the longest queue names plus their counts and selection marker, with room for larger counts
 
 func maxInt(a, b int) int {
 	if a > b {
@@ -700,7 +759,7 @@ func (m *model) switchRepo(repo string) tea.Cmd {
 	m.activePairs, m.pairs, m.pairsLoaded = false, nil, false
 
 	m.sidebar.pairCount, m.sidebar.batchCount, m.sidebar.groupCount, m.sidebar.notificationCount = -1, -1, -1, -1
-	m.sidebar.RecomputeCounts(items)
+	m.recomputeSidebarCounts()
 	m.listReady, m.overview, m.focus = false, true, FocusSidebar
 
 	m.refreshing = true

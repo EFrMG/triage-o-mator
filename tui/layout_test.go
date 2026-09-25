@@ -23,7 +23,7 @@ func testPRModel() model {
 	items := []Item{{Kind: "pr", Number: 1, Title: strings.Repeat("long title ", 20), State: "open"}}
 	m := newModel("/tmp", "owner/repo", testTaxonomy(), "tester", items)
 	m = send(m, tea.WindowSizeMsg{Width: 100, Height: 30})
-	m.activateTab(1)
+	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
 	content := strings.Repeat("word 中文 👩‍💻 https://example.com/"+strings.Repeat("x", 120)+"\n", 30)
 
@@ -102,7 +102,7 @@ func TestWrapAndScrollRetainsAllText(t *testing.T) {
 func TestBackNavigationAndFullSectionCycling(t *testing.T) {
 	for _, back := range []string{"esc", "h"} {
 		m := testPRModel()
-		if strings.Contains(m.View(), "Untriaged Issues") {
+		if strings.Contains(m.View(), "Untriaged (1)") {
 			t.Fatal("sidebar still visible in full-screen item")
 		}
 
@@ -212,7 +212,7 @@ func TestNarrowSidebarBackShowsOverview(t *testing.T) {
 	}
 
 	m = press(m, "j")
-	if !strings.Contains(m.View(), "Untriaged Issues") {
+	if !strings.Contains(m.View(), "Untriaged") {
 		t.Fatal("sidebar inaccessible from overview")
 	}
 }

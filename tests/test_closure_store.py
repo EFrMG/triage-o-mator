@@ -150,8 +150,9 @@ def write(index):
     except ValueError as error:
         return str(error)
 
-with ProcessPoolExecutor(max_workers=2) as pool:
-    print(json.dumps(list(pool.map(write, [1, 2]))))
+if __name__ == '__main__':
+    with ProcessPoolExecutor(max_workers=2) as pool:
+        print(json.dumps(list(pool.map(write, [1, 2]))))
 """
         result = self.call(code)
         self.assertEqual(result.count("saved"), 1)

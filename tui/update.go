@@ -118,7 +118,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.items = msg.items
-		m.sidebar.RecomputeCounts(m.items)
+		m.recomputeSidebarCounts()
 		m.refreshActiveList()
 		if m.form.saved && !m.form.dirty {
 			if it, ok := m.findItem(m.detail.key); ok {
@@ -742,6 +742,10 @@ func (m model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case m.activeTab == untriagedTab && m.activeBatch == "" && !m.activePairs && key.Matches(msg, keys.UntriagedKind):
+		m.cycleUntriagedKind()
+	case m.activeTab == untriagedTab && m.activeBatch == "" && !m.activePairs && key.Matches(msg, keys.UntriagedOrder):
+		m.toggleUntriagedOrder()
 	case key.Matches(msg, keys.Up):
 		m.list.CursorUp()
 	case key.Matches(msg, keys.Down):

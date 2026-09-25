@@ -88,7 +88,7 @@ func (m model) placeCrumbs(withItem bool) []string {
 	case m.activeBatch != "":
 		crumbs = append(crumbs, "Batches", m.activeBatch)
 	default:
-		crumbs = append(crumbs, tabs[m.activeTab].Name)
+		crumbs = append(crumbs, m.tabName(m.activeTab))
 	}
 
 	if q := m.searchQuery(); q != "" && m.listReady {

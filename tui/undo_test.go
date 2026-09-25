@@ -106,7 +106,7 @@ func TestUndoAfterApprovalInPendingReview(t *testing.T) {
 	}
 
 	m := batchModel(t, root)
-	m.activateTab(2)
+	m.activateTab(pendingReviewTab)
 	m = press(m, "a")
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	m = runCmd(next.(model), cmd)

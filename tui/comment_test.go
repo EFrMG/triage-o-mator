@@ -142,6 +142,7 @@ func TestCommentReferenceNavigationAndMouse(t *testing.T) {
 }
 
 func TestCommentComposerFloatsOverItem(t *testing.T) {
+	themeFixture(t)
 	m := commentEditorFixture(t)
 	x, y := m.commentPosition()
 	if x != 8 || y != 6 || m.commentWidth() != m.width-16 || m.commentHeight() != m.mainHeight()+2-7 {
@@ -159,8 +160,18 @@ func TestCommentComposerFloatsOverItem(t *testing.T) {
 	if screen[0] != background[0] || !strings.Contains(screen[y], "╭") || !strings.Contains(strings.Join(screen, "\n"), "Compose comment") {
 		t.Fatal("floating composer did not preserve the item view around its panel")
 	}
+	checkTopBorder := func(m model) {
+		t.Helper()
+		_, row := m.commentPosition()
+		top := strings.Split(m.viewContent(), "\n")[row]
+		if !strings.Contains(top, "\x1b[38;2;203;166;247m╭") || strings.Contains(top, "\x1b[38;2;203;166;247;49m╭") {
+			t.Fatalf("composer top border lost its accent or theme background: %q", top)
+		}
+	}
+	checkTopBorder(m)
 	m = send(m, tea.WindowSizeMsg{Width: 60, Height: 24})
 	m = send(m, tea.KeyPressMsg{Text: "#"})
+	checkTopBorder(m)
 	x, y = m.commentPosition()
 	if x != 2 || m.commentWidth() != m.width-4 {
 		t.Fatalf("compact composer side margins are %d, want 2", x)

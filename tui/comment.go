@@ -530,7 +530,7 @@ func (m model) commentView() string {
 		}
 	}
 
-	return panelStyle(true).Width(m.commentWidth()).Height(m.commentHeight()).Padding(0, 1).Render(m.commentHeader(m.commentWidth()-4) + "\n\n" + content)
+	return panelStyle(true).BorderBackground(lipgloss.Color(currentTheme.Background)).Width(m.commentWidth()).Height(m.commentHeight()).Padding(0, 1).Render(m.commentHeader(m.commentWidth()-4) + "\n\n" + content)
 }
 
 func (m model) commentWidth() int {

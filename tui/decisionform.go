@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -301,7 +301,7 @@ func (f *decisionForm) OpenPick() {
 }
 
 // PickKey handles a key while the list is open; picking sets the value and moves to the next field.
-func (f *decisionForm) PickKey(msg tea.KeyMsg) {
+func (f *decisionForm) PickKey(msg tea.KeyPressMsg) {
 	if !f.pick.Key(msg) {
 		return
 	}

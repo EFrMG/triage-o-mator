@@ -6,14 +6,13 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/glamour/v2"
+	gansi "charm.land/glamour/v2/ansi"
+	"charm.land/glamour/v2/styles"
+	"charm.land/lipgloss/v2"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
-	"github.com/charmbracelet/glamour"
-	gansi "github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/glamour/styles"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/lucasb-eyer/go-colorful"
-	"github.com/muesli/termenv"
 )
 
 // Item text (bodies, comments, agent notes) is Markdown and renders through glamour, styled from the active theme so it matches every palette in themes/. Diffs render as a fenced diff block, which glamour highlights through chroma with the same theme colors.
@@ -100,7 +99,7 @@ func markdownRenderer(width int) (*glamour.TermRenderer, error) {
 		return r, nil
 	}
 
-	r, err := glamour.NewTermRenderer(glamour.WithStyles(markdownStyle()), glamour.WithWordWrap(width), glamour.WithColorProfile(lipgloss.ColorProfile()), glamour.WithChromaFormatter(chromaFormatter()))
+	r, err := glamour.NewTermRenderer(glamour.WithStyles(markdownStyle()), glamour.WithWordWrap(width), glamour.WithChromaFormatter(chromaFormatter()))
 	if err != nil {
 		return nil, err
 	}
@@ -110,16 +109,9 @@ func markdownRenderer(width int) (*glamour.TermRenderer, error) {
 	return r, nil
 }
 
-// chromaFormatter matches code block colors to the terminal's color profile. glamour always uses chroma's 256-color formatter otherwise, which rounds the theme's colors to palette entries the terminal may remap: on light themes that left diff context lines nearly invisible.
+// chromaFormatter keeps the theme's true colors through Markdown rendering; Bubble Tea adapts the final frame to the terminal profile.
 func chromaFormatter() string {
-	switch lipgloss.ColorProfile() {
-	case termenv.TrueColor:
-		return "terminal16m"
-	case termenv.ANSI:
-		return "terminal16"
-	default:
-		return "terminal256"
-	}
+	return "terminal16m"
 }
 
 // forgetRenderers drops cached renderers after a theme change, so text re-renders in the new palette. glamour also registers its code block colors in chroma's global style registry, once, under a fixed name, and reuses them after that: remove them too, or diffs keep the first theme's colors.

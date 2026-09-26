@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // openerGrace is how long the opener gets to fail. Openers like xdg-open usually hand off and exit at once, but some keep running as the browser itself; one still running after this long is taken to have worked.

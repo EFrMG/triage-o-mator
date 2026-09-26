@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Notifications presents tracked comments and retained PR records in two sections.
@@ -293,7 +293,7 @@ func (n notificationsUI) choices() []notificationChoice {
 	return choices
 }
 
-func (m model) handleNotificationsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "?":
 		m.showHelp = !m.showHelp
@@ -496,7 +496,7 @@ func (m model) notificationsView() string {
 	if !hasPast {
 		fmt.Fprintf(&b, "%s\n", inset(mutedText("No past actions yet.")))
 	}
-	vp := viewport.New(m.cardWidth(), m.mainHeight())
+	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(m.mainHeight()))
 	vp.SetContent(b.String())
 	vp.SetYOffset(maxInt(0, selectedLine-m.mainHeight()/2))
 	return vp.View()

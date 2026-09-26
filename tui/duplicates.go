@@ -1,15 +1,15 @@
 package main
 
 import (
+	"charm.land/bubbles/v2/key"
+	"charm.land/lipgloss/v2"
 	"encoding/json"
 	"fmt"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/lipgloss"
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -170,7 +170,7 @@ func (m *model) closeDuplicates(toDetail bool) tea.Cmd {
 	return nil
 }
 
-func (m model) handleDupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleDupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Saving can warn here as it does in the item (untouched defaults, no reason); any other key takes the warning back.
 	if m.confirmSave && !key.Matches(msg, keys.Save, keys.SaveApprove) {
 		m.confirmSave = false
@@ -487,7 +487,7 @@ func (m model) dupsView() string {
 	}
 
 	// No panel padding, so the cards reach the borders; the other rows are inset instead.
-	return m.titled(panelStyle(true).Width(w+2).Height(h).Render(fitScreen(strings.Join(rows, "\n"), w+2, h)), true)
+	return m.titled(panelStyle(true).Width(w+4).Height(h+2).Render(fitScreen(strings.Join(rows, "\n"), w+2, h)), true)
 }
 
 // dupSourceCard is the top card: the original the candidates are marked duplicates of, named as such so it doesn't read as one of them, and carrying its date and decision rather than a similarity.

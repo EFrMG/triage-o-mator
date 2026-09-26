@@ -11,11 +11,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Batches are bin/batch's working files in the current repo's data/<owner>/<repo>/batches/: <id>.items.jsonl (enriched context) and <id>.decisions.jsonl (blank template, or proposals an agent filled in).
@@ -419,7 +419,7 @@ func (m *model) cycleBatchField(delta int) {
 	}
 }
 
-func (m model) handleBatchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleBatchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.batches.confirm != "" && !key.Matches(msg, keys.ApplyAll) && !key.Matches(msg, keys.Delete) {
 		m.batches.confirm = ""
 		m.status = ""
@@ -542,7 +542,7 @@ func (m model) batchFieldOptions(field int) ([]string, int) {
 }
 
 // handleBatchFormKey edits the new-batch form: Tab / Enter move down the fields, and Enter on the last one creates the batch, like Ctrl-S. On a choice field j/k (or the arrows) change the value and l / → open its list; picking moves on, and on the last field creates the batch.
-func (m model) handleBatchFormKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleBatchFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	onChoice := m.batches.field > 0
 	// A choice isn't typing, so q quits there as everywhere else, list open or not.
 	if onChoice && key.Matches(msg, keys.Quit) {

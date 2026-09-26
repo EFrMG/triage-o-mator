@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -200,7 +200,7 @@ func (m model) startCorpus(action string) (tea.Model, tea.Cmd) {
 	return m, corpusCommand(m.installRoot, m.repo, m.corpusEpoch, m.corpus, action, m.corpusLifecycle.current)
 }
 
-func (m model) handleCorpusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleCorpusKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, keys.Help) {
 		m.showHelp = !m.showHelp
 		return m, nil

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // u steps a decision back one layer, asking first: an approval is taken back, then the decision is cleared and the form shows the batch's proposal again.
@@ -13,17 +13,17 @@ func TestUndoStepsBackOneLayer(t *testing.T) {
 	m := batchModel(t, root)
 	m.openBatch("b20260101-000000")
 	m.selectCurrentListItem()
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = runCmd(next.(model), cmd)
 	m.list.Select(0)
 	m.selectCurrentListItem()
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "a"})
 	m = runCmd(next.(model), cmd)
 	if ledgerRow(t, root, 1)["reviewed"] != true {
 		t.Fatal("setup: the decision should be approved")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "u"})
 	m = next.(model)
 	if cmd != nil || !strings.Contains(m.status, "Take back the approval of support-question/") {
 		t.Fatalf("the first u should ask: %q", m.status)
@@ -35,7 +35,7 @@ func TestUndoStepsBackOneLayer(t *testing.T) {
 	}
 
 	m = press(m, "u")
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "u"})
 	m = runCmd(next.(model), cmd)
 	row := ledgerRow(t, root, 1)
 	if row["reviewed"] != false || row["category"] != "support-question" || m.status != "Took back 1 approval." {
@@ -47,7 +47,7 @@ func TestUndoStepsBackOneLayer(t *testing.T) {
 		t.Fatalf("the next u should offer to clear: %q", m.status)
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "u"})
 	m = runCmd(next.(model), cmd)
 	if row := ledgerRow(t, root, 1); row["category"] != "" || row["triaged_by"] != "" {
 		t.Fatalf("u u should clear the decision: %v", row)
@@ -85,7 +85,7 @@ func TestUndoOnTickedItems(t *testing.T) {
 		t.Fatalf("bulk undo question: %q", m.status)
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "u"})
 	m = runCmd(next.(model), cmd)
 	if one, two := ledgerRow(t, root, 1), ledgerRow(t, root, 2); one["reviewed"] != false || one["category"] != "bug" || two["category"] != "" {
 		t.Fatalf("bulk undo: #1 %v, #2 %v", one, two)
@@ -108,7 +108,7 @@ func TestUndoAfterApprovalInPendingReview(t *testing.T) {
 	m := batchModel(t, root)
 	m.activateTab(pendingReviewTab)
 	m = press(m, "a")
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "a"})
 	m = runCmd(next.(model), cmd)
 	if ledgerRow(t, root, 1)["reviewed"] != true || len(m.list.Items()) != 1 {
 		t.Fatalf("setup: #1 should be approved and gone from Pending Review, %d listed", len(m.list.Items()))
@@ -118,7 +118,7 @@ func TestUndoAfterApprovalInPendingReview(t *testing.T) {
 		t.Fatalf("u should offer to take back #1's approval: %q", m.status)
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "u"})
 	m = runCmd(next.(model), cmd)
 	if ledgerRow(t, root, 1)["reviewed"] != false || ledgerRow(t, root, 2)["category"] != "support-question" {
 		t.Fatal("u u should take back #1's approval and leave #2 alone")
@@ -129,7 +129,7 @@ func TestUndoAfterApprovalInPendingReview(t *testing.T) {
 	}
 
 	m = press(m, "u")
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "u"})
 	m = runCmd(next.(model), cmd)
 	if ledgerRow(t, root, 1)["category"] != "" || ledgerRow(t, root, 2)["category"] != "support-question" {
 		t.Fatal("the next u u should clear #1's decision")

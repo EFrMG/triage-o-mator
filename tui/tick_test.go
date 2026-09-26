@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // pressCmd presses k and runs whatever command it returns, feeding the result back in.
 func pressCmd(t *testing.T, m model, k string) model {
 	t.Helper()
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: k})
 	m = next.(model)
 	if cmd == nil {
 		t.Fatalf("%s returned no command; status %q", k, m.status)
@@ -184,7 +184,7 @@ func TestGroupKeyCarriesTickedItems(t *testing.T) {
 	m.activateTab(0)
 	m = press(m, " ")
 	m = press(m, " ")
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	next, _ := m.Update(tea.KeyPressMsg{Text: "b"})
 	m = next.(model)
 	if !m.groups.open || len(m.groups.sources) != 2 {
 		t.Fatalf("b on two ticked items should open Groups for both: %+v", m.groups.sources)

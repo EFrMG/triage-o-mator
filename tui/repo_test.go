@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func writeLedger(t *testing.T, root, repo, rows string) {
@@ -51,7 +51,7 @@ func TestSwitchRepoLoadsThatRepoAndDropsPerRepoState(t *testing.T) {
 		t.Fatalf("the first Enter with an unsaved draft should only warn: repo %s, status %q", m.repo, m.status)
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
 	if cmd == nil || m.repo != "other/repo" || len(m.drafts) != 0 {
 		t.Fatalf("the second Enter should discard the draft and switch: %q", m.status)

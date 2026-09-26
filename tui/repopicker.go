@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Switch Repo lists everything already triaged from this machine: the repos this install has data for, then the repos of every other install bin/install-to has registered, so moving between a repository and its neighbours is a pick instead of a path.
@@ -148,12 +148,12 @@ func ago(t time.Time) string {
 }
 
 // moveRepoPick moves the highlighted known repo with the arrow keys, or with j/k once a repo is highlighted (in the text field they're letters); -1 means "use what's typed". Tab / Shift-Tab switch between the text field and the known repos, keeping the last one highlighted there.
-func (m *model) moveRepoPick(msg tea.KeyMsg) bool {
+func (m *model) moveRepoPick(msg tea.KeyPressMsg) bool {
 	picked := m.repoPick >= 0
 	switch {
-	case msg.Type == tea.KeyDown, picked && key.Matches(msg, keys.Down):
+	case msg.Code == tea.KeyDown, picked && key.Matches(msg, keys.Down):
 		m.repoPick = minInt(m.repoPick+1, len(m.repoRecent)-1)
-	case msg.Type == tea.KeyUp, picked && key.Matches(msg, keys.Up):
+	case msg.Code == tea.KeyUp, picked && key.Matches(msg, keys.Up):
 		m.repoPick = maxInt(m.repoPick-1, -1)
 	case key.Matches(msg, keys.FieldNext), key.Matches(msg, keys.FieldPrev):
 		if m.repoPick >= 0 {
@@ -239,14 +239,13 @@ func (m model) repoPromptView() string {
 	inputWidth := minInt(w, 60)
 	inputModel := m.repoInput
 	innerWidth := maxInt(inputWidth-4, 1) // two border cells and one padding cell on each side
-	inputModel.Width = innerWidth
+	inputModel.SetWidth(innerWidth)
 	if inputModel.Value() != "" {
 		// At the end of entered text, bubbles/textinput adds the cursor cell beyond Width.
-		inputModel.Width = maxInt(innerWidth-1, 1)
+		inputModel.SetWidth(maxInt(innerWidth-1, 1))
 	}
 
-	// Lip Gloss includes horizontal padding in Width, while the border sits outside it.
-	input := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accent).Padding(0, 1).Width(inputWidth - 2).Render(inputModel.View())
+	input := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accent).Padding(0, 1).Width(inputWidth).Render(inputModel.View())
 	subtitle := "current: " + m.repo
 	if m.noInstall() {
 		subtitle = "no install open"

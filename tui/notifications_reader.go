@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 )
 
 type notificationReaderCard struct {
@@ -27,9 +27,9 @@ func (m model) notificationReaderView(section, subtitle, note string, rows []not
 	for i, row := range rows {
 		fmt.Fprintf(&b, "%s\n", markedCard(row.label, row.summary, row.mark, i == selected, m.cardWidth()))
 	}
-	vp := viewport.New(m.cardWidth(), maxInt(m.mainHeight()-1, 1))
+	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(maxInt(m.mainHeight()-1, 1)))
 	vp.SetContent(b.String())
-	vp.SetYOffset(maxInt(0, cardStart+selected*cardHeight-vp.Height/2+scroll))
+	vp.SetYOffset(maxInt(0, cardStart+selected*cardHeight-vp.Height()/2+scroll))
 	return header + vp.View()
 }
 

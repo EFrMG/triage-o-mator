@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Failures show as one short sentence in the status line; ! opens the last one in full (the command, and everything it printed), until the next failure replaces it.
@@ -138,7 +138,7 @@ func (m model) typingText() bool {
 	return m.typingReason() || m.editingRepo || m.searching || m.themePicker.searching || m.groups.editing != "" || m.batches.editing
 }
 
-func (m model) handleErrorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleErrorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Back), key.Matches(msg, keys.ErrorDetails), key.Matches(msg, keys.Quit):
 		m.lastError.open = false
@@ -162,9 +162,9 @@ func (m model) errorView() string {
 	w, h := m.width-4, m.mainHeight()
 	e := m.lastError
 	head := titleBar("Last error", e.what+" · "+e.at.Format("15:04:05"), w)
-	vp := viewport.New(w, maxInt(h-2, 1))
+	vp := viewport.New(viewport.WithWidth(w), viewport.WithHeight(maxInt(h-2, 1)))
 	vp.SetContent(wrapText(e.text, w))
 	vp.SetYOffset(e.offset)
 
-	return m.titled(panelStyle(true).Width(w+2).Height(h).Padding(0, 1).Render(lipgloss.JoinVertical(lipgloss.Left, head, "", vp.View())), true)
+	return m.titled(panelStyle(true).Width(w+4).Height(h+2).Padding(0, 1).Render(lipgloss.JoinVertical(lipgloss.Left, head, "", vp.View())), true)
 }

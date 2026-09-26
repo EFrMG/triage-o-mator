@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -253,7 +253,7 @@ func TestFooterContextsAndScreenBounds(t *testing.T) {
 					m.showHelp = help
 					m.layout()
 
-					view := m.View()
+					view := m.viewContent()
 					assertBounds(t, view, width, 24)
 
 					lines := strings.Split(ansi.Strip(view), "\n")
@@ -339,7 +339,7 @@ func TestEnterAddsAndQuickAddPreservesNotes(t *testing.T) {
 	m.groups = groupUI{open: true, records: []Group{g}, sources: []Key{key}}
 	m.editGroup("add")
 	m.groups.inputs[0].SetValue("Preserve this evidence")
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
 
 	if cmd == nil {
@@ -352,7 +352,7 @@ func TestEnterAddsAndQuickAddPreservesNotes(t *testing.T) {
 	}
 
 	m.groups.open = false
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("B")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "B"})
 	m = next.(model)
 	if cmd == nil {
 		t.Fatal("quick-add shortcut did not dispatch")

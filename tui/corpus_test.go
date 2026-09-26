@@ -8,17 +8,17 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func corpusKey(m model, k string) (model, tea.Cmd) {
 	if k == "enter" {
-		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 		return next.(model), cmd
 	}
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+	msg := tea.KeyPressMsg{Text: k}
 	if k == "esc" {
-		msg = tea.KeyMsg{Type: tea.KeyEsc}
+		msg = tea.KeyPressMsg{Code: tea.KeyEsc}
 	}
 	next, cmd := m.Update(msg)
 	return next.(model), cmd
@@ -148,8 +148,8 @@ func TestCorpusRejectsWrongRepositoryAndDisplaysSelection(t *testing.T) {
 	m := loadCorpusFixture(t)
 	m.width, m.height, m.ready = 60, 24, true
 	for _, want := range []string{"owner/repo", "open-prs", "pr-comparison", "2 items"} {
-		if !strings.Contains(m.View(), want) {
-			t.Fatalf("missing %q: %s", want, m.View())
+		if !strings.Contains(m.viewContent(), want) {
+			t.Fatalf("missing %q: %s", want, m.viewContent())
 		}
 	}
 	path := filepath.Join(m.installRoot, "bin/cache")

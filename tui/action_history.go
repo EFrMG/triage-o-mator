@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 const actionHistoryPageSize = 5
@@ -129,7 +129,7 @@ func (m model) finishActionHistory(msg actionHistoryMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleActionHistoryKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleActionHistoryKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	ui := m.actionHistory
 	at := ui.location
 	switch msg.String() {

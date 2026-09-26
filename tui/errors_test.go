@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -50,7 +50,7 @@ func TestScriptErrorsAreShortWithDetailsOnBang(t *testing.T) {
 	}
 
 	m = press(m, "!")
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.viewContent())
 	if !m.lastError.open || !strings.Contains(view, "Last error") || !strings.Contains(view, "$ bin/group update "+g.ID) || !strings.Contains(view, "exit status") {
 		t.Fatalf("! should show the command and its output:\n%s", view)
 	}
@@ -87,7 +87,7 @@ func TestExportShowsProgress(t *testing.T) {
 	m.installRoot = root
 	m = send(m, windowSize(120, 36))
 	m.groups = groupUI{open: true, records: []Group{{ID: "g", Title: "Wifi", Status: "draft", Members: []GroupMember{{Kind: "issue", Number: 1}, {Kind: "pr", Number: 2}}}}}
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "X"})
 	m = next.(model)
 	if !strings.Contains(m.status, `Full export of "Wifi": fetching 0/2`) {
 		t.Fatalf("status when the export starts: %q", m.status)
@@ -99,7 +99,7 @@ func TestExportShowsProgress(t *testing.T) {
 		m = next.(model)
 		if m.groups.busy {
 			seen = append(seen, m.status)
-			if view := ansi.Strip(m.View()); !strings.Contains(view, m.groups.progress) {
+			if view := ansi.Strip(m.viewContent()); !strings.Contains(view, m.groups.progress) {
 				t.Fatalf("the Groups subtitle should show the progress:\n%s", view)
 			}
 		}

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestSaveAndApproveRecordsHumanReviewAndLeavesNoPendingItem(t *testing.T) {
@@ -22,7 +22,7 @@ func TestSaveAndApproveRecordsHumanReviewAndLeavesNoPendingItem(t *testing.T) {
 			m.commitDraftIfDirty()
 			m = press(m, "tab")
 
-			next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(shortcut)})
+			next, cmd := m.Update(tea.KeyPressMsg{Text: shortcut})
 			if cmd == nil {
 				t.Fatal("the save shortcut did not produce a command after leaving the reason")
 			}
@@ -69,7 +69,7 @@ func TestSaveAndApprovePreservesProposalAuthorUnlessEdited(t *testing.T) {
 			wantAuthor = "tester"
 		}
 
-		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("S")})
+		next, cmd := m.Update(tea.KeyPressMsg{Text: "S"})
 		m = send(next.(model), cmd())
 		row := ledgerRow(t, m.installRoot, 1)
 		if row["triaged_by"] != wantAuthor || row["reviewed_by"] != "tester" || row["reviewed"] != true || row["agent_notes"] != "Logs match." {
@@ -89,7 +89,7 @@ func TestSaveAndApproveOfUnchangedLedgerDecisionPreservesTriage(t *testing.T) {
 	m := batchModel(t, root)
 	m.openItem(m.items[0])
 	m.focus = FocusDetail
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("S")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "S"})
 	m = send(next.(model), cmd())
 	after := ledgerRow(t, root, 1)
 	for _, field := range []string{"triaged_by", "triaged_at", "batch_id"} {
@@ -106,7 +106,7 @@ func TestSaveAndApproveOfUnchangedLedgerDecisionPreservesTriage(t *testing.T) {
 func TestSaveApprovalWarningsCannotConfirmTheOtherOperation(t *testing.T) {
 	m := openFixtureItem(t)
 	for _, shortcut := range []string{"s", "S", "s", "S"} {
-		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(shortcut)})
+		next, cmd := m.Update(tea.KeyPressMsg{Text: shortcut})
 		m = next.(model)
 		if cmd != nil || !m.confirmSave {
 			t.Fatal("switching save operations must ask again for untouched defaults")
@@ -117,7 +117,7 @@ func TestSaveApprovalWarningsCannotConfirmTheOtherOperation(t *testing.T) {
 		t.Fatal("warning should name the approving shortcut")
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("S")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "S"})
 	m = send(next.(model), cmd())
 	if ledgerRow(t, m.installRoot, 1)["reviewed"] != true {
 		t.Fatal("repeating the explicit approving shortcut should confirm")
@@ -128,7 +128,7 @@ func TestLateCombinedSavePreservesNewerEdits(t *testing.T) {
 	m := openFixtureItem(t)
 	m.form.reason.SetValue("Checked.")
 	m.form.touched, m.form.dirty = true, true
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("S")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "S"})
 	m = next.(model)
 	m.form.reason.SetValue("Newer evidence.")
 	m.commitDraftIfDirty()
@@ -143,7 +143,7 @@ func TestSaveAndApproveWorksFromDuplicateComparison(t *testing.T) {
 	m.form.reason.SetValue("Compared both reports.")
 	m.form.touched, m.form.dirty = true, true
 	m.dups.open, m.dups.source = true, m.detail.key
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("S")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "S"})
 	m = send(next.(model), cmd())
 	if !m.dups.open || ledgerRow(t, m.installRoot, 1)["reviewed"] != true {
 		t.Fatal("save and approve should work without leaving the comparison")
@@ -159,7 +159,7 @@ func TestSaveLettersRemainTextInTheReason(t *testing.T) {
 		t.Fatal("save letters must be ordinary text while editing the reason")
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("Enter should save without needing a modifier")
 	}
@@ -174,25 +174,25 @@ func TestSaveLettersRemainTextInTheReason(t *testing.T) {
 func TestEnterApprovalWarningNamesEnterAndCannotBeConfirmedBySaveOnly(t *testing.T) {
 	m := openFixtureItem(t)
 	m.form.FocusField(fieldReason)
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
 	if cmd != nil || !strings.Contains(m.status, "Enter again to save and approve") {
 		t.Fatalf("an empty reason should explain what Enter will do: %q", m.status)
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd != nil || m.confirmSaveApproval {
 		t.Fatal("save-only must not confirm a save-and-approve warning")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
 	if cmd != nil || !m.confirmSaveApproval {
 		t.Fatal("switching back to approval must warn again")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = send(next.(model), cmd())
 	if ledgerRow(t, m.installRoot, 1)["reviewed"] != true {
 		t.Fatal("repeated Enter should save and approve")

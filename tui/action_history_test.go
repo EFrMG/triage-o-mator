@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func actionHistoryFixture(t *testing.T) model {
@@ -65,7 +65,7 @@ func TestActionHistoryNavigationAndStaleReplies(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		m, _ = corpusKey(m, "j")
 	}
-	next, cmd = m.handleActionHistoryKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.handleActionHistoryKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = finishActionCommand(t, next.(model), cmd)
 	if m.actionHistory.page.Section != "entries" || m.actionHistory.page.Pagination.Offset != 5 || m.form.Snapshot() != before {
 		t.Fatal("paged explanations changed the draft or opened another level")
@@ -106,7 +106,7 @@ func TestActionHistoryCancelSwitchAndLateReplies(t *testing.T) {
 	next, cmd := m.readActionHistory(actionHistoryLocation{section: "list"})
 	m = next.(model)
 	oldGeneration := m.actionHistoryGeneration
-	next, _ = m.handleActionHistoryKey(tea.KeyMsg{Type: tea.KeyEsc})
+	next, _ = m.handleActionHistoryKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = next.(model)
 	reply := cmd().(actionHistoryMsg)
 	if reply.err == nil || m.actionHistory.open || m.actionHistoryGeneration == oldGeneration {

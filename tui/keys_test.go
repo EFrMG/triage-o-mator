@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -103,7 +103,7 @@ func TestChoiceFieldsCycleWithJKAndOpenAList(t *testing.T) {
 		t.Fatalf("in the reason field ← moves the cursor instead of going back: %v %q", m.form.focused, m.form.Reason())
 	}
 
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd == nil {
 		t.Fatal("Enter in the reason field, the last one, should save")
 	}
 }
@@ -119,6 +119,55 @@ func TestContentScrollsWithJKAndTabsJumpByNumber(t *testing.T) {
 	m = press(m, "j")
 	if m.form.focused != fieldContent {
 		t.Fatal("on the content, j scrolls instead of moving to a field")
+	}
+}
+
+func TestNumberedTabFocusTogglesWithTheForm(t *testing.T) {
+	m := testPRModel()
+	m = press(m, "1")
+	if m.detail.active != 0 || m.form.focused != fieldCategory {
+		t.Fatalf("pressing the focused tab's number should focus the form: tab %d, field %d", m.detail.active, m.form.focused)
+	}
+
+	m = press(m, "1")
+	if m.detail.active != 0 || m.form.focused != fieldContent {
+		t.Fatalf("pressing the current tab's number from the form should focus its content: tab %d, field %d", m.detail.active, m.form.focused)
+	}
+
+	m = press(m, "1")
+	m.form.FocusField(fieldAction)
+	m = press(m, "2")
+	if m.detail.active != 1 || m.form.focused != fieldAction {
+		t.Fatalf("switching tabs from the form should keep the current field focused: tab %d, field %d", m.detail.active, m.form.focused)
+	}
+
+	m = press(m, "2")
+	if m.detail.active != 1 || m.form.focused != fieldContent {
+		t.Fatalf("pressing the newly selected tab's number should focus its content: tab %d, field %d", m.detail.active, m.form.focused)
+	}
+
+	m = press(m, "1")
+	if m.detail.active != 0 || m.form.focused != fieldContent {
+		t.Fatalf("switching tabs from content should keep content focused: tab %d, field %d", m.detail.active, m.form.focused)
+	}
+
+	m.form.FocusField(fieldReason)
+	m = press(m, "1")
+	if m.detail.active != 0 || m.form.focused != fieldReason || m.form.Reason() != "1" {
+		t.Fatalf("digits in the reason editor should remain text: tab %d, field %d, reason %q", m.detail.active, m.form.focused, m.form.Reason())
+	}
+
+	m.form.FocusField(fieldCategory)
+	m = press(m, "4")
+	if m.detail.active != 0 || m.form.focused != fieldCategory {
+		t.Fatalf("a number without a tab should leave focus alone: tab %d, field %d", m.detail.active, m.form.focused)
+	}
+
+	m.form.FocusField(fieldContent)
+	m.detail.full = true
+	m = press(m, "1")
+	if m.form.focused != fieldContent {
+		t.Fatal("a full-screen tab must not focus the hidden form")
 	}
 }
 
@@ -154,7 +203,7 @@ func TestBatchFormEnterWalksFieldsThenCreates(t *testing.T) {
 	}
 
 	m = press(m, "l")
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m = next.(model); cmd == nil || m.batches.editing || !m.batches.busy {
 		t.Fatal("picking on the last field should create the batch")
 	}
@@ -166,7 +215,7 @@ func TestBatchFormEnterWalksFieldsThenCreates(t *testing.T) {
 		m = press(m, "tab")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m = next.(model); cmd == nil || m.batches.editing || !m.batches.busy {
 		t.Fatalf("Enter on the last field should create the batch: field %d, editing %v", m.batches.field, m.batches.editing)
 	}
@@ -217,7 +266,7 @@ func TestGroupEditorStatusIsAChoice(t *testing.T) {
 		t.Fatalf("Enter on the status should confirm it and move on: field %d", m.groups.field)
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = send(next.(model), cmd())
 	if len(m.groups.records) != 1 || m.groups.records[0].Status != "ready" {
 		t.Fatalf("Enter on the last field should save the new status: %+v", m.groups.records)
@@ -250,7 +299,7 @@ func TestRemovingAGroupMemberNeedsASecondPress(t *testing.T) {
 	m.installRoot = root
 	m.groups = groupUI{open: true, records: []Group{g}, detail: true}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "d"})
 	if m = next.(model); cmd != nil || !strings.Contains(m.status, "Press d again") {
 		t.Fatalf("the first d should only ask: %q", m.status)
 	}
@@ -276,7 +325,7 @@ func TestDeletingAGroupFromTheListNeedsASecondPress(t *testing.T) {
 	m.lastGroupID = g.ID
 	m.groups = groupUI{open: true, records: []Group{g}, ticked: map[Key]bool{}}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "d"})
 	if m = next.(model); cmd != nil || !strings.Contains(m.status, "1 member") || !strings.Contains(m.status, "Press d again") {
 		t.Fatalf("the first d should only ask, naming what would go: %q", m.status)
 	}
@@ -286,7 +335,7 @@ func TestDeletingAGroupFromTheListNeedsASecondPress(t *testing.T) {
 	}
 
 	m = press(m, "d")
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "d"})
 	m = send(next.(model), cmd())
 	if len(m.groups.records) != 0 || m.sidebar.groupCount != 0 || !strings.Contains(m.status, "deleted") {
 		t.Fatalf("the second d should delete the group: %d left, %q", len(m.groups.records), m.status)
@@ -314,7 +363,7 @@ func TestApplyProposalsFromInsideABatch(t *testing.T) {
 		t.Fatalf("A inside an open batch should ask to apply its proposals: %q", m.status)
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("A")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "A"})
 	m = send(next.(model), cmd())
 	if row := ledgerRow(t, m.installRoot, 1); row["category"] != "support-question" {
 		t.Fatalf("the second A should apply the proposal: %v", row)
@@ -354,13 +403,13 @@ func TestGroupsOpenFromTheSidebar(t *testing.T) {
 	m = send(m, tea.WindowSizeMsg{Width: 130, Height: 36})
 	m.focus = FocusSidebar
 	m.sidebar.selected = groupsIndex
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	if !m.groups.open || m.groups.busy || len(m.groups.records) != 1 || m.sidebar.groupCount != 1 {
 		t.Fatalf("Enter on Groups should open and load the groups: open %v, %d loaded, count %d", m.groups.open, len(m.groups.records), m.sidebar.groupCount)
 	}
 
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.viewContent())
 	if !strings.Contains(view, "◇ Groups (1)") || !strings.Contains(view, g.Title) || !strings.Contains(view, "Untriaged") {
 		t.Fatalf("Groups should show its cards beside the sidebar:\n%s", view)
 	}
@@ -380,7 +429,7 @@ func TestContentScrollKeys(t *testing.T) {
 			t.Fatal("the opened item should have a section to scroll")
 		}
 
-		return vp.YOffset
+		return vp.YOffset()
 	}
 
 	if offset() != 0 {

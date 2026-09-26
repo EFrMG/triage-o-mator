@@ -1,6 +1,6 @@
 package main
 
-import "github.com/charmbracelet/bubbles/key"
+import "charm.land/bubbles/v2/key"
 
 // Every key the TUI understands is defined here, once. Handlers match against these bindings and the footer renders its hints from them, so the two can't drift apart. Context-specific handlers may reuse keys; text fields consume printable input before shortcuts.
 type keyMap struct {
@@ -101,7 +101,7 @@ var keys = keyMap{
 	TabPrev:        key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "previous tab")),
 	TabNext:        key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "next tab")),
 	TabJump:        key.NewBinding(key.WithKeys("1", "2", "3", "4"), key.WithHelp("1-4", "jump to tab")),
-	Tick:           key.NewBinding(key.WithKeys(" "), key.WithHelp("Space", "tick")),
+	Tick:           key.NewBinding(key.WithKeys("space"), key.WithHelp("Space", "tick")),
 	Search:         key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 	UntriagedKind:  key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "item kind")),
 	UntriagedOrder: key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "age order")),

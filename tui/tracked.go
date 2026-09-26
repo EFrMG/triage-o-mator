@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 type trackedRow struct {

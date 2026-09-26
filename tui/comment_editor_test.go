@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -59,19 +59,19 @@ func TestExternalCommentBindingAndLiteralCapitalC(t *testing.T) {
 	m := commentEditorFixture(t)
 	m.comment.open = false
 	m.focus = FocusDetail
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("C")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "C"})
 	m = next.(model)
 	if cmd == nil || !m.comment.open || !m.comment.busy {
 		t.Fatal("C on item must launch external comment editor")
 	}
 
 	m = commentEditorFixture(t)
-	m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("C")})
+	m = send(m, tea.KeyPressMsg{Text: "C"})
 	if m.comment.text.Value() != "C" || m.comment.busy {
 		t.Fatal("C in the inline editor must remain text")
 	}
-	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlP})
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("C")})
+	m = send(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "C"})
 	if cmd == nil || !next.(model).comment.busy {
 		t.Fatal("C in preview must reopen the draft in the editor")
 	}

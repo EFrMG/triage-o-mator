@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -257,7 +257,7 @@ func (m *model) editGroup(mode string) {
 		input.Prompt = ""
 		input.CharLimit = 0
 		input.SetValue(value)
-		input.Width = maxInt(m.width-24, 1)
+		input.SetWidth(maxInt(m.width-24, 1))
 		themeInput(&input)
 
 		m.groups.inputs[i] = input
@@ -334,7 +334,7 @@ func (m *model) cycleGroupStatus(delta int) {
 }
 
 // handleGroupEditorKey edits a group or a member's notes: Tab / Enter move down the fields and Enter on the last one saves; on the Status choice, j/k (or the arrows) change the value and l / → open the list of statuses.
-func (m model) handleGroupEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleGroupEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	last := len(m.groups.inputs) - 1
 	move := func(delta int) {
 		m.groups.inputs[m.groups.field].Blur()
@@ -395,7 +395,7 @@ func (m model) handleGroupEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleGroupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.groups.busy {
 		return m, nil
 	}
@@ -559,7 +559,7 @@ func (m model) handleGroupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // moveGroupCursor moves through members inside a group, or through groups in the list.
-func (m *model) moveGroupCursor(msg tea.KeyMsg) {
+func (m *model) moveGroupCursor(msg tea.KeyPressMsg) {
 	move := func(cur, count int) int {
 		last := maxInt(count-1, 0)
 		switch {
@@ -697,7 +697,7 @@ func (m model) groupMembersView(g Group, w, h int) string {
 		context = append(context, "", fmt.Sprintf("Notes on #%d: %s", member.Number, orPlaceholder(member.Notes, "(none)")), mutedText("added by "+member.AddedBy))
 	}
 
-	vp := viewport.New(w, minInt(6, maxInt(h/3, 2)))
+	vp := viewport.New(viewport.WithWidth(w), viewport.WithHeight(minInt(6, maxInt(h/3, 2))))
 	vp.SetContent(wrapText(strings.Join(context, "\n"), w))
 	vp.SetYOffset(m.groups.previewOffset)
 
@@ -754,7 +754,7 @@ func (m model) groupEditorView(w int) string {
 			label = accent.Render(fmt.Sprintf("› %-12s", labels[i]))
 		}
 
-		input.Width = maxInt(w-17, 1)
+		input.SetWidth(maxInt(w-17, 1))
 		value := input.View()
 		if m.groups.editing == "edit" && i == groupStatusField {
 			value = input.Value()

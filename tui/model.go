@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -145,7 +145,10 @@ func newModel(installRoot, repo string, taxonomy Taxonomy, reviewer string, item
 	repoInput := textinput.New()
 	repoInput.Prompt = ""
 	repoInput.Placeholder = "filter, owner/repo, or /path/to/an/install"
-	repoInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	repoStyles := repoInput.Styles()
+	repoStyles.Focused.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	repoStyles.Blurred.Placeholder = repoStyles.Focused.Placeholder
+	repoInput.SetStyles(repoStyles)
 	repoInput.CharLimit = 200
 	searchInput := textinput.New()
 	searchInput.Prompt = ""
@@ -482,7 +485,7 @@ func (m *model) layout() {
 		m.list.SetSize(listW, maxInt(m.mainHeight()-listHeaderHeight, 1))
 	}
 
-	m.repoInput.Width = maxInt(m.mainAreaWidth()-8, 1)
+	m.repoInput.SetWidth(maxInt(m.mainAreaWidth()-8, 1))
 	w, h := m.detailInnerWidth(), m.detailBodyHeight()
 	switch {
 	case m.detail.full:
@@ -613,6 +616,7 @@ var (
 	blurredBorderColor = lipgloss.Color("240")
 )
 
+// Lip Gloss v2 includes the border in Width and Height, so panel callers pass the full outer size.
 func panelStyle(focused bool) lipgloss.Style {
 	color := blurredBorderColor
 	if focused {
@@ -636,7 +640,16 @@ func fitScreen(s string, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) View() string {
+func (m model) View() tea.View {
+	v := tea.NewView(m.viewContent())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	v.ForegroundColor = lipgloss.Color(currentTheme.Foreground)
+	v.BackgroundColor = lipgloss.Color(currentTheme.Background)
+	return v
+}
+
+func (m model) viewContent() string {
 	if !m.ready {
 		return "starting…"
 	}
@@ -652,7 +665,7 @@ func (m model) View() string {
 	case m.themePicker.open:
 		body = m.themePickerView()
 	case m.notificationPR.open:
-		body = m.titled(panelStyle(true).Width(m.width-2).Height(m.mainHeight()).Padding(0, 1).Render(m.itemView()), true)
+		body = m.titled(panelStyle(true).Width(m.width).Height(m.mainHeight()+2).Padding(0, 1).Render(m.itemView()), true)
 	case m.attention.open:
 		body = m.withSidebar(m.attentionView(), true)
 	case m.actionHistory.open:
@@ -668,7 +681,7 @@ func (m model) View() string {
 	case m.corpus.open:
 		body = m.withSidebar(m.corpusView(), true)
 	case m.focus == FocusDetail:
-		body = m.titled(panelStyle(true).Width(m.width-2).Height(m.mainHeight()).Padding(0, 1).Render(m.itemView()), true)
+		body = m.titled(panelStyle(true).Width(m.width).Height(m.mainHeight()+2).Padding(0, 1).Render(m.itemView()), true)
 	default:
 		sidebarBox := m.sidebarBox(m.focus == FocusSidebar)
 		var content string
@@ -682,7 +695,7 @@ func (m model) View() string {
 			content = m.listHeader(m.mainAreaWidth()-2) + "\n" + m.list.View()
 		}
 
-		mainView := m.titled(panelStyle(m.focus == FocusList).Width(m.mainAreaWidth()-2).Height(m.mainHeight()).Render(ansi.Wrap(content, m.mainAreaWidth()-2, "")), m.focus == FocusList)
+		mainView := m.titled(panelStyle(m.focus == FocusList).Width(m.mainAreaWidth()).Height(m.mainHeight()+2).Render(ansi.Wrap(content, m.mainAreaWidth()-2, "")), m.focus == FocusList)
 		if m.width < 100 || m.noInstall() {
 			if m.focus == FocusSidebar && !m.editingRepo && !m.overview {
 				body = sidebarBox

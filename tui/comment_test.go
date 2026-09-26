@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -93,27 +93,27 @@ func TestCommentSingleSubmitPublishesFromEditorOrPreview(t *testing.T) {
 	for _, preview := range []bool{false, true} {
 		t.Run(fmt.Sprint("preview=", preview), func(t *testing.T) {
 			m := commentEditorFixture(t)
-			m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("qrac? a comment")})
+			m = send(m, tea.KeyPressMsg{Text: "qrac? a comment"})
 			if m.comment.text.Value() != "qrac? a comment" || m.refreshing || m.form.dirty {
 				t.Fatal("composer leaked keys into other actions")
 			}
 
 			if preview {
-				next, cmd := m.handleCommentKey(tea.KeyMsg{Type: tea.KeyCtrlP})
+				next, cmd := m.handleCommentKey(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 				m = next.(model)
 				if cmd != nil || !m.comment.previewing || m.comment.busy {
 					t.Fatal("preview must render locally without running a script")
 				}
 			}
 
-			next, cmd := m.handleCommentKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+			next, cmd := m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 			m = next.(model)
 			if cmd == nil || !m.comment.busy {
 				t.Fatal("one submit must start publishing")
 			}
 
 			body := m.comment.text.Value()
-			m = send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ignored while busy")})
+			m = send(m, tea.KeyPressMsg{Text: "ignored while busy"})
 			if m.comment.text.Value() != body {
 				t.Fatal("approved text changed during publishing")
 			}
@@ -141,27 +141,27 @@ func TestCommentPreviewRendersMarkdownAndPreservesDraft(t *testing.T) {
 	m.comment.text.SetValue(body)
 	prompt := m.comment.text.Prompt
 	line := m.comment.text.Line()
-	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = send(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	rendered := ansi.Strip(m.comment.preview.View())
 	if !strings.Contains(rendered, "Heading") || !strings.Contains(rendered, "fmt.Println(42)") || strings.Contains(rendered, "```") || strings.Contains(rendered, "# Heading") {
 		t.Fatalf("preview did not render Markdown: %q", rendered)
 	}
-	if !strings.Contains(m.View(), m.comment.target) {
+	if !strings.Contains(m.viewContent(), m.comment.target) {
 		t.Fatal("preview must show the publishing target")
 	}
 
 	m = send(m, tea.WindowSizeMsg{Width: 65, Height: 24})
 	for _, row := range strings.Split(m.comment.preview.View(), "\n") {
-		if ansi.StringWidth(row) > m.comment.preview.Width {
+		if ansi.StringWidth(row) > m.comment.preview.Width() {
 			t.Fatal("preview overflowed after resize")
 		}
 	}
 
-	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = send(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if m.comment.previewing || !m.comment.text.Focused() || m.comment.text.Value() != body || m.comment.text.Line() != line || m.comment.text.Prompt != prompt || prompt == "" {
 		t.Fatal("toggling preview changed the draft, cursor or editor marker")
 	}
-	next, _ := m.handleCommentKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next, _ := m.handleCommentKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
 	if m.comment.busy || m.comment.text.Value() == body {
 		t.Fatal("Enter must insert a newline, not publish")
@@ -192,18 +192,18 @@ func TestCommentRejectsMismatchedTarget(t *testing.T) {
 
 func TestCommentPreviewEscapeAndStaleReply(t *testing.T) {
 	m := commentEditorFixture(t)
-	m = send(m, tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = send(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	m = send(m, commentMsg{root: "other", repo: m.repo, publish: true, out: `{}`})
 	if !m.comment.open {
 		t.Fatal("stale reply changed composer")
 	}
 
-	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = send(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.comment.previewing || !m.comment.text.Focused() {
 		t.Fatal("Esc from preview must return to editing")
 	}
 
-	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = send(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.comment.open {
 		t.Fatal("Esc from editing must discard composer")
 	}

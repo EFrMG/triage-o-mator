@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // secondInstall is another repository's install, with its own taxonomy, config/repo and ledger, registered for this user as bin/install-to registers one.
@@ -80,7 +80,7 @@ func TestSwitchRepoListsEveryRegisteredInstall(t *testing.T) {
 		t.Fatalf("this install's repos come first: %+v", m.repoRecent)
 	}
 
-	if !strings.Contains(m.View(), "other/backlog") {
+	if !strings.Contains(m.viewContent(), "other/backlog") {
 		t.Fatal("a repo from elsewhere should be listed in the picker")
 	}
 }
@@ -155,7 +155,7 @@ func TestWithoutAnInstallTheAppIsOnlyThePicker(t *testing.T) {
 		t.Fatal("the status tick should still run")
 	}
 
-	view := m.View()
+	view := m.viewContent()
 	if !strings.Contains(view, "no install open") || !strings.Contains(view, "before anything is written") {
 		t.Fatalf("the picker should say what this screen is and that a path can be installed into:\n%s", view)
 	}
@@ -190,7 +190,7 @@ func TestWithoutAnInstallEscapeQuitsAndARepoNameHasNowhereToGo(t *testing.T) {
 		t.Fatalf("a repo name needs an install to live in: %q", m.status)
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd == nil {
 		t.Fatal("Esc should quit when there is nothing behind the picker")
 	}
@@ -300,31 +300,31 @@ func TestTheInstallPlanIsShownBeforeAnythingIsWritten(t *testing.T) {
 		t.Fatalf("the plan should arrive and be kept: %+v", m.installing)
 	}
 
-	flat := flatten(m.View())
+	flat := flatten(m.viewContent())
 	for _, want := range []string{"acme/widgets", "create triage-o-mator/", "Nothing has been written yet", "Mode: tracked"} {
 		if !strings.Contains(flat, flatten(want)) {
-			t.Fatalf("the plan screen should show what the script said it would do, and what accepting it means (%q):\n%s", want, m.View())
+			t.Fatalf("the plan screen should show what the script said it would do, and what accepting it means (%q):\n%s", want, m.viewContent())
 		}
 	}
 
 	// The rest of the plan is a scroll away, never silently cut. How many presses that takes depends on how far the plan's absolute paths wrap, so scroll until the view stops moving rather than a fixed count.
 	settled := false
 	for i := 0; i < 500 && !settled; i++ {
-		before := m.View()
+		before := m.viewContent()
 		m = press(m, "j")
-		settled = m.View() == before
+		settled = m.viewContent() == before
 	}
 
 	if !settled {
-		t.Fatalf("scrolling never reached the end of the plan:\n%s", m.View())
+		t.Fatalf("scrolling never reached the end of the plan:\n%s", m.viewContent())
 	}
 
-	if !strings.Contains(flatten(m.View()), flatten("triage-o-mator/config/repo")) {
-		t.Fatalf("scrolling should reach the end of the plan:\n%s", m.View())
+	if !strings.Contains(flatten(m.viewContent()), flatten("triage-o-mator/config/repo")) {
+		t.Fatalf("scrolling should reach the end of the plan:\n%s", m.viewContent())
 	}
 
-	if !strings.Contains(flatten(m.View()), flatten("Nothing has been written yet")) {
-		t.Fatalf("and the question stays on screen while it does:\n%s", m.View())
+	if !strings.Contains(flatten(m.viewContent()), flatten("Nothing has been written yet")) {
+		t.Fatalf("and the question stays on screen while it does:\n%s", m.viewContent())
 	}
 
 	if entries, err := os.ReadDir(target); err != nil || len(entries) != 1 {
@@ -338,8 +338,8 @@ func TestTheOtherModeIsAPlanToo(t *testing.T) {
 	m = typeRepo(m, target)
 	m = runCmd(m, installPlanCmd(m.installerRoot(), target, false))
 
-	if !strings.Contains(flatten(m.View()), flatten("committed there")) {
-		t.Fatalf("the default plan is the tracked install:\n%s", m.View())
+	if !strings.Contains(flatten(m.viewContent()), flatten("committed there")) {
+		t.Fatalf("the default plan is the tracked install:\n%s", m.viewContent())
 	}
 
 	m = press(m, "s")
@@ -348,8 +348,8 @@ func TestTheOtherModeIsAPlanToo(t *testing.T) {
 	}
 
 	m = runCmd(m, installPlanCmd(m.installerRoot(), target, true))
-	if !strings.Contains(flatten(m.View()), flatten("kept out of that repository's history")) {
-		t.Fatalf("and show it:\n%s", m.View())
+	if !strings.Contains(flatten(m.viewContent()), flatten("kept out of that repository's history")) {
+		t.Fatalf("and show it:\n%s", m.viewContent())
 	}
 
 	if entries, _ := os.ReadDir(target); len(entries) != 1 {

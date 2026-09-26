@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // installRootFromArgs is `--root <path>` (also `--root=<path>`), else the install found from the working directory.
@@ -86,7 +86,7 @@ func run(m model) {
 	m.notificationsLifecycle = &readLifecycle{}
 	m.evidenceLifecycle = &readLifecycle{}
 	m.corpusLifecycle, m.corpusObserverLifecycle = &readLifecycle{}, &readLifecycle{}
-	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(m)
 	_, err := p.Run()
 	m.actionHistoryLifecycle.stop()
 	m.attentionLifecycle.stop()

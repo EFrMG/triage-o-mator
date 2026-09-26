@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -73,8 +73,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = msg.summary
 
 		return m, reloadLedgerCmd(m.installRoot, m.repo)
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.PasteMsg:
+		return m.handlePaste(msg)
 
 	case statusTickMsg:
 		return m.onStatusTick()
@@ -246,7 +248,87 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// handlePaste follows the same modal priority as handleKey, so pasted text only reaches the active editor.
+func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case m.comment.open:
+		if m.comment.busy || m.comment.previewing {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.comment.text, cmd = m.comment.text.Update(msg)
+		return m, cmd
+	case m.confirmQuit || m.lastError.open || m.notificationPR.open || m.attention.open || m.actionHistory.open || m.notifications.open || m.corpus.open:
+		return m, nil
+	case m.themePicker.open:
+		if !m.themePicker.searching {
+			return m, nil
+		}
+		before := m.themePicker.query.Value()
+		var cmd tea.Cmd
+		m.themePicker.query, cmd = m.themePicker.query.Update(msg)
+		if m.themePicker.query.Value() != before {
+			m.themePicker.selected = 0
+			m.previewSelectedTheme()
+		}
+		return m, cmd
+	case m.groups.open:
+		if m.groups.busy || m.groups.editing == "" || m.onGroupStatusField() {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.groups.inputs[m.groups.field], cmd = m.groups.inputs[m.groups.field].Update(msg)
+		return m, cmd
+	case m.batches.open:
+		if m.batches.busy || !m.batches.editing || m.batches.field != 0 {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.batches.size, cmd = m.batches.size.Update(msg)
+		return m, cmd
+	case m.dups.open:
+		return m, nil
+	case m.editingRepo:
+		if m.installing.path != "" {
+			return m, nil
+		}
+		m.confirmSwitch = false
+		m.status = ""
+		m.repoPick = -1
+		var cmd tea.Cmd
+		m.repoInput, cmd = m.repoInput.Update(msg)
+		m.repoRecent = matchingRepos(m.repoAll, m.repoInput.Value())
+		m.repoLastPick = 0
+		return m, cmd
+	case m.typingReason():
+		if m.confirmSave {
+			m.confirmSave = false
+			m.status = ""
+		}
+		before := m.form.reason.Value()
+		var cmd tea.Cmd
+		m.form.reason, cmd = m.form.reason.Update(msg)
+		if m.form.reason.Value() != before {
+			m.form.dirty = true
+			m.form.saved = false
+			m.form.touched = true
+		}
+		return m, cmd
+	case m.searching:
+		before := m.searchInput.Value()
+		var cmd tea.Cmd
+		m.searchInput, cmd = m.searchInput.Update(msg)
+		if m.searchInput.Value() != before {
+			m.showList()
+			m.list.Select(0)
+		}
+		return m, cmd
+	default:
+		return m, nil
+	}
+}
+
+func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Modal states intercept every key, in priority order, before any global keybinding; otherwise, typing "r" (or "q", "a", "h", "?", ...) into a text field would trigger refresh, quit, approve, back, etc. instead of being typed. ForceQuit is the one exception: it must always work.
 	if key.Matches(msg, keys.ForceQuit) {
 		m.notificationsLifecycle.stop()
@@ -375,7 +457,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.form.FocusField(fieldCategory)
 
 			return m, nil
-		case m.form.focused != fieldContent && msg.Type != tea.KeyEsc && key.Matches(msg, keys.Back):
+		case m.form.focused != fieldContent && msg.Code != tea.KeyEsc && key.Matches(msg, keys.Back):
 			m.form.FocusField(fieldContent)
 
 			return m, nil
@@ -475,7 +557,7 @@ func (m model) requestQuit() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleQuitConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleQuitConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, keys.Quit) {
 		return m, tea.Quit
 	}
@@ -493,7 +575,7 @@ func (m model) handleQuitConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleRepoInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleRepoInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.moveRepoPick(msg) {
 		m.confirmSwitch = false
 
@@ -614,7 +696,7 @@ func (m model) typedInstallTarget() string {
 }
 
 // handleInstallPlanKey drives the plan screen: Enter accepts the plan as shown, s asks for the other mode's plan, and anything that goes back leaves the repository untouched.
-func (m model) handleInstallPlanKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleInstallPlanKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.installing.busy {
 		return m, nil // a plan or an install is running; let it finish rather than queueing another
 	}
@@ -642,7 +724,7 @@ func (m model) handleInstallPlanKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 
-	case msg.Type == tea.KeyRunes && string(msg.Runes) == "s":
+	case msg.Text == "s":
 		solo := !m.installing.solo
 		m.installing = installUI{path: m.installing.path, solo: solo, busy: true}
 
@@ -736,7 +818,7 @@ func (m model) repoTarget() (repoInfo, string) {
 	return repoInfo{}, fmt.Sprintf("%q is neither a repo nor an install: type owner/repo, an absolute path to another install, or a filter that matches one of the listed repos.", value)
 }
 
-func (m model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleSidebarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Up):
 		m.overview = false
@@ -759,7 +841,7 @@ func (m model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case m.activeTab == untriagedTab && m.activeBatch == "" && !m.activePairs && key.Matches(msg, keys.UntriagedKind):
 		m.cycleUntriagedKind()
@@ -829,7 +911,7 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleReasonKey handles keys while typing the reason: printable keys are text, so only field movement, save, and Esc act.
-func (m model) handleReasonKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleReasonKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Letter shortcuts are text here. Enter saves and approves the completed decision; Ctrl-S remains an optional save-for-review alias.
 	save := msg.String() == "ctrl+s" || key.Matches(msg, keys.Confirm)
 	if m.confirmSave && !save {
@@ -869,7 +951,7 @@ func (m model) handleReasonKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleDetailKey handles an open item. On the content (the default focus), j/k and the arrows scroll the active tab; on a choice field, j/k and ↑/↓ change the value, J / K move to the next / previous field (into the reason too), l / → open the list of values, and Enter moves on to the next field.
-func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	onChoice := formFieldIsEnum(m.form.focused) && !m.detail.AnySectionFull()
 	if onChoice && m.form.pick.open {
 		m.form.PickKey(msg)
@@ -907,7 +989,19 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		return m, m.diffIfNeeded()
 	case key.Matches(msg, keys.TabJump):
-		m.detail.JumpSection(int(msg.Runes[0] - '1'))
+		tab := int(msg.String()[0] - '1')
+		if tab >= len(m.detail.sections) {
+			return m, nil
+		}
+
+		if tab == m.detail.active && !m.detail.AnySectionFull() {
+			if m.form.focused == fieldContent {
+				m.form.FocusField(fieldCategory)
+			} else {
+				m.form.FocusField(fieldContent)
+			}
+		}
+		m.detail.JumpSection(tab)
 
 		return m, m.diffIfNeeded()
 	case key.Matches(msg, keys.Enter):

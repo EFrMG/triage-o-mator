@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // age pretends the current status was set long ago, then lets one status tick run.
@@ -79,7 +79,7 @@ func TestInvalidProposalIsShownAndCannotBeSaved(t *testing.T) {
 		t.Fatalf("the form should show the proposal's real values, flagged:\n%s", view)
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd != nil || !strings.Contains(m.status, "Can't save") {
 		t.Fatalf("saving an invalid proposal unchanged should be refused: %q", m.status)
@@ -100,7 +100,7 @@ func TestOpenReportsOpenerFailure(t *testing.T) {
 	m := batchModel(t, batchFixture(t))
 	m.activateTab(0)
 	m.selectCurrentListItem()
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "o"})
 	m = send(next.(model), cmd())
 	if !strings.HasPrefix(m.status, "Couldn't open the browser") || !strings.Contains(m.status, "no method available") {
 		t.Fatalf("a failing opener should be reported, with its reason: %q", m.status)
@@ -112,7 +112,7 @@ func TestEmptyListShowsOneCenteredMessage(t *testing.T) {
 	m = send(m, tea.WindowSizeMsg{Width: 120, Height: 30})
 	m.untriagedKind = untriagedPR
 	m.activateTab(untriagedTab) // The fixture has no PRs.
-	view := m.View()
+	view := m.viewContent()
 	if strings.Count(view, "Nothing here yet.") != 1 || strings.Contains(view, "No items") {
 		t.Fatalf("expected exactly one empty-state message:\n%s", view)
 	}

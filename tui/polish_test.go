@@ -5,29 +5,24 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 )
 
 func TestRepaintKeepsThemeColorsAfterResets(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
 	old := currentTheme
 	defer func() { currentTheme = old }()
 	currentTheme = Theme{Background: "#eff1f5", Foreground: "#4c4f69"}
 
 	base := themeBaseSequence()
 	out := repaint(lipgloss.NewStyle().Bold(true).Render("x") + " y\nz")
-	if base == "" || !strings.Contains(out, "\x1b[0m"+base+" y") || !strings.Contains(out, "\n"+base+"z") {
+	if base == "" || !strings.Contains(out, "\x1b[m"+base+" y") || !strings.Contains(out, "\n"+base+"z") {
 		t.Fatalf("theme colors should follow every reset and start every line: %q", out)
 	}
 }
 
 func TestDiffUsesTheThemesExactColors(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
 	old := currentTheme
 	defer func() { currentTheme = old; forgetRenderers() }()
 
@@ -47,8 +42,6 @@ func TestDiffUsesTheThemesExactColors(t *testing.T) {
 }
 
 func TestReasonTakesTheNewThemeWhileUnfocused(t *testing.T) {
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	defer lipgloss.SetColorProfile(termenv.Ascii)
 	old := currentTheme
 	defer func() { currentTheme = old }()
 	currentTheme = Theme{Background: "#1e1e2e", Foreground: "#cdd6f4", Muted: "#a6adc8", Accent: "#cba6f7"}
@@ -100,7 +93,7 @@ func TestMovingAroundTheRepoPicker(t *testing.T) {
 		t.Fatalf("both repos with a ledger should be listed: %+v", m.repoRecent)
 	}
 
-	if m.repoPick != -1 || !strings.Contains(m.View(), "other/repo") {
+	if m.repoPick != -1 || !strings.Contains(m.viewContent(), "other/repo") {
 		t.Fatal("Switch Repo should open on the text field, with the known repos listed below")
 	}
 
@@ -187,21 +180,21 @@ func TestMenuScreensStayInBounds(t *testing.T) {
 		m := batchModel(t, batchFixture(t))
 		m = send(m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		m, _ = openBatchesNow(t, m)
-		assertBounds(t, m.View(), size[0], size[1])
-		if size[0] >= 100 && !strings.Contains(m.View(), "Untriaged") {
+		assertBounds(t, m.viewContent(), size[0], size[1])
+		if size[0] >= 100 && !strings.Contains(m.viewContent(), "Untriaged") {
 			t.Fatal("Batches should keep the sidebar visible")
 		}
 
 		m = press(m, "n")
 		m = press(m, "enter")
 		m = press(m, "enter") // Kind's list
-		assertBounds(t, m.View(), size[0], size[1])
+		assertBounds(t, m.viewContent(), size[0], size[1])
 
 		d := testPRModel()
 		d = send(d, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		d.similar[d.detail.key] = []dupCandidate{{Number: 9, Kind: "pr", Title: strings.Repeat("similar ", 30), Score: 0.8}}
 		d.dups = dupUI{open: true, source: d.detail.key, checked: map[Key]bool{}}
-		assertBounds(t, d.View(), size[0], size[1])
+		assertBounds(t, d.viewContent(), size[0], size[1])
 	}
 }
 
@@ -226,7 +219,7 @@ func TestItemListCardsSpanTheFullWidth(t *testing.T) {
 func TestSidebarIsCenteredAndOverviewNoteWraps(t *testing.T) {
 	m := batchModel(t, batchFixture(t))
 	m = send(m, tea.WindowSizeMsg{Width: 110, Height: 30})
-	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	lines := strings.Split(ansi.Strip(m.viewContent()), "\n")
 	if strings.Contains(lines[1], "Untriaged") {
 		t.Fatal("the sidebar's entries should be centered vertically, not start at the top")
 	}
@@ -245,7 +238,7 @@ func TestOverviewShowsEveryNextStepThatFits(t *testing.T) {
 		m.nextSteps = append(m.nextSteps, nextStep{Who: "agent", What: fmt.Sprintf("Step %d", i), Do: "do it"})
 	}
 
-	if view := ansi.Strip(m.View()); !strings.Contains(view, "Step 4") || strings.Contains(view, "more: bin/next") {
+	if view := ansi.Strip(m.viewContent()); !strings.Contains(view, "Step 4") || strings.Contains(view, "more: bin/next") {
 		t.Fatalf("steps that fit should all show, without a \"more\" line:\n%s", view)
 	}
 
@@ -253,8 +246,8 @@ func TestOverviewShowsEveryNextStepThatFits(t *testing.T) {
 		m.nextSteps = append(m.nextSteps, nextStep{Who: "agent", What: fmt.Sprintf("Step %d", i), Do: "do it"})
 	}
 
-	view := ansi.Strip(m.View())
-	assertBounds(t, m.View(), 110, 36)
+	view := ansi.Strip(m.viewContent())
+	assertBounds(t, m.viewContent(), 110, 36)
 	if !strings.Contains(view, "Step 8") || !strings.Contains(view, "more: bin/next lists them all") || !strings.Contains(view, "AGENTS.md") {
 		t.Fatalf("steps should fill the panel, then say how many more there are, above the note:\n%s", view)
 	}

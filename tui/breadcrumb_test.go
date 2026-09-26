@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -19,8 +19,8 @@ func TestBreadcrumbFollowsTheFlow(t *testing.T) {
 			t.Fatalf("breadcrumb = %q, want %q", got, want)
 		}
 
-		if !strings.Contains(ansi.Strip(m.View()), "─ "+want+" ─") {
-			t.Fatalf("the panel border should carry %q:\n%s", want, ansi.Strip(m.View()))
+		if !strings.Contains(ansi.Strip(m.viewContent()), "─ "+want+" ─") {
+			t.Fatalf("the panel border should carry %q:\n%s", want, ansi.Strip(m.viewContent()))
 		}
 	}
 

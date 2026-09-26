@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // dupFixture is a throwaway repo root with the real bin/similar, bin/group, and bin/apply, where issue #1 and #2 have near-identical titles and #3 is unrelated.
@@ -81,7 +81,11 @@ func TestDuplicatesHeaderCompareAndMark(t *testing.T) {
 		t.Fatal("Duplicates screen did not open on #1")
 	}
 
-	m = runCmd(m, func() tea.Cmd { next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}); m = next.(model); return cmd }())
+	m = runCmd(m, func() tea.Cmd {
+		next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = next.(model)
+		return cmd
+	}())
 	if m.dups.open || m.detail.key.Number != 1 {
 		t.Fatal("Enter should open the candidate for reading")
 	}
@@ -123,7 +127,7 @@ func TestDuplicatesHeaderCompareAndMark(t *testing.T) {
 		t.Fatal("marking must not write the ledger before Ctrl-S")
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("a prefilled duplicate should save on the first Ctrl-S")
 	}
@@ -140,7 +144,7 @@ func TestDuplicatesGroupChecked(t *testing.T) {
 	before, _ := os.ReadFile(filepath.Join(root, "data", "owner", "repo", "ledger.jsonl"))
 	m = press(m, "m")
 	m = press(m, " ")
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "b"})
 	m = runCmd(next.(model), cmd)
 	if m.dups.busy || m.lastGroup() == nil {
 		t.Fatalf("group not created: %q", m.status)
@@ -170,13 +174,13 @@ func TestDuplicatesGroupChecked(t *testing.T) {
 func TestFullRefreshKey(t *testing.T) {
 	m := newModel("/tmp", "owner/repo", testTaxonomy(), "tester", testItems())
 	m = send(m, fetchSyncDoneMsg{}) // the startup fetch
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "R"})
 	m = next.(model)
 	if cmd == nil || !m.refreshing || !strings.Contains(m.status, "full") {
 		t.Fatalf("R should start a full refetch: %q", m.status)
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "r"})
 	if cmd != nil {
 		t.Fatal("a second refresh must not start while one is running")
 	}
@@ -186,7 +190,7 @@ func TestPossibleDuplicatesViewComparesAndMarksResolvedPairs(t *testing.T) {
 	root := dupFixture(t)
 	m := batchModel(t, root)
 	m.sidebar.selected = pairsIndex
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	if !m.activePairs || len(m.list.Items()) != 1 || m.sidebar.pairCount != 1 {
 		t.Fatalf("expected one pair (#1 ↔ #2), got %d; title %q", len(m.list.Items()), m.list.Title)
@@ -196,7 +200,7 @@ func TestPossibleDuplicatesViewComparesAndMarksResolvedPairs(t *testing.T) {
 		t.Fatal("the older item, the one a comparison opens on, should lead the pair")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	if !m.dups.open || m.dups.source.Number != 1 || m.selectedDup() == nil || m.selectedDup().Number != 2 {
 		t.Fatal("Enter should compare the pair on the older item, with the newer one selected")
@@ -207,10 +211,10 @@ func TestPossibleDuplicatesViewComparesAndMarksResolvedPairs(t *testing.T) {
 		t.Fatal("Esc should return to the Possible Duplicates list")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	m = press(m, "m")
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = runCmd(next.(model), cmd)
 	if ledgerRow(t, root, 2)["category"] != "duplicate" {
 		t.Fatal("marked duplicate was not saved")
@@ -229,7 +233,7 @@ func TestPossibleDuplicatesViewComparesAndMarksResolvedPairs(t *testing.T) {
 
 	// Opened again, the view lists only pairs still needing a look.
 	m = press(m, "esc")
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	if !m.activePairs || len(m.list.Items()) != 0 {
 		t.Fatalf("a pair resolved earlier should be gone when the view reopens; %d listed", len(m.list.Items()))
@@ -241,9 +245,9 @@ func TestDuplicatesSourceCardLeadsAndSaves(t *testing.T) {
 	root := dupFixture(t)
 	m := batchModel(t, root)
 	m.sidebar.selected = pairsIndex
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	view := m.dupsView()
 	original, candidate := strings.Index(view, "#1"), strings.Index(view, "#2")
@@ -260,7 +264,7 @@ func TestDuplicatesSourceCardLeadsAndSaves(t *testing.T) {
 		t.Fatal("k from the first candidate should move to the original's card")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	if m.dups.open || m.detail.key.Number != 1 {
 		t.Fatalf("Enter on the top card should open the original, not a candidate: #%d", m.detail.key.Number)
@@ -283,7 +287,7 @@ func TestDuplicatesSourceCardLeadsAndSaves(t *testing.T) {
 		t.Fatal("setup: Esc should keep the candidate's prefilled decision as a draft, back on the comparison")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = runCmd(next.(model), cmd)
 	if row := ledgerRow(t, root, 2); row["category"] != "duplicate" || !m.dups.open {
 		t.Fatalf("Ctrl-S on the comparison should save the marked candidate and stay: %v, open %v", row["category"], m.dups.open)
@@ -299,10 +303,10 @@ func TestMarkFromHoveredPair(t *testing.T) {
 	root := dupFixture(t)
 	m := batchModel(t, root)
 	m.sidebar.selected = pairsIndex
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	m = runCmd(m, func() tea.Cmd {
-		n, c := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+		n, c := m.Update(tea.KeyPressMsg{Text: "m"})
 		m = n.(model)
 		return c
 	}())
@@ -321,15 +325,15 @@ func TestSwapTheOriginalWithM(t *testing.T) {
 	root := dupFixture(t)
 	m := batchModel(t, root)
 	m.sidebar.selected = pairsIndex
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	if m.dups.source.Number != 1 || m.selectedDup().Number != 2 {
 		t.Fatal("setup: the pair should open on #1 with #2 selected")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("M")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "M"})
 	m = runCmd(next.(model), cmd)
 	if m.dups.source.Number != 2 || m.selectedDup() == nil || m.selectedDup().Number != 1 {
 		t.Fatalf("M should make #2 the original, with #1 selected under it: on #%d", m.dups.source.Number)
@@ -341,7 +345,7 @@ func TestSwapTheOriginalWithM(t *testing.T) {
 
 	// Marking now runs the other way: #1 becomes a duplicate of #2.
 	m = press(m, "m")
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = runCmd(next.(model), cmd)
 	if ledgerRow(t, root, 1)["category"] != "duplicate" || ledgerRow(t, root, 2)["category"] != "" {
 		t.Fatal("after the swap, m should close #1 as a duplicate of #2")
@@ -359,7 +363,7 @@ func TestClearHandledPairs(t *testing.T) {
 	root := dupFixture(t)
 	m := batchModel(t, root)
 	m.sidebar.selected = pairsIndex
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	if m = press(m, "D"); !strings.Contains(m.status, "Nothing to clear") {
 		t.Fatalf("D with no handled pair should say so: %q", m.status)
@@ -370,7 +374,7 @@ func TestClearHandledPairs(t *testing.T) {
 		t.Fatalf("the first d should ask: %q", m.status)
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "d"})
 	m = runCmd(next.(model), cmd)
 	if len(m.list.Items()) != 0 || !m.ruledOut("issue", 2, 1) {
 		t.Fatalf("d d should rule the pair out: %d listed, %q", len(m.list.Items()), m.status)
@@ -382,7 +386,7 @@ func TestClearHandledPairs(t *testing.T) {
 	}
 
 	m = press(m, "esc")
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	if !m.activePairs || len(m.list.Items()) != 0 {
 		t.Fatalf("a pair ruled out should stay off the list when the view reopens; %d listed", len(m.list.Items()))
@@ -394,17 +398,17 @@ func TestClearHandledPairs(t *testing.T) {
 	}
 
 	m = press(m, "esc")
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	if len(m.list.Items()) != 1 {
 		t.Fatalf("bin/not-duplicate --remove should bring the pair back; %d listed", len(m.list.Items()))
 	}
 
 	// Resolve the pair, which leaves it listed as handled.
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = runCmd(next.(model), cmd)
 	m = press(m, "m")
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = runCmd(next.(model), cmd)
 	m = press(m, "esc")
 	if len(m.list.Items()) != 1 || !m.list.Items()[0].(pairListItem).handled {
@@ -436,7 +440,7 @@ func TestRuleOutFromComparison(t *testing.T) {
 	m := batchModel(t, root)
 	m.activateTab(0)
 	m = runCmd(m, func() tea.Cmd {
-		n, c := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")})
+		n, c := m.Update(tea.KeyPressMsg{Text: "m"})
 		m = n.(model)
 		return c
 	}())
@@ -454,7 +458,7 @@ func TestRuleOutFromComparison(t *testing.T) {
 	}
 
 	m = press(m, "d")
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "d"})
 	m = runCmd(next.(model), cmd)
 	candidate := m.selectedDup()
 	if candidate == nil || !m.ruledOut(candidate.Kind, candidate.Number, m.dups.source.Number) {

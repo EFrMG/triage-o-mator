@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // batchFixture builds a throwaway repo root with the real bin/apply, a two-issue ledger, and one batch whose decisions file proposes a decision for issue #1 only.
@@ -199,20 +199,20 @@ func TestSaveWarnsOnDefaultsAndEmptyReason(t *testing.T) {
 	m.activateTab(0)
 	m.list.Select(1) // #2, no proposal outside a batch either
 	m.selectCurrentListItem()
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd != nil || !m.confirmSave || !strings.Contains(m.status, "Defaults unchanged") || !strings.Contains(m.status, "no reason") {
 		t.Fatalf("first Ctrl-S on untouched defaults should only warn; status %q", m.status)
 	}
 
 	m = press(m, "j") // any other key disarms
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd != nil {
 		t.Fatal("a disarmed warning must warn again rather than save")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd == nil {
 		t.Fatal("second consecutive Ctrl-S should save anyway")
@@ -229,7 +229,7 @@ func TestBatchSaveStampsBatchAndApproveWarnsOnUnsavedEdits(t *testing.T) {
 	m := batchModel(t, root)
 	m.openBatch("b20260101-000000")
 	m.selectCurrentListItem()
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("a complete proposal should save on the first Ctrl-S")
 	}
@@ -253,13 +253,13 @@ func TestBatchSaveStampsBatchAndApproveWarnsOnUnsavedEdits(t *testing.T) {
 	m.selectCurrentListItem()
 	m = press(m, "tab")
 	m = press(m, "down") // unsaved category edit
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "a"})
 	m = next.(model)
 	if cmd != nil || !m.confirmApprove {
 		t.Fatal("approving with unsaved edits should warn first")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "a"})
 	if cmd == nil {
 		t.Fatal("second a should approve the saved decision")
 	}
@@ -295,13 +295,13 @@ func TestApplyBatchProposalsNeedsConfirmAndKeepsExistingDecisions(t *testing.T) 
 	root = batchFixture(t)
 	m = batchModel(t, root)
 	m.batches.open = true
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("A")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "A"})
 	m = next.(model)
 	if cmd != nil || m.batches.confirm != "A" {
 		t.Fatal("applying proposals should ask for confirmation first")
 	}
 
-	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("A")})
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "A"})
 	if cmd == nil {
 		t.Fatal("second A should apply")
 	}
@@ -337,7 +337,7 @@ func TestBatchFormBuildsBatchArgs(t *testing.T) {
 		t.Fatal("size 0 should be rejected")
 	}
 
-	assertBounds(t, m.View(), 100, 30)
+	assertBounds(t, m.viewContent(), 100, 30)
 }
 
 func TestDeleteBatchNeedsConfirmAndLeavesLedger(t *testing.T) {
@@ -359,7 +359,7 @@ func TestDeleteBatchNeedsConfirmAndLeavesLedger(t *testing.T) {
 	}
 
 	m = press(m, "d")
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "d"})
 	if cmd == nil {
 		t.Fatal("second d should delete")
 	}
@@ -400,7 +400,7 @@ func TestAgentNotesShowFromProposalAndSurviveSave(t *testing.T) {
 		t.Fatalf("proposal notes should show as the second section: %+v", m.detail.sections)
 	}
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = send(next.(model), cmd())
 	m = send(m, reloadLedgerCmd(root, "owner/repo")())
 	if row := ledgerRow(t, root, 1); row["agent_notes"] != "Comment 1 has the fix." || row["triaged_by"] != "tester" {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func testTaxonomy() Taxonomy {
@@ -21,6 +21,17 @@ func testItems() []Item {
 	return []Item{
 		{Number: 1, Kind: "issue", State: "open", Title: "first"},
 		{Number: 2, Kind: "issue", State: "open", Title: "second"},
+	}
+}
+
+func TestViewDeclaresTerminalState(t *testing.T) {
+	m := testPRModel()
+	v := m.View()
+	if !v.AltScreen || v.MouseMode != tea.MouseModeCellMotion || v.ForegroundColor == nil || v.BackgroundColor == nil {
+		t.Fatal("view must declare its terminal mode and theme colors")
+	}
+	if v.Content != m.viewContent() {
+		t.Fatal("view content differs from the rendered model")
 	}
 }
 
@@ -95,7 +106,7 @@ func TestQuitConfirmation(t *testing.T) {
 		t.Fatal("first quit with unsaved drafts should not quit immediately")
 	}
 
-	next, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	next, cmd := m.handleKey(tea.KeyPressMsg{Text: "q"})
 	m2 := next.(model)
 	if !m2.confirmQuit {
 		t.Fatal("expected confirmQuit=true after requesting quit with unsaved drafts")
@@ -106,7 +117,7 @@ func TestQuitConfirmation(t *testing.T) {
 	}
 
 	// Any other key should cancel the confirmation, not quit and not lose it silently.
-	next, cmd = m2.handleQuitConfirmKey(tea.KeyMsg{Type: tea.KeyEsc})
+	next, cmd = m2.handleQuitConfirmKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m3 := next.(model)
 	if m3.confirmQuit {
 		t.Fatal("expected confirmQuit to clear after a non-quit key")
@@ -117,7 +128,7 @@ func TestQuitConfirmation(t *testing.T) {
 	}
 
 	// A second real quit keypress should actually quit.
-	_, cmd = m2.handleQuitConfirmKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	_, cmd = m2.handleQuitConfirmKey(tea.KeyPressMsg{Text: "q"})
 	if cmd == nil {
 		t.Fatal("expected a quit cmd on confirmed second 'q'")
 	}

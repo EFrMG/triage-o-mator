@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Space ticks items in a list; list actions (a, b, B, and d inside a batch) then act on every ticked item, or on the hovered one when nothing is ticked. Ticks belong to the list on screen: switching lists, or finishing a bulk action, clears them.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Status messages are informational unless something is waiting on them: they expire after a few seconds, and are dropped when you move to another screen, so a message never describes something that's no longer true.

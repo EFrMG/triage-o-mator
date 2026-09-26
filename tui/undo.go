@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // u steps a saved decision back one layer, on the open item, the hovered one, or the ticked ones: an approval is taken back (the decision stays, unreviewed), and an unreviewed decision is cleared (the item is untriaged again; its agent and reviewer notes stay). It always asks first. bin/apply --unapprove / --clear do the work; the ledger's git diff is the record.

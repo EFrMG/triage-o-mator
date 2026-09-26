@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/lucasb-eyer/go-colorful"
 )
@@ -26,7 +27,7 @@ func (d *dropdown) Open(options []string, current int) {
 }
 
 // Key handles a key while the list is open. picked reports Enter (or l / →) on an option (d.cursor holds it); the list closes on Enter or Esc.
-func (d *dropdown) Key(msg tea.KeyMsg) (picked bool) {
+func (d *dropdown) Key(msg tea.KeyPressMsg) (picked bool) {
 	last := len(d.options) - 1
 	switch {
 	case key.Matches(msg, keys.Confirm), key.Matches(msg, keys.OpenList):
@@ -81,7 +82,7 @@ const (
 )
 
 // themeOpacity blends a theme color toward the background: terminals have no opacity, so this produces the same visual effect for text and borders.
-func themeOpacity(color string, opacity float64) lipgloss.Color {
+func themeOpacity(color string, opacity float64) color.Color {
 	a, errA := colorful.Hex(color)
 	b, errB := colorful.Hex(currentTheme.Background)
 	if errA != nil || errB != nil {
@@ -94,6 +95,6 @@ func themeOpacity(color string, opacity float64) lipgloss.Color {
 }
 
 // strongAccent is the accent drawn at the strongest blended rung against the theme background.
-func strongAccent() lipgloss.Color {
+func strongAccent() color.Color {
 	return themeOpacity(currentTheme.Accent, opacityStrong)
 }

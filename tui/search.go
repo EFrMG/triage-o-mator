@@ -5,10 +5,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -131,7 +131,7 @@ func (m *model) startSearch() {
 }
 
 // handleSearchKey takes every key while the query is being typed: Enter keeps the matches listed, Esc clears the search, ↑/↓ move through the matches, and anything else edits the query.
-func (m model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Cancel):
 		m.clearSearch()
@@ -141,9 +141,9 @@ func (m model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.searchQuery() == "" {
 			m.clearSearch()
 		}
-	case msg.Type == tea.KeyUp:
+	case msg.Code == tea.KeyUp:
 		m.list.CursorUp()
-	case msg.Type == tea.KeyDown:
+	case msg.Code == tea.KeyDown:
 		m.list.CursorDown()
 	default:
 		before := m.searchInput.Value()

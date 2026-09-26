@@ -2,9 +2,9 @@ package main
 
 import (
 	"bytes"
+	tea "charm.land/bubbletea/v2"
 	"encoding/json"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 	"io"
 	"os"
@@ -13,11 +13,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/lipgloss/v2"
 )
 
 type Theme struct {
@@ -172,15 +172,20 @@ func loadTheme(root string) error {
 }
 
 func themeInput(input *textinput.Model) {
-	input.TextStyle = screenStyle()
-	input.PromptStyle = screenStyle().Foreground(lipgloss.Color(currentTheme.Accent))
-	input.PlaceholderStyle = screenStyle().Foreground(lipgloss.Color(currentTheme.Muted))
-	input.Cursor.Style = screenStyle().Foreground(lipgloss.Color(currentTheme.Accent))
+	styles := input.Styles()
+	for _, st := range []*textinput.StyleState{&styles.Focused, &styles.Blurred} {
+		st.Text = screenStyle()
+		st.Prompt = screenStyle().Foreground(lipgloss.Color(currentTheme.Accent))
+		st.Placeholder = screenStyle().Foreground(lipgloss.Color(currentTheme.Muted))
+	}
+	styles.Cursor.Color = lipgloss.Color(currentTheme.Accent)
+	input.SetStyles(styles)
 }
 
 // themeTextarea styles a multi-line input like themeInput does single-line ones, without the default highlighted cursor line.
 func themeTextarea(ta *textarea.Model) {
-	for _, st := range []*textarea.Style{&ta.FocusedStyle, &ta.BlurredStyle} {
+	styles := ta.Styles()
+	for _, st := range []*textarea.StyleState{&styles.Focused, &styles.Blurred} {
 		st.Base = screenStyle()
 		st.Text = screenStyle()
 		st.CursorLine = screenStyle()
@@ -188,14 +193,8 @@ func themeTextarea(ta *textarea.Model) {
 		st.EndOfBuffer = screenStyle().Foreground(lipgloss.Color(currentTheme.Background))
 	}
 
-	ta.Cursor.Style = screenStyle().Foreground(lipgloss.Color(currentTheme.Accent))
-
-	// The textarea draws through a pointer to its active style, taken at its last Focus/Blur, so it points into an older copy of the model with the old colors: re-point it at the styles just set.
-	if ta.Focused() {
-		ta.Focus()
-	} else {
-		ta.Blur()
-	}
+	styles.Cursor.Color = lipgloss.Color(currentTheme.Accent)
+	ta.SetStyles(styles)
 }
 
 func themeList(l *list.Model) {
@@ -283,7 +282,7 @@ func (m *model) openThemePicker() {
 	m.restyle()
 }
 
-func (m model) handleThemeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleThemeKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.themePicker.searching {
 		return m.handleThemeSearchKey(msg)
 	}
@@ -339,7 +338,7 @@ func (m model) handleThemeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleThemeSearchKey takes every key while the query is being typed, like handleSearchKey: Enter keeps the matches, Esc clears the search, ↑/↓ move, anything else edits the query and previews the first match.
-func (m model) handleThemeSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleThemeSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Cancel):
 		m.clearThemeSearch()
@@ -349,10 +348,10 @@ func (m model) handleThemeSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(m.themePicker.query.Value()) == "" {
 			m.clearThemeSearch()
 		}
-	case msg.Type == tea.KeyUp:
+	case msg.Code == tea.KeyUp:
 		m.themePicker.selected = maxInt(m.themePicker.selected-1, 0)
 		m.previewSelectedTheme()
-	case msg.Type == tea.KeyDown:
+	case msg.Code == tea.KeyDown:
 		m.themePicker.selected = minInt(m.themePicker.selected+1, maxInt(len(m.themePicker.shown())-1, 0))
 		m.previewSelectedTheme()
 	default:
@@ -427,5 +426,5 @@ func (m model) themePickerView() string {
 		rows = append(rows, line)
 	}
 
-	return m.titled(panelStyle(true).Width(w+2).Height(h).Padding(0, 1).Render(strings.Join(rows, "\n")), true)
+	return m.titled(panelStyle(true).Width(w+4).Height(h+2).Padding(0, 1).Render(strings.Join(rows, "\n")), true)
 }

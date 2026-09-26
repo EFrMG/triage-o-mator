@@ -1,9 +1,10 @@
 package main
 
 import (
+	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -58,7 +59,7 @@ func markedCard(first, second string, mark cardMark, selected bool, width int) s
 }
 
 // continueStyleAfterReset keeps nested styled spans, such as a progress bar, from dropping the selected card's foreground and background for the text that follows them.
-func continueStyleAfterReset(text string, foreground, background lipgloss.Color) string {
+func continueStyleAfterReset(text string, foreground, background color.Color) string {
 	marker := "\x00"
 	rendered := lipgloss.NewStyle().Foreground(foreground).Background(background).Render(marker)
 	i := strings.Index(rendered, marker)
@@ -115,7 +116,7 @@ func inset(s string) string {
 // withSidebar lays content out in the main panel beside the sidebar (or alone on narrow terminals), as the list views do. The panel has no padding: indent text with inset, and give cards cardWidth.
 func (m model) withSidebar(content string, mainFocused bool) string {
 	sidebarBox := m.sidebarBox(!mainFocused)
-	mainView := m.titled(panelStyle(mainFocused).Width(m.mainAreaWidth()-2).Height(m.mainHeight()).Render(fitScreen(content, m.cardWidth(), m.mainHeight())), mainFocused)
+	mainView := m.titled(panelStyle(mainFocused).Width(m.mainAreaWidth()).Height(m.mainHeight()+2).Render(fitScreen(content, m.cardWidth(), m.mainHeight())), mainFocused)
 	if m.width < 100 {
 		return mainView
 	}
@@ -125,9 +126,9 @@ func (m model) withSidebar(content string, mainFocused bool) string {
 
 // sidebarBox is the sidebar's panel, as tall as its entries and centered vertically beside the main panel; on a terminal too short for that, it takes the full height like the main panel.
 func (m model) sidebarBox(focused bool) string {
-	box := panelStyle(focused).Width(sidebarContentWidth+2).Padding(1, 1).Render(m.sidebar.View(focused))
+	box := panelStyle(focused).Width(sidebarContentWidth+4).Padding(1, 1).Render(m.sidebar.View(focused))
 	if lipgloss.Height(box) > m.mainHeight()+2 {
-		return panelStyle(focused).Width(sidebarContentWidth+2).Height(m.mainHeight()).Padding(0, 1).Render(m.sidebar.View(focused))
+		return panelStyle(focused).Width(sidebarContentWidth+4).Height(m.mainHeight()+2).Padding(0, 1).Render(m.sidebar.View(focused))
 	}
 
 	return lipgloss.PlaceVertical(m.mainHeight()+2, lipgloss.Center, box)

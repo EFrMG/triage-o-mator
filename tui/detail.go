@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -88,7 +88,7 @@ func (d *detailModel) SetItem(it Item) (needsFetch bool) {
 	}
 
 	for i := range d.sections {
-		d.sections[i].viewport = viewport.New(maxInt(d.width, 1), maxInt(d.height, 1))
+		d.sections[i].viewport = viewport.New(viewport.WithWidth(maxInt(d.width, 1)), viewport.WithHeight(maxInt(d.height, 1)))
 	}
 
 	d.active, d.full, d.loadErr = 0, false, nil
@@ -187,13 +187,19 @@ func (d detailModel) TabBar(width int, focused bool) string {
 			style = style.Foreground(color).Faint(true)
 		}
 
-		brackets := style.Foreground(themeOpacity(string(color), opacityMedium))
-		number := style.Foreground(themeOpacity(string(color), opacityStrong))
+		blendColor := currentTheme.Foreground
+		if i == d.active && focused {
+			blendColor = currentTheme.Accent
+		} else if i != d.active && s.empty() {
+			blendColor = currentTheme.Muted
+		}
+		brackets := lipgloss.NewStyle().Foreground(themeOpacity(blendColor, opacityMedium))
+		number := lipgloss.NewStyle().Foreground(accent)
 		badge := brackets.Render("[") + number.Render(fmt.Sprint(i+1)) + brackets.Render("]")
 		label := style.Render(" ") + badge + style.Render(" ") + d.renderTabLabel(i, style) + style.Render(" ")
 		ruleColor, ruleGlyph := lipgloss.Color(currentTheme.Border), "─"
 		if i == d.active {
-			ruleColor, ruleGlyph = themeOpacity(string(activeColor), opacityStrong), "━"
+			ruleColor, ruleGlyph = themeOpacity(blendColor, opacityStrong), "━"
 		}
 
 		rule := lipgloss.NewStyle().Foreground(ruleColor).Render(strings.Repeat(ruleGlyph, ansi.StringWidth(label)))
@@ -270,13 +276,13 @@ func (d *detailModel) activeViewport() *viewport.Model {
 
 func (d *detailModel) LineDown(n int) {
 	if vp := d.activeViewport(); vp != nil {
-		vp.LineDown(n)
+		vp.ScrollDown(n)
 	}
 }
 
 func (d *detailModel) LineUp(n int) {
 	if vp := d.activeViewport(); vp != nil {
-		vp.LineUp(n)
+		vp.ScrollUp(n)
 	}
 }
 
@@ -313,7 +319,8 @@ func wrapText(text string, width int) string {
 func (d *detailModel) Resize(width, height int) {
 	d.width, d.height = maxInt(width, 1), maxInt(height, 1)
 	for i := range d.sections {
-		d.sections[i].viewport.Width, d.sections[i].viewport.Height = d.width, d.height
+		d.sections[i].viewport.SetWidth(d.width)
+		d.sections[i].viewport.SetHeight(d.height)
 	}
 
 	d.renderActive()
@@ -397,7 +404,7 @@ func (d *detailModel) renderActive() {
 		text = wrapText(notice, d.width) + "\n\n" + text
 	}
 
-	offset := s.viewport.YOffset
+	offset := s.viewport.YOffset()
 	s.viewport.SetContent(text)
 	s.viewport.SetYOffset(offset)
 	s.renderedFor = key

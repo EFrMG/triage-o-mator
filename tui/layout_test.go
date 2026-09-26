@@ -5,19 +5,25 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
 func send(m model, msg tea.Msg) model { next, _ := m.Update(msg); return next.(model) }
 func press(m model, k string) model {
-	special := map[string]tea.KeyType{"enter": tea.KeyEnter, "backspace": tea.KeyBackspace, "esc": tea.KeyEsc, "ctrl+h": tea.KeyCtrlH, "tab": tea.KeyTab, "shift+tab": tea.KeyShiftTab, "up": tea.KeyUp, "down": tea.KeyDown, "left": tea.KeyLeft, "right": tea.KeyRight, " ": tea.KeySpace}
+	special := map[string]rune{"enter": tea.KeyEnter, "backspace": tea.KeyBackspace, "esc": tea.KeyEsc, "tab": tea.KeyTab, "up": tea.KeyUp, "down": tea.KeyDown, "left": tea.KeyLeft, "right": tea.KeyRight, " ": tea.KeySpace}
+	if k == "ctrl+h" {
+		return send(m, tea.KeyPressMsg{Code: 'h', Mod: tea.ModCtrl})
+	}
+	if k == "shift+tab" {
+		return send(m, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	}
 	if typ, ok := special[k]; ok {
-		return send(m, tea.KeyMsg{Type: typ})
+		return send(m, tea.KeyPressMsg{Code: typ})
 	}
 
-	return send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)})
+	return send(m, tea.KeyPressMsg{Text: k})
 }
 func testPRModel() model {
 	items := []Item{{Kind: "pr", Number: 1, Title: strings.Repeat("long title ", 20), State: "open"}}
@@ -41,6 +47,58 @@ func assertBounds(t *testing.T, view string, w, h int) {
 		}
 	}
 }
+
+func TestPanelsFillTheBodyAndCardEdgesStayOnOneLine(t *testing.T) {
+	for _, size := range [][2]int{{80, 24}, {100, 30}} {
+		for _, screen := range []string{"overview", "items", "batches", "groups", "duplicates"} {
+			t.Run(fmt.Sprintf("%dx%d/%s", size[0], size[1], screen), func(t *testing.T) {
+				m := newModel("/tmp", "owner/repo", testTaxonomy(), "tester", testItems())
+				m = send(m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+				cardWidth := m.cardWidth()
+				switch screen {
+				case "items":
+					m = press(m, "enter")
+				case "batches":
+					m.batches = batchUI{open: true, records: []batchRecord{{ID: "example"}}}
+				case "groups":
+					m.groups = groupUI{open: true, records: []Group{{ID: "example", Title: "Example group"}}}
+				case "duplicates":
+					m.dups = dupUI{open: true, source: Key{Kind: "issue", Number: 1}}
+					cardWidth = m.width - 2
+				}
+
+				view := m.viewContent()
+				assertBounds(t, view, size[0], size[1])
+				lines := strings.Split(ansi.Strip(view), "\n")
+				bottom := size[1] - lipgloss.Height(m.footerView()) - 2
+				if !strings.Contains(lines[bottom], "╰") || !strings.Contains(lines[bottom], "╯") {
+					t.Fatalf("panel stops above the footer: %q", lines[bottom])
+				}
+
+				if screen == "overview" {
+					return
+				}
+
+				for _, edge := range []string{"▔", "▁"} {
+					found := false
+					for i, line := range lines[:bottom] {
+						if !strings.Contains(line, edge) {
+							continue
+						}
+						if !strings.Contains(line, strings.Repeat(edge, cardWidth)) || strings.Contains(lines[i+1], edge) {
+							t.Fatalf("card edge wraps at row %d: %q / %q", i, line, lines[i+1])
+						}
+						found = true
+						break
+					}
+					if !found {
+						t.Fatalf("selected card has no %s edge", edge)
+					}
+				}
+			})
+		}
+	}
+}
 func TestLayoutAllTabsAndResize(t *testing.T) {
 	for _, size := range [][2]int{{60, 24}, {80, 24}, {100, 30}, {190, 50}, {40, 12}} {
 		for _, full := range []bool{false, true} {
@@ -50,23 +108,23 @@ func TestLayoutAllTabsAndResize(t *testing.T) {
 					m.detail.JumpSection(tab)
 					m.detail.full = full
 					m = send(m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-					assertBounds(t, m.View(), size[0], size[1])
+					assertBounds(t, m.viewContent(), size[0], size[1])
 					if size[0] >= 60 {
-						if !full && !strings.Contains(m.View(), "reason") {
-							t.Fatalf("decision form lost:\n%s", m.View())
+						if !full && !strings.Contains(m.viewContent(), "reason") {
+							t.Fatalf("decision form lost:\n%s", m.viewContent())
 						}
 
-						if full && strings.Contains(m.View(), "confidence") {
-							t.Fatalf("a full-screen tab should hide the form:\n%s", m.View())
+						if full && strings.Contains(m.viewContent(), "confidence") {
+							t.Fatalf("a full-screen tab should hide the form:\n%s", m.viewContent())
 						}
 
 						assertBounds(t, m.detail.View(), m.detail.width, m.detail.height)
 					}
 
 					m = press(m, "esc")
-					assertBounds(t, m.View(), size[0], size[1])
+					assertBounds(t, m.viewContent(), size[0], size[1])
 					m = press(m, "esc")
-					assertBounds(t, m.View(), size[0], size[1])
+					assertBounds(t, m.viewContent(), size[0], size[1])
 				})
 			}
 		}
@@ -81,7 +139,7 @@ func TestWrapAndScrollRetainsAllText(t *testing.T) {
 	}
 
 	m.detail.GotoBottom()
-	if s.viewport.YOffset == 0 {
+	if s.viewport.YOffset() == 0 {
 		t.Fatal("cannot scroll wrapped content")
 	}
 
@@ -102,7 +160,7 @@ func TestWrapAndScrollRetainsAllText(t *testing.T) {
 func TestBackNavigationAndFullSectionCycling(t *testing.T) {
 	for _, back := range []string{"esc", "h"} {
 		m := testPRModel()
-		if strings.Contains(m.View(), "Untriaged (1)") {
+		if strings.Contains(m.viewContent(), "Untriaged (1)") {
 			t.Fatal("sidebar still visible in full-screen item")
 		}
 
@@ -169,7 +227,7 @@ func TestGroupNavigationAndEditorKeys(t *testing.T) {
 		m = press(m, "tab")
 	}
 
-	assertBounds(t, m.View(), 100, 30)
+	assertBounds(t, m.viewContent(), 100, 30)
 }
 func TestThemePalettes(t *testing.T) {
 	preserveTheme(t)
@@ -207,12 +265,12 @@ func TestNarrowSidebarBackShowsOverview(t *testing.T) {
 		m = press(m, "esc")
 	}
 
-	if !strings.Contains(m.View(), "Next steps") {
+	if !strings.Contains(m.viewContent(), "Next steps") {
 		t.Fatal("overview inaccessible on narrow terminal")
 	}
 
 	m = press(m, "j")
-	if !strings.Contains(m.View(), "Untriaged") {
+	if !strings.Contains(m.viewContent(), "Untriaged") {
 		t.Fatal("sidebar inaccessible from overview")
 	}
 }

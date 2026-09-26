@@ -65,6 +65,8 @@ mise exec -- make run ROOT=/path/to/a/repository/triage-o-mator
 
 Tests build throwaway checkouts and installs in temporary directories with a fake `gh` (`tests/test_install.py` for the layout, `tests/test_fetch_similar.py` and `tests/test_agent_flow.py` for the scripts, `tui/*_test.go` for the TUI). Shared Python setup lives in `tests/support/`; test modules should not import one another. None of them may touch a real install, a real repository or GitHub. Prettier formats the Markdown and the palette JSON, `gofmt` the Go; `make check` enforces both.
 
+For a terminal smoke check, run the built TUI in a disposable install through Python's `pty.openpty()`.
+
 ### House style
 
 Two conventions `make check` couldn't enforce:

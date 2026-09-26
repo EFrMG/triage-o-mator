@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // q isn't typing in an open choice list, so it quits there as everywhere else, asking first when decisions are unsaved.
@@ -18,7 +18,7 @@ func TestQuitFromOpenChoiceList(t *testing.T) {
 		t.Fatal("setup: l, l should open the Category list")
 	}
 
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}); cmd == nil {
+	if _, cmd := m.Update(tea.KeyPressMsg{Text: "q"}); cmd == nil {
 		t.Fatal("q in an open list should quit")
 	} else if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Fatal("q in an open list should quit")

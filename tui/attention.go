@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 const attentionPageSize = 5
@@ -148,7 +148,7 @@ func (m model) finishAttention(msg attentionMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) handleAttentionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleAttentionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	ui := m.attention
 	at := ui.location
 	switch msg.String() {

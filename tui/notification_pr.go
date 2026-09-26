@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // A notification opens its subject with a fresh, read-only GitHub read. Keep the reader state and the former item tabs so Back returns to the selected card.
@@ -55,7 +55,7 @@ func (m model) finishNotificationPREvidence(msg evidenceReadMsg) (tea.Model, tea
 	return m, nil
 }
 
-func (m model) handleNotificationPRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleNotificationPRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "h", "left":
 		m.evidenceLifecycle.stop()
@@ -73,7 +73,7 @@ func (m model) handleNotificationPRKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "shift+tab":
 		m.detail.CycleSection(-1)
 	case "1", "2", "3", "4":
-		m.detail.JumpSection(int(msg.Runes[0] - '1'))
+		m.detail.JumpSection(int(msg.String()[0] - '1'))
 	case "j", "down":
 		m.detail.LineDown(1)
 	case "k", "up":

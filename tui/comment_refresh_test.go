@@ -7,16 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 )
 
 func TestCommentHeaderLayoutAndColors(t *testing.T) {
 	themeFixture(t)
-	profile := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(profile) })
 	m := commentEditorFixture(t)
 
 	for _, preview := range []bool{false, true} {

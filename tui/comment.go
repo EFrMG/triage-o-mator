@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -56,7 +56,7 @@ func (m model) openComment() (tea.Model, tea.Cmd) {
 	themeTextarea(&text)
 	text.SetWidth(maxInt(m.width-8, 20))
 	text.SetHeight(maxInt(m.mainHeight()-7, 3))
-	m.comment = commentComposer{open: true, key: it.Key(), host: u.Host, target: it.URL, text: text, preview: viewport.New(maxInt(m.width-8, 20), maxInt(m.mainHeight()-7, 3))}
+	m.comment = commentComposer{open: true, key: it.Key(), host: u.Host, target: it.URL, text: text, preview: viewport.New(viewport.WithWidth(maxInt(m.width-8, 20)), viewport.WithHeight(maxInt(m.mainHeight()-7, 3)))}
 	cmd := m.comment.text.Focus()
 
 	return m, cmd
@@ -75,7 +75,7 @@ func (m model) commentCmd(publish bool) tea.Cmd {
 	}
 }
 
-func (m model) handleCommentKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	c := &m.comment
 	if c.busy {
 		return m, nil
@@ -221,15 +221,15 @@ func (m model) commentView() string {
 		content = m.comment.preview.View()
 	}
 
-	return panelStyle(true).Width(m.width-2).Height(m.mainHeight()).Padding(0, 1).Render(m.commentHeader(maxInt(m.width-4, 20)) + "\n\n" + content)
+	return panelStyle(true).Width(m.width).Height(m.mainHeight()+2).Padding(0, 1).Render(m.commentHeader(maxInt(m.width-4, 20)) + "\n\n" + content)
 }
 
 func (c *commentComposer) setPreview(text string) {
 	c.previewText = text
 	if c.previewing {
-		c.preview.SetContent(renderMarkdown(text, c.preview.Width))
+		c.preview.SetContent(renderMarkdown(text, c.preview.Width()))
 	} else {
-		c.preview.SetContent(ansi.Wrap(text, maxInt(c.preview.Width, 1), ""))
+		c.preview.SetContent(ansi.Wrap(text, maxInt(c.preview.Width(), 1), ""))
 	}
 }
 
@@ -243,10 +243,11 @@ func (m *model) layoutComment() {
 	height := maxInt(m.mainHeight()-3, 3)
 	c.text.SetWidth(width)
 	c.text.SetHeight(height)
-	resized := c.preview.Width != width
-	c.preview.Width, c.preview.Height = width, height
+	resized := c.preview.Width() != width
+	c.preview.SetWidth(width)
+	c.preview.SetHeight(height)
 	if resized {
-		offset := c.preview.YOffset
+		offset := c.preview.YOffset()
 		c.setPreview(c.previewText)
 		c.preview.SetYOffset(offset)
 	}

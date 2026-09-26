@@ -6,7 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func notificationsFixture(t *testing.T) model {
@@ -56,7 +57,7 @@ func TestNotificationsMenuHasTwoSections(t *testing.T) {
 	}
 	next, _ := m.Update(msg)
 	m = next.(model)
-	view := m.View()
+	view := m.viewContent()
 	attention, actions := strings.Index(view, "Needs attention"), strings.Index(view, "Past actions")
 	if attention < 0 || actions <= attention || !strings.Contains(view, "2 response comment(s)") || !strings.Contains(view, "coverage incomplete") || !strings.Contains(view, "Press w on an issue or PR") || strings.Contains(view, "Past closures") {
 		t.Fatalf("notification content or order: %s", view)
@@ -68,7 +69,7 @@ func TestNotificationsMenuHasTwoSections(t *testing.T) {
 		t.Fatal("reading notifications changed the decision draft")
 	}
 
-	next, cmd = m.handleNotificationsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
 	if cmd == nil || !m.attention.open || m.attention.location.section != "history" || m.attention.location.number != 8028 || m.attention.location.checkpoint != strings.Repeat("b", 64) {
 		t.Fatal("attention row lost its watch binding")
@@ -78,7 +79,7 @@ func TestNotificationsMenuHasTwoSections(t *testing.T) {
 		t.Fatal("reader did not return to Notifications")
 	}
 	m, _ = corpusKey(m, "j")
-	next, cmd = m.handleNotificationsKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
 	if cmd == nil || !m.actionHistory.open || m.actionHistory.location.section != "entries" || m.actionHistory.location.checkpoint != strings.Repeat("c", 64) {
 		t.Fatal("closure row lost its independent history binding")
@@ -98,17 +99,17 @@ func TestTrackedNotificationCountAndMarkRead(t *testing.T) {
 	if !strings.Contains(m.sidebar.View(false), "Notifications (1)") {
 		t.Fatal("sidebar did not count unread tracked items")
 	}
-	view := m.View()
+	view := m.viewContent()
 	if strings.Index(view, "Changed") > strings.Index(view, "Past actions") || !strings.Contains(view, "Quiet") {
 		t.Fatalf("tracked order or sections missing: %s", view)
 	}
-	next, cmd = m.handleNotificationsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "v"})
 	m = next.(model)
 	if !m.trackingBusy || cmd == nil {
 		t.Fatal("mark read did not start for unread tracked item")
 	}
 	m.trackingBusy = false
-	next, cmd = m.handleNotificationsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
 	m = next.(model)
 	if cmd == nil || !m.trackingBusy || cmd().(trackDoneMsg).action != "remove" {
 		t.Fatal("one d did not stop tracking the selected item")
@@ -120,7 +121,7 @@ func TestNotificationsViewAndDismissOnePress(t *testing.T) {
 	cmd := m.enterSidebarSelection()
 	next, _ := m.Update(cmd())
 	m = next.(model)
-	next, cmd = m.handleNotificationsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "v"})
 	m = next.(model)
 	if cmd == nil || !m.trackingBusy {
 		t.Fatal("v did not mark watched activity viewed")
@@ -136,7 +137,7 @@ func TestNotificationsViewAndDismissOnePress(t *testing.T) {
 		t.Fatalf("viewed watch did not move to Past actions: %+v", choices)
 	}
 	m.notifications.selected = 1
-	next, cmd = m.handleNotificationsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
 	m = next.(model)
 	if cmd == nil || !m.trackingBusy {
 		t.Fatal("one d did not dismiss the selected row")
@@ -147,7 +148,7 @@ func TestNotificationsViewAndDismissOnePress(t *testing.T) {
 	}
 	m.trackingBusy = false
 	m.notifications.selected = 0
-	next, cmd = m.handleNotificationsKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "v"})
 	m = next.(model)
 	if cmd == nil || !m.trackingBusy {
 		t.Fatal("v did not mark imported action viewed")
@@ -186,7 +187,7 @@ func TestNotificationsSmallScreenKeepsPastClosureReachable(t *testing.T) {
 	closures := actionHistoryPage{Rows: []actionHistoryRow{{Number: 8028, Label: "PR #8028 closure"}}}
 	closures.Pagination.Total = 1
 	m.notifications = notificationsUI{open: true, attention: &attention, closures: &closures, selected: 0}
-	view := m.View()
+	view := m.viewContent()
 	if !strings.Contains(view, "PR #8028 closure") {
 		t.Fatalf("selected closure clipped at 60×24: %s", view)
 	}
@@ -211,7 +212,7 @@ func TestNotificationDirectionalOpenAndStyledReaders(t *testing.T) {
 	if view := attention.attentionView(); !strings.Contains(view, "▔") || !strings.Contains(view, "Discussion") {
 		t.Fatalf("attention records lack selected cards: %s", view)
 	}
-	if view := attention.View(); !strings.Contains(view, "▔") || !strings.Contains(view, "Saved discussion entry") {
+	if view := attention.viewContent(); !strings.Contains(view, "▔") || !strings.Contains(view, "Saved discussion entry") {
 		t.Fatalf("attention card clipped by the 60×24 layout: %s", view)
 	}
 	attention, _ = corpusKey(attention, "j")
@@ -235,7 +236,7 @@ func TestNotificationDirectionalOpenAndStyledReaders(t *testing.T) {
 	if view := action.actionHistoryView(); !strings.Contains(view, "▔") || !strings.Contains(view, "Closure explanations") {
 		t.Fatalf("closure records lack selected cards: %s", view)
 	}
-	if view := action.View(); !strings.Contains(view, "▔") || !strings.Contains(view, "record 1") {
+	if view := action.viewContent(); !strings.Contains(view, "▔") || !strings.Contains(view, "record 1") {
 		t.Fatalf("closure card clipped by the 60×24 layout: %s", view)
 	}
 	action, _ = corpusKey(action, "j")
@@ -303,7 +304,7 @@ print(json.dumps({'number':1,'kind':'pr','title':'A current PR','state':'closed'
 	}
 	next, _ := m.Update(read)
 	m = next.(model)
-	if m.detail.item.Title != "A current PR" || m.detail.enriched.CommentBodies[1] != "New contributor response" || !strings.Contains(m.View(), "New contributor response") || strings.Contains(m.View(), "offline") {
+	if m.detail.item.Title != "A current PR" || m.detail.enriched.CommentBodies[1] != "New contributor response" || !strings.Contains(ansi.Strip(m.viewContent()), "New contributor response") || strings.Contains(m.viewContent(), "offline") {
 		t.Fatal("refreshed PR item did not show the current title and discussion")
 	}
 	for _, k := range []string{"S", "a"} {

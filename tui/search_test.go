@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -49,8 +49,8 @@ func TestSearchFiltersKeepsAndClears(t *testing.T) {
 
 	// Letters that are keys elsewhere (e, c) are part of the query while typing.
 	m = typeText(m, "sec")
-	if n := len(m.list.Items()); n != 1 || !strings.Contains(ansi.Strip(m.View()), "/ sec") {
-		t.Fatalf("typing should narrow the list to the match, got %d:\n%s", n, ansi.Strip(m.View()))
+	if n := len(m.list.Items()); n != 1 || !strings.Contains(ansi.Strip(m.viewContent()), "/ sec") {
+		t.Fatalf("typing should narrow the list to the match, got %d:\n%s", n, ansi.Strip(m.viewContent()))
 	}
 
 	m = press(m, "enter")
@@ -77,8 +77,8 @@ func TestSearchFiltersKeepsAndClears(t *testing.T) {
 
 	m = press(m, "/")
 	m = typeText(m, "nothing like it")
-	if !strings.Contains(ansi.Strip(m.View()), "No titles match") {
-		t.Fatalf("a search without matches should say so:\n%s", ansi.Strip(m.View()))
+	if !strings.Contains(ansi.Strip(m.viewContent()), "No titles match") {
+		t.Fatalf("a search without matches should say so:\n%s", ansi.Strip(m.viewContent()))
 	}
 
 	m = press(m, "esc")

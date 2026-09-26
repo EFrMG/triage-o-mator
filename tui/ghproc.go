@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // runScript is the only way the TUI runs bin/* scripts (callers live here, in groups.go, batches.go, and duplicates.go); it never runs gh itself. It never touches the ledger directly: every mutation goes through bin/apply, matching the "only the scripts mutate the ledger" rule.

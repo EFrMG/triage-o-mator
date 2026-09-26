@@ -8,16 +8,16 @@ triage-o-mator is tooling for working through a GitHub issue and pull request ba
 
 ## What is here
 
-| path                               | what it is                                                                                                       |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `bin/`                             | extensionless CLIs and shared `_*.py` modules; `_install.py` owns root discovery and `_triage.py` install state  |
-| `tui/`                             | the Go terminal UI, built to `bin/triage-o-mator`                                                                |
-| `prompts/`                         | operating prompts for agents: `PLAYBOOK.md` (main one), and one file per task                                    |
-| `config/`                          | `taxonomy.json` and `taxonomy.md`, the default categories and actions that `bin/install-to` copies into installs |
-| `themes/`                          | color palettes                                                                                                   |
-| `docs/`                            | The documentation installs link back to                                                                          |
-| `tests/test_*.py`, `tui/*_test.go` | Python and Go tests; both use throwaway checkouts and installs with a fake `gh`                                  |
-| `tests/support.py`                 | Disposable Python fixture with a strict fake `gh`                                                                |
+| path                                      | what it is                                                                                                       |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `bin/`                                    | extensionless CLIs and shared `_*.py` modules; `_install.py` owns root discovery and `_triage.py` install state  |
+| `tui/`                                    | the Go terminal UI, built to `bin/triage-o-mator`                                                                |
+| `prompts/`                                | operating prompts for agents: `PLAYBOOK.md` (main one), and one file per task                                    |
+| `config/`                                 | `taxonomy.json` and `taxonomy.md`, the default categories and actions that `bin/install-to` copies into installs |
+| `themes/`                                 | color palettes                                                                                                   |
+| `docs/`                                   | The documentation installs link back to                                                                          |
+| `tests/test_*.py`, `tui/baseline_test.go` | Python and Go workflow tests over disposable installs                                                            |
+| `tests/support.py`                        | Disposable Python fixture with a strict fake `gh`                                                                |
 
 There is no `config/repo`, no ledger and no reports here, see why in the following section.
 
@@ -63,9 +63,17 @@ mise exec -- make build
 mise exec -- make run ROOT=/path/to/a/repository/triage-o-mator
 ```
 
-Tests use throwaway checkouts and installs in temporary directories with a fake `gh` (`tests/test_core.py` for the layout and ledger, the other Python modules for evidence and review workflows, `tui/*_test.go` for the TUI). Shared Python setup lives in `tests/support.py`; test modules should not import one another. None of them may touch a real install, a real repository or GitHub. Prettier formats the Markdown and the palette JSON, `gofmt` the Go; `make check` enforces both.
+Tests use throwaway checkouts and installs in temporary directories (`tests/test_core.py` for the layout and ledger, the other Python modules for evidence and review workflows, `tui/baseline_test.go` for the TUI). The Python fixture in `tests/support.py` supplies a fake `gh`; Go tests use a disposable install and local model. Test modules should not import one another. None of them may touch a real install, a real repository or GitHub. Prettier formats the Markdown and the palette JSON, `gofmt` the Go; `make check` enforces both.
 
-For a terminal smoke check, run the built TUI in a disposable install through Python's `pty.openpty()`.
+### Test baseline
+
+Keep the suite a modest check of the tool's main workflows and trust boundaries: install data stays in the install; GitHub acquisition and offline reads stay separate; incomplete or corrupt evidence cannot become complete evidence; corpus membership stays pinned; proposals, review and GitHub write approval stay separate; and the TUI rejects stale replies and preserves drafts. When a feature changes one of these contracts, update the nearest workflow test or add one focused test for the new contract.
+
+Do not add a test merely because a bug was difficult to fix or once regressed. Add a dedicated regression test only when the bug exposes a major contract that the baseline does not already cover. Prefer observable script or UI behavior over internal branches, exact presentation details and one test per edge case. Keep fixtures small and reject unexpected GitHub calls.
+
+Keep Python tests in `tests/`. Go tests that inspect the TUI model stay in `tui/` because it is `package main` with unexported state; moving them under `tests/` would require a production package refactor. Do not create a new Go test file just to separate a small scenario from `tui/baseline_test.go`.
+
+For a terminal smoke check, you could run the built TUI in a disposable install through Python's `pty.openpty()`.
 
 ### House style
 

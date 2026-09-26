@@ -118,7 +118,10 @@ For a requested reassessment from imported closure history through explicit enro
 
 - From a group, `x` exports a Markdown review packet with current decisions and notes. `X` also fetches bodies, comments, and PR diffs; the status line shows its progress and output path.
 - `bin/report` gathers ready groups and individual human-reviewed decisions. An agent following [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) can turn that report into a concise maintainer brief.
-- Exporting or reporting does not act on GitHub. Labeling, commenting, closing, approving, and merging remain separate, explicitly authorized work.
+- Exporting or reporting does not act on GitHub. Labeling, approving, and merging remain separate work.
+- On an item, `c` composes a conversation comment inline, while `C` opens `$EDITOR`. `Ctrl-P` toggles a rendered Markdown preview; `Ctrl-S` approves and publishes the exact target and text. In preview, `C` reopens `$EDITOR`; `Esc` returns to editing. From the inline editor, `Esc` discards the draft.
+- On an open item, `x` composes an explanatory closing comment inline and `X` uses `$EDITOR`. `Ctrl-S` approves the comment and closure together. After confirmation, the TUI updates the visible state and refreshes the item discussion and ledger.
+- On a closed item, `v` composes a reopening comment inline and `V` uses `$EDITOR`. These keys also work in item lists: select closed items with `Space`, then use one shared comment for all selected items; without a selection, they use the hovered item. For multiple items, the first `Ctrl-S` opens a scrollable review of every target and the comment, and the second approves them. The TUI stops if an outcome is uncertain and reports how many were confirmed open.
 
 ## 13. Move between repositories without mixing their work
 

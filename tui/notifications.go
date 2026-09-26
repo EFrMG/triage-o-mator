@@ -762,7 +762,7 @@ func (m model) notificationsView() string {
 	}
 	fmt.Fprintf(&b, "\n%s\n", inset(heading.Render("Past actions")))
 	if n.tracked.Total == 0 {
-		fmt.Fprintf(&b, "%s\n", inset(mutedText("Press w on an issue or PR to track its comments.")))
+		fmt.Fprintf(&b, "%s\n", inset(mutedText("Track an issue or PR to see its comment activity here.")))
 	}
 	hasPast := false
 	for _, choice := range choices {

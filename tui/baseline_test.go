@@ -142,6 +142,49 @@ func TestBaselineViewDeclaresTerminalState(t *testing.T) {
 	}
 }
 
+func TestBaselineErrorShortcutMatchesFooterAcrossViews(t *testing.T) {
+	for _, view := range []string{"sidebar", "list", "item", "notifications"} {
+		t.Run(view, func(t *testing.T) {
+			m := baselineModel(t, baselineRoot(t))
+			m.lastError = errorDetails{what: "Fixture error", text: "full details"}
+			switch view {
+			case "list":
+				m.activateTab(untriagedTab)
+			case "item":
+				m.activateTab(untriagedTab)
+				m.selectCurrentListItem()
+			case "notifications":
+				m.notifications.open = true
+			}
+
+			shown := false
+			for _, group := range m.footerGroups() {
+				for _, hint := range group.hints {
+					shown = shown || hint.keys == "!"
+				}
+			}
+			if !shown {
+				t.Fatal("footer omitted the error shortcut")
+			}
+
+			m = baselineSend(m, tea.KeyPressMsg{Text: "!"})
+			if !m.lastError.open {
+				t.Fatal("error shortcut did not open the saved error")
+			}
+		})
+	}
+
+	m := baselineModel(t, baselineRoot(t))
+	m.lastError = errorDetails{what: "Fixture error", text: "full details"}
+	m.activateTab(untriagedTab)
+	m.selectCurrentListItem()
+	m.form.FocusField(fieldReason)
+	m = baselineSend(m, tea.KeyPressMsg{Text: "!"})
+	if m.lastError.open || m.form.Reason() != "!" {
+		t.Fatal("error shortcut intercepted typing in the reason field")
+	}
+}
+
 func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 	for _, approve := range []bool{false, true} {
 		t.Run(map[bool]string{false: "proposal", true: "approval"}[approve], func(t *testing.T) {

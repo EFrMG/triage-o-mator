@@ -43,16 +43,20 @@ func (m model) navigationGroup() footerGroup {
 }
 
 func (m model) menusGroup() footerGroup {
-	g := group("Menus", bind("", keys.Yank), bind("", keys.Group), bind("", keys.Corpus), bind("", keys.Theme), bind("", keys.Refresh), bind("", keys.RefreshFull))
-	if m.lastError.text != "" {
-		g.hints = append(g.hints, bind("", keys.ErrorDetails))
-	}
-
-	return g
+	return group("Menus", bind("", keys.Yank), bind("", keys.Group), bind("", keys.Corpus), bind("", keys.Theme), bind("", keys.Refresh), bind("", keys.RefreshFull))
 }
 
 // footerGroups lists the keys that work on the current screen, most specific first and Navigation last.
 func (m model) footerGroups() []footerGroup {
+	groups := m.contextFooterGroups()
+	if m.lastError.text != "" && m.canOpenErrorDetails() && m.width >= 60 && m.height >= 24 {
+		return append([]footerGroup{group("Error", bind("", keys.ErrorDetails))}, groups...)
+	}
+
+	return groups
+}
+
+func (m model) contextFooterGroups() []footerGroup {
 	if m.width < 60 || m.height < 24 && !m.comment.open {
 		return []footerGroup{group("Navigation", bind("back", keys.Cancel), bind("quit", keys.ForceQuit))}
 	}
@@ -194,7 +198,7 @@ func (m model) footerGroups() []footerGroup {
 	case m.searching:
 		return []footerGroup{group("Search", hint{"type", "title words or #number"}, hint{"↑/↓", "move"}, bind("keep", keys.Enter), bind("clear", keys.Cancel)), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.typingReason():
-		return []footerGroup{group("Edit", bind("fields; then s saves for review", keys.FieldNext, keys.FieldPrev), bind("save & approve", keys.Confirm)), group("Navigation", bind("back", keys.Cancel), bind("exit", keys.ForceQuit))}
+		return []footerGroup{group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("save & approve", keys.Confirm)), group("Navigation", bind("back", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.groups.open:
 		return m.groupFooter()
 	case m.dups.open:

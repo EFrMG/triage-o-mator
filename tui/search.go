@@ -163,12 +163,12 @@ func (m model) handleSearchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // listHeader is the list's title and, under it, the entry count or the search with its match count.
 func (m model) listHeader(width int) string {
 	accent := lipgloss.NewStyle().Foreground(focusedBorderColor).Bold(true)
-	line := mutedText(fmt.Sprintf("%d items · / to search", len(m.listAll)))
+	line := mutedText(fmt.Sprintf("%d items", len(m.listAll)))
 	switch {
 	case m.searching:
-		line = accent.Render("/ ") + m.searchInput.View() + "  " + mutedText(fmt.Sprintf("%d of %d · Enter keeps, Esc clears", len(m.list.Items()), len(m.listAll)))
+		line = accent.Render("/ ") + m.searchInput.View() + "  " + mutedText(fmt.Sprintf("%d of %d", len(m.list.Items()), len(m.listAll)))
 	case m.searchQuery() != "":
-		line = accent.Render("/ "+m.searchQuery()) + "  " + mutedText(fmt.Sprintf("%d of %d · / edits, Esc clears", len(m.list.Items()), len(m.listAll)))
+		line = accent.Render("/ "+m.searchQuery()) + "  " + mutedText(fmt.Sprintf("%d of %d", len(m.list.Items()), len(m.listAll)))
 	}
 
 	// The line starts where the cards' text does, two columns in.

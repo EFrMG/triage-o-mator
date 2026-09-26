@@ -452,7 +452,7 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if g != nil && len(m.groups.sources) > 0 {
 			m.editGroup("add")
 		} else {
-			m.status = "Open or tick items first, then b to add them to a group."
+			m.status = "Open or tick items before adding them to a group."
 		}
 	case key.Matches(msg, keys.Tick):
 		if m.groups.detail && g != nil && m.groups.member < len(g.Members) {
@@ -624,13 +624,13 @@ func (m model) groupsView() string {
 		return m.withSidebar(m.groupMembersView(*g, w, h), true)
 	}
 
-	subtitle := "no groups yet: n creates one"
+	subtitle := "No groups yet"
 	if n := len(m.groups.records); n > 0 {
 		subtitle = pluralize(n, "group", "groups")
 	}
 
 	if n := len(m.groups.sources); n > 0 {
-		subtitle += " · b adds " + pluralize(n, "item", "items") + " to the selected one"
+		subtitle += " · " + pluralize(n, "item", "items") + " ready to add"
 	}
 
 	if m.groups.busy {
@@ -727,7 +727,7 @@ func (m model) groupMembersView(g Group, w, h int) string {
 	for i, member := range g.Members {
 		it, ok := m.findItem(member.Key())
 		if !ok {
-			cards[i] = [2]string{fmt.Sprintf("#%d (missing from the ledger: r fetches)", member.Number), member.Kind}
+			cards[i] = [2]string{fmt.Sprintf("#%d (missing from the ledger)", member.Number), member.Kind}
 
 			continue
 		}
@@ -739,7 +739,7 @@ func (m model) groupMembersView(g Group, w, h int) string {
 	}
 
 	top := inset(titleBar(g.Title, subtitle, w) + "\n\n" + vp.View())
-	list := inset(mutedText("No members yet: b on an item or a list adds it."))
+	list := inset(mutedText("No members yet."))
 	if len(g.Members) > 0 {
 		list = markedCardList(cards, marks, m.groups.member, m.cardWidth(), h-lipgloss.Height(top)-1)
 	}
@@ -942,7 +942,7 @@ func (m model) quickAddLastGroup(keys []Key) (tea.Model, tea.Cmd) {
 	}
 
 	if m.lastGroupID == "" {
-		m.status = "No last group yet: add something with b first."
+		m.status = "No last group yet. Add an item to a group first."
 
 		return m, nil
 	}

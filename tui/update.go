@@ -376,6 +376,15 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.lastError.open {
 		return m.handleErrorKey(msg)
 	}
+	if key.Matches(msg, keys.ErrorDetails) && m.canOpenErrorDetails() {
+		if m.lastError.text == "" {
+			m.status = "No errors so far."
+		} else {
+			m.lastError.open, m.lastError.offset = true, 0
+		}
+
+		return m, nil
+	}
 	if m.notificationPR.open {
 		return m.handleNotificationPRKey(msg)
 	}
@@ -398,16 +407,6 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.status = "Taking " + what + "…"
 
 		return m, yankCmd(m.installRoot, m.repo, what, text)
-	}
-
-	if key.Matches(msg, keys.ErrorDetails) && !m.typingText() && !m.themePicker.open {
-		if m.lastError.text == "" {
-			m.status = "No errors so far."
-		} else {
-			m.lastError.open, m.lastError.offset = true, 0
-		}
-
-		return m, nil
 	}
 
 	if m.themePicker.open {
@@ -1160,7 +1159,7 @@ func (m model) requestDecisionSave(approve bool) (tea.Model, tea.Cmd) {
 func (m model) requestApprove() (tea.Model, tea.Cmd) {
 	it, ok := m.findItem(m.detail.key)
 	if !ok || it.Untriaged() {
-		m.status = "Nothing to approve yet: s saves for review; S saves and approves."
+		m.status = "Nothing to approve yet. Save a decision first."
 
 		return m, nil
 	}

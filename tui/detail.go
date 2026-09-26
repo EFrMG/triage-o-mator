@@ -209,14 +209,9 @@ func (d detailModel) TabBar(width int, focused bool) string {
 
 	used := ansi.StringWidth(strings.Join(labels, " "))
 	tail := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Border)).Render(strings.Repeat("─", maxInt(width-used, 0)))
-	hint := ""
-	if d.full && !d.notificationOnly {
-		hint = mutedText("  full screen · Enter to go back to the form")
-	}
-
 	joiner := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Border)).Render("─")
 
-	return ansi.Truncate(strings.Join(labels, " ")+hint, width, "…") + "\n" + ansi.Truncate(strings.Join(rules, joiner)+tail, width, "")
+	return ansi.Truncate(strings.Join(labels, " "), width, "…") + "\n" + ansi.Truncate(strings.Join(rules, joiner)+tail, width, "")
 }
 
 // AnySectionFull reports whether the active tab fills the screen, in which case the caller hides the decision form.
@@ -414,9 +409,9 @@ func (d *detailModel) renderActive() {
 func (d detailModel) View() string {
 	if d.loadErr != nil {
 		if d.notificationOnly {
-			return wrapText("Couldn't fetch item details: "+friendlyError(d.loadErr)+"\n\nEsc or h returns to Notifications. Open the item again to retry.", d.width)
+			return wrapText("Couldn't fetch item details: "+friendlyError(d.loadErr)+"\n\nOpen the item again to retry.", d.width)
 		}
-		return wrapText("Couldn't load the item: "+friendlyError(d.loadErr)+"\n\nEsc and open it again to retry, o opens it on GitHub, ! shows the details.", d.width)
+		return wrapText("Couldn't load the item: "+friendlyError(d.loadErr)+"\n\nOpen it again to retry, or view it on GitHub. Error details are available.", d.width)
 	}
 
 	if len(d.sections) == 0 {

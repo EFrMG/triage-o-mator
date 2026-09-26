@@ -765,7 +765,7 @@ func (m model) batchesView() string {
 		return m.withSidebar(inset(m.batchFormView(w)), true)
 	}
 
-	subtitle := "no batches yet: n creates one"
+	subtitle := "No batches yet"
 	if n := len(m.batches.records); n > 0 {
 		subtitle = pluralize(n, "batch", "batches")
 		if t := len(m.batches.ticked); t > 0 {

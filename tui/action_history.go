@@ -120,7 +120,7 @@ func (m model) finishActionHistory(msg actionHistoryMsg) (tea.Model, tea.Cmd) {
 	}
 	m.actionHistory.busy = false
 	if msg.err != nil {
-		m.actionHistory.problem = "Offline action read unavailable or changed. o restarts the action list; Esc returns."
+		m.actionHistory.problem = "Offline action read unavailable or changed. Restart the action list to retry."
 		m.recordError("Action history read unavailable", msg.err)
 		return m, nil
 	}

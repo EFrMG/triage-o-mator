@@ -231,7 +231,7 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			c.text.Blur()
 			c.setPreview(c.text.Value())
 			c.preview.GotoTop()
-			m.status = "Review every target and the shared explanation. Ctrl-S approves all of them."
+			m.status = "Review every target and the shared explanation before approving."
 			return m, nil
 		}
 

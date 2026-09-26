@@ -290,13 +290,13 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.corpus.preparing = false
 		if msg.action == "capture" {
-			m.corpus.inventoryNotice = "Capture failed/cancelled; previous selection retained. Raw publication may have completed: inspect !; recover with bin/cache import-inventory offline. No automatic retry or sync."
+			m.corpus.inventoryNotice = "Capture failed/cancelled; previous selection retained. Raw publication may have completed: inspect the error details; recover with bin/cache import-inventory offline. No automatic retry or sync."
 		}
 		if errors.Is(msg.err, context.Canceled) {
 			m.status = "Corpus operation cancelled; checkpoints retained."
 		} else {
 			m.recordError("Corpus operation failed", msg.err)
-			m.status = "Corpus operation failed; checkpoints retained. ! shows details after closing the menu."
+			m.status = "Corpus operation failed; checkpoints retained. Details are available after closing the menu."
 		}
 		return m, nil
 	}
@@ -316,7 +316,7 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.action == "handoff" {
 		if msg.id == "" {
-			m.status = "No current dataset. Download with d."
+			m.status = "No current dataset. Download one first."
 			return m, nil
 		}
 		m.corpus.id, m.corpus.progress = msg.id, &msg.progress

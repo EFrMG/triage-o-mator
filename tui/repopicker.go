@@ -172,10 +172,8 @@ func (m *model) moveRepoPick(msg tea.KeyPressMsg) bool {
 func (m model) installPlanView() string {
 	w := m.menuWidth()
 	mode := "tracked in that repository: its ledger, groups and reports are committed there, and a short section is added to its AGENTS.md"
-	other := "s: plan it as a solo install instead, kept out of that repository's history"
 	if m.installing.solo {
 		mode = "solo: kept out of that repository's history through .git/info/exclude, and none of its tracked files are touched"
-		other = "s: plan it as a tracked install instead, committed to that repository"
 	}
 
 	head := []string{inset(titleBar("Install triage-o-mator", m.installing.path, w)), ""}
@@ -188,9 +186,7 @@ func (m model) installPlanView() string {
 		"",
 		inset(mutedText(wrapText("Mode: "+mode, w))),
 		"",
-		inset(wrapText("Nothing has been written yet. Enter makes exactly the changes listed above; Esc leaves that repository as it is.", w)),
-		"",
-		inset(mutedText(wrapText(other, w))),
+		inset(wrapText("Nothing has been written yet. Installing applies exactly the changes listed above.", w)),
 	}
 
 	// Wrapped here rather than by the panel, so a window over these lines is a window over the rows they will really take.
@@ -209,7 +205,7 @@ func (m model) installPlanView() string {
 
 	rows := append(head, inset(strings.Join(shown, "\n")))
 	if len(plan) > len(shown) {
-		rows = append(rows, inset(mutedText(fmt.Sprintf("%d more line(s) · j/k scrolls", len(plan)-len(shown)))))
+		rows = append(rows, inset(mutedText(fmt.Sprintf("%d more line(s)", len(plan)-len(shown)))))
 	}
 
 	return strings.Join(append(rows, tail...), "\n")
@@ -267,16 +263,16 @@ func (m model) repoPromptView() string {
 			cards[i] = [2]string{first, second}
 		}
 
-		rows = append(rows, inset(mutedText("Tab, then j/k to pick one; type to filter, or an owner/repo to start it here")), "")
+		rows = append(rows, inset(mutedText("Choose an install, or type an owner/repo to start it here.")), "")
 		rows = append(rows, cardList(cards, m.repoPick, m.cardWidth(), m.mainHeight()-len(rows)-4))
 	} else if m.noInstall() {
 		rows = append(rows, inset(mutedText("No installs recorded on this machine yet. Type the path of a repository to install into one.")))
 	} else {
-		rows = append(rows, inset(mutedText("Nothing matches. Esc to go back.")))
+		rows = append(rows, inset(mutedText("Nothing matches.")))
 	}
 
 	if m.noInstall() {
-		return strings.Join(append(rows, "", inset(mutedText(wrapText("This is a triage-o-mator checkout, not an install: the triage itself lives in the repositories you triage. Pick one of the installs above, or type the path of a repository: one that has an install opens it, and one that doesn't is offered a plan of what installing there would change, before anything is written. This repository's own path works too, and triages triage-o-mator's own backlog. Esc quits.", w)))), "\n")
+		return strings.Join(append(rows, "", inset(mutedText(wrapText("This is a triage-o-mator checkout, not an install: the triage itself lives in the repositories you triage. Pick one of the installs above, or type the path of a repository: one that has an install opens it, and one that doesn't is offered a plan of what installing there would change, before anything is written. This repository's own path works too, and triages triage-o-mator's own backlog.", w)))), "\n")
 	}
 
 	rows = append(rows, "", inset(mutedText(wrapText("Each repo keeps its own ledger, batches, groups and exports in its install's data/<owner>/<repo>/, so switching back finds everything as you left it. A repo in another install switches this session to that install; an absolute path opens one directly (bin/install-to creates them). A repo with no data yet starts with a full fetch.", w))))

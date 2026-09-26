@@ -139,7 +139,7 @@ func (m model) finishAttention(msg attentionMsg) (tea.Model, tea.Cmd) {
 	}
 	m.attention.busy = false
 	if msg.err != nil {
-		m.attention.problem = "Offline read unavailable or changed. o restarts the watch list; Esc returns. No live fallback."
+		m.attention.problem = "Offline read unavailable or changed. Restart the watch list to retry. No live fallback."
 		m.recordError("Needs attention read unavailable", msg.err)
 		return m, nil
 	}

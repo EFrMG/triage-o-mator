@@ -115,7 +115,7 @@ func (m model) similarLabel() string {
 		return "Possible duplicates: none by title after recorded exclusions"
 	}
 
-	return "Possible duplicates: " + strings.Join(parts, ", ") + " (m to compare)"
+	return "Possible duplicates: " + strings.Join(parts, ", ")
 }
 
 func (m model) openDuplicates() (tea.Model, tea.Cmd) {
@@ -314,7 +314,7 @@ func (m model) handleDupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) markCandidateDuplicate(c dupCandidate) (tea.Model, tea.Cmd) {
 	original, ok := m.findItem(m.dups.source)
 	if !ok {
-		m.status = "The item being compared is missing from the ledger; r fetches."
+		m.status = "The item being compared is missing from the ledger. Refresh the repository first."
 
 		return m, nil
 	}
@@ -331,10 +331,10 @@ func (m model) markCandidateDuplicate(c dupCandidate) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	m.status = fmt.Sprintf("Prefilled #%d as a duplicate of #%d. Check confidence and reason, then s to save or S to save and approve.", c.Number, original.Number)
+	m.status = fmt.Sprintf("Prefilled #%d as a duplicate of #%d. Check confidence and reason before saving.", c.Number, original.Number)
 	// The older report is usually the one to keep, so say when this closes it in favour of a later one.
 	if it, found := m.findItem(c.Key()); found && it.CreatedAt != "" && original.CreatedAt != "" && it.CreatedAt < original.CreatedAt {
-		m.status = fmt.Sprintf("#%d (%s) is older than #%d (%s): check which one should stay. Prefilled as a duplicate anyway; Esc leaves it unsaved.", c.Number, shortDate(it.CreatedAt), original.Number, shortDate(original.CreatedAt))
+		m.status = fmt.Sprintf("#%d (%s) is older than #%d (%s): check which one should stay. The decision is still unsaved.", c.Number, shortDate(it.CreatedAt), original.Number, shortDate(original.CreatedAt))
 	}
 
 	return m, cmd
@@ -345,13 +345,13 @@ func (m model) swapDupOriginal(c dupCandidate) (tea.Model, tea.Cmd) {
 	was := m.dups.source
 	old, ok := m.findItem(was)
 	if !ok {
-		m.status = "The item on top is missing from the ledger; r fetches."
+		m.status = "The item on top is missing from the ledger. Refresh the repository first."
 
 		return m, nil
 	}
 
 	m.dups = dupUI{open: true, source: c.Key(), checked: map[Key]bool{}, fromList: m.dups.fromList, want: dupCandidate{Number: was.Number, Kind: was.Kind, Title: old.Title, Score: c.Score}}
-	m.status = fmt.Sprintf("#%d is the original now: m marks a candidate, #%d included, as a duplicate of it. M swaps back.", c.Number, was.Number)
+	m.status = fmt.Sprintf("#%d is the original now; #%d is among its candidates.", c.Number, was.Number)
 	if _, cached := m.similar[m.dups.source]; cached {
 		m.selectWantedDup()
 
@@ -376,7 +376,7 @@ func (m model) selectedDupKey() Key {
 func (m model) openFromDuplicates(key Key) (tea.Model, tea.Cmd) {
 	it, ok := m.findItem(key)
 	if !ok {
-		m.status = "Missing from the ledger; r fetches."
+		m.status = "Missing from the ledger. Refresh the repository first."
 
 		return m, nil
 	}
@@ -399,7 +399,7 @@ func (m model) saveFromDuplicates() (tea.Model, tea.Cmd) {
 
 func (m model) saveDuplicateDecision(approve bool) (tea.Model, tea.Cmd) {
 	if !m.onDupScreen(m.detail.key) {
-		m.status = "Nothing to save here: m marks the selected candidate, or Enter opens an item to decide on it."
+		m.status = "Nothing to save here. Select a candidate to mark or open an item to decide on it."
 
 		return m, nil
 	}
@@ -464,7 +464,7 @@ func dupGroupCmd(root string, source Key, sourceTitle string, members []dupCandi
 
 		msg := groupsCmd(root)().(groupsLoadedMsg)
 		msg.selectedID = g.ID
-		msg.status = fmt.Sprintf("Created a duplicates group with %d items: b opens Groups, B adds more.", len(members)+1)
+		msg.status = fmt.Sprintf("Created a duplicates group with %d items.", len(members)+1)
 
 		return msg
 	}
@@ -473,7 +473,7 @@ func dupGroupCmd(root string, source Key, sourceTitle string, members []dupCandi
 // dupsView compares an item with its likely duplicates: the item itself on the top card, always in view and with no similarity of its own, then a rule, then each candidate with its title similarity.
 func (m model) dupsView() string {
 	w, h := m.width-4, m.mainHeight()
-	subtitle := "ranked by title similarity only: open both and read them before deciding; m marks one a duplicate of the top item"
+	subtitle := "Ranked by title similarity only; read both items before deciding"
 	if m.dups.busy {
 		subtitle = "working…"
 	}
@@ -746,7 +746,7 @@ func (m model) requestRuleOutPair() (tea.Model, tea.Cmd) {
 
 	if hovered.handled {
 		m.listConfirm = ""
-		m.status = fmt.Sprintf("#%d ↔ #%d is already decided: D clears the handled pairs from the list.", hovered.original.Number, hovered.newer.Number)
+		m.status = fmt.Sprintf("#%d ↔ #%d is already decided. Handled pairs can be cleared from this list.", hovered.original.Number, hovered.newer.Number)
 
 		return m, nil
 	}
@@ -864,7 +864,7 @@ func (m model) onPairsLoaded(msg pairsLoadedMsg) (tea.Model, tea.Cmd) {
 	m.pairsLoaded = true
 	m.refreshActiveList()
 	if m.activePairs {
-		m.status = fmt.Sprintf("%d pairs with similar titles. Enter compares a pair.", len(m.list.Items()))
+		m.status = fmt.Sprintf("%d pairs with similar titles.", len(m.list.Items()))
 	}
 
 	return m, nil

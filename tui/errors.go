@@ -36,19 +36,19 @@ type errorDetails struct {
 
 // knownFailures turn the messages scripts and gh print for common problems into what to do about them; the first match wins.
 var knownFailures = []struct{ match, say string }{
-	{"gh auth login", "the GitHub CLI isn't logged in. Run gh auth login, then r."},
-	{"http 401", "GitHub refused the login. Run gh auth login again, then r."},
-	{"bad credentials", "GitHub refused the login. Run gh auth login again, then r."},
-	{"rate limit", "GitHub's rate limit is used up. Wait a while, then r."},
-	{"error connecting to", "couldn't reach GitHub. Check the connection, then r."},
-	{"could not resolve host", "couldn't reach GitHub. Check the connection, then r."},
-	{"dial tcp", "couldn't reach GitHub. Check the connection, then r."},
-	{"i/o timeout", "GitHub took too long to answer. Try again with r."},
+	{"gh auth login", "the GitHub CLI isn't logged in. Run gh auth login, then refresh."},
+	{"http 401", "GitHub refused the login. Run gh auth login again, then refresh."},
+	{"bad credentials", "GitHub refused the login. Run gh auth login again, then refresh."},
+	{"rate limit", "GitHub's rate limit is used up. Wait a while, then refresh."},
+	{"error connecting to", "couldn't reach GitHub. Check the connection, then refresh."},
+	{"could not resolve host", "couldn't reach GitHub. Check the connection, then refresh."},
+	{"dial tcp", "couldn't reach GitHub. Check the connection, then refresh."},
+	{"i/o timeout", "GitHub took too long to answer. Refresh to retry."},
 	{"executable file not found", "gh (the GitHub CLI) isn't installed or isn't on PATH."},
 	{"group changed since it was loaded", "someone else changed this group since you opened it. Reopen Groups and redo the edit."},
-	{"is not in the ledger", "the item isn't in the ledger yet. Fetch with r first."},
-	{"missing from the ledger", "the item isn't in the ledger yet. Fetch with r first."},
-	{"no raw fetch found", "nothing has been fetched for this repo yet. Fetch with r first."},
+	{"is not in the ledger", "the item isn't in the ledger yet. Refresh the repository first."},
+	{"missing from the ledger", "the item isn't in the ledger yet. Refresh the repository first."},
+	{"no raw fetch found", "nothing has been fetched for this repo yet. Refresh the repository first."},
 }
 
 // friendlyError is a short, plain reason for err: a known problem's advice, else the script's own "error:" line or a traceback's last line, else the first line of whatever it printed.
@@ -136,6 +136,10 @@ func errorText(err error) string {
 // typingText reports whether keys are going into a text field, where ! is just a character.
 func (m model) typingText() bool {
 	return m.typingReason() || m.editingRepo || m.searching || m.themePicker.searching || m.groups.editing != "" || m.batches.editing
+}
+
+func (m model) canOpenErrorDetails() bool {
+	return !m.comment.open && !m.confirmQuit && !m.lastError.open && !m.themePicker.open && !m.typingText()
 }
 
 func (m model) handleErrorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

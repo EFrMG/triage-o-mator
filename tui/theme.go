@@ -396,12 +396,12 @@ func (m model) themePickerView() string {
 	w, h := m.width-4, m.mainHeight()
 	shown := m.themePicker.shown()
 	accent := lipgloss.NewStyle().Foreground(focusedBorderColor).Bold(true)
-	search := mutedText(fmt.Sprintf("%d themes · / to search", len(shown)))
+	search := mutedText(fmt.Sprintf("%d themes", len(shown)))
 	switch {
 	case m.themePicker.searching:
-		search = accent.Render("/ ") + m.themePicker.query.View() + "  " + mutedText(fmt.Sprintf("%d of %d · Enter keeps, Esc clears", len(shown), len(m.themePicker.names)))
+		search = accent.Render("/ ") + m.themePicker.query.View() + "  " + mutedText(fmt.Sprintf("%d of %d", len(shown), len(m.themePicker.names)))
 	case m.themePicker.query.Value() != "":
-		search = accent.Render("/ "+strings.TrimSpace(m.themePicker.query.Value())) + "  " + mutedText(fmt.Sprintf("%d of %d · / edits, Esc clears", len(shown), len(m.themePicker.names)))
+		search = accent.Render("/ "+strings.TrimSpace(m.themePicker.query.Value())) + "  " + mutedText(fmt.Sprintf("%d of %d", len(shown), len(m.themePicker.names)))
 	}
 
 	rows := []string{"Themes", "Preview: " + currentTheme.Name, ansi.Truncate(search, w, "…"), ""}

@@ -144,12 +144,12 @@ func (m model) finishCommentEditor(msg commentEditorMsg) (tea.Model, tea.Cmd) {
 	c.approval, c.requestID = "", ""
 	c.setPreview(c.text.Value())
 	c.preview.GotoTop()
-	m.status = "Comment loaded. Ctrl-S publishes; C reopens $EDITOR."
+	m.status = "Comment loaded. Review it before publishing."
 	if c.close {
-		m.status = "Comment loaded. Ctrl-S closes with comment; X reopens $EDITOR."
+		m.status = "Comment loaded. Review it before closing with a comment."
 	}
 	if c.reopen {
-		m.status = "Comment loaded. Review targets, then Ctrl-S reopens; V reopens $EDITOR."
+		m.status = "Comment loaded. Review the targets before reopening."
 	}
 
 	return m, nil

@@ -71,7 +71,7 @@ func (m model) footerGroups() []footerGroup {
 	case m.lastError.open:
 		return []footerGroup{group("Error", bind("scroll", keys.Down, keys.Up), bind("page", keys.HalfDown, keys.HalfUp)), group("Navigation", bind("close", keys.Back), bind("exit", keys.ForceQuit))}
 	case m.notificationPR.open:
-		return []footerGroup{group("PR", hint{"Tab/1–4", "tabs"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}), group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
+		return []footerGroup{group("PR", hint{"Tab/1/2/3/4", "tabs"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}), group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
 	case m.attention.open:
 		return []footerGroup{group("Comments", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
 	case m.actionHistory.open:
@@ -108,9 +108,9 @@ func (m model) footerGroups() []footerGroup {
 	case m.editingRepo && m.installing.path != "":
 		return []footerGroup{group("Install", bind("install", keys.Enter), hint{"s", "solo / tracked"}), group("Navigation", bind("cancel", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.editingRepo && m.noInstall():
-		return []footerGroup{group("Install", hint{"Tab j/k", "your installs"}, bind("open", keys.Enter)), group("Navigation", bind("quit", keys.Cancel), bind("exit", keys.ForceQuit))}
+		return []footerGroup{group("Install", hint{"Tab/j/k", "your installs"}, bind("open", keys.Enter)), group("Navigation", bind("quit", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.editingRepo:
-		return []footerGroup{group("Repo", hint{"Tab j/k", "your repos"}, bind("switch", keys.Enter)), group("Navigation", bind("", keys.Cancel), bind("exit", keys.ForceQuit))}
+		return []footerGroup{group("Repo", hint{"Tab/j/k", "your repos"}, bind("switch", keys.Enter)), group("Navigation", bind("", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.searching:
 		return []footerGroup{group("Search", hint{"type", "title words or #number"}, hint{"↑/↓", "move"}, bind("keep", keys.Enter), bind("clear", keys.Cancel)), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.typingReason():

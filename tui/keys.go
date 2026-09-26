@@ -100,7 +100,7 @@ var keys = keyMap{
 	Forward:        key.NewBinding(key.WithKeys("l", "right"), key.WithHelp("l", "open")),
 	TabPrev:        key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "previous tab")),
 	TabNext:        key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "next tab")),
-	TabJump:        key.NewBinding(key.WithKeys("1", "2", "3", "4"), key.WithHelp("1-4", "jump to tab")),
+	TabJump:        key.NewBinding(key.WithKeys("1", "2", "3", "4"), key.WithHelp("1/2/3/4", "jump to tab")),
 	Tick:           key.NewBinding(key.WithKeys("space"), key.WithHelp("Space", "tick")),
 	Search:         key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 	UntriagedKind:  key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "item kind")),

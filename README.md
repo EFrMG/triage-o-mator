@@ -105,6 +105,8 @@ An item first enters the ledger when observed open. Later syncs retain its row a
 
 The [tutorial](docs/tutorial.md) walks through these tasks and their controls. [Group review](docs/groups.md) and [cache evidence](docs/evidence.md) have some extra details.
 
+Mouse controls work alongside the keys: click a sidebar entry or tab, click a card to select it and click it again to open it, right-click a card to tick it where Space does, and scroll with the wheel. Footer shortcuts are clickable too. A choice field opens on a second click; click an option to select it.
+
 1. **Start from the overview.** It shows the repository, triage and review progress, and the next work recommended by `bin/next`.
 
 2. **Refresh the backlog.** Fetch changed issues and PRs and sync them into the ledger, or perform a full refresh when needed. This reads GitHub without modifying it; existing decisions and review history stay in the local ledger.

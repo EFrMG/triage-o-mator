@@ -74,7 +74,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, reloadLedgerCmd(m.installRoot, m.repo)
 	case tea.KeyPressMsg:
+		m.lastMouseTarget = ""
 		return m.handleKey(msg)
+	case tea.MouseClickMsg:
+		return m.handleMouseClick(msg.Mouse())
+	case tea.MouseWheelMsg:
+		return m.handleMouseWheel(msg.Mouse())
 	case tea.PasteMsg:
 		return m.handlePaste(msg)
 

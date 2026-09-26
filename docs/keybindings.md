@@ -4,6 +4,8 @@ The TUI's key scheme, agreed 2026-09-19. Every binding is defined once in `tui/k
 
 Printable keys remain text while editing a text field. Destructive actions and bulk decision changes need the same key twice, except dismissing one row in Notifications with `d`; another key cancels the confirmation. Item actions apply to ticked items, or to the item in front when nothing is ticked.
 
+**Mouse:** click a sidebar entry or item tab to open it. Click a card to select it and click it again to open it; right-click a card to tick it where Space does. The wheel scrolls the active view. Click a form field to focus it, click an already focused choice field to open its options, and click an option to choose it. Footer key hints are clickable and run the same actions as their keys, including confirmation steps.
+
 **General browsing** (outside text fields and modal menus)
 
 | key           | meaning                                                                                                                                                                                                                                                |

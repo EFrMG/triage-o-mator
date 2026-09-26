@@ -138,7 +138,11 @@ type model struct {
 	ticked      map[Key]bool
 	listConfirm string
 	// lastStep is what the last approval, or approval taken back, acted on, so a u right after it undoes the next layer on those items (undo.go) rather than on the hovered one: an approved item leaves Pending Review, and the cursor falls on the next. Any key but u forgets it.
-	lastStep []Key
+	lastStep               []Key
+	lastMouseX, lastMouseY int
+	lastMouseAt            time.Time
+	lastMouseTarget        string
+	lastMouseTargetAt      time.Time
 }
 
 func newModel(installRoot, repo string, taxonomy Taxonomy, reviewer string, items []Item) model {
@@ -775,6 +779,7 @@ func (m *model) switchRepo(repo string) tea.Cmd {
 	m.evidenceRequest++
 	m.groups, m.batches, m.dups = groupUI{}, batchUI{}, dupUI{}
 	m.lastGroupID, m.activeBatch = "", ""
+	m.lastMouseTarget = ""
 	m.activePairs, m.pairs, m.pairsLoaded = false, nil, false
 
 	m.sidebar.pairCount, m.sidebar.batchCount, m.sidebar.groupCount, m.sidebar.notificationCount = -1, -1, -1, -1

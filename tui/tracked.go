@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -32,6 +33,7 @@ type trackedPage struct {
 type trackDoneMsg struct {
 	root, repo, action string
 	key                Key
+	alreadyTracking    bool
 	err                error
 }
 
@@ -43,8 +45,16 @@ func trackCmd(root, repo, action string, target Key, row ...trackedRow) tea.Cmd 
 		} else if action == "read" {
 			args = append(args, "--checked-at", row[0].CheckedAt, "--new-count", strconv.Itoa(row[0].NewCount))
 		}
-		_, err := runScript(root, "cache", args...)
-		return trackDoneMsg{root: root, repo: repo, action: action, key: target, err: err}
+		out, err := runScript(root, "cache", args...)
+		msg := trackDoneMsg{root: root, repo: repo, action: action, key: target, err: err}
+		if action == "add" && err == nil {
+			var result struct {
+				AlreadyTracking bool `json:"already_tracking"`
+			}
+			msg.err = json.Unmarshal([]byte(out), &result)
+			msg.alreadyTracking = result.AlreadyTracking
+		}
+		return msg
 	}
 }
 
@@ -75,7 +85,14 @@ func (m model) finishTracking(msg trackDoneMsg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Marked %s #%d read; still tracking comments.", msg.key.Kind, msg.key.Number)
 		return m.openNotifications()
 	}
-	m.status = fmt.Sprintf("Tracking %s #%d. Its comments will be checked on the next ledger refresh.", msg.key.Kind, msg.key.Number)
+	if msg.alreadyTracking {
+		m.status = fmt.Sprintf("Already tracking %s #%d comments.", msg.key.Kind, msg.key.Number)
+	} else {
+		m.status = fmt.Sprintf("Tracking %s #%d. Its comments will be checked on the next ledger refresh.", msg.key.Kind, msg.key.Number)
+	}
+	if m.notifications.open {
+		return m.reloadNotifications()
+	}
 	return m, nil
 }
 

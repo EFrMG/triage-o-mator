@@ -104,8 +104,8 @@ Counts describe saved outcomes, not complete or current coverage. Custom corpus 
 ## 11. Track follow-up activity
 
 - Press `w` on an issue or PR in a list or item view to track its comments. The app checks tracked items at startup and during a normal refresh with `r`.
-- **Notifications** places new tracked comments and unviewed saved PR activity or imported actions under **Needs attention**. Quiet or viewed tracked items and viewed saved records appear under **Past actions**.
-- Select with `j`/`k` or `Tab`. `v` marks an alert viewed; one `d` dismisses it. Dismissing a tracked item stops its comment checks. Dismissing retained watch or imported-action activity hides the row without deleting its evidence.
+- **Notifications** shows one card per issue or PR. It combines comment tracking, closure proposals and retained activity for that item. A card appears under **Needs attention** while any source needs review, then under **Past actions** once those sources are viewed.
+- Select with `j`/`k` or `Tab`. `v` marks the selected item's viewable sources viewed; one `d` dismisses its local sources. Dismissing a tracked item stops its comment checks. Dismissing retained watch or imported-action activity hides the row without deleting its evidence.
 - `Enter`, `l`, or `→` opens a tracked item with a fresh read from GitHub. For retained PR activity, it first opens cards containing bounded excerpts; the same keys open a card's PR, while `Esc` or `h` returns to the selected card. Previous and More cards page within that screen.
 
 Opening the notification list and retained cards makes no GitHub request. Reading does not mark activity viewed, resolve an appeal, or approve a decision. A refreshed PR and its retained card can describe different moments.

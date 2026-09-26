@@ -91,6 +91,10 @@ def checked(cache, manifest, kind, number):
 def add(cache, kind, number, budget=20):
     validate_item(dict(kind=kind, number=number, database_id=None, node_id=None))
     natural(budget, "request budget", 1)
+
+    if any((item["identity"]["kind"], item["identity"]["number"]) == (kind, number) for item in load(cache)["items"]):
+        return dict(kind=kind, number=number, already_tracking=True, requests=0)
+
     cache.initialize()
     manifest, stats = acquire(cache, kind, number, components_for(kind), "refresh", 0, budget)
     identity, title, ids = checked(cache, manifest, kind, number)
@@ -98,7 +102,7 @@ def add(cache, kind, number, budget=20):
     with locked(path):
         value = load(cache)
         if any((item["identity"]["kind"], item["identity"]["number"]) == (kind, number) for item in value["items"]):
-            raise ValueError("item is already tracked")
+            return dict(kind=kind, number=number, already_tracking=True, requests=stats["requests"])
 
         stamp = now()
         value["items"].append(dict(identity=identity, title=title, added_at=stamp, checked_at=stamp,
@@ -106,7 +110,7 @@ def add(cache, kind, number, budget=20):
         value.pop("checksum", None)
         save(path, value)
 
-    return dict(kind=kind, number=number, requests=stats["requests"], baseline_comments=len(ids))
+    return dict(kind=kind, number=number, already_tracking=False, requests=stats["requests"], baseline_comments=len(ids))
 
 
 def remove(cache, kind, number):

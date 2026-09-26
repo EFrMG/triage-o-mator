@@ -86,3 +86,19 @@ class LedgerTests(Workspace):
         self.assertEqual(self.json_cli("similar", "--pairs")["pairs"], [])
         self.assertEqual(len(self.json_cli("similar", "--pairs", "--include-checked")["pairs"]), 1)
         self.assertFalse((self.mock / "calls.jsonl").read_text().count("POST"))
+
+
+class TrackingTests(Workspace):
+    def test_repeated_enrollment_keeps_the_comment_baseline(self):
+        self.seed_pr()
+        arguments = ("--expected-repo", "owner/repo", "track-add", "--kind", "pr", "--number", "1", "--request-budget", "20")
+        first = self.json_cli("cache", *arguments)
+        before_calls = self.calls()
+        before_record = (self.root / "data/owner/repo/local/tracked-items.json").read_bytes()
+
+        second = self.json_cli("cache", *arguments)
+        self.assertFalse(first["already_tracking"])
+        self.assertTrue(second["already_tracking"])
+        self.assertEqual(second["requests"], 0)
+        self.assertEqual(self.calls(), before_calls)
+        self.assertEqual((self.root / "data/owner/repo/local/tracked-items.json").read_bytes(), before_record)

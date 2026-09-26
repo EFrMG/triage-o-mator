@@ -28,8 +28,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishNotifications(msg)
 	case autoCloseMsg:
 		return m.finishAutoClose(msg)
-	case notificationDoneMsg:
-		return m.finishNotificationChange(msg)
+	case notificationItemDoneMsg:
+		return m.finishNotificationItem(msg)
 	case actionHistoryMsg:
 		return m.finishActionHistory(msg)
 	case attentionMsg:
@@ -98,17 +98,21 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, nil
 		}
-		if msg.trackingErr == nil {
+		if msg.trackingErr == nil && msg.proposalErr == nil {
 			m.sidebar.notificationCount = msg.unreadTotal
 		} else {
-			m.recordError("Tracked comment check failed", msg.trackingErr)
+			if msg.trackingErr != nil {
+				m.recordError("Tracked comment check failed", msg.trackingErr)
+			} else {
+				m.recordError("Closure proposal count unavailable", msg.proposalErr)
+			}
 		}
 
 		// A confirmation waiting for its second key press keeps the status line; the sync result isn't worth hiding it for.
 		if !m.statusPinned() {
 			m.status = "Synced. Loading ledger…"
-			if msg.trackingErr != nil {
-				m.status = "Ledger synced; tracked comment check failed. ! shows details."
+			if msg.trackingErr != nil || msg.proposalErr != nil {
+				m.status = "Ledger synced; notification count unavailable. ! shows details."
 			}
 		}
 		m.detail.cache = make(map[Key]EnrichedItem)

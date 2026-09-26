@@ -692,7 +692,11 @@ func (m model) clickNotifications(event tea.Mouse, _ bool) (tea.Model, tea.Cmd) 
 		if clicked < start || clicked >= start+cardHeight {
 			continue
 		}
-		repeat := m.mouseTargetRepeat("notification:" + choices[i].kind + ":" + strconv.Itoa(choices[i].row))
+		target := "notification:" + choices[i].kind
+		if choices[i].kind == "item" {
+			target += ":" + choices[i].key.Kind + ":" + strconv.Itoa(choices[i].key.Number)
+		}
+		repeat := m.mouseTargetRepeat(target)
 		if n.selected == i && repeat {
 			return m.mousePress("enter")
 		}

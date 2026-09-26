@@ -27,6 +27,7 @@ type notificationsUI struct {
 	state         notificationState
 	selected      int
 	selectAfter   string
+	selectItem    Key
 	problem       string
 }
 
@@ -51,12 +52,18 @@ type notificationsMsg struct {
 	closures   actionHistoryPage
 	proposals  autoCloseList
 	state      notificationState
+	unreadKeys []Key
 	err        error
 }
 
 type notificationChoice struct {
-	kind string
-	row  int
+	kind                                  string
+	key                                   Key
+	proposal, tracked, attention, closure int
+}
+
+func itemChoice(key Key) notificationChoice {
+	return notificationChoice{kind: "item", key: key, proposal: -1, tracked: -1, attention: -1, closure: -1}
 }
 
 type autoCloseRow struct {
@@ -154,25 +161,15 @@ func autoCloseExecuteCmd(root, repo string, generation uint64, all bool, numbers
 	}
 }
 
-func autoCloseChangeCmd(root, repo string, generation uint64, action string, row autoCloseRow) tea.Cmd {
-	return func() tea.Msg {
-		out, err := runScript(root, "auto-close", "--expected-repo", repo, action, "--number", fmt.Sprint(row.Number), "--checkpoint", row.Checkpoint)
-		return autoCloseMsg{root: root, repo: repo, generation: generation, action: action, out: out, err: err}
-	}
-}
-
 func (m model) finishAutoClose(msg autoCloseMsg) (tea.Model, tea.Cmd) {
 	if !m.notifications.open || msg.root != m.installRoot || msg.repo != m.repo || msg.generation != m.notificationsGeneration {
 		return m, nil
 	}
 	m.notifications.reviewBusy = false
-	if msg.action == "view" || msg.action == "dismiss" {
-		m.trackingBusy = false
-	}
 	if msg.err != nil {
 		m.failErr("Auto-close proposal operation failed", msg.err)
 		m.notifications.review = nil
-		if msg.action == "execute" || msg.action == "view" || msg.action == "dismiss" {
+		if msg.action == "execute" {
 			return m.openNotifications()
 		}
 		return m, nil
@@ -216,42 +213,11 @@ func (m model) finishAutoClose(msg autoCloseMsg) (tea.Model, tea.Cmd) {
 	if msg.action == "execute" {
 		m.notifications.review = nil
 		m.status = "Approved PR closures completed. Refreshing ledger…"
-		next, syncCmd := m.startRefresh(false)
-		return next, syncCmd
+		next, notificationCmd := m.openNotifications()
+		updated, syncCmd := next.(model).startRefresh(false)
+		return updated, tea.Batch(notificationCmd, syncCmd)
 	}
-	m.status = "Proposal presentation updated."
-	return m.openNotifications()
-}
-
-type notificationDoneMsg struct {
-	root, repo, action, source string
-	number                     int
-	err                        error
-}
-
-func notificationChangeCmd(root, repo, action, source string, number int, checkpoint string) tea.Cmd {
-	return func() tea.Msg {
-		_, err := runScript(root, "cache", "--expected-repo", repo, "notification-"+action, "--source", source, "--number", fmt.Sprint(number), "--checkpoint", checkpoint)
-		return notificationDoneMsg{root: root, repo: repo, action: action, source: source, number: number, err: err}
-	}
-}
-
-func (m model) finishNotificationChange(msg notificationDoneMsg) (tea.Model, tea.Cmd) {
-	if msg.root != m.installRoot || msg.repo != m.repo {
-		return m, nil
-	}
-	m.trackingBusy = false
-	if msg.err != nil {
-		m.recordError("Couldn't update notification", msg.err)
-		m.status = "Couldn't update notification. ! shows details."
-		return m, nil
-	}
-	if msg.action == "dismiss" {
-		m.status = fmt.Sprintf("Dismissed %s PR #%d from Notifications.", msg.source, msg.number)
-	} else {
-		m.status = fmt.Sprintf("Viewed %s PR #%d; saved evidence remains.", msg.source, msg.number)
-	}
-	return m.openNotifications()
+	return m, nil
 }
 
 const notificationsPageSize = 5
@@ -308,17 +274,27 @@ func notificationsCommand(root, repo string, generation uint64, trackedAt, atten
 		} else {
 			msg.err = validateActionHistoryPage(msg.closures, actionHistoryLocation{section: "list", offset: closureAt, checkpoint: closureCheckpoint}, repo)
 		}
+		if msg.err == nil {
+			msg.unreadKeys, msg.err = unreadTrackedKeys(repo, msg.tracked.UnreadTotal, func(args ...string) (string, error) {
+				return runReadScript(process, root, "cache", args...)
+			})
+		}
 		return msg
 	}
 }
 
 func (m model) openNotifications() (tea.Model, tea.Cmd) {
+	m.notifications = notificationsUI{open: true, ticked: make(map[int]bool)}
+	return m.reloadNotifications()
+}
+
+func (m model) reloadNotifications() (tea.Model, tea.Cmd) {
 	if m.notificationsLifecycle == nil {
 		m.notificationsLifecycle = &readLifecycle{}
 	}
 	m.notificationsLifecycle.stop()
 	m.notificationsGeneration++
-	m.notifications = notificationsUI{open: true, busy: true, ticked: make(map[int]bool)}
+	m.notifications.busy = true
 	m.notificationsLifecycle.current = &readProcess{}
 	return m, notificationsCommand(m.installRoot, m.repo, m.notificationsGeneration, 0, 0, 0, "", "", m.notificationsLifecycle.current)
 }
@@ -362,12 +338,7 @@ func (m model) finishNotifications(msg notificationsMsg) (tea.Model, tea.Cmd) {
 	m.notifications.proposals = msg.proposals
 	m.notifications.tracked = &msg.tracked
 	m.notifications.state = msg.state
-	m.sidebar.notificationCount = msg.tracked.UnreadTotal
-	for _, proposal := range msg.proposals.Rows {
-		if proposal.Needs {
-			m.sidebar.notificationCount++
-		}
-	}
+	m.sidebar.notificationCount = notificationCount(msg.unreadKeys, msg.proposals)
 	if m.notifications.selectAfter != "" {
 		for i, choice := range m.notifications.choices() {
 			if choice.kind == m.notifications.selectAfter {
@@ -376,6 +347,15 @@ func (m model) finishNotifications(msg notificationsMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.notifications.selectAfter = ""
+	}
+	if m.notifications.selectItem.Number > 0 {
+		for i, choice := range m.notifications.choices() {
+			if choice.kind == "item" && choice.key == m.notifications.selectItem {
+				m.notifications.selected = i
+				break
+			}
+		}
+		m.notifications.selectItem = Key{}
 	}
 	return m, nil
 }
@@ -400,14 +380,11 @@ func (n notificationsUI) actionNeeds(row actionHistoryRow) bool {
 
 func (n notificationsUI) choiceNeeds(choice notificationChoice) bool {
 	switch choice.kind {
-	case "proposal":
-		return n.proposals.Rows[choice.row].Needs
-	case "tracked":
-		return n.tracked.Rows[choice.row].NewCount > 0
-	case "attention":
-		return n.watchNeeds(n.attention.Rows[choice.row])
-	case "closure":
-		return n.actionNeeds(n.closures.Rows[choice.row])
+	case "item":
+		return choice.proposal >= 0 && n.proposals.Rows[choice.proposal].Needs ||
+			choice.tracked >= 0 && n.tracked.Rows[choice.tracked].NewCount > 0 ||
+			choice.attention >= 0 && n.watchNeeds(n.attention.Rows[choice.attention]) ||
+			choice.closure >= 0 && n.actionNeeds(n.closures.Rows[choice.closure])
 	case "attention-prev", "attention-more", "closure-prev", "closure-more":
 		return true
 	default:
@@ -416,27 +393,59 @@ func (n notificationsUI) choiceNeeds(choice notificationChoice) bool {
 }
 
 func (n notificationsUI) choices() []notificationChoice {
-	var choices []notificationChoice
+	var items []notificationChoice
+	byKey := make(map[Key]int)
+	add := func(key Key, source string, row int) {
+		index, found := byKey[key]
+		if !found {
+			index = len(items)
+			byKey[key] = index
+			items = append(items, itemChoice(key))
+		}
+		switch source {
+		case "proposal":
+			items[index].proposal = row
+		case "tracked":
+			items[index].tracked = row
+		case "attention":
+			items[index].attention = row
+		case "closure":
+			items[index].closure = row
+		}
+	}
 	for i, row := range n.proposals.Rows {
-		if row.Active && row.Needs {
-			choices = append(choices, notificationChoice{kind: "proposal", row: i})
+		if !row.Dismissed && row.Status != "executed" {
+			add(Key{Kind: "pr", Number: row.Number}, "proposal", i)
 		}
 	}
 	if n.tracked != nil {
 		for i := range n.tracked.Rows {
-			if n.tracked.Rows[i].NewCount > 0 {
-				choices = append(choices, notificationChoice{kind: "tracked", row: i})
+			add(n.tracked.Rows[i].key(), "tracked", i)
+		}
+	}
+	if n.attention != nil {
+		for i := range n.attention.Rows {
+			if _, dismissed := n.rowState("watch", n.attention.Rows[i].Number); !dismissed {
+				add(Key{Kind: "pr", Number: n.attention.Rows[i].Number}, "attention", i)
 			}
+		}
+	}
+	if n.closures != nil {
+		for i := range n.closures.Rows {
+			if _, dismissed := n.rowState("action", n.closures.Rows[i].Number); !dismissed {
+				add(Key{Kind: "pr", Number: n.closures.Rows[i].Number}, "closure", i)
+			}
+		}
+	}
+	var choices []notificationChoice
+	for _, item := range items {
+		if n.choiceNeeds(item) {
+			choices = append(choices, item)
 		}
 	}
 	if n.attention != nil {
 		if n.attention.Pagination.Offset > 0 {
 			choices = append(choices, notificationChoice{kind: "attention-prev"})
-		}
-		for i := range n.attention.Rows {
-			if n.watchNeeds(n.attention.Rows[i]) {
-				choices = append(choices, notificationChoice{kind: "attention", row: i})
-			}
 		}
 		if n.attention.Pagination.Next != nil {
 			choices = append(choices, notificationChoice{kind: "attention-more"})
@@ -446,49 +455,21 @@ func (n notificationsUI) choices() []notificationChoice {
 		if n.closures.Pagination.Offset > 0 {
 			choices = append(choices, notificationChoice{kind: "closure-prev"})
 		}
-		for i := range n.closures.Rows {
-			if n.actionNeeds(n.closures.Rows[i]) {
-				choices = append(choices, notificationChoice{kind: "closure", row: i})
-			}
-		}
 		if n.closures.Pagination.Next != nil {
 			choices = append(choices, notificationChoice{kind: "closure-more"})
+		}
+	}
+	for _, item := range items {
+		if !n.choiceNeeds(item) {
+			choices = append(choices, item)
 		}
 	}
 	if n.tracked != nil {
 		if n.tracked.Offset > 0 {
 			choices = append(choices, notificationChoice{kind: "tracked-prev"})
 		}
-		for i := range n.tracked.Rows {
-			if n.tracked.Rows[i].NewCount == 0 {
-				choices = append(choices, notificationChoice{kind: "tracked", row: i})
-			}
-		}
 		if n.tracked.Next != nil {
 			choices = append(choices, notificationChoice{kind: "tracked-more"})
-		}
-	}
-	if n.attention != nil {
-		for i := range n.attention.Rows {
-			if !n.watchNeeds(n.attention.Rows[i]) {
-				_, dismissed := n.rowState("watch", n.attention.Rows[i].Number)
-				if !dismissed {
-					choices = append(choices, notificationChoice{kind: "attention", row: i})
-				}
-			}
-		}
-	}
-	if n.closures != nil {
-		for i := range n.closures.Rows {
-			_, dismissed := n.rowState("action", n.closures.Rows[i].Number)
-			if !dismissed && !n.actionNeeds(n.closures.Rows[i]) {
-				choices = append(choices, notificationChoice{kind: "closure", row: i})
-			}
-		}
-	}
-	for i, row := range n.proposals.Rows {
-		if !row.Dismissed && (!row.Active || !row.Needs) {
-			choices = append(choices, notificationChoice{kind: "proposal", row: i})
 		}
 	}
 	return choices
@@ -523,12 +504,26 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m, nil
 		}
 		switch msg.String() {
+		case "w":
+			if len(m.notifications.review.Plan.Proposals) == 1 {
+				row := m.notifications.review.Plan.Proposals[0]
+				for _, choice := range m.notifications.choices() {
+					if choice.kind == "item" && choice.key == (Key{Kind: "pr", Number: row.Number}) && choice.tracked >= 0 {
+						m.status = fmt.Sprintf("Already tracking PR #%d comments.", row.Number)
+						return m, nil
+					}
+				}
+				return m.startTracking(Key{Kind: "pr", Number: row.Number})
+			}
 		case "d":
 			if len(m.notifications.review.Plan.Proposals) == 1 {
 				row := m.notifications.review.Plan.Proposals[0]
-				m.notifications.review = nil
-				m.trackingBusy = true
-				return m, autoCloseChangeCmd(m.installRoot, m.repo, m.notificationsGeneration, "dismiss", row)
+				for _, choice := range m.notifications.choices() {
+					if choice.kind == "item" && choice.key == (Key{Kind: "pr", Number: row.Number}) {
+						m.notifications.review = nil
+						return m.changeNotificationItem(choice, "dismiss")
+					}
+				}
 			}
 		case "enter", "l", "right":
 			if len(m.notifications.review.Plan.Proposals) == 1 {
@@ -591,10 +586,22 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	choices := m.notifications.choices()
+	if m.notifications.selected >= len(choices) && len(choices) > 0 {
+		m.notifications.selected = len(choices) - 1
+	}
 	switch msg.String() {
+	case "w":
+		if len(choices) > 0 && choices[m.notifications.selected].kind == "item" {
+			choice := choices[m.notifications.selected]
+			if choice.tracked >= 0 {
+				m.status = fmt.Sprintf("Already tracking %s #%d comments.", strings.ToUpper(choice.key.Kind), choice.key.Number)
+				return m, nil
+			}
+			return m.startTracking(choice.key)
+		}
 	case "space":
-		if len(choices) > 0 && choices[m.notifications.selected].kind == "proposal" {
-			row := m.notifications.proposals.Rows[choices[m.notifications.selected].row]
+		if len(choices) > 0 && choices[m.notifications.selected].kind == "item" && choices[m.notifications.selected].proposal >= 0 {
+			row := m.notifications.proposals.Rows[choices[m.notifications.selected].proposal]
 			if row.Active {
 				m.notifications.ticked[row.Number] = !m.notifications.ticked[row.Number]
 			}
@@ -611,8 +618,8 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 					numbers = append(numbers, row.Number)
 				}
 			}
-			if len(numbers) == 0 && len(choices) > 0 && choices[m.notifications.selected].kind == "proposal" {
-				row := m.notifications.proposals.Rows[choices[m.notifications.selected].row]
+			if len(numbers) == 0 && len(choices) > 0 && choices[m.notifications.selected].kind == "item" && choices[m.notifications.selected].proposal >= 0 {
+				row := m.notifications.proposals.Rows[choices[m.notifications.selected].proposal]
 				if row.Active {
 					numbers = append(numbers, row.Number)
 				}
@@ -635,62 +642,12 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		if len(choices) == 0 || m.trackingBusy {
 			break
 		}
-		choice := choices[m.notifications.selected]
-		switch choice.kind {
-		case "proposal":
-			row := m.notifications.proposals.Rows[choice.row]
-			m.trackingBusy = true
-			return m, autoCloseChangeCmd(m.installRoot, m.repo, m.notificationsGeneration, "view", row)
-		case "tracked":
-			row := m.notifications.tracked.Rows[choice.row]
-			if row.NewCount > 0 {
-				m.trackingBusy = true
-				return m, trackCmd(m.installRoot, m.repo, "read", row.key(), row)
-			}
-		case "attention":
-			row := m.notifications.attention.Rows[choice.row]
-			if row.Selectable && m.notifications.watchNeeds(row) {
-				m.trackingBusy = true
-				return m, notificationChangeCmd(m.installRoot, m.repo, "view", "watch", row.Number, row.WatchCheckpoint)
-			}
-		case "closure":
-			row := m.notifications.closures.Rows[choice.row]
-			if row.Selectable && m.notifications.actionNeeds(row) {
-				m.trackingBusy = true
-				return m, notificationChangeCmd(m.installRoot, m.repo, "view", "action", row.Number, row.HistoryCheckpoint)
-			}
-		}
+		return m.changeNotificationItem(choices[m.notifications.selected], "view")
 	case "d":
 		if len(choices) == 0 || m.trackingBusy {
 			break
 		}
-		choice := choices[m.notifications.selected]
-		switch choice.kind {
-		case "proposal":
-			row := m.notifications.proposals.Rows[choice.row]
-			m.trackingBusy = true
-			return m, autoCloseChangeCmd(m.installRoot, m.repo, m.notificationsGeneration, "dismiss", row)
-		case "tracked":
-			key := m.notifications.tracked.Rows[choice.row].key()
-			m.trackingBusy = true
-			return m, trackCmd(m.installRoot, m.repo, "remove", key)
-		case "attention":
-			row := m.notifications.attention.Rows[choice.row]
-			checkpoint := row.WatchCheckpoint
-			if !row.Selectable {
-				checkpoint = m.notifications.attention.Checkpoint
-			}
-			m.trackingBusy = true
-			return m, notificationChangeCmd(m.installRoot, m.repo, "dismiss", "watch", row.Number, checkpoint)
-		case "closure":
-			row := m.notifications.closures.Rows[choice.row]
-			checkpoint := row.HistoryCheckpoint
-			if !row.Selectable {
-				checkpoint = m.notifications.closures.Checkpoint
-			}
-			m.trackingBusy = true
-			return m, notificationChangeCmd(m.installRoot, m.repo, "dismiss", "action", row.Number, checkpoint)
-		}
+		return m.changeNotificationItem(choices[m.notifications.selected], "dismiss")
 	case "j", "down", "tab":
 		if len(choices) > 0 {
 			m.notifications.selected = (m.notifications.selected + 1) % len(choices)
@@ -705,30 +662,12 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 		choice := choices[m.notifications.selected]
 		switch choice.kind {
-		case "proposal":
-			row := m.notifications.proposals.Rows[choice.row]
-			m.notifications.review = &autoCloseReview{}
-			m.notifications.review.Plan.Repository = m.repo
-			m.notifications.review.Plan.Proposals = []autoCloseRow{row}
-			m.notifications.reviewKey = ""
-			m.notifications.reviewScroll = 0
-			return m, nil
-		case "tracked":
-			return m.openNotificationItem(m.notifications.tracked.Rows[choice.row].key())
+		case "item":
+			return m.openNotificationSource(choice, "default")
 		case "tracked-more":
 			return m.pageNotifications("tracked", *m.notifications.tracked.Next)
 		case "tracked-prev":
 			return m.pageNotifications("tracked", maxInt(0, m.notifications.tracked.Offset-notificationsPageSize))
-		case "attention":
-			row := m.notifications.attention.Rows[choice.row]
-			if row.Selectable {
-				return m.readAttention(attentionLocation{section: "history", number: row.Number, checkpoint: row.WatchCheckpoint})
-			}
-		case "closure":
-			row := m.notifications.closures.Rows[choice.row]
-			if row.Selectable {
-				return m.readActionHistory(actionHistoryLocation{section: "entries", number: row.Number, checkpoint: row.HistoryCheckpoint})
-			}
 		case "attention-more":
 			return m.pageNotifications("attention", *m.notifications.attention.Pagination.Next)
 		case "attention-prev":
@@ -737,6 +676,11 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m.pageNotifications("closure", *m.notifications.closures.Pagination.Next)
 		case "closure-prev":
 			return m.pageNotifications("closure", maxInt(0, m.notifications.closures.Pagination.Offset-notificationsPageSize))
+		}
+	case "1", "2", "3", "4":
+		if len(choices) > 0 {
+			source := map[string]string{"1": "proposal", "2": "PR", "3": "watch", "4": "action"}[msg.String()]
+			return m.openNotificationSource(choices[m.notifications.selected], source)
 		}
 	}
 	return m, nil
@@ -886,50 +830,72 @@ func (m model) autoCloseReviewView() string {
 
 func renderNotificationChoice(n notificationsUI, choice notificationChoice, card func(string, string, cardMark)) {
 	switch choice.kind {
-	case "proposal":
-		row := n.proposals.Rows[choice.row]
-		label := fmt.Sprintf("PR #%d: %s", row.Number, singleLine(row.Title))
-		if n.ticked[row.Number] {
-			label = "✓ " + label
-		}
-		summary := "Proposed comment and closure · " + singleLine(row.Rationale)
-		if row.Status == "executed" {
-			summary = "Comment and closure completed"
-		}
-		if row.Status == "uncertain" {
-			summary = "Write outcome uncertain; inspect saved record"
-			if row.Outcome != nil {
-				summary = "Comment " + row.Outcome.Comment.Status + " · close " + row.Outcome.StateChange.Status
+	case "item":
+		prefix := fmt.Sprintf("%s #%d", strings.ToUpper(choice.key.Kind), choice.key.Number)
+		title := ""
+		var parts []string
+		if choice.proposal >= 0 {
+			row := n.proposals.Rows[choice.proposal]
+			title = row.Title
+			switch row.Status {
+			case "pending":
+				parts = append(parts, "Closure proposed")
+			case "executed":
+				parts = append(parts, "Comment and closure completed")
+			case "uncertain":
+				parts = append(parts, "Closure outcome uncertain")
 			}
 		}
-		card(label, summary, cardMark{text: "PR", color: currentTheme.Warning})
-	case "tracked":
-		row := n.tracked.Rows[choice.row]
-		key := row.key()
-		summary := fmt.Sprintf("last checked %s", row.CheckedAt)
+		if choice.tracked >= 0 {
+			row := n.tracked.Rows[choice.tracked]
+			if title == "" {
+				title = row.Title
+			}
+			if row.NewCount > 0 {
+				parts = append(parts, fmt.Sprintf("%d new comment(s)", row.NewCount))
+			} else {
+				parts = append(parts, "Tracking comments")
+			}
+			if row.Error != nil {
+				parts = append(parts, "comment check incomplete")
+			}
+		}
+		if choice.attention >= 0 {
+			row := n.attention.Rows[choice.attention]
+			if title == "" {
+				title = strings.TrimPrefix(row.Label, prefix+": ")
+			}
+			if row.Selectable {
+				parts = append(parts, "Retained activity: "+notificationAttentionSummary(row))
+			} else {
+				parts = append(parts, "Retained activity unavailable")
+			}
+		}
+		if choice.closure >= 0 {
+			row := n.closures.Rows[choice.closure]
+			if title == "" {
+				title = strings.TrimPrefix(row.Label, prefix+": ")
+			}
+			if row.Selectable {
+				parts = append(parts, "Imported explanation")
+			} else {
+				parts = append(parts, "Imported explanation unavailable")
+			}
+		}
+		label := prefix
+		if title != "" {
+			label += ": " + singleLine(title)
+		}
+		if n.ticked[choice.key.Number] && choice.key.Kind == "pr" && choice.proposal >= 0 {
+			label = "✓ " + label
+		}
 		mark := cardMark{}
-		if row.NewCount > 0 {
-			summary = fmt.Sprintf("%d new comment(s) · %s", row.NewCount, summary)
+		if n.choiceNeeds(choice) {
 			mark = cardMark{text: "NEW", color: currentTheme.Info}
+		} else if choice.proposal >= 0 {
+			mark = cardMark{text: "PR", color: currentTheme.Warning}
 		}
-		if row.Error != nil {
-			summary += " · check incomplete"
-		}
-		card(fmt.Sprintf("%s #%d: %s", strings.ToUpper(key.Kind), key.Number, singleLine(row.Title)), summary, mark)
-	case "attention":
-		row := n.attention.Rows[choice.row]
-		label := row.Label
-		if !row.Selectable {
-			label += " · unavailable"
-		}
-		card(label, notificationAttentionSummary(row), cardMark{text: "PR", color: currentTheme.Warning})
-	case "closure":
-		row := n.closures.Rows[choice.row]
-		label := row.Label
-		if !row.Selectable {
-			label += " · unavailable"
-		}
-		card(label, "Imported explanation · operation and provenance unverified", cardMark{text: "PR", color: currentTheme.Info})
+		card(label, strings.Join(parts, " · "), mark)
 	case "tracked-prev", "attention-prev", "closure-prev":
 		card("Previous saved items", "Show the preceding saved page", cardMark{})
 	case "tracked-more", "attention-more", "closure-more":

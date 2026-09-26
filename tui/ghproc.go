@@ -60,10 +60,10 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 
 // fetchSyncDoneMsg reports the result of a background `bin/fetch && bin/sync`; bin/fetch is incremental unless full is set (or it decides a full fetch is due).
 type fetchSyncDoneMsg struct {
-	err, trackingErr error
-	summary          string
-	unreadTotal      int
-	repo             string
+	err, trackingErr, proposalErr error
+	summary                       string
+	unreadTotal                   int
+	repo                          string
 }
 
 func fetchSyncCmd(installRoot, repo string, full bool) tea.Cmd {
@@ -89,7 +89,22 @@ func fetchSyncCmd(installRoot, repo string, full bool) tea.Cmd {
 		if trackingErr == nil {
 			trackingErr = json.Unmarshal([]byte(tracked), &count)
 		}
-		return fetchSyncDoneMsg{repo: repo, summary: out, trackingErr: trackingErr, unreadTotal: count.UnreadTotal}
+		var unreadKeys []Key
+		if trackingErr == nil {
+			unreadKeys, trackingErr = unreadTrackedKeys(repo, count.UnreadTotal, func(args ...string) (string, error) {
+				return runScript(installRoot, "cache", args...)
+			})
+		}
+
+		proposals, proposalErr := runScript(installRoot, "auto-close", "--expected-repo", repo, "list")
+		var listed autoCloseList
+		if proposalErr == nil {
+			proposalErr = json.Unmarshal([]byte(proposals), &listed)
+		}
+		if proposalErr == nil && (listed.Repository != repo || listed.Requests != 0) {
+			proposalErr = fmt.Errorf("proposal count response identity mismatch")
+		}
+		return fetchSyncDoneMsg{repo: repo, summary: out, trackingErr: trackingErr, proposalErr: proposalErr, unreadTotal: notificationCount(unreadKeys, listed)}
 	}
 }
 

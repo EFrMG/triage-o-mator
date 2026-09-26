@@ -73,7 +73,7 @@ Do not add a test merely because a bug was difficult to fix or once regressed. A
 
 Keep Python tests in `tests/`. Go tests that inspect the TUI model stay in `tui/` because it is `package main` with unexported state; moving them under `tests/` would require a production package refactor. Do not create a new Go test file just to separate a small scenario from `tui/baseline_test.go`.
 
-For a terminal smoke check, you could run the built TUI in a disposable install through Python's `pty.openpty()`.
+For a terminal smoke check, run the built TUI in a disposable install through Python's `pty.openpty()`.
 
 ### House style
 

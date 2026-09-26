@@ -72,6 +72,8 @@ func (m model) handleNotificationPRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		return m.requestQuit()
 	case "?":
 		m.showHelp = !m.showHelp
+	case "w":
+		return m.startTracking(m.notificationPR.key)
 	case "tab", "l", "right":
 		m.detail.CycleSection(1)
 	case "shift+tab":

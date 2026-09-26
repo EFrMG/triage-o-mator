@@ -95,7 +95,7 @@ func (m model) footerGroups() []footerGroup {
 		if m.notifications.review != nil {
 			back = "back to proposal"
 		}
-		return []footerGroup{group("PR", hint{"Tab/1/2/3/4", "tabs"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}), group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
+		return []footerGroup{group("PR", hint{"Tab/1/2/3/4", "tabs"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, hint{"w", "track comments"}), group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
 	case m.attention.open:
 		return []footerGroup{group("Comments", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
 	case m.actionHistory.open:
@@ -126,14 +126,38 @@ func (m model) footerGroups() []footerGroup {
 				}
 			}
 			if len(m.notifications.review.Plan.Proposals) == 1 {
-				proposal.hints = append(proposal.hints, hint{"d", "dismiss"})
+				proposal.hints = append(proposal.hints, hint{"w", "track comments"}, hint{"d", "dismiss"})
 			}
 			return []footerGroup{proposal, group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
 		}
 		if m.notifications.reviewBusy {
 			return []footerGroup{group("Notifications", hint{"", "preparing exact review…"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
 		}
-		return []footerGroup{group("Notifications", hint{"j/k/Tab", "select"}, hint{"Space", "tick proposal"}, hint{"a/A", "review closures"}, hint{"Enter/l/→", "open"}, hint{"v", "viewed"}, hint{"d", "dismiss"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+		notifications := group("Notifications", hint{"j/k/Tab", "select"}, hint{"Space", "tick proposal"}, hint{"a/A", "review closures"}, hint{"Enter/l/→", "open"})
+		choices := m.notifications.choices()
+		if len(choices) > 0 && m.notifications.selected < len(choices) {
+			choice := choices[m.notifications.selected]
+			if choice.kind == "item" {
+				if choice.proposal >= 0 {
+					notifications.hints = append(notifications.hints, hint{"1", "proposal"})
+				}
+				notifications.hints = append(notifications.hints, hint{"2", "open item"})
+				if choice.attention >= 0 {
+					notifications.hints = append(notifications.hints, hint{"3", "activity"})
+				}
+				if choice.closure >= 0 {
+					notifications.hints = append(notifications.hints, hint{"4", "actions"})
+				}
+				if choice.tracked < 0 {
+					notifications.hints = append(notifications.hints, hint{"w", "track comments"})
+				}
+				if len(m.notifications.itemOperations(m.repo, choice, "view")) > 0 {
+					notifications.hints = append(notifications.hints, hint{"v", "viewed"})
+				}
+			}
+		}
+		notifications.hints = append(notifications.hints, hint{"d", "dismiss"})
+		return []footerGroup{notifications, group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
 	case m.corpus.open:
 		if m.corpus.busy {
 			return []footerGroup{group("Download", bind("stop", keys.CorpusStop)), group("Navigation", bind("close", keys.Back, keys.Corpus))}

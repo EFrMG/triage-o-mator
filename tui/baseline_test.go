@@ -291,6 +291,139 @@ func TestBaselineAttentionDropsForeignReply(t *testing.T) {
 	}
 }
 
+func TestNotificationCountIncludesProposalsAfterSync(t *testing.T) {
+	root := baselineRoot(t)
+	for name, output := range map[string]string{
+		"fetch":      "{}",
+		"sync":       "{}",
+		"auto-close": `{"repository":"owner/repo","requests":0,"rows":[{"number":3,"needs_attention":true},{"number":4,"needs_attention":true},{"number":5,"needs_attention":false}]}`,
+	} {
+		script := "#!/usr/bin/env python3\nprint('" + output + "')\n"
+		if err := os.WriteFile(filepath.Join(root, "bin", name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cache := `#!/usr/bin/env python3
+import json, sys
+if 'track-check' in sys.argv:
+    print(json.dumps({'unread_total': 1}))
+else:
+    print(json.dumps({'repository': {'full_name': 'owner/repo'}, 'rows': [{'identity': {'kind': 'pr', 'number': 3}, 'new_count': 2}], 'unread_total': 1, 'offset': 0, 'next': None}))
+`
+	if err := os.WriteFile(filepath.Join(root, "bin", "cache"), []byte(cache), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := baselineModel(t, root)
+	result := fetchSyncCmd(root, m.repo, false)().(fetchSyncDoneMsg)
+	if result.err != nil || result.trackingErr != nil || result.proposalErr != nil || result.unreadTotal != 2 {
+		t.Fatalf("sync notification count = %+v", result)
+	}
+	m = baselineSend(m, result)
+	if m.sidebar.notificationCount != 2 || m.notifications.open {
+		t.Fatal("sync did not update the closed Notifications menu count")
+	}
+}
+
+func TestProposalReaderTracksComments(t *testing.T) {
+	root := baselineRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "bin", "cache"), []byte("#!/usr/bin/env python3\nprint('{\"already_tracking\": false}')\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	key := Key{Kind: "pr", Number: 3}
+	m := baselineModel(t, root)
+	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Status: "pending", Active: true}}}, review: &autoCloseReview{}}
+	m.notifications.review.Plan.Proposals = m.notifications.proposals.Rows
+	next, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "w"})
+	if cmd == nil {
+		t.Fatal("w in a proposal reader did not start tracking")
+	}
+	result := cmd().(trackDoneMsg)
+	if result.err != nil || result.key != key {
+		t.Fatalf("w tracked the wrong item: %+v", result)
+	}
+	updated, reload := next.(model).finishTracking(result)
+	if reload == nil || updated.(model).notifications.review == nil {
+		t.Fatal("tracking did not refresh Notifications while keeping the proposal reader")
+	}
+}
+
+func TestNotificationsShowOneCardPerItemAndViewEachSource(t *testing.T) {
+	root := baselineRoot(t)
+	logScript := `#!/usr/bin/env python3
+import json, pathlib, sys
+with pathlib.Path('notification-calls.jsonl').open('a') as out:
+    out.write(json.dumps(sys.argv[1:]) + '\n')
+print('{}')
+`
+	for _, name := range []string{"cache", "auto-close"} {
+		if err := os.WriteFile(filepath.Join(root, "bin", name), []byte(logScript), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m := baselineModel(t, root)
+	tracked := trackedRow{Title: "Fixture", NewCount: 2, CheckedAt: "2026-09-26T20:00:00Z"}
+	tracked.Identity.Kind, tracked.Identity.Number = "pr", 3
+	m.notifications = notificationsUI{
+		open:      true,
+		tracked:   &trackedPage{Rows: []trackedRow{tracked}, Total: 1, UnreadTotal: 1},
+		proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Title: "Fixture", Status: "pending", Active: true, Needs: true, Checkpoint: strings.Repeat("a", 64)}}},
+		attention: &attentionPage{Rows: []attentionRow{{Number: 3, Selectable: true, Attention: true, WatchCheckpoint: strings.Repeat("b", 64)}}},
+		closures:  &actionHistoryPage{Rows: []actionHistoryRow{{Number: 3, Selectable: true, HistoryCheckpoint: strings.Repeat("c", 64)}}},
+	}
+	choices := m.notifications.choices()
+	if len(choices) != 1 || choices[0].kind != "item" || choices[0].key != (Key{Kind: "pr", Number: 3}) || !m.notifications.choiceNeeds(choices[0]) {
+		t.Fatalf("notification sources were not grouped: %+v", choices)
+	}
+	if strings.Count(m.notificationsView(), "PR #3: Fixture") != 1 {
+		t.Fatal("PR appears more than once in Notifications")
+	}
+
+	next, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "v"})
+	if cmd == nil {
+		t.Fatal("v did not act on the grouped item")
+	}
+	result := cmd().(notificationItemDoneMsg)
+	if result.err != nil || result.completed != 4 || result.total != 4 || !next.(model).trackingBusy {
+		t.Fatalf("v did not update every source: %+v", result)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "notification-calls.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"\"view\"", "\"track-read\"", "\"notification-view\""} {
+		if !strings.Contains(string(data), command) {
+			t.Fatalf("missing %s in script calls: %s", command, data)
+		}
+	}
+
+	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
+	dismissed := cmd().(notificationItemDoneMsg)
+	if dismissed.err != nil || dismissed.completed != 4 {
+		t.Fatalf("d did not dismiss every source: %+v", dismissed)
+	}
+	data, err = os.ReadFile(filepath.Join(root, "notification-calls.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"\"dismiss\"", "\"track-remove\"", "\"notification-dismiss\""} {
+		if !strings.Contains(string(data), command) {
+			t.Fatalf("missing %s in script calls: %s", command, data)
+		}
+	}
+}
+
+func TestCompletedClosureLeavesNotificationsWithoutTracking(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Title: "Completed fixture", Status: "executed"}, {Number: 4, Title: "Needs inspection", Status: "uncertain"}}}}
+	choices := m.notifications.choices()
+	if len(choices) != 1 || choices[0].key != (Key{Kind: "pr", Number: 4}) || strings.Contains(m.notificationsView(), "PR #3") {
+		t.Fatalf("completed closure remained a notification: %+v", choices)
+	}
+}
+
 func TestBaselineReadCancellationStopsChildProcess(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "bin"), 0o755); err != nil {

@@ -9,7 +9,7 @@ run:
 
 test:
 	cd tui && go test ./...
-	python3 -m unittest discover -s tests -v
+	python3 -c 'import unittest; suite = unittest.defaultTestLoader.discover("tests"); assert suite.countTestCases(), "no Python tests discovered"; result = unittest.TextTestRunner(verbosity=2).run(suite); raise SystemExit(not result.wasSuccessful())'
 
 check: test
 	cd tui && go vet ./... && gopls check *.go

@@ -16,8 +16,8 @@ triage-o-mator is tooling for working through a GitHub issue and pull request ba
 | `config/`                          | `taxonomy.json` and `taxonomy.md`, the default categories and actions that `bin/install-to` copies into installs |
 | `themes/`                          | color palettes                                                                                                   |
 | `docs/`                            | The documentation installs link back to                                                                          |
-| `tests/test_*.py`, `tui/*_test.go` | Python and Go tests; both build throwaway checkouts and installs with a fake `gh`                                |
-| `tests/support/`                   | Shared Python fixtures, also used by Go tests when preparing throwaway installs                                  |
+| `tests/test_*.py`, `tui/*_test.go` | Python and Go tests; both use throwaway checkouts and installs with a fake `gh`                                  |
+| `tests/support.py`                 | Disposable Python fixture with a strict fake `gh`                                                                |
 
 There is no `config/repo`, no ledger and no reports here, see why in the following section.
 
@@ -63,7 +63,7 @@ mise exec -- make build
 mise exec -- make run ROOT=/path/to/a/repository/triage-o-mator
 ```
 
-Tests build throwaway checkouts and installs in temporary directories with a fake `gh` (`tests/test_install.py` for the layout, `tests/test_fetch_similar.py` and `tests/test_agent_flow.py` for the scripts, `tui/*_test.go` for the TUI). Shared Python setup lives in `tests/support/`; test modules should not import one another. None of them may touch a real install, a real repository or GitHub. Prettier formats the Markdown and the palette JSON, `gofmt` the Go; `make check` enforces both.
+Tests use throwaway checkouts and installs in temporary directories with a fake `gh` (`tests/test_core.py` for the layout and ledger, the other Python modules for evidence and review workflows, `tui/*_test.go` for the TUI). Shared Python setup lives in `tests/support.py`; test modules should not import one another. None of them may touch a real install, a real repository or GitHub. Prettier formats the Markdown and the palette JSON, `gofmt` the Go; `make check` enforces both.
 
 For a terminal smoke check, run the built TUI in a disposable install through Python's `pty.openpty()`.
 
@@ -79,7 +79,7 @@ Two conventions `make check` couldn't enforce:
 - **A playbook:** write it in `prompts/`, add a row to `prompts/PLAYBOOK.md`'s "What you can be asked" table and to `README.md`'s prompts table, and give `bin/next` a suggestion that points at it.
 - **A category or action:** `config/taxonomy.json` and `config/taxonomy.md` together. Installs keep their own copies, so this changes the default for new ones, not the ones already out there.
 - **A script:** it imports `bin/_triage.py`, reads its paths from `WORK_ROOT`, and stays read-only against GitHub unless it is an explicitly authorized write script that defaults to dry-run and requires approval of the exact proposed operation. Add it to `README.md`'s script table.
-- **The playbook itself:** remember where it is read. `prompts/PLAYBOOK.md` is an install's `AGENTS.md`, so its paths and links are relative to an install, and `tests/test_install.py` walks every one of them from inside a fresh one.
+- **The playbook itself:** remember where it is read. `prompts/PLAYBOOK.md` is an install's `AGENTS.md`, so its paths and links are relative to an install.
 
 Closed-PR watches use explicit pinned enrollment and budgeted `cache watch-capture`. The watch lock precedes acquisition and cache metadata locks; no ledger or inventory locks are acquired. Publish evidence before referencing it from the atomic watch record. Preserve initial closure context, unknown provenance, existing post-closure activity and incomplete coverage. Offline watch reads validate retained snapshots and never fetch. Watches are observations, not acknowledgment or approval.
 

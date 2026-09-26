@@ -53,7 +53,7 @@ func (m model) menusGroup() footerGroup {
 
 // footerGroups lists the keys that work on the current screen, most specific first and Navigation last.
 func (m model) footerGroups() []footerGroup {
-	if m.width < 60 || m.height < 24 {
+	if m.width < 60 || m.height < 24 && !m.comment.open {
 		return []footerGroup{group("Navigation", bind("back", keys.Cancel), bind("quit", keys.ForceQuit))}
 	}
 
@@ -81,6 +81,9 @@ func (m model) footerGroups() []footerGroup {
 		}
 		if m.comment.reopen && len(m.comment.targets) > 1 {
 			action = "review targets"
+		}
+		if m.comment.referenceActive {
+			return []footerGroup{group("Comment", hint{"↑/↓ Ctrl-J/N/K/P", "choose reference"}, hint{"Enter/Tab", "insert"}, hint{"Esc", "dismiss"}, hint{"Ctrl-S", action})}
 		}
 		return []footerGroup{group("Comment", hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", action}, hint{"Esc", "discard"})}
 	case m.confirmQuit:
@@ -328,7 +331,7 @@ func (m model) statusRow() string {
 	}
 
 	help := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true).Render(keys.Help.Help().Key) + " " + helpLabel
-	if m.width < 60 || m.height < 24 {
+	if m.needsResize() {
 		help = ""
 	}
 

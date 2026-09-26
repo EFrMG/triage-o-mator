@@ -267,7 +267,7 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 	if event.Y >= footerTop {
 		return m.handleFooterClick(event.X, event.Y-footerTop)
 	}
-	if m.width < 60 || m.height < 24 {
+	if m.needsResize() {
 		return m, nil
 	}
 	if event.Y >= footerTop-1 || event.Y >= m.mainHeight()+2 {
@@ -281,6 +281,18 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.comment.open {
+		if !m.comment.previewing && !m.comment.busy && m.comment.referenceActive && event.Button == tea.MouseLeft {
+			x, y := m.commentPosition()
+			row := event.Y - m.commentReferenceRow()
+			if event.X > x && event.X < x+m.commentWidth()-1 && event.Y >= y && row >= 0 && row < 5 {
+				index := m.comment.referenceOffset + row
+				if index < len(m.comment.referenceMatches) {
+					m.comment.referenceSelected = index
+					m.comment.completeReference()
+					m.layoutComment()
+				}
+			}
+		}
 		return m, nil
 	}
 	if m.themePicker.open {
@@ -738,7 +750,7 @@ func (m model) clickReader(event tea.Mouse, _ bool) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleMouseWheel(event tea.Mouse) (tea.Model, tea.Cmd) {
-	if !m.ready || m.width < 60 || m.height < 24 || event.X < 0 || event.X >= m.width || event.Y < 0 || event.Y >= m.height || event.Y >= m.mainHeight()+2 {
+	if !m.ready || m.needsResize() || event.X < 0 || event.X >= m.width || event.Y < 0 || event.Y >= m.height || event.Y >= m.mainHeight()+2 {
 		return m, nil
 	}
 	name := "down"
@@ -771,6 +783,17 @@ func (m model) handleMouseWheel(event tea.Mouse) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.comment.open {
+		if m.comment.referenceActive && !m.comment.previewing && !m.comment.busy {
+			x, _ := m.commentPosition()
+			if event.X > x && event.X < x+m.commentWidth()-1 && event.Y >= m.commentReferenceRow() && event.Y < m.commentReferenceRow()+5 {
+				if name == "down" {
+					m.comment.scrollReference(3)
+				} else {
+					m.comment.scrollReference(-3)
+				}
+				return m, nil
+			}
+		}
 		if name == "down" {
 			m.comment.text.PageDown()
 		} else {

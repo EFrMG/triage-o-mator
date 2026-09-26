@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
@@ -24,6 +26,10 @@ type commentComposer struct {
 	completed                             []Key
 	text                                  textarea.Model
 	preview                               viewport.Model
+	referenceQuery                        string
+	referenceActive                       bool
+	referenceMatches                      []Item
+	referenceSelected, referenceOffset    int
 }
 
 type commentTarget struct {
@@ -120,9 +126,8 @@ func (m model) openCommentComposer(target commentTarget, close, reopen bool, tar
 	text.CharLimit = 65536
 	text.ShowLineNumbers = false
 	themeTextarea(&text)
-	text.SetWidth(maxInt(m.width-8, 20))
-	text.SetHeight(maxInt(m.mainHeight()-7, 3))
-	m.comment = commentComposer{open: true, close: close, reopen: reopen, key: target.key, host: target.host, target: target.url, targets: targets, text: text, preview: viewport.New(viewport.WithWidth(maxInt(m.width-8, 20)), viewport.WithHeight(maxInt(m.mainHeight()-7, 3)))}
+	m.comment = commentComposer{open: true, close: close, reopen: reopen, key: target.key, host: target.host, target: target.url, targets: targets, text: text, preview: viewport.New()}
+	m.layoutComment()
 	cmd := m.comment.text.Focus()
 
 	return m, cmd
@@ -164,9 +169,28 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 			return m, cmd
 		}
+		if c.referenceActive {
+			c.referenceActive = false
+			m.layoutComment()
+			return m, nil
+		}
 
 		c.open = false
 		return m, nil
+	}
+	if c.referenceActive && !c.previewing {
+		switch msg.String() {
+		case "down", "ctrl+j", "ctrl+n":
+			c.moveReference(1)
+			return m, nil
+		case "up", "ctrl+k", "ctrl+p":
+			c.moveReference(-1)
+			return m, nil
+		case "enter", "tab":
+			c.completeReference()
+			m.layoutComment()
+			return m, nil
+		}
 	}
 
 	if c.previewing {
@@ -228,6 +252,7 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		c.preview, cmd = c.preview.Update(msg)
 	} else {
 		c.text, cmd = c.text.Update(msg)
+		m.updateCommentReferences()
 	}
 
 	return m, cmd
@@ -485,7 +510,56 @@ func (m model) commentView() string {
 		content = m.comment.preview.View()
 	}
 
-	return panelStyle(true).Width(m.width).Height(m.mainHeight()+2).Padding(0, 1).Render(m.commentHeader(maxInt(m.width-4, 20)) + "\n\n" + content)
+	if m.comment.referenceActive && !m.comment.previewing {
+		divider := strings.Repeat("─", m.comment.text.Width())
+		content += "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Border)).Render(divider)
+		for row := 0; row < 5; row++ {
+			index := m.comment.referenceOffset + row
+			line := ""
+			if index < len(m.comment.referenceMatches) {
+				it := m.comment.referenceMatches[index]
+				line = fmt.Sprintf("#%d  %s  %s", it.Number, strings.ToUpper(it.Kind), it.Title)
+				line = ansi.Truncate(line, m.comment.text.Width(), "…")
+				if index == m.comment.referenceSelected {
+					line = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true).Render(line)
+				}
+			} else if row == 0 && len(m.comment.referenceMatches) == 0 {
+				line = "No matching items"
+			}
+			content += "\n" + line
+		}
+	}
+
+	return panelStyle(true).Width(m.commentWidth()).Height(m.commentHeight()).Padding(0, 1).Render(m.commentHeader(m.commentWidth()-4) + "\n\n" + content)
+}
+
+func (m model) commentWidth() int {
+	margin := 8
+	if m.width < splitMinWidth {
+		margin = 2
+	}
+	return maxInt(m.width-2*margin, 1)
+}
+
+func (m model) commentHeight() int {
+	available := m.mainHeight() + 2
+	// Keep six rows above and one below when possible; short terminals borrow from the top to fit the editor and suggestions.
+	return minInt(maxInt(available-7, 15), maxInt(available-1, 1))
+}
+
+func (m model) commentPosition() (int, int) {
+	return (m.width - m.commentWidth()) / 2, maxInt(m.mainHeight()+1-m.commentHeight(), 0)
+}
+
+func (m model) commentReferenceRow() int {
+	_, y := m.commentPosition()
+	return y + 4 + m.comment.text.Height()
+}
+
+func (m model) commentOverlay(background string) string {
+	x, y := m.commentPosition()
+	base := screenStyle().Width(m.width).Height(m.mainHeight() + 2).Render(fitScreen(background, m.width, m.mainHeight()+2))
+	return lipgloss.NewCompositor(lipgloss.NewLayer(base), lipgloss.NewLayer(m.commentView()).X(x).Y(y).Z(1)).Render()
 }
 
 func (c *commentComposer) setPreview(text string) {
@@ -501,7 +575,7 @@ func (c *commentComposer) setPreview(text string) {
 		text = b.String()
 	}
 	if c.previewing {
-		c.preview.SetContent(renderMarkdown(text, c.preview.Width()))
+		c.preview.SetContent(renderMarkdownWithLineBreaks(text, c.preview.Width(), true))
 	} else {
 		c.preview.SetContent(ansi.Wrap(text, maxInt(c.preview.Width(), 1), ""))
 	}
@@ -513,8 +587,11 @@ func (m *model) layoutComment() {
 	}
 
 	c := &m.comment
-	width := maxInt(m.width-4, 20)
-	height := maxInt(m.mainHeight()-3, 3)
+	width := maxInt(m.commentWidth()-4, 1)
+	height := maxInt(m.commentHeight()-4, 3)
+	if c.referenceActive && !c.previewing {
+		height = maxInt(height-6, 3)
+	}
 	c.text.SetWidth(width)
 	c.text.SetHeight(height)
 	resized := c.preview.Width() != width
@@ -525,4 +602,89 @@ func (m *model) layoutComment() {
 		c.setPreview(c.previewText)
 		c.preview.SetYOffset(offset)
 	}
+}
+
+func (m *model) updateCommentReferences() {
+	c := &m.comment
+	query, active := commentReferenceQuery(c.text)
+	if !active {
+		c.referenceActive = false
+		c.referenceQuery = ""
+		c.referenceMatches = nil
+		m.layoutComment()
+		return
+	}
+	if c.referenceActive && c.referenceQuery == query {
+		return
+	}
+
+	c.referenceActive = true
+	c.referenceQuery = query
+	c.referenceSelected, c.referenceOffset = 0, 0
+	c.referenceMatches = nil
+	for _, it := range m.items {
+		if query == "" || strings.HasPrefix(strconv.Itoa(it.Number), query) || strings.Contains(strings.ToLower(it.Title), query) {
+			c.referenceMatches = append(c.referenceMatches, it)
+		}
+	}
+	sort.Slice(c.referenceMatches, func(i, j int) bool {
+		return c.referenceMatches[i].Number > c.referenceMatches[j].Number
+	})
+	m.layoutComment()
+}
+
+func commentReferenceQuery(editor textarea.Model) (string, bool) {
+	lines := strings.Split(editor.Value(), "\n")
+	if editor.Line() >= len(lines) {
+		return "", false
+	}
+	runes := []rune(lines[editor.Line()])
+	col := minInt(editor.Column(), len(runes))
+	start := col
+	for start > 0 && (unicode.IsLetter(runes[start-1]) || unicode.IsDigit(runes[start-1]) || runes[start-1] == '-') {
+		start--
+	}
+	if start == 0 || runes[start-1] != '#' || start > 1 && (unicode.IsLetter(runes[start-2]) || unicode.IsDigit(runes[start-2]) || runes[start-2] == '#') {
+		return "", false
+	}
+
+	return strings.ToLower(string(runes[start:col])), true
+}
+
+func (c *commentComposer) moveReference(step int) {
+	c.referenceSelected = maxInt(0, minInt(c.referenceSelected+step, len(c.referenceMatches)-1))
+	if c.referenceSelected < c.referenceOffset {
+		c.referenceOffset = c.referenceSelected
+	}
+	if c.referenceSelected >= c.referenceOffset+5 {
+		c.referenceOffset = c.referenceSelected - 4
+	}
+}
+
+func (c *commentComposer) scrollReference(step int) {
+	if len(c.referenceMatches) == 0 {
+		return
+	}
+	c.referenceSelected = maxInt(0, minInt(c.referenceSelected+step, len(c.referenceMatches)-1))
+	c.referenceOffset = maxInt(0, minInt(c.referenceOffset+step, len(c.referenceMatches)-5))
+	if c.referenceSelected < c.referenceOffset {
+		c.referenceSelected = c.referenceOffset
+	}
+	if c.referenceSelected >= c.referenceOffset+5 {
+		c.referenceSelected = c.referenceOffset + 4
+	}
+}
+
+func (c *commentComposer) completeReference() {
+	if !c.referenceActive || c.referenceSelected >= len(c.referenceMatches) {
+		return
+	}
+	for range []rune(c.referenceQuery) {
+		c.text, _ = c.text.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+	c.text, _ = c.text.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	c.text.InsertString("#" + strconv.Itoa(c.referenceMatches[c.referenceSelected].Number))
+	c.referenceActive = false
+	c.referenceQuery = ""
+	c.referenceMatches = nil
 }

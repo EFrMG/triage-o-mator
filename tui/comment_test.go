@@ -90,6 +90,119 @@ func commentEditorFixture(t *testing.T) model {
 	return next.(model)
 }
 
+func TestCommentReferencePickerCompletesAtCursor(t *testing.T) {
+	m := commentEditorFixture(t)
+	m.items = append(m.items, Item{Kind: "issue", Number: 1234, Title: "Related fix"}, Item{Kind: "pr", Number: 1245, Title: "Related change"})
+	m.comment.text.SetValue("See  later")
+	for i := 0; i < 6; i++ {
+		m = send(m, tea.KeyPressMsg{Code: tea.KeyLeft})
+	}
+	m = send(m, tea.KeyPressMsg{Text: "#12"})
+	if !m.comment.referenceActive || len(m.comment.referenceMatches) != 2 || m.comment.referenceMatches[0].Number != 1245 {
+		t.Fatalf("wrong reference suggestions: active=%v matches=%v", m.comment.referenceActive, m.comment.referenceMatches)
+	}
+	m = send(m, tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
+	if m.comment.referenceSelected != 1 {
+		t.Fatal("Ctrl-J did not select the next reference")
+	}
+	m = send(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got := m.comment.text.Value(); got != "See #1234 later" {
+		t.Fatalf("completion changed surrounding draft: %q", got)
+	}
+	if m.comment.referenceActive || m.comment.busy {
+		t.Fatal("completion must close suggestions without publishing")
+	}
+}
+
+func TestCommentReferenceNavigationAndMouse(t *testing.T) {
+	m := commentEditorFixture(t)
+	for i := 10; i < 20; i++ {
+		m.items = append(m.items, Item{Kind: "issue", Number: i, Title: fmt.Sprintf("Item %d", i)})
+	}
+	m = send(m, tea.KeyPressMsg{Text: "#"})
+	if !m.comment.referenceActive || len(m.comment.referenceMatches) < 10 {
+		t.Fatal("typing # did not open ledger suggestions")
+	}
+	for _, key := range []tea.KeyPressMsg{{Code: tea.KeyDown}, {Code: 'n', Mod: tea.ModCtrl}, {Code: 'j', Mod: tea.ModCtrl}, {Code: tea.KeyUp}, {Code: 'k', Mod: tea.ModCtrl}, {Code: 'p', Mod: tea.ModCtrl}} {
+		m = send(m, key)
+	}
+	if m.comment.referenceSelected != 0 || m.comment.previewing {
+		t.Fatal("navigation did not return to first suggestion or Ctrl-P opened preview")
+	}
+	x, _ := m.commentPosition()
+	y := m.commentReferenceRow()
+	m = wheel(m, x+4, y+1, tea.MouseWheelDown)
+	if m.comment.referenceSelected != 3 || m.comment.referenceOffset != 3 {
+		t.Fatalf("wheel did not scroll references: selected=%d offset=%d", m.comment.referenceSelected, m.comment.referenceOffset)
+	}
+	m = click(m, x+4, y+1, tea.MouseLeft)
+	if got := m.comment.text.Value(); got != "#15" || m.comment.referenceActive {
+		t.Fatalf("click did not insert selected reference: %q", got)
+	}
+}
+
+func TestCommentComposerFloatsOverItem(t *testing.T) {
+	m := commentEditorFixture(t)
+	x, y := m.commentPosition()
+	if x != 8 || y != 6 || m.commentWidth() != m.width-16 || m.commentHeight() != m.mainHeight()+2-7 {
+		t.Fatalf("composer is not a centered floating panel: x=%d y=%d width=%d height=%d", x, y, m.commentWidth(), m.commentHeight())
+	}
+	if bottom := m.mainHeight() + 2 - y - m.commentHeight(); bottom != 1 {
+		t.Fatalf("composer leaves %d rows below it, want 1", bottom)
+	}
+	narrow := send(m, tea.WindowSizeMsg{Width: splitMinWidth - 1, Height: 35})
+	if left, _ := narrow.commentPosition(); left != 2 {
+		t.Fatalf("composer leaves %d columns at the narrow layout breakpoint, want 2", left)
+	}
+	background := strings.Split(ansi.Strip(m.bodyView()), "\n")
+	screen := strings.Split(ansi.Strip(m.viewContent()), "\n")
+	if screen[0] != background[0] || !strings.Contains(screen[y], "╭") || !strings.Contains(strings.Join(screen, "\n"), "Compose comment") {
+		t.Fatal("floating composer did not preserve the item view around its panel")
+	}
+	m = send(m, tea.WindowSizeMsg{Width: 60, Height: 24})
+	m = send(m, tea.KeyPressMsg{Text: "#"})
+	x, y = m.commentPosition()
+	if x != 2 || m.commentWidth() != m.width-4 {
+		t.Fatalf("compact composer side margins are %d, want 2", x)
+	}
+	if bottom := m.mainHeight() + 2 - y - m.commentHeight(); bottom != 1 {
+		t.Fatalf("compact composer leaves %d rows below it, want 1", bottom)
+	}
+	if row := m.commentReferenceRow(); row+4 >= m.mainHeight()+2 || m.comment.text.Height() < 3 {
+		t.Fatalf("reference rows do not fit at minimum terminal size: first=%d body=%d editor=%d", row, m.mainHeight()+2, m.comment.text.Height())
+	}
+	divider := strings.Split(ansi.Strip(m.commentView()), "\n")[3+m.comment.text.Height()]
+	if !strings.Contains(divider, " "+strings.Repeat("─", m.comment.text.Width())+" ") || strings.Contains(divider, "References") {
+		t.Fatalf("reference divider does not span the composer with side spacing: %q", divider)
+	}
+}
+
+func TestCommentResizeUsesTopMarginBeforePrompt(t *testing.T) {
+	m := commentEditorFixture(t)
+	m = send(m, tea.KeyPressMsg{Text: "#"})
+	lastTop := -1
+	promptSeen := false
+	for height := 24; height >= 15; height-- {
+		m = send(m, tea.WindowSizeMsg{Width: 60, Height: height})
+		if m.needsResize() {
+			promptSeen = true
+			if lastTop != 0 || !strings.Contains(m.viewContent(), "Please resize to fit the comment editor.") {
+				t.Fatalf("resize prompt appeared before using top margin: height=%d last top=%d", height, lastTop)
+			}
+			break
+		}
+		_, lastTop = m.commentPosition()
+	}
+	if !promptSeen {
+		t.Fatal("composer never reached its resize prompt")
+	}
+	m.comment.open = false
+	m = send(m, tea.WindowSizeMsg{Width: 60, Height: 23})
+	if !m.needsResize() || !strings.Contains(m.viewContent(), "Please resize to at least 60 × 24.") {
+		t.Fatal("ordinary screens lost their 60 × 24 resize breakpoint")
+	}
+}
+
 func TestCommentSingleSubmitPublishesFromEditorOrPreview(t *testing.T) {
 	for _, preview := range []bool{false, true} {
 		t.Run(fmt.Sprint("preview=", preview), func(t *testing.T) {
@@ -166,6 +279,33 @@ func TestCommentPreviewRendersMarkdownAndPreservesDraft(t *testing.T) {
 	m = next.(model)
 	if m.comment.busy || m.comment.text.Value() == body {
 		t.Fatal("Enter must insert a newline, not publish")
+	}
+}
+
+func TestCommentPreviewKeepsLineBreaks(t *testing.T) {
+	m := commentEditorFixture(t)
+	m.comment.text.SetValue("first *line*\nsecond line\nthird line")
+	m = send(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	rendered := ansi.Strip(m.comment.preview.GetContent())
+	lines := strings.Split(rendered, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimSpace(lines[i])
+	}
+	if strings.Join(lines, "\n") != "first line\nsecond line\nthird line" {
+		t.Fatalf("preview lost draft line breaks or Markdown styling: %q", rendered)
+	}
+	panelLines := strings.Split(ansi.Strip(m.commentView()), "\n")
+	first, second := -1, -1
+	for i, line := range panelLines {
+		if strings.Contains(line, "first line") {
+			first = i
+		}
+		if strings.Contains(line, "second line") {
+			second = i
+		}
+	}
+	if first < 0 || second != first+1 {
+		t.Fatalf("floating preview did not show separate lines: %q", panelLines)
 	}
 }
 

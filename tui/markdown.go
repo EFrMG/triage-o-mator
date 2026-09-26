@@ -18,8 +18,9 @@ import (
 // Item text (bodies, comments, agent notes) is Markdown and renders through glamour, styled from the active theme so it matches every palette in themes/. Diffs render as a fenced diff block, which glamour highlights through chroma with the same theme colors.
 
 type rendererKey struct {
-	theme string
-	width int
+	theme            string
+	width            int
+	preserveNewLines bool
 }
 
 var (
@@ -90,16 +91,20 @@ func markdownStyle() gansi.StyleConfig {
 	return style
 }
 
-func markdownRenderer(width int) (*glamour.TermRenderer, error) {
+func markdownRenderer(width int, preserveNewLines bool) (*glamour.TermRenderer, error) {
 	renderersMu.Lock()
 	defer renderersMu.Unlock()
 
-	k := rendererKey{theme: themeName, width: width}
+	k := rendererKey{theme: themeName, width: width, preserveNewLines: preserveNewLines}
 	if r, ok := renderers[k]; ok {
 		return r, nil
 	}
 
-	r, err := glamour.NewTermRenderer(glamour.WithStyles(markdownStyle()), glamour.WithWordWrap(width), glamour.WithChromaFormatter(chromaFormatter()))
+	options := []glamour.TermRendererOption{glamour.WithStyles(markdownStyle()), glamour.WithWordWrap(width), glamour.WithChromaFormatter(chromaFormatter())}
+	if preserveNewLines {
+		options = append(options, glamour.WithPreservedNewLines())
+	}
+	r, err := glamour.NewTermRenderer(options...)
 	if err != nil {
 		return nil, err
 	}
@@ -140,9 +145,13 @@ func sanitize(text string) string {
 
 // renderMarkdown renders sanitized Markdown to width columns, falling back to plain wrapped text if glamour fails. Every line is cut to width, since a long unbreakable token (a URL) would otherwise overflow the panel.
 func renderMarkdown(src string, width int) string {
+	return renderMarkdownWithLineBreaks(src, width, false)
+}
+
+func renderMarkdownWithLineBreaks(src string, width int, preserveNewLines bool) string {
 	width = maxInt(width, 10)
 	clean := sanitize(src)
-	r, err := markdownRenderer(width)
+	r, err := markdownRenderer(width, preserveNewLines)
 	if err != nil {
 		return wrapText(clean, width)
 	}

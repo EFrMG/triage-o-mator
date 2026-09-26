@@ -274,6 +274,7 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.comment.text, cmd = m.comment.text.Update(msg)
+		m.updateCommentReferences()
 		return m, cmd
 	case m.confirmQuit || m.lastError.open || m.notificationPR.open || m.attention.open || m.actionHistory.open || m.notifications.open || m.corpus.open:
 		return m, nil

@@ -658,12 +658,27 @@ func (m model) viewContent() string {
 		return "starting…"
 	}
 
+	body := m.bodyView()
+	if m.comment.open && !m.needsResize() {
+		body = m.commentOverlay(body)
+	}
+
+	status := m.statusRow()
+	footer := m.footerView()
+	bodyHeight := maxInt(m.height-lipgloss.Height(footer)-1, 0)
+	body = screenStyle().Width(m.width).Height(bodyHeight).Render(fitScreen(body, m.width, bodyHeight))
+
+	return repaint(screenStyle().Width(m.width).Height(m.height).Render(fitScreen(body+"\n"+status+"\n"+footer, m.width, m.height)))
+}
+
+func (m model) bodyView() string {
 	var body string
 	switch {
-	case m.width < 60 || m.height < 24:
+	case m.needsResize():
 		body = "Please resize to at least 60 × 24."
-	case m.comment.open:
-		body = m.commentView()
+		if m.comment.open && m.width >= 60 {
+			body = "Please resize to fit the comment editor."
+		}
 	case m.lastError.open:
 		body = m.errorView()
 	case m.themePicker.open:
@@ -711,12 +726,17 @@ func (m model) viewContent() string {
 		}
 	}
 
-	status := m.statusRow()
-	footer := m.footerView()
-	bodyHeight := maxInt(m.height-lipgloss.Height(footer)-1, 0)
-	body = screenStyle().Width(m.width).Height(bodyHeight).Render(fitScreen(body, m.width, bodyHeight))
+	return body
+}
 
-	return repaint(screenStyle().Width(m.width).Height(m.height).Render(fitScreen(body+"\n"+status+"\n"+footer, m.width, m.height)))
+func (m model) needsResize() bool {
+	if m.width < 60 {
+		return true
+	}
+	if m.comment.open {
+		return m.mainHeight()+2 < 16
+	}
+	return m.height < 24
 }
 
 // switchBusy gates legacy work without cancellation/reply identities. Explicit evidence/corpus processes are stopped on switch and their stale replies are rejected. Unsaved drafts still require discard confirmation.

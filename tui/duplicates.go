@@ -235,6 +235,29 @@ func (m model) handleDupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 			return m, openURLCmd(it.URL)
 		}
+	case key.Matches(msg, keys.Reopen), key.Matches(msg, keys.ReopenEditor):
+		var selectedKeys []Key
+		for _, candidate := range m.dupCandidates() {
+			if m.dups.checked[candidate.Key()] {
+				selectedKeys = append(selectedKeys, candidate.Key())
+			}
+		}
+		if len(selectedKeys) == 0 {
+			selectedKeys = []Key{m.selectedDupKey()}
+		}
+		var items []Item
+		for _, k := range selectedKeys {
+			it, ok := m.findItem(k)
+			if !ok {
+				m.warn("A selected duplicate candidate is missing from the ledger; refresh first.")
+				return m, nil
+			}
+			items = append(items, it)
+		}
+		if key.Matches(msg, keys.ReopenEditor) {
+			return m.openExternalReopen(items)
+		}
+		return m.openReopen(items)
 	case key.Matches(msg, keys.MarkDup):
 		if c == nil {
 			m.status = "This is the original: pick a candidate below to mark it a duplicate of this one."

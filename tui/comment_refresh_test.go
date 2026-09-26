@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -70,6 +71,39 @@ func TestPublishedCommentReloadsThroughScriptAndRejectsOlderResponse(t *testing.
 	m = send(m, enrichedMsg{root: root, repo: m.repo, key: m.detail.key, generation: oldGeneration, data: EnrichedItem{CommentBodies: []string{"stale"}}})
 	if m.detail.enriched.CommentBodies[0] != "newly published" {
 		t.Fatal("old enrichment overwrote published comment")
+	}
+}
+
+func TestCloseReloadsItemDiscussionBeforeLedgerSync(t *testing.T) {
+	m := commentEditorFixture(t)
+	root := batchFixture(t)
+	m.installRoot = root
+	copyFixtureScripts(t, root, "enrich-one")
+	fakeGH := "#!/bin/sh\nprintf '%s\\n' '{\"title\":\"first\",\"body\":\"body\",\"comments\":[{\"body\":\"closure explanation\",\"author\":{\"login\":\"tester\"}}]}'\n"
+	if err := os.WriteFile(filepath.Join(root, "bin", "gh"), []byte(fakeGH), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Join(root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	m.detail.populate(EnrichedItem{CommentBodies: []string{"old comment"}})
+	m.form.reason.SetValue("unsaved triage reason")
+	m.form.dirty = true
+	m.comment.open = false
+	next, _ := m.openClose()
+	m = next.(model)
+
+	next, cmd := m.Update(commentMsg{root: root, repo: m.repo, publish: true, out: `{"comment":{"status":"succeeded","url":"https://github.com/owner/repo/issues/1#issuecomment-42"},"state_change":{"status":"succeeded","state":"closed"}}`})
+	m = next.(model)
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatal("close must start item and ledger refreshes")
+	}
+	read, ok := batch[1]().(enrichedMsg)
+	if !ok || !read.afterClose || read.err != nil {
+		t.Fatalf("close did not directly refresh the item: %+v", read)
+	}
+	m = send(m, read)
+	if len(m.detail.enriched.CommentBodies) != 1 || m.detail.enriched.CommentBodies[0] != "closure explanation" || m.items[0].State != "closed" || !strings.Contains(m.status, "comments refreshed") || !m.form.dirty || m.form.Reason() != "unsaved triage reason" {
+		t.Fatalf("close did not refresh comments while retaining the confirmed state and draft: %+v, %s", m.detail.enriched, m.status)
 	}
 }
 

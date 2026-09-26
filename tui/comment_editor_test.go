@@ -77,6 +77,56 @@ func TestExternalCommentBindingAndLiteralCapitalC(t *testing.T) {
 	}
 }
 
+func TestStateChangeEditorBindings(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	t.Setenv("EDITOR", "vi")
+	m := commentEditorFixture(t)
+	m.comment.open = false
+	m.focus = FocusDetail
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "X"})
+	m = next.(model)
+	if cmd == nil || !m.comment.open || !m.comment.close || !m.comment.busy {
+		t.Fatal("X did not open the closing comment in $EDITOR")
+	}
+
+	m = reopenFixture(t)
+	m.ticked[m.items[0].Key()] = true
+	m.ticked[m.items[1].Key()] = true
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "V"})
+	m = next.(model)
+	if cmd == nil || !m.comment.open || !m.comment.reopen || len(m.comment.targets) != 2 || !m.comment.busy {
+		t.Fatal("V did not open the ticked reopen comment in $EDITOR")
+	}
+
+	m = reopenFixture(t)
+	m.openItem(m.items[0])
+	m.focus = FocusDetail
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "V"})
+	m = next.(model)
+	if cmd == nil || !m.comment.reopen || len(m.comment.targets) != 1 || !m.comment.busy {
+		t.Fatal("V did not work inside an item view")
+	}
+
+	m = commentEditorFixture(t)
+	m.comment.open = false
+	next, _ = m.openClose()
+	m = next.(model)
+	m.comment.previewing = true
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "X"})
+	if cmd == nil || !next.(model).comment.busy {
+		t.Fatal("X did not reopen $EDITOR from a closure preview")
+	}
+
+	m = reopenFixture(t)
+	next, _ = m.openReopen(m.items[:1])
+	m = next.(model)
+	m.comment.previewing = true
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "V"})
+	if cmd == nil || !next.(model).comment.busy {
+		t.Fatal("V did not reopen $EDITOR from a reopening preview")
+	}
+}
+
 func TestExternalCommentFailurePreservesDraft(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("EDITOR", "exit 7")

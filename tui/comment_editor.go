@@ -89,6 +89,26 @@ func (m model) openExternalComment() (tea.Model, tea.Cmd) {
 	return m.startCommentEditor()
 }
 
+func (m model) openExternalClose() (tea.Model, tea.Cmd) {
+	next, _ := m.openClose()
+	m = next.(model)
+	if !m.comment.open {
+		return m, nil
+	}
+
+	return m.startCommentEditor()
+}
+
+func (m model) openExternalReopen(items []Item) (tea.Model, tea.Cmd) {
+	next, _ := m.openReopen(items)
+	m = next.(model)
+	if !m.comment.open {
+		return m, nil
+	}
+
+	return m.startCommentEditor()
+}
+
 func (m model) startCommentEditor() (tea.Model, tea.Cmd) {
 	command, path, err := prepareCommentEditor(m.comment.text.Value())
 	if err != nil {
@@ -125,6 +145,12 @@ func (m model) finishCommentEditor(msg commentEditorMsg) (tea.Model, tea.Cmd) {
 	c.setPreview(c.text.Value())
 	c.preview.GotoTop()
 	m.status = "Comment loaded. Ctrl-S publishes; C reopens $EDITOR."
+	if c.close {
+		m.status = "Comment loaded. Ctrl-S closes with comment; X reopens $EDITOR."
+	}
+	if c.reopen {
+		m.status = "Comment loaded. Review targets, then Ctrl-S reopens; V reopens $EDITOR."
+	}
 
 	return m, nil
 }

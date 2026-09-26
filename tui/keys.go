@@ -51,6 +51,10 @@ type keyMap struct {
 	Undo          key.Binding
 	Comment       key.Binding
 	CommentEditor key.Binding
+	Close         key.Binding
+	CloseEditor   key.Binding
+	Reopen        key.Binding
+	ReopenEditor  key.Binding
 	Yank          key.Binding
 	YankAll       key.Binding
 
@@ -123,6 +127,10 @@ var keys = keyMap{
 	Undo:          key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "undo")),
 	CommentEditor: key.NewBinding(key.WithKeys("C"), key.WithHelp("C", "$EDITOR comment")),
 	Comment:       key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
+	Close:         key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "close with comment")),
+	CloseEditor:   key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "$EDITOR close")),
+	Reopen:        key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "reopen with comment")),
+	ReopenEditor:  key.NewBinding(key.WithKeys("V"), key.WithHelp("V", "$EDITOR reopen")),
 	// Yank / YankAll take context out of the app for an agent to read: y what is in front of you, Y the whole screen's worth, in the same relationship as every other lowercase/uppercase pair.
 	Yank:    key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "take context")),
 	YankAll: key.NewBinding(key.WithKeys("Y"), key.WithHelp("Y", "take all of it")),

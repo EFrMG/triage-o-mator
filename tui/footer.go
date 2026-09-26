@@ -62,10 +62,27 @@ func (m model) footerGroups() []footerGroup {
 		if m.comment.busy {
 			return []footerGroup{group("Comment", hint{"", "working…"})}
 		}
-		if m.comment.previewing {
-			return []footerGroup{group("Comment", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.CommentEditor), hint{"Ctrl-S", "publish"}, hint{"Esc", "edit"})}
+		action := "publish"
+		if m.comment.close {
+			action = "comment & close"
 		}
-		return []footerGroup{group("Comment", hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", "publish"}, hint{"Esc", "discard"})}
+		if m.comment.reopen {
+			action = "comment & reopen"
+		}
+		if m.comment.previewing {
+			editor := keys.CommentEditor
+			if m.comment.close {
+				editor = keys.CloseEditor
+			}
+			if m.comment.reopen {
+				editor = keys.ReopenEditor
+			}
+			return []footerGroup{group("Comment", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", editor), hint{"Ctrl-S", action}, hint{"Esc", "edit"})}
+		}
+		if m.comment.reopen && len(m.comment.targets) > 1 {
+			action = "review targets"
+		}
+		return []footerGroup{group("Comment", hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", action}, hint{"Esc", "discard"})}
 	case m.confirmQuit:
 		return []footerGroup{group("Quit", bind("discard drafts", keys.Quit), hint{"any key", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.lastError.open:
@@ -120,7 +137,7 @@ func (m model) footerGroups() []footerGroup {
 	case m.dups.open:
 		return []footerGroup{
 			group("Duplicate", bind("mark as duplicate", keys.MarkDup), bind("", keys.SwapDup), bind("", keys.Tick), bind("group ticked", keys.Group)),
-			group("Item", bind("read", keys.Enter), bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Open)),
+			group("Item", bind("read", keys.Enter), bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Open), bind("", keys.Reopen, keys.ReopenEditor)),
 			group("Select", bind("move", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom)),
 			group("Menus", bind("", keys.Theme)),
 			m.navigationGroup(),
@@ -147,7 +164,7 @@ func (m model) footerGroups() []footerGroup {
 	}
 
 	// An item list: list actions apply to the ticked items, or the hovered one.
-	items := group("Items", bind("", keys.Approve), bind("", keys.Undo), bind("", keys.Group), bind("", keys.QuickGroup), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.Yank, keys.YankAll))
+	items := group("Items", bind("", keys.Approve), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Undo), bind("", keys.Group), bind("", keys.QuickGroup), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.Yank, keys.YankAll))
 	if len(m.ticked) > 0 {
 		items.name = fmt.Sprintf("%d ticked", len(m.ticked))
 	}
@@ -164,7 +181,7 @@ func (m model) footerGroups() []footerGroup {
 }
 
 func (m model) itemFooter() []footerGroup {
-	item := group("Item", bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Approve), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Yank))
+	item := group("Item", bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Approve), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Close, keys.CloseEditor), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Yank))
 	read := group("Read", bind("tabs", keys.TabPrev, keys.TabNext), bind("", keys.TabJump), bind("expand", keys.Enter), bind("scroll", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("page", keys.HalfDown, keys.HalfUp))
 	if m.detail.AnySectionFull() {
 		return []footerGroup{item, read, m.menusGroup(), m.navigationGroup()}
@@ -188,7 +205,7 @@ func (m model) groupFooter() []footerGroup {
 	g := m.selectedGroup()
 	if m.groups.detail {
 		if g != nil && len(g.Members) > 0 {
-			groups = append(groups, group("Member", bind("open", keys.Enter), bind("notes", keys.Edit), bind("", keys.Tick), bind("remove", keys.Delete)), group("Context", bind("scroll notes", keys.HalfDown, keys.HalfUp)))
+			groups = append(groups, group("Member", bind("open", keys.Enter), bind("notes", keys.Edit), bind("", keys.Tick), bind("", keys.Reopen, keys.ReopenEditor), bind("remove", keys.Delete)), group("Context", bind("scroll notes", keys.HalfDown, keys.HalfUp)))
 		}
 	}
 

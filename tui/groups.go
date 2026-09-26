@@ -460,6 +460,27 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.groups.ticked[k] = !m.groups.ticked[k]
 			m.groups.member = minInt(m.groups.member+1, len(g.Members)-1)
 		}
+	case key.Matches(msg, keys.Reopen), key.Matches(msg, keys.ReopenEditor):
+		if !m.groups.detail || g == nil || len(g.Members) == 0 {
+			return m, nil
+		}
+		selectedKeys := m.tickedMembers(*g)
+		if len(selectedKeys) == 0 && m.groups.member < len(g.Members) {
+			selectedKeys = []Key{g.Members[m.groups.member].Key()}
+		}
+		var items []Item
+		for _, k := range selectedKeys {
+			it, ok := m.findItem(k)
+			if !ok {
+				m.warn("A selected group member is missing from the ledger; refresh first.")
+				return m, nil
+			}
+			items = append(items, it)
+		}
+		if key.Matches(msg, keys.ReopenEditor) {
+			return m.openExternalReopen(items)
+		}
+		return m.openReopen(items)
 	case key.Matches(msg, keys.Delete):
 		if g == nil {
 			return m, nil

@@ -177,6 +177,18 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.detail.OnEnriched(msg)
+		if msg.afterReopen {
+			m.status = "Item reopened; comments refreshed."
+			if msg.err != nil {
+				m.fail("Item reopened, but reloading comments failed. ! shows details.")
+			}
+		}
+		if msg.afterClose {
+			m.status = "Comment published and item closed; comments refreshed."
+			if msg.err != nil {
+				m.fail("Item closed, but reloading comments failed. ! shows details.")
+			}
+		}
 		if msg.afterComment {
 			m.status = "Comment published; comments refreshed."
 			if msg.err != nil {
@@ -892,6 +904,10 @@ func (m model) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.toggleTick()
 	case key.Matches(msg, keys.Approve):
 		return m.requestListApprove()
+	case key.Matches(msg, keys.Reopen):
+		return m.openReopen(m.listTargets())
+	case key.Matches(msg, keys.ReopenEditor):
+		return m.openExternalReopen(m.listTargets())
 	case key.Matches(msg, keys.Undo):
 		return m.requestUndo(m.undoTargets())
 	case key.Matches(msg, keys.QuickGroup):
@@ -1051,6 +1067,18 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.openExternalComment()
 	case key.Matches(msg, keys.Comment):
 		return m.openComment()
+	case key.Matches(msg, keys.Close):
+		return m.openClose()
+	case key.Matches(msg, keys.CloseEditor):
+		return m.openExternalClose()
+	case key.Matches(msg, keys.Reopen):
+		if it, ok := m.findItem(m.detail.key); ok {
+			return m.openReopen([]Item{it})
+		}
+	case key.Matches(msg, keys.ReopenEditor):
+		if it, ok := m.findItem(m.detail.key); ok {
+			return m.openExternalReopen([]Item{it})
+		}
 	}
 
 	return m, nil

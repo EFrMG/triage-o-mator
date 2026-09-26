@@ -2,7 +2,7 @@
 
 The TUI's key scheme, agreed 2026-09-19. Every binding is defined once in `tui/keys.go`, which the handlers, the footer and `?` all read, so a change goes there and here together.
 
-Printable keys remain text while editing a text field. Destructive actions and bulk decision changes need the same key twice, except dismissing one row in Notifications with `d`; another key cancels the confirmation. Item actions apply to ticked items, or to the item in front when nothing is ticked.
+Printable keys remain text while editing a text field. Destructive actions and bulk decision changes need the same key twice, except dismissing one row in Notifications with `d` and closing or reopening through the comment composer with `Ctrl-S`; another key cancels the confirmation. Item actions apply to ticked items, or to the item in front when nothing is ticked.
 
 **Mouse:** click a sidebar entry or item tab to open it. Click a card to select it and click it again to open it; right-click a card to tick it where Space does. The wheel scrolls the active view. Click a form field to focus it, click an already focused choice field to open its options, and click an option to choose it. Footer key hints are clickable and run the same actions as their keys, including confirmation steps.
 
@@ -40,17 +40,19 @@ Printable keys remain text while editing a text field. Destructive actions and b
 
 `f` opens Local dataset. There, `d` downloads or updates the open backlog, `r` resumes, `n` changes the item limit, `u` measures cache size, `y` copies the agent prompt, and `x` stops the current operation. `j`/`k` scrolls the status; `Esc`/`h` closes the menu without stopping. Repository switches and TUI exit cancel owned corpus processes. See [dataset download](evidence.md#download-from-the-tui).
 
-| key       | meaning                                                                                                                                             |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `s`       | save the decision for review; leave the reason field with `Tab` first                                                                               |
-| `S`       | save and approve the decision in the open item or duplicate comparison; leave the reason with `Tab` first; records local human review only          |
-| `a`       | approve, its only meaning; on ticked items it always needs a second press                                                                           |
-| `m` / `M` | mark as duplicate: on an item or pair, opens the comparison; there, marks the hovered candidate a duplicate of the item on top / makes it that item |
-| `b` / `B` | add to a group (pick one, write a note) / add to the last group; works on hovered and ticked items                                                  |
-| `o`       | open on GitHub                                                                                                                                      |
-| `u`       | undo one step, with a second press: take back an approval, or clear an unreviewed decision                                                          |
-| `c`       | compose a GitHub comment; `Ctrl-P` toggles Markdown preview; `Ctrl-S` approves and publishes                                                        |
-| `C`       | compose in `$EDITOR`; save and exit to load the Markdown preview; also works from comment preview                                                   |
+| key       | meaning                                                                                                                                               |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `s`       | save the decision for review; leave the reason field with `Tab` first                                                                                 |
+| `S`       | save and approve the decision in the open item or duplicate comparison; leave the reason with `Tab` first; records local human review only            |
+| `a`       | approve, its only meaning; on ticked items it always needs a second press                                                                             |
+| `m` / `M` | mark as duplicate: on an item or pair, opens the comparison; there, marks the hovered candidate a duplicate of the item on top / makes it that item   |
+| `b` / `B` | add to a group (pick one, write a note) / add to the last group; works on hovered and ticked items                                                    |
+| `o`       | open on GitHub                                                                                                                                        |
+| `u`       | undo one step, with a second press: take back an approval, or clear an unreviewed decision                                                            |
+| `c`       | compose a GitHub comment; `Ctrl-P` toggles Markdown preview; `Ctrl-S` approves and publishes                                                          |
+| `C`       | compose in `$EDITOR`; save and exit to load the Markdown preview; also works from comment preview                                                     |
+| `x` / `X` | compose an explanatory closing comment inline / in `$EDITOR`; `Ctrl-S` approves the text, target and closure together                                 |
+| `v` / `V` | reopen closed issues or PRs with a comment inline / in `$EDITOR`; on an item list uses ticked items or the hovered one; bulk `Ctrl-S` reviews targets |
 
 `s` and `S` remain letters in text fields. `Ctrl-S` remains an optional save alias, including while typing; saving and approving a decision does not require Ctrl.
 

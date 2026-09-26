@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preview and explicitly approve one GitHub conversation comment."""
+"""Preview and explicitly approve a GitHub comment, optionally changing its item's state."""
 
 import argparse
 import hashlib
@@ -45,6 +45,9 @@ def main():
     body.add_argument("--body")
     body.add_argument("--body-file", type=Path)
     parser.add_argument("--request-id", help="reuse the dry-run request ID when publishing")
+    change = parser.add_mutually_exclusive_group()
+    change.add_argument("--close", action="store_true", help="close the item after publishing the explanatory comment")
+    change.add_argument("--reopen", action="store_true", help="reopen the item after publishing the explanatory comment")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--publish", action="store_true")
@@ -72,7 +75,9 @@ def main():
         raise ValueError("request ID must be a canonical UUID")
 
     target = f"https://{args.host}/{repo}/{'pull' if args.kind == 'pr' else 'issues'}/{args.number}"
-    plan = dict(version=1, request_id=request_id, operation="comment", host=args.host, repo=repo, kind=args.kind, number=args.number, target=target, body=text, state_change="none")
+    operation = "close" if args.close else "reopen" if args.reopen else "comment"
+    target_state = "closed" if args.close else "open" if args.reopen else "none"
+    plan = dict(version=1, request_id=request_id, operation=operation, host=args.host, repo=repo, kind=args.kind, number=args.number, target=target, body=text, state_change=target_state)
     digest = hashlib.sha256(json.dumps(plan, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     if not args.publish:
         print(json.dumps(dict(plan=plan, approval=digest), ensure_ascii=False, indent=2))
@@ -91,7 +96,7 @@ def main():
                 raise ValueError("request ID already belongs to another plan")
 
             print(json.dumps(record, ensure_ascii=False))
-            if record["comment"]["status"] != "succeeded":
+            if record["comment"]["status"] != "succeeded" or (target_state != "none" and record["state_change"]["status"] != "succeeded"):
                 raise ValueError("previous attempt did not finish successfully; inspect its record and GitHub before creating a new request")
 
             return
@@ -100,6 +105,14 @@ def main():
         item = api(args.host, "GET", f"repos/{repo}/issues/{args.number}")
         if not isinstance(item, dict) or item.get("html_url") != target or item.get("number") != args.number or ("pull_request" in item) != (args.kind == "pr"):
             raise ValueError("live target differs from the approved target")
+        if target_state != "none":
+            required_state = "open" if args.close else "closed"
+            if item.get("state") != required_state:
+                raise ValueError(f"item is no longer {required_state}; preview again after inspecting GitHub")
+        if args.reopen and args.kind == "pr":
+            pull = api(args.host, "GET", f"repos/{repo}/pulls/{args.number}")
+            if not isinstance(pull, dict) or pull.get("html_url") != target or pull.get("number") != args.number or pull.get("state") != "closed" or pull.get("merged_at") is not None or pull.get("merged") is True:
+                raise ValueError("pull request is merged or differs from the approved closed target")
 
         record = dict(plan=plan, approval=digest, started_at=now_iso(), comment=dict(status="unknown"), state_change=dict(status="not_requested"))
         # Durable before POST: process death and transport errors must never invite an automatic duplicate comment.
@@ -116,6 +129,24 @@ def main():
             save(path, record)
             print(json.dumps(record, ensure_ascii=False))
             raise ValueError("comment outcome is unknown; inspect GitHub before attempting another request") from exc
+
+        if target_state != "none":
+            # The comment is durable before the state request; an interrupted PATCH must never be retried automatically.
+            record["state_change"] = dict(status="unknown")
+            save(path, record)
+            endpoint = f"repos/{repo}/{'pulls' if args.kind == 'pr' else 'issues'}/{args.number}"
+            try:
+                result = api(args.host, "PATCH", endpoint, dict(state=target_state))
+                if not isinstance(result, dict) or result.get("html_url") != target or result.get("number") != args.number or result.get("state") != target_state:
+                    raise ValueError("GitHub returned an unrecognized state-change response")
+
+                record["state_change"] = dict(status="succeeded", state=target_state, url=result["html_url"])
+            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+                record["state_change"] = dict(status="unknown", error=str(exc))
+                record["finished_at"] = now_iso()
+                save(path, record)
+                print(json.dumps(record, ensure_ascii=False))
+                raise ValueError("state-change outcome is unknown; comment was published; inspect GitHub before attempting another request") from exc
 
         record["finished_at"] = now_iso()
         save(path, record)

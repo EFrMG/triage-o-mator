@@ -109,12 +109,12 @@ func reloadLedgerCmd(installRoot, repo string) tea.Cmd {
 
 // enrichedMsg carries the result of a lazy bin/enrich-one call for one item.
 type enrichedMsg struct {
-	afterComment bool
-	root, repo   string
-	generation   uint64
-	key          Key
-	data         EnrichedItem
-	err          error
+	afterComment, afterClose, afterReopen bool
+	root, repo                            string
+	generation                            uint64
+	key                                   Key
+	data                                  EnrichedItem
+	err                                   error
 }
 
 // EnrichedItem is JSON output from bin/enrich-one (body / comments / diff).

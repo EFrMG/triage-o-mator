@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -118,7 +119,7 @@ func TestCommentSingleSubmitPublishesFromEditorOrPreview(t *testing.T) {
 				t.Fatal("approved text changed during publishing")
 			}
 
-			data, _ := json.Marshal(map[string]any{"approval": "digest", "plan": map[string]any{"request_id": "id", "target": m.comment.target, "body": body}})
+			data, _ := json.Marshal(map[string]any{"approval": "digest", "plan": map[string]any{"request_id": "id", "target": m.comment.target, "body": body, "operation": "comment", "state_change": "none"}})
 			next, cmd = m.Update(commentMsg{root: m.installRoot, repo: m.repo, out: string(data)})
 			m = next.(model)
 			if cmd == nil || !m.comment.busy || m.comment.approval != "digest" {
@@ -172,7 +173,7 @@ func TestCommentRejectsChangedPlanBeforePublishing(t *testing.T) {
 	m := commentEditorFixture(t)
 	m.comment.text.SetValue("approved text")
 	m.comment.busy = true
-	data, _ := json.Marshal(map[string]any{"approval": "digest", "plan": map[string]any{"request_id": "id", "target": m.comment.target, "body": "different text"}})
+	data, _ := json.Marshal(map[string]any{"approval": "digest", "plan": map[string]any{"request_id": "id", "target": m.comment.target, "body": "different text", "operation": "comment", "state_change": "none"}})
 	next, cmd := m.Update(commentMsg{root: m.installRoot, repo: m.repo, out: string(data)})
 	if cmd != nil || next.(model).comment.busy {
 		t.Fatal("changed plan must not publish")
@@ -206,5 +207,81 @@ func TestCommentPreviewEscapeAndStaleReply(t *testing.T) {
 	m = send(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.comment.open {
 		t.Fatal("Esc from editing must discard composer")
+	}
+}
+
+func TestCloseComposerRequiresExactClosurePlanAndRefreshesAfterSuccess(t *testing.T) {
+	m := commentEditorFixture(t)
+	m.comment.open = false
+	m.focus = FocusDetail
+	m = send(m, tea.KeyPressMsg{Text: "x"})
+	if !m.comment.open || !m.comment.close || !strings.Contains(ansi.Strip(m.commentHeader(96)), "Close with comment") {
+		t.Fatal("close key did not open an explicit closure composer")
+	}
+	m.comment.text.SetValue("Explanatory closure comment")
+	root := batchFixture(t)
+	copyFixtureScripts(t, root, "comment")
+	m.installRoot = root
+	preview := m.commentCmd(false)().(commentMsg)
+	if preview.err != nil {
+		t.Fatal(preview.err)
+	}
+	var plan struct {
+		Plan struct {
+			Operation   string `json:"operation"`
+			StateChange string `json:"state_change"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal([]byte(preview.out), &plan); err != nil || plan.Plan.Operation != "close" || plan.Plan.StateChange != "closed" {
+		t.Fatalf("TUI did not request a closure plan: %s, %v", preview.out, err)
+	}
+	m.comment.busy = true
+	wrong := `{"approval":"digest","plan":{"request_id":"id","target":"` + m.comment.target + `","body":"Explanatory closure comment","operation":"comment","state_change":"none"}}`
+	next, cmd := m.Update(commentMsg{root: m.installRoot, repo: m.repo, out: wrong})
+	m = next.(model)
+	if cmd != nil || m.comment.busy {
+		t.Fatal("comment-only plan must not authorize closing")
+	}
+	m.comment.busy = true
+	approved := `{"approval":"digest","plan":{"request_id":"id","target":"` + m.comment.target + `","body":"Explanatory closure comment","operation":"close","state_change":"closed"}}`
+	next, cmd = m.Update(commentMsg{root: m.installRoot, repo: m.repo, out: approved})
+	m = next.(model)
+	if cmd == nil || !m.comment.busy {
+		t.Fatal("exact closure plan did not start publishing")
+	}
+	next, cmd = m.Update(commentMsg{root: m.installRoot, repo: m.repo, publish: true, out: `{"comment":{"status":"succeeded","url":"https://github.com/owner/repo/issues/1#issuecomment-42"},"state_change":{"status":"succeeded","state":"closed"}}`})
+	m = next.(model)
+	if cmd == nil || !m.refreshing || m.comment.open || m.items[0].State != "closed" || m.detail.item.State != "closed" || !strings.Contains(ansi.Strip(m.itemView()), "closed") || !strings.Contains(m.status, "item closed") {
+		t.Fatal("successful closure did not update the visible item and refresh the ledger")
+	}
+}
+
+func TestCloseComposerRejectsClosedOrRefreshingItem(t *testing.T) {
+	m := commentEditorFixture(t)
+	m.comment.open = false
+	it := m.items[0]
+	it.State = "closed"
+	m.items[0] = it
+	next, cmd := m.openClose()
+	if next.(model).comment.open || cmd != nil {
+		t.Fatal("closed item opened a closure composer")
+	}
+	m.items[0].State = "open"
+	m.refreshing = true
+	next, cmd = m.openClose()
+	if next.(model).comment.open || cmd != nil {
+		t.Fatal("refreshing item opened a closure composer")
+	}
+}
+
+func TestUncertainCloseDoesNotChangeVisibleState(t *testing.T) {
+	m := commentEditorFixture(t)
+	m.comment.open = false
+	next, _ := m.openClose()
+	m = next.(model)
+	m.comment.busy = true
+	m = send(m, commentMsg{root: m.installRoot, repo: m.repo, publish: true, err: errors.New("close outcome unknown")})
+	if m.items[0].State != "open" || m.detail.item.State != "open" {
+		t.Fatal("uncertain close changed the visible item state")
 	}
 }

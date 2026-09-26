@@ -10,7 +10,7 @@ Tooling to work through a GitHub issue / PR backlog too large for one person to 
 
 The backlog gets a first pass of categorization done in batches, by you or by an AI Agent, and whoever's triaging gets a fast, git-tracked way to check and correct that first pass before anyone acts on it.
 
-It reads issues and PRs via `gh` and writes categorization decisions to a local ledger. You can also compose and explicitly approve a GitHub comment through the TUI or `bin/comment`; publishing defaults to dry-run and never follows automatically from a triage decision.
+It reads issues and PRs via `gh` and writes categorization decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI or `bin/comment`; publishing defaults to dry-run and never follows automatically from a triage decision.
 
 > Developed with the [omacom/omarchy](https://github.com/omacom/omarchy) backlog in mind, while supporting other GitHub repositories. Adoption by Omarchy is a goal, not an existing deployment.
 
@@ -99,13 +99,13 @@ flowchart LR
     REVIEWED --> HANDOFF
 ```
 
-An item first enters the ledger when observed open. Later syncs retain its row after closure, along with its triage and review history. `bin/sync` does not import every item that closed before that first observation. Every GitHub path shown is read-only and runs through a script. The TUI invokes the owning scripts for managed data, and agent proposals stay unreviewed until a human confirms them.
+An item first enters the ledger when observed open. Later syncs retain its row after closure, along with its triage and review history. `bin/sync` does not import every item that closed before that first observation. GitHub reads run through scripts; approved comments and closures run through `bin/comment`. The TUI invokes the owning scripts for managed data, and agent proposals stay unreviewed until a human confirms them.
 
 ### Using the TUI
 
 The [tutorial](docs/tutorial.md) walks through these tasks and their controls. [Group review](docs/groups.md) and [cache evidence](docs/evidence.md) have some extra details.
 
-Mouse controls work alongside the keys: click a sidebar entry or tab, click a card to select it and click it again to open it, right-click a card to tick it where Space does, and scroll with the wheel. Footer shortcuts are clickable too. A choice field opens on a second click; click an option to select it.
+Mouse controls work alongside the keys: click a sidebar entry or tab, click a card to select it and click it again to open it, right-click a card to select it for a bulk action, and scroll with the wheel. Footer shortcuts are clickable too. A choice field opens on a second click; click an option to select it.
 
 1. **Start from the overview.** It shows the repository, triage and review progress, and the next work recommended by `bin/next`.
 
@@ -129,7 +129,7 @@ Mouse controls work alongside the keys: click a sidebar entry or tab, click a ca
 
 11. **Track follow-up activity.** Watch an issue or PR for new comments. **Notifications** separates items needing attention from past activity, where alerts can be viewed or dismissed; dismissing an ordinarily tracked item stops its comment checks.
 
-12. **Hand reviewed work to maintainers.** Export a group or generate a report to gather ready groups and human-reviewed decisions. The resulting packet is the handoff: labeling, closing, approving, and merging still happen separately on GitHub. For a conversation comment, open an item and press `c` (or `C` to compose in `$EDITOR`), compose the text, optionally toggle a rendered Markdown preview with `Ctrl-P`, then press `Ctrl-S` once to approve and publish. `Esc` returns from preview to editing or discards the composer.
+12. **Hand reviewed work to maintainers.** Export a group or generate a report to gather ready groups and human-reviewed decisions. The resulting packet is the handoff: labeling, approving, and merging still happen separately on GitHub. You can also compose and explicitly approve a conversation comment, close an item with an explanation, or reopen closed items with a shared comment. Bulk reopening shows every target for review before publishing.
 
 13. **Move between repositories without mixing their work.** **Switch Repo** opens another install or repository, each with its own taxonomy, ledger, batches, groups, exports, and reports.
 
@@ -176,7 +176,7 @@ bin/report
 | `bin/cache`                                | Acquire selected or frozen backlog evidence, search and read it offline, and retain closure history. See the [cache reference](docs/evidence-reference.md) and [appeals](docs/appeal-evidence.md). |
 | `bin/enrich-one`                           | Read one issue or PR, with optional explicit cache mode.                                                                                                                                           |
 | `bin/export-csv`, `bin/import-csv`         | Review ledger decisions in a spreadsheet with revision checks.                                                                                                                                     |
-| `bin/comment`                              | Preview and explicitly approve a conversation comment on an issue or PR; record the write outcome.                                                                                                 |
+| `bin/comment`                              | Preview and explicitly approve a conversation comment, explained closure or reopening on an issue or PR; record comment and state outcomes separately.                                             |
 | `bin/stats`, `bin/next`, `bin/report`      | Inspect progress, next tasks and the maintainer report.                                                                                                                                            |
 
 The standard Local dataset downloads descriptions and discussion for open issues and PRs, plus PR file lists, diffs, and closing-issue links. Saved snapshots and their gaps are available to agents through [bounded offline readers](docs/evidence-reference.md#bounded-offline-snapshot-readers); a candidate match still needs source review. Selected PR reads can obtain further components when needed. The [agent preparation prompt](prompts/prepare-analysis.md) starts from the saved dataset rather than refetching each candidate.
@@ -221,6 +221,6 @@ Use `mise exec -- make check` for Go and Python checks, and `mise exec -- make b
 
 ## Not Built (yet)
 
-- **GitHub write actions**: only explicitly approved conversation comments are supported; the tool does not label, reopen, close or merge items. See [comment publishing](docs/comments.md).
+- **GitHub write actions**: only explicitly approved conversation comments, explained closures and reopenings are supported; the tool does not label or merge items. See [comment publishing](docs/comments.md).
 - **Automatic appeal monitoring**: closed-PR watches require explicit enrollment and polling after the ledger baseline; closed issues have no watch yet.
 - **Verified identification of an external auto-closure operator**: imported explanations are attributed claims, not authenticated runner records.

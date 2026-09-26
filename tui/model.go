@@ -575,9 +575,7 @@ func (m model) itemView() string {
 		meta = append(meta, author, state, mutedText(singleLine(labels)), mutedText("updated "+singleLine(shortDate(it.UpdatedAt))))
 	}
 
-	if m.notificationPR.open {
-		meta = append(meta, mutedText("refreshed PR details · read only · saved notification may differ"))
-	} else {
+	if !m.notificationPR.open {
 		meta = append(meta, mutedText(singleLine(m.similarLabel())))
 		if g := m.lastGroup(); g != nil {
 			meta = append(meta, mutedText(singleLine(m.lastGroupLabel())))

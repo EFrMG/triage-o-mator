@@ -16,7 +16,7 @@ import (
 
 func TestCommentCommandPreservesLeadingDashes(t *testing.T) {
 	root := batchFixture(t)
-	copyFixtureScripts(t, root, "comment")
+	copyFixtureScripts(t, root, "comment-plus")
 	fakeGH := `#!/usr/bin/env python3
 import json, sys
 from pathlib import Path
@@ -371,7 +371,7 @@ func TestCloseComposerRequiresExactClosurePlanAndRefreshesAfterSuccess(t *testin
 	}
 	m.comment.text.SetValue("Explanatory closure comment")
 	root := batchFixture(t)
-	copyFixtureScripts(t, root, "comment")
+	copyFixtureScripts(t, root, "comment-plus")
 	m.installRoot = root
 	preview := m.commentCmd(false)().(commentMsg)
 	if preview.err != nil {

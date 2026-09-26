@@ -151,7 +151,7 @@ func (m model) commentCmd(publish bool) tea.Cmd {
 		if publish {
 			args = append(args, "--publish", "--request-id", c.requestID, "--approve", c.approval)
 		}
-		out, err := runScript(root, "comment", args...)
+		out, err := runScript(root, "comment-plus", args...)
 		return commentMsg{root: root, repo: repo, publish: publish, index: c.index, out: out, err: err}
 	}
 }

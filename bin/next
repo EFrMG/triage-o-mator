@@ -93,6 +93,11 @@ def suggestions(ledger):
         add("agent", f"Code-review {len(unreviewed_code)} triaged PRs nobody has read the diff of ({merge_ready} marked merge-ready)",
             f"prompts/review-pr.md (e.g. {sample})", "their category was judged from the description alone")
 
+    open_prs = [r for r in open_items if r["kind"] == "pr"]
+    if open_prs:
+        add("agent", f"Check whether any of {len(open_prs)} open PRs merit an explained closure proposal",
+            "prompts/recommend-auto-close.md", "recommendations are saved offline and require a person's exact approval before any GitHub write")
+
     pairs = [p for p in TitleVerdicts().pairs(TitleIndex(ledger), min_score=STRONG_PAIR)
              if not by_key[(p["item"]["kind"], p["item"]["number"])]["category"]]
     if pairs:

@@ -41,6 +41,9 @@ print(json.dumps(page))
 	if err := os.WriteFile(filepath.Join(m.installRoot, "bin/cache"), []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(m.installRoot, "bin/auto-close"), []byte("#!/usr/bin/env python3\nimport json\nprint(json.dumps({'repository':'owner/repo','rows':[],'requests':0}))\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	return m
 }
 
@@ -83,6 +86,251 @@ func TestNotificationsMenuHasTwoSections(t *testing.T) {
 	m = next.(model)
 	if cmd == nil || !m.actionHistory.open || m.actionHistory.location.section != "entries" || m.actionHistory.location.checkpoint != strings.Repeat("c", 64) {
 		t.Fatal("closure row lost its independent history binding")
+	}
+}
+
+func TestAutoCloseProposalReaderApprovesWithOneKey(t *testing.T) {
+	m := notificationsFixture(t)
+	script := `#!/usr/bin/env python3
+import json,sys
+a=sys.argv[1:]
+action=a[2]
+row={'number':3,'title':'Superseded','target':'https://github.com/owner/repo/pull/3','rationale':'PR #4 replaced it','comment':'Thank you. PR #4 replaces this work.','reference':{'kind':'pr','number':4},'head_sha':'b'*40,'updated_at':'2026-09-25T00:00:00Z','status':'pending','checkpoint':'a'*64,'active':True,'needs_attention':True,'dismissed':False}
+if action=='list':
+    print(json.dumps({'repository':'owner/repo','rows':[row],'requests':0}))
+elif action=='review':
+    print(json.dumps({'plan':{'repo':'owner/repo','operation':'comment-and-close-pr','proposals':[row]},'approval':'c'*64}))
+else:
+    assert action=='execute' and '--publish' in a and '--approve' in a,a
+    print(json.dumps({'results':[{'number':3,'status':'executed'}]}))
+`
+	if err := os.WriteFile(filepath.Join(m.installRoot, "bin/auto-close"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := m.enterSidebarSelection()
+	next, _ := m.Update(cmd())
+	m = next.(model)
+	if len(m.notifications.choices()) == 0 || m.notifications.choices()[0].kind != "proposal" {
+		t.Fatal("proposal is not first in Needs attention")
+	}
+	m, _ = corpusKey(m, "enter")
+	if m.notifications.review == nil || m.notifications.review.Approval != "" {
+		t.Fatal("Enter did not open the proposal for inspection")
+	}
+	view := m.notificationsView()
+	heights := map[int]int{}
+	for _, width := range []int{60, 80, 120} {
+		m.width = width
+		heights[width] = m.mainHeight()
+	}
+	m, cmd = corpusKey(m, "a")
+	if cmd == nil || !m.notifications.reviewBusy || m.notifications.review.Approval != "" {
+		t.Fatal("a from the proposal did not prepare exact execution")
+	}
+	for width, height := range heights {
+		m.width = width
+		if m.mainHeight() != height || strings.Contains(ansi.Strip(m.notificationsView()), "Preparing exact review") {
+			t.Fatalf("preparing the review shifted the proposal content at width %d", width)
+		}
+	}
+	next, cmd = m.Update(cmd())
+	m = next.(model)
+	if !strings.Contains(view, "PR #4 replaces this work") || !strings.Contains(view, "Repository: owner/repo") || !strings.Contains(view, "PR #4 replaced it") || strings.Count(ansi.Strip(view), "PR #3") != 1 || strings.Contains(view, "Host:") || strings.Contains(view, "https://") {
+		t.Fatalf("review omitted comment, target or rationale, or showed a link: %s", view)
+	}
+	if cmd == nil || !m.notifications.reviewBusy {
+		t.Fatal("one a did not start approved execution")
+	}
+	for width, height := range heights {
+		m.width = width
+		if m.mainHeight() != height || strings.Contains(ansi.Strip(m.notificationsView()), "Executing approved closures") {
+			t.Fatalf("execution shifted the proposal content at width %d", width)
+		}
+	}
+	if result := cmd().(autoCloseMsg); result.err != nil || result.action != "execute" {
+		t.Fatalf("execution command failed: %+v", result)
+	}
+}
+
+func TestAutoCloseProposalReaderDismissesWithOneKey(t *testing.T) {
+	m := notificationsFixture(t)
+	cmd := m.enterSidebarSelection()
+	next, _ := m.Update(cmd())
+	m = next.(model)
+	m.notifications.proposals.Rows = []autoCloseRow{{Number: 3, Title: "Fixture", Active: true, Needs: true, Checkpoint: strings.Repeat("a", 64)}}
+
+	m, _ = corpusKey(m, "enter")
+	if !strings.Contains(ansi.Strip(m.footerView()), "d") {
+		t.Fatal("proposal reader does not offer dismissal")
+	}
+	m, cmd = corpusKey(m, "d")
+	if cmd == nil || m.notifications.review != nil || !m.trackingBusy {
+		t.Fatal("one d did not dismiss the displayed proposal")
+	}
+	result := cmd().(autoCloseMsg)
+	if result.action != "dismiss" || result.err != nil {
+		t.Fatalf("dismissal did not use the proposal script: %+v", result)
+	}
+}
+
+func TestAutoCloseProposalReaderRejectsChangedExactReview(t *testing.T) {
+	m := notificationsFixture(t)
+	cmd := m.enterSidebarSelection()
+	next, _ := m.Update(cmd())
+	m = next.(model)
+	row := autoCloseRow{Number: 3, Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Comment: "Original comment", Active: true, Needs: true, Checkpoint: strings.Repeat("a", 64)}
+	m.notifications.proposals.Rows = []autoCloseRow{row}
+	m, _ = corpusKey(m, "enter")
+	m, cmd = corpusKey(m, "a")
+	changed := row
+	changed.Comment = "Changed comment"
+	review := autoCloseReview{Approval: strings.Repeat("c", 64)}
+	review.Plan.Repository = m.repo
+	review.Plan.Operation = "comment-and-close-pr"
+	review.Plan.Proposals = []autoCloseRow{changed}
+	next, execute := m.Update(autoCloseMsg{root: m.installRoot, repo: m.repo, generation: m.notificationsGeneration, action: "review", numbers: []int{3}, direct: true, review: review})
+	if execute != nil || next.(model).notifications.reviewBusy {
+		t.Fatal("a changed exact review started execution")
+	}
+}
+
+func TestAutoCloseBulkSelectionAndPresentationKeys(t *testing.T) {
+	m := notificationsFixture(t)
+	openCmd := m.enterSidebarSelection()
+	next, _ := m.Update(openCmd())
+	m = next.(model)
+	m.notifications.proposals.Rows = []autoCloseRow{{Number: 3, Title: "First", Active: true, Needs: true, Checkpoint: strings.Repeat("a", 64)}, {Number: 4, Title: "Second", Active: true, Needs: true, Checkpoint: strings.Repeat("b", 64)}}
+	next, _ = m.handleNotificationsKey(tea.KeyPressMsg{Code: tea.KeySpace})
+	m = next.(model)
+	if !m.notifications.ticked[3] {
+		t.Fatal("space did not tick the selected proposal")
+	}
+	next, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("a did not request review")
+	}
+	selected := cmd().(autoCloseMsg)
+	if selected.all || len(selected.numbers) != 1 || selected.numbers[0] != 3 {
+		t.Fatalf("a did not select only the ticked proposal: %+v", selected)
+	}
+	m.notifications.reviewBusy = false
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "A"})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("A did not request review")
+	}
+	all := cmd().(autoCloseMsg)
+	if !all.all || len(all.numbers) != 2 {
+		t.Fatalf("A did not include all active proposals: %+v", all)
+	}
+	m.notifications.review = &autoCloseReview{}
+	m.notifications.review.Plan.Proposals = []autoCloseRow{m.notifications.proposals.Rows[0]}
+	m.notifications.reviewBusy = false
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "A"})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("A from the proposal reader did not request all active proposals")
+	}
+	all = cmd().(autoCloseMsg)
+	if !all.all || len(all.numbers) != 2 {
+		t.Fatalf("A from the proposal reader changed its scope: %+v", all)
+	}
+	m.notifications.review = nil
+	m.notifications.reviewBusy = false
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "v"})
+	m = next.(model)
+	if cmd == nil || cmd().(autoCloseMsg).action != "view" {
+		t.Fatal("v did not call the proposal presentation script")
+	}
+	m.trackingBusy = false
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
+	if cmd == nil || cmd().(autoCloseMsg).action != "dismiss" {
+		t.Fatal("d did not call the proposal presentation script")
+	}
+}
+
+func TestAutoCloseProposalReaderHelpAndPRNavigation(t *testing.T) {
+	m := notificationsFixture(t)
+	cmd := m.enterSidebarSelection()
+	next, _ := m.Update(cmd())
+	m = next.(model)
+	m.notifications.proposals.Rows = []autoCloseRow{{Number: 3, Title: "Disposable PR", Target: "https://github.com/owner/repo/pull/3", Rationale: "Testing the reader", Comment: "Close this fixture.", Active: true, Needs: true}}
+
+	m, _ = corpusKey(m, "space")
+	list := ansi.Strip(m.notificationsView())
+	if !strings.Contains(list, "✓ PR #3") || strings.Contains(list, "[x]") || strings.Contains(list, "Space ticks PR closure proposals") {
+		t.Fatalf("proposal selection or list hints differ from other screens: %s", list)
+	}
+
+	m, _ = corpusKey(m, "enter")
+	if m.notifications.review == nil || m.notifications.reviewKey != "" {
+		t.Fatal("Enter did not open the proposal reader")
+	}
+	view := ansi.Strip(m.notificationsView())
+	if !strings.Contains(view, "Proposed action") || strings.Index(view, "Reason") <= strings.Index(view, "Proposed action") || strings.Index(view, "Comment to publish") <= strings.Index(view, "Reason") || strings.Contains(view, "Saved proposal") || strings.Contains(view, "Esc returns") || strings.Contains(view, "https://") {
+		t.Fatalf("proposal reader lost sections or contains redundant text/link: %s", view)
+	}
+	if strings.Contains(m.footerView(), "approve and execute") {
+		t.Fatal("inspection footer offered execution without a review")
+	}
+
+	m, _ = corpusKey(m, "?")
+	if !m.showHelp || !strings.Contains(ansi.Strip(m.footerView()), "open PR") || strings.Contains(ansi.Strip(m.footerView()), "approve and execute") {
+		t.Fatal("? did not expand the proposal reader footer")
+	}
+	m, _ = corpusKey(m, "?")
+	if m.showHelp {
+		t.Fatal("second ? did not collapse help")
+	}
+
+	m, cmd = corpusKey(m, "l")
+	if cmd == nil || !m.notificationPR.open || m.notificationPR.key != (Key{Kind: "pr", Number: 3}) || m.detail.active != 0 {
+		t.Fatal("l did not open the proposed PR on its Body tab")
+	}
+	if !strings.Contains(ansi.Strip(m.footerView()), "Esc/h") {
+		t.Fatal("PR reader lost its back key")
+	}
+	m, _ = corpusKey(m, "h")
+	if m.notificationPR.open || m.notifications.review == nil || m.notifications.review.Plan.Proposals[0].Number != 3 {
+		t.Fatal("h did not return to the proposal reader")
+	}
+	m, cmd = corpusKey(m, "enter")
+	if cmd == nil || !m.notificationPR.open {
+		t.Fatal("Enter did not reopen the proposed PR")
+	}
+	m, _ = corpusKey(m, "esc")
+	if m.notificationPR.open || m.notifications.review == nil {
+		t.Fatal("Esc did not return to the proposal reader")
+	}
+	m, cmd = corpusKey(m, "q")
+	if cmd == nil {
+		t.Fatal("q from the proposal reader did not request quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("q from the proposal reader did not quit")
+	}
+}
+
+func TestAutoCloseProposalReviewCanCancelPreparation(t *testing.T) {
+	m := notificationsFixture(t)
+	cmd := m.enterSidebarSelection()
+	next, _ := m.Update(cmd())
+	m = next.(model)
+	m.notifications.proposals.Rows = []autoCloseRow{{Number: 3, Title: "Fixture", Active: true, Needs: true}}
+	m, _ = corpusKey(m, "enter")
+	m, cmd = corpusKey(m, "a")
+	if cmd == nil || !m.notifications.reviewBusy || strings.Contains(ansi.Strip(m.footerView()), "approve and execute") {
+		t.Fatal("preparing review exposed an executable action")
+	}
+	late := cmd().(autoCloseMsg)
+	m, _ = corpusKey(m, "esc")
+	if m.notifications.review != nil || m.notifications.reviewBusy {
+		t.Fatal("Esc did not leave the pending review")
+	}
+	next, _ = m.Update(late)
+	if next.(model).notifications.review != nil {
+		t.Fatal("late review response reopened a cancelled proposal")
 	}
 }
 
@@ -306,6 +554,9 @@ print(json.dumps({'number':1,'kind':'pr','title':'A current PR','state':'closed'
 	m = next.(model)
 	if m.detail.item.Title != "A current PR" || m.detail.enriched.CommentBodies[1] != "New contributor response" || !strings.Contains(ansi.Strip(m.viewContent()), "New contributor response") || strings.Contains(m.viewContent(), "offline") {
 		t.Fatal("refreshed PR item did not show the current title and discussion")
+	}
+	if m.status != "" || strings.Contains(m.itemView(), "refreshed PR details") || strings.Contains(m.itemView(), "saved notification may differ") {
+		t.Fatal("PR item reader shows redundant refresh status")
 	}
 	for _, k := range []string{"S", "a"} {
 		var action tea.Cmd

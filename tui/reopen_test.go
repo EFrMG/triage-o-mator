@@ -67,7 +67,7 @@ func TestSingleReopenPreviewShowsCommentWithoutTargetWrapper(t *testing.T) {
 func TestReopenCommandUsesTheSelectedTargetAndStateChange(t *testing.T) {
 	m := reopenFixture(t)
 	root := batchFixture(t)
-	copyFixtureScripts(t, root, "comment")
+	copyFixtureScripts(t, root, "comment-plus")
 	m.installRoot = root
 	next, _ := m.openReopen(m.items[:2])
 	m = next.(model)

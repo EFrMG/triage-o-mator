@@ -52,6 +52,8 @@ def main():
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--publish", action="store_true")
     parser.add_argument("--approve", help="SHA-256 from the reviewed dry-run plan")
+    parser.add_argument("--expected-head", help="PR head SHA observed when a closing proposal was prepared")
+    parser.add_argument("--expected-updated-at", help="item update time observed when a closing proposal was prepared")
     args = parser.parse_args()
 
     # Older argparse versions strip a literal '--' even from '--body=--', returning an empty list for this single-value option.
@@ -65,6 +67,10 @@ def main():
         raise ValueError("host must be a lowercase hostname")
     if args.number <= 0:
         raise ValueError("number must be positive")
+    if (args.expected_head or args.expected_updated_at) and (args.kind != "pr" or not args.close):
+        raise ValueError("revision checks require closing a pull request")
+    if args.expected_head and not re.fullmatch(r"[0-9a-f]{40}", args.expected_head):
+        raise ValueError("expected head must be a 40-character lowercase SHA")
 
     text = args.body if args.body is not None else args.body_file.read_text(encoding="utf-8")
     if not text.strip() or len(text) > 65536 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in text):
@@ -78,6 +84,10 @@ def main():
     operation = "close" if args.close else "reopen" if args.reopen else "comment"
     target_state = "closed" if args.close else "open" if args.reopen else "none"
     plan = dict(version=1, request_id=request_id, operation=operation, host=args.host, repo=repo, kind=args.kind, number=args.number, target=target, body=text, state_change=target_state)
+    if args.expected_head:
+        plan["expected_head"] = args.expected_head
+    if args.expected_updated_at:
+        plan["expected_updated_at"] = args.expected_updated_at
     digest = hashlib.sha256(json.dumps(plan, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     if not args.publish:
         print(json.dumps(dict(plan=plan, approval=digest), ensure_ascii=False, indent=2))
@@ -109,6 +119,12 @@ def main():
             required_state = "open" if args.close else "closed"
             if item.get("state") != required_state:
                 raise ValueError(f"item is no longer {required_state}; preview again after inspecting GitHub")
+        if args.expected_updated_at and item.get("updated_at") != args.expected_updated_at:
+            raise ValueError("pull request activity changed since the approved proposal; review it again")
+        if args.expected_head:
+            pull = api(args.host, "GET", f"repos/{repo}/pulls/{args.number}")
+            if not isinstance(pull, dict) or pull.get("html_url") != target or pull.get("number") != args.number or (pull.get("head") or {}).get("sha") != args.expected_head:
+                raise ValueError("pull request head changed since the approved proposal; review it again")
         if args.reopen and args.kind == "pr":
             pull = api(args.host, "GET", f"repos/{repo}/pulls/{args.number}")
             if not isinstance(pull, dict) or pull.get("html_url") != target or pull.get("number") != args.number or pull.get("state") != "closed" or pull.get("merged_at") is not None or pull.get("merged") is True:

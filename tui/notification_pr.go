@@ -14,6 +14,10 @@ type notificationPRUI struct {
 }
 
 func (m model) openNotificationItem(key Key) (tea.Model, tea.Cmd) {
+	return m.openNotificationItemAt(key, 1)
+}
+
+func (m model) openNotificationItemAt(key Key, section int) (tea.Model, tea.Cmd) {
 	if key.Number < 1 || (key.Kind != "issue" && key.Kind != "pr") {
 		return m, nil
 	}
@@ -25,7 +29,7 @@ func (m model) openNotificationItem(key Key) (tea.Model, tea.Cmd) {
 	m.detail.blockLegacy = true
 	m.detail.notificationOnly = true
 	m.detail.loading = true
-	m.detail.JumpSection(1)
+	m.detail.JumpSection(section)
 	if m.evidenceLifecycle == nil {
 		m.evidenceLifecycle = &readLifecycle{}
 	}
@@ -51,7 +55,7 @@ func (m model) finishNotificationPREvidence(msg evidenceReadMsg) (tea.Model, tea
 
 	m.detail.item.Title, m.detail.item.State, m.detail.item.URL = msg.data.Title, msg.data.State, msg.data.URL
 	m.detail.populate(msg.data)
-	m.status = "Item details refreshed. Saved notification records may describe an earlier state."
+	m.status = ""
 	return m, nil
 }
 

@@ -12,14 +12,22 @@ import (
 
 // Notifications presents tracked comments and retained PR records in two sections.
 type notificationsUI struct {
-	open, busy  bool
-	tracked     *trackedPage
-	attention   *attentionPage
-	closures    *actionHistoryPage
-	state       notificationState
-	selected    int
-	selectAfter string
-	problem     string
+	open, busy    bool
+	tracked       *trackedPage
+	attention     *attentionPage
+	closures      *actionHistoryPage
+	proposals     autoCloseList
+	ticked        map[int]bool
+	review        *autoCloseReview
+	reviewBusy    bool
+	reviewAll     bool
+	reviewKey     string
+	reviewNumbers []int
+	reviewScroll  int
+	state         notificationState
+	selected      int
+	selectAfter   string
+	problem       string
 }
 
 type notificationState struct {
@@ -41,6 +49,7 @@ type notificationsMsg struct {
 	tracked    trackedPage
 	attention  attentionPage
 	closures   actionHistoryPage
+	proposals  autoCloseList
 	state      notificationState
 	err        error
 }
@@ -48,6 +57,170 @@ type notificationsMsg struct {
 type notificationChoice struct {
 	kind string
 	row  int
+}
+
+type autoCloseRow struct {
+	Number    int    `json:"number"`
+	Title     string `json:"title"`
+	Target    string `json:"target"`
+	Rationale string `json:"rationale"`
+	Comment   string `json:"comment"`
+	Reference *struct {
+		Kind   string `json:"kind"`
+		Number int    `json:"number"`
+	} `json:"reference"`
+	HeadSHA    string `json:"head_sha"`
+	UpdatedAt  string `json:"updated_at"`
+	Checkpoint string `json:"checkpoint"`
+	Status     string `json:"status"`
+	Active     bool   `json:"active"`
+	Needs      bool   `json:"needs_attention"`
+	Dismissed  bool   `json:"dismissed"`
+	Outcome    *struct {
+		RequestID string `json:"request_id"`
+		Comment   struct {
+			Status string `json:"status"`
+			URL    string `json:"url"`
+		} `json:"comment"`
+		StateChange struct {
+			Status string `json:"status"`
+			URL    string `json:"url"`
+		} `json:"state_change"`
+	} `json:"outcome"`
+}
+
+type autoCloseList struct {
+	Repository string         `json:"repository"`
+	Rows       []autoCloseRow `json:"rows"`
+	Requests   int            `json:"requests"`
+}
+
+type autoCloseReview struct {
+	Plan struct {
+		Repository string         `json:"repo"`
+		Operation  string         `json:"operation"`
+		Proposals  []autoCloseRow `json:"proposals"`
+	} `json:"plan"`
+	Approval string `json:"approval"`
+}
+
+type autoCloseMsg struct {
+	root, repo string
+	generation uint64
+	action     string
+	all        bool
+	direct     bool
+	numbers    []int
+	review     autoCloseReview
+	out        string
+	err        error
+}
+
+func autoCloseSelectionArgs(all bool, numbers []int) []string {
+	if all {
+		return []string{"--all"}
+	}
+	args := []string{}
+	for _, number := range numbers {
+		args = append(args, "--number", fmt.Sprint(number))
+	}
+	return args
+}
+
+func autoCloseReviewCmd(root, repo string, generation uint64, all, direct bool, numbers []int) tea.Cmd {
+	return func() tea.Msg {
+		args := append([]string{"--expected-repo", repo, "review"}, autoCloseSelectionArgs(all, numbers)...)
+		out, err := runScript(root, "auto-close", args...)
+		msg := autoCloseMsg{root: root, repo: repo, generation: generation, action: "review", all: all, direct: direct, numbers: numbers, err: err}
+		if err == nil {
+			msg.err = json.Unmarshal([]byte(out), &msg.review)
+		}
+		return msg
+	}
+}
+
+func (m model) beginAutoCloseReview(all, direct bool, numbers []int) (tea.Model, tea.Cmd) {
+	m.notifications.reviewBusy = true
+	m.status = "Preparing exact PR closure review…"
+	return m, autoCloseReviewCmd(m.installRoot, m.repo, m.notificationsGeneration, all, direct, numbers)
+}
+
+func autoCloseExecuteCmd(root, repo string, generation uint64, all bool, numbers []int, approval string) tea.Cmd {
+	return func() tea.Msg {
+		args := append([]string{"--expected-repo", repo, "execute"}, autoCloseSelectionArgs(all, numbers)...)
+		args = append(args, "--publish", "--approve", approval)
+		out, err := runScript(root, "auto-close", args...)
+		return autoCloseMsg{root: root, repo: repo, generation: generation, action: "execute", out: out, err: err}
+	}
+}
+
+func autoCloseChangeCmd(root, repo string, generation uint64, action string, row autoCloseRow) tea.Cmd {
+	return func() tea.Msg {
+		out, err := runScript(root, "auto-close", "--expected-repo", repo, action, "--number", fmt.Sprint(row.Number), "--checkpoint", row.Checkpoint)
+		return autoCloseMsg{root: root, repo: repo, generation: generation, action: action, out: out, err: err}
+	}
+}
+
+func (m model) finishAutoClose(msg autoCloseMsg) (tea.Model, tea.Cmd) {
+	if !m.notifications.open || msg.root != m.installRoot || msg.repo != m.repo || msg.generation != m.notificationsGeneration {
+		return m, nil
+	}
+	m.notifications.reviewBusy = false
+	if msg.action == "view" || msg.action == "dismiss" {
+		m.trackingBusy = false
+	}
+	if msg.err != nil {
+		m.failErr("Auto-close proposal operation failed", msg.err)
+		m.notifications.review = nil
+		if msg.action == "execute" || msg.action == "view" || msg.action == "dismiss" {
+			return m.openNotifications()
+		}
+		return m, nil
+	}
+	if msg.action == "review" {
+		if msg.review.Plan.Repository != m.repo || msg.review.Plan.Operation != "comment-and-close-pr" || msg.review.Approval == "" || len(msg.review.Plan.Proposals) == 0 {
+			m.fail("Invalid auto-close review; nothing published.")
+			return m, nil
+		}
+		current := make(map[int]autoCloseRow)
+		for _, row := range m.notifications.proposals.Rows {
+			current[row.Number] = row
+		}
+		if len(msg.review.Plan.Proposals) != len(msg.numbers) {
+			m.fail("Proposal set changed; reopen Notifications before approving.")
+			return m, nil
+		}
+		for i, row := range msg.review.Plan.Proposals {
+			saved := current[row.Number]
+			if row.Number != msg.numbers[i] || !saved.Active || row.Checkpoint != saved.Checkpoint || row.Target != saved.Target || row.Comment != saved.Comment {
+				m.fail("Proposal changed; reopen Notifications before approving.")
+				return m, nil
+			}
+		}
+		m.notifications.review = &msg.review
+		m.notifications.reviewAll = msg.all
+		m.notifications.reviewKey = "a"
+		if msg.all {
+			m.notifications.reviewKey = "A"
+		}
+		m.notifications.reviewNumbers = msg.numbers
+		m.notifications.reviewScroll = 0
+		if msg.direct {
+			m.notifications.reviewBusy = true
+			m.status = "Publishing approved comment and closing PR…"
+			return m, autoCloseExecuteCmd(m.installRoot, m.repo, m.notificationsGeneration, false, msg.numbers, msg.review.Approval)
+		}
+		m.status = "Review every target and comment; press the same approval key again to execute."
+		return m, nil
+	}
+	if msg.action == "execute" {
+		m.notifications.review = nil
+		m.status = "Approved PR closures completed. Refreshing ledger…"
+		next, syncCmd := m.startRefresh(false)
+		return next, syncCmd
+	}
+	m.status = "Proposal presentation updated."
+	return m.openNotifications()
 }
 
 type notificationDoneMsg struct {
@@ -108,7 +281,15 @@ func notificationsCommand(root, repo string, generation uint64, trackedAt, atten
 				return msg
 			}
 		}
-		out, err := runReadScript(process, root, "cache", "--expected-repo", repo, "notification-state")
+		out, err := runReadScript(process, root, "auto-close", "--expected-repo", repo, "list")
+		if err == nil {
+			err = json.Unmarshal([]byte(out), &msg.proposals)
+		}
+		if err != nil {
+			msg.err = err
+			return msg
+		}
+		out, err = runReadScript(process, root, "cache", "--expected-repo", repo, "notification-state")
 		if err == nil {
 			err = json.Unmarshal([]byte(out), &msg.state)
 		}
@@ -118,6 +299,8 @@ func notificationsCommand(root, repo string, generation uint64, trackedAt, atten
 		}
 		if msg.tracked.Repository.Name != repo || msg.tracked.Offset != trackedAt || len(msg.tracked.Rows) > notificationsPageSize {
 			msg.err = fmt.Errorf("tracked item response identity or bounds mismatch")
+		} else if msg.proposals.Repository != repo || msg.proposals.Requests != 0 {
+			msg.err = fmt.Errorf("proposal response identity mismatch")
 		} else if msg.state.Repository.Name != repo || msg.state.Requests != 0 {
 			msg.err = fmt.Errorf("notification state identity mismatch")
 		} else if err := validateAttentionPage(msg.attention, attentionLocation{section: "list", offset: attentionAt, checkpoint: attentionCheckpoint}, repo); err != nil {
@@ -135,7 +318,7 @@ func (m model) openNotifications() (tea.Model, tea.Cmd) {
 	}
 	m.notificationsLifecycle.stop()
 	m.notificationsGeneration++
-	m.notifications = notificationsUI{open: true, busy: true}
+	m.notifications = notificationsUI{open: true, busy: true, ticked: make(map[int]bool)}
 	m.notificationsLifecycle.current = &readProcess{}
 	return m, notificationsCommand(m.installRoot, m.repo, m.notificationsGeneration, 0, 0, 0, "", "", m.notificationsLifecycle.current)
 }
@@ -176,9 +359,15 @@ func (m model) finishNotifications(msg notificationsMsg) (tea.Model, tea.Cmd) {
 	}
 	m.notifications.attention = &msg.attention
 	m.notifications.closures = &msg.closures
+	m.notifications.proposals = msg.proposals
 	m.notifications.tracked = &msg.tracked
 	m.notifications.state = msg.state
 	m.sidebar.notificationCount = msg.tracked.UnreadTotal
+	for _, proposal := range msg.proposals.Rows {
+		if proposal.Needs {
+			m.sidebar.notificationCount++
+		}
+	}
 	if m.notifications.selectAfter != "" {
 		for i, choice := range m.notifications.choices() {
 			if choice.kind == m.notifications.selectAfter {
@@ -211,6 +400,8 @@ func (n notificationsUI) actionNeeds(row actionHistoryRow) bool {
 
 func (n notificationsUI) choiceNeeds(choice notificationChoice) bool {
 	switch choice.kind {
+	case "proposal":
+		return n.proposals.Rows[choice.row].Needs
 	case "tracked":
 		return n.tracked.Rows[choice.row].NewCount > 0
 	case "attention":
@@ -226,6 +417,11 @@ func (n notificationsUI) choiceNeeds(choice notificationChoice) bool {
 
 func (n notificationsUI) choices() []notificationChoice {
 	var choices []notificationChoice
+	for i, row := range n.proposals.Rows {
+		if row.Active && row.Needs {
+			choices = append(choices, notificationChoice{kind: "proposal", row: i})
+		}
+	}
 	if n.tracked != nil {
 		for i := range n.tracked.Rows {
 			if n.tracked.Rows[i].NewCount > 0 {
@@ -290,10 +486,91 @@ func (n notificationsUI) choices() []notificationChoice {
 			}
 		}
 	}
+	for i, row := range n.proposals.Rows {
+		if !row.Dismissed && (!row.Active || !row.Needs) {
+			choices = append(choices, notificationChoice{kind: "proposal", row: i})
+		}
+	}
 	return choices
 }
 
 func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.notifications.review != nil {
+		switch msg.String() {
+		case "?":
+			m.showHelp = !m.showHelp
+			return m, nil
+		case "q":
+			if m.notifications.reviewBusy && m.notifications.review.Approval != "" {
+				return m, nil
+			}
+			m.notificationsLifecycle.stop()
+			m.notificationsGeneration++
+			return m.requestQuit()
+		case "esc", "x", "h", "left":
+			if m.notifications.reviewBusy && m.notifications.review.Approval != "" {
+				return m, nil
+			}
+			if m.notifications.reviewBusy {
+				m.notificationsGeneration++
+				m.notifications.reviewBusy = false
+				m.status = ""
+			}
+			m.notifications.review = nil
+			return m, nil
+		}
+		if m.notifications.reviewBusy {
+			return m, nil
+		}
+		switch msg.String() {
+		case "d":
+			if len(m.notifications.review.Plan.Proposals) == 1 {
+				row := m.notifications.review.Plan.Proposals[0]
+				m.notifications.review = nil
+				m.trackingBusy = true
+				return m, autoCloseChangeCmd(m.installRoot, m.repo, m.notificationsGeneration, "dismiss", row)
+			}
+		case "enter", "l", "right":
+			if len(m.notifications.review.Plan.Proposals) == 1 {
+				row := m.notifications.review.Plan.Proposals[0]
+				return m.openNotificationItemAt(Key{Kind: "pr", Number: row.Number}, 0)
+			}
+		case "a", "A":
+			if m.notifications.review.Approval != "" {
+				if msg.String() != m.notifications.reviewKey {
+					return m, nil
+				}
+				m.notifications.reviewBusy = true
+				m.status = "Publishing approved comments and closing PRs…"
+				return m, autoCloseExecuteCmd(m.installRoot, m.repo, m.notificationsGeneration, m.notifications.reviewAll, m.notifications.reviewNumbers, m.notifications.review.Approval)
+			}
+			if msg.String() == "A" {
+				var numbers []int
+				for _, row := range m.notifications.proposals.Rows {
+					if row.Active {
+						numbers = append(numbers, row.Number)
+					}
+				}
+				if len(numbers) > 0 {
+					return m.beginAutoCloseReview(true, false, numbers)
+				}
+				return m, nil
+			}
+			if len(m.notifications.review.Plan.Proposals) == 1 && m.notifications.review.Plan.Proposals[0].Active {
+				return m.beginAutoCloseReview(false, true, []int{m.notifications.review.Plan.Proposals[0].Number})
+			}
+			return m, nil
+		case "j", "down":
+			m.notifications.reviewScroll++
+		case "k", "up":
+			m.notifications.reviewScroll = maxInt(0, m.notifications.reviewScroll-1)
+		case "ctrl+d":
+			m.notifications.reviewScroll += maxInt(m.mainHeight()/2, 1)
+		case "ctrl+u":
+			m.notifications.reviewScroll = maxInt(0, m.notifications.reviewScroll-maxInt(m.mainHeight()/2, 1))
+		}
+		return m, nil
+	}
 	switch msg.String() {
 	case "?":
 		m.showHelp = !m.showHelp
@@ -310,17 +587,60 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case "r":
 		return m.startRefresh(false)
 	}
-	if m.notifications.busy || m.notifications.problem != "" {
+	if m.notifications.busy || m.notifications.reviewBusy || m.notifications.problem != "" {
 		return m, nil
 	}
 	choices := m.notifications.choices()
 	switch msg.String() {
+	case "space":
+		if len(choices) > 0 && choices[m.notifications.selected].kind == "proposal" {
+			row := m.notifications.proposals.Rows[choices[m.notifications.selected].row]
+			if row.Active {
+				m.notifications.ticked[row.Number] = !m.notifications.ticked[row.Number]
+			}
+		}
+	case "a", "A":
+		if m.trackingBusy || m.notifications.reviewBusy {
+			break
+		}
+		all := msg.String() == "A"
+		var numbers []int
+		if !all {
+			for _, row := range m.notifications.proposals.Rows {
+				if row.Active && m.notifications.ticked[row.Number] {
+					numbers = append(numbers, row.Number)
+				}
+			}
+			if len(numbers) == 0 && len(choices) > 0 && choices[m.notifications.selected].kind == "proposal" {
+				row := m.notifications.proposals.Rows[choices[m.notifications.selected].row]
+				if row.Active {
+					numbers = append(numbers, row.Number)
+				}
+			}
+			if len(numbers) == 0 {
+				break
+			}
+		} else {
+			for _, row := range m.notifications.proposals.Rows {
+				if row.Active {
+					numbers = append(numbers, row.Number)
+				}
+			}
+			if len(numbers) == 0 {
+				break
+			}
+		}
+		return m.beginAutoCloseReview(all, false, numbers)
 	case "v":
 		if len(choices) == 0 || m.trackingBusy {
 			break
 		}
 		choice := choices[m.notifications.selected]
 		switch choice.kind {
+		case "proposal":
+			row := m.notifications.proposals.Rows[choice.row]
+			m.trackingBusy = true
+			return m, autoCloseChangeCmd(m.installRoot, m.repo, m.notificationsGeneration, "view", row)
 		case "tracked":
 			row := m.notifications.tracked.Rows[choice.row]
 			if row.NewCount > 0 {
@@ -346,6 +666,10 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 		choice := choices[m.notifications.selected]
 		switch choice.kind {
+		case "proposal":
+			row := m.notifications.proposals.Rows[choice.row]
+			m.trackingBusy = true
+			return m, autoCloseChangeCmd(m.installRoot, m.repo, m.notificationsGeneration, "dismiss", row)
 		case "tracked":
 			key := m.notifications.tracked.Rows[choice.row].key()
 			m.trackingBusy = true
@@ -381,6 +705,14 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 		choice := choices[m.notifications.selected]
 		switch choice.kind {
+		case "proposal":
+			row := m.notifications.proposals.Rows[choice.row]
+			m.notifications.review = &autoCloseReview{}
+			m.notifications.review.Plan.Repository = m.repo
+			m.notifications.review.Plan.Proposals = []autoCloseRow{row}
+			m.notifications.reviewKey = ""
+			m.notifications.reviewScroll = 0
+			return m, nil
 		case "tracked":
 			return m.openNotificationItem(m.notifications.tracked.Rows[choice.row].key())
 		case "tracked-more":
@@ -440,12 +772,14 @@ func notificationAttentionSummary(row attentionRow) string {
 func (m model) notificationsView() string {
 	w := m.menuWidth()
 	n := m.notifications
+	if n.review != nil {
+		return m.autoCloseReviewView()
+	}
 	if n.tracked == nil {
 		n.tracked = &trackedPage{}
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\n", inset(titleBar("Notifications", m.repo+" · retained offline records", w)))
-	fmt.Fprintf(&b, "%s\n\n", inset(mutedText("Tracked comments update on ledger refresh. v marks viewed; d dismisses. Opening an item fetches current details.")))
 	if n.busy {
 		return b.String() + inset("Reading retained notifications…")
 	}
@@ -502,8 +836,73 @@ func (m model) notificationsView() string {
 	return vp.View()
 }
 
+func (m model) autoCloseReviewView() string {
+	n := m.notifications
+	var b strings.Builder
+	title := "PR closure proposal"
+	if n.review.Approval != "" {
+		title = "Review PR closures"
+	}
+	fmt.Fprintf(&b, "%s\n\n", inset(titleBar(title, m.repo, m.menuWidth())))
+	section := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(currentTheme.Accent))
+	target := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(currentTheme.Info))
+	action := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
+	comment := lipgloss.NewStyle().BorderLeft(true).BorderForeground(lipgloss.Color(currentTheme.Accent)).PaddingLeft(1)
+	textWidth := maxInt(m.menuWidth()-4, 1)
+	for i, row := range n.review.Plan.Proposals {
+		if i > 0 {
+			fmt.Fprintln(&b)
+		}
+		fmt.Fprintf(&b, "%s\n", inset(target.Render(fmt.Sprintf("PR #%d · %s", row.Number, sanitize(row.Title)))))
+		if len(n.review.Plan.Proposals) > 1 {
+			fmt.Fprintf(&b, "%s\n", inset(muted.Render(fmt.Sprintf("%d of %d", i+1, len(n.review.Plan.Proposals)))))
+		}
+		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Proposed action")))
+		fmt.Fprintf(&b, "%s\n", inset(action.Render("Publish the comment below, then close this PR.")))
+		fmt.Fprintf(&b, "%s\n", inset(muted.Render("Repository: "+m.repo)))
+		if row.Reference != nil {
+			fmt.Fprintf(&b, "%s\n", inset(muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))
+		}
+		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Reason")))
+		fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(row.Rationale), textWidth)))
+		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Comment to publish")))
+		fmt.Fprintf(&b, "%s\n", inset(comment.Render(wrapText(sanitize(row.Comment), textWidth-2))))
+		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Observed PR revision")))
+		fmt.Fprintf(&b, "%s\n", inset(muted.Render("Head: "+sanitize(row.HeadSHA))))
+		fmt.Fprintf(&b, "%s\n", inset(muted.Render("Updated: "+sanitize(row.UpdatedAt))))
+		if row.Outcome != nil {
+			fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Previous attempt")))
+			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Comment: "+sanitize(row.Outcome.Comment.Status))))
+			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Close: "+sanitize(row.Outcome.StateChange.Status))))
+			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Write request: "+sanitize(row.Outcome.RequestID))))
+		}
+	}
+	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(m.mainHeight()))
+	vp.SetContent(b.String())
+	vp.SetYOffset(n.reviewScroll)
+	return vp.View()
+}
+
 func renderNotificationChoice(n notificationsUI, choice notificationChoice, card func(string, string, cardMark)) {
 	switch choice.kind {
+	case "proposal":
+		row := n.proposals.Rows[choice.row]
+		label := fmt.Sprintf("PR #%d: %s", row.Number, singleLine(row.Title))
+		if n.ticked[row.Number] {
+			label = "✓ " + label
+		}
+		summary := "Proposed comment and closure · " + singleLine(row.Rationale)
+		if row.Status == "executed" {
+			summary = "Comment and closure completed"
+		}
+		if row.Status == "uncertain" {
+			summary = "Write outcome uncertain; inspect saved record"
+			if row.Outcome != nil {
+				summary = "Comment " + row.Outcome.Comment.Status + " · close " + row.Outcome.StateChange.Status
+			}
+		}
+		card(label, summary, cardMark{text: "PR", color: currentTheme.Warning})
 	case "tracked":
 		row := n.tracked.Rows[choice.row]
 		key := row.key()

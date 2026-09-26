@@ -647,7 +647,7 @@ func (m model) clickDuplicates(event tea.Mouse, _ bool) (tea.Model, tea.Cmd) {
 
 func (m model) clickNotifications(event tea.Mouse, _ bool) (tea.Model, tea.Cmd) {
 	n := m.notifications
-	if n.busy || n.problem != "" {
+	if n.busy || n.review != nil || n.reviewBusy || n.problem != "" {
 		return m, nil
 	}
 	choices := n.choices()
@@ -655,7 +655,7 @@ func (m model) clickNotifications(event tea.Mouse, _ bool) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	selected := minInt(n.selected, len(choices)-1)
-	line := 5 // title, blank, description, blank, Needs attention
+	line := 3 // title, blank, Needs attention
 	hasNeeds := false
 	for _, choice := range choices {
 		hasNeeds = hasNeeds || n.choiceNeeds(choice)

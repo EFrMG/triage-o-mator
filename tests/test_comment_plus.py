@@ -41,7 +41,7 @@ else:
         (self.mock / "item.json").write_text(json.dumps(self.item))
 
     def call(self, *args, ok=True, kind="issue", body=None):
-        result = subprocess.run([str(self.root / "bin/comment"), "--expected-repo", "owner/repo", "--kind", kind, "--number", "1", "--body", self.body if body is None else body, *args], env=self.env, cwd=self.root, text=True, capture_output=True)
+        result = subprocess.run([str(self.root / "bin/comment-plus"), "--expected-repo", "owner/repo", "--kind", kind, "--number", "1", "--body", self.body if body is None else body, *args], env=self.env, cwd=self.root, text=True, capture_output=True)
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout) if result.stdout else None
 

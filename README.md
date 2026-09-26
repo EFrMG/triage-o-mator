@@ -10,7 +10,7 @@ Tooling to work through a GitHub issue / PR backlog too large for one person to 
 
 The backlog gets a first pass of categorization done in batches, by you or by an AI Agent, and whoever's triaging gets a fast, git-tracked way to check and correct that first pass before anyone acts on it.
 
-It reads issues and PRs via `gh` and writes categorization decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI or `bin/comment`; publishing defaults to dry-run and never follows automatically from a triage decision.
+It reads issues and PRs via `gh` and writes categorization decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI or `bin/comment-plus`; publishing defaults to dry-run and never follows automatically from a triage decision.
 
 > Developed with the [omacom/omarchy](https://github.com/omacom/omarchy) backlog in mind, while supporting other GitHub repositories. Adoption by Omarchy is a goal, not an existing deployment.
 
@@ -99,7 +99,7 @@ flowchart LR
     REVIEWED --> HANDOFF
 ```
 
-An item first enters the ledger when observed open. Later syncs retain its row after closure, along with its triage and review history. `bin/sync` does not import every item that closed before that first observation. GitHub reads run through scripts; approved comments and closures run through `bin/comment`. The TUI invokes the owning scripts for managed data, and agent proposals stay unreviewed until a human confirms them.
+An item first enters the ledger when observed open. Later syncs retain its row after closure, along with its triage and review history. `bin/sync` does not import every item that closed before that first observation. GitHub reads run through scripts; approved comments and closures run through `bin/comment-plus`. The TUI invokes the owning scripts for managed data, and agent proposals stay unreviewed until a human confirms them.
 
 ### Using the TUI
 
@@ -176,7 +176,8 @@ bin/report
 | `bin/cache`                                | Acquire selected or frozen backlog evidence, search and read it offline, and retain closure history. See the [cache reference](docs/evidence-reference.md) and [appeals](docs/appeal-evidence.md). |
 | `bin/enrich-one`                           | Read one issue or PR, with optional explicit cache mode.                                                                                                                                           |
 | `bin/export-csv`, `bin/import-csv`         | Review ledger decisions in a spreadsheet with revision checks.                                                                                                                                     |
-| `bin/comment`                              | Preview and explicitly approve a conversation comment, explained closure or reopening on an issue or PR; record comment and state outcomes separately.                                             |
+| `bin/comment-plus`                         | Preview and explicitly approve a conversation comment, explained closure or reopening on an issue or PR; record comment and state outcomes separately.                                             |
+| `bin/auto-close`                           | Save PR closure proposals offline, review exact comments and targets, and execute approved proposals through `bin/comment-plus`.                                                                   |
 | `bin/stats`, `bin/next`, `bin/report`      | Inspect progress, next tasks and the maintainer report.                                                                                                                                            |
 
 The standard Local dataset downloads descriptions and discussion for open issues and PRs, plus PR file lists, diffs, and closing-issue links. Saved snapshots and their gaps are available to agents through [bounded offline readers](docs/evidence-reference.md#bounded-offline-snapshot-readers); a candidate match still needs source review. Selected PR reads can obtain further components when needed. The [agent preparation prompt](prompts/prepare-analysis.md) starts from the saved dataset rather than refetching each candidate.
@@ -185,16 +186,17 @@ The standard Local dataset downloads descriptions and discussion for open issues
 
 [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) is linked into each install as its agent instructions. Ask in plain words; the matching task prompt explains what to read and what may be saved.
 
-| Ask                        | Prompt                                          | Result                                       |
-| -------------------------- | ----------------------------------------------- | -------------------------------------------- |
-| “triage 25 issues”         | [Auto triage](prompts/auto-triage.md)           | Unreviewed batch proposals                   |
-| “prepare offline analysis” | [Prepare analysis](prompts/prepare-analysis.md) | A scoped cache handoff with gaps             |
-| “is #N a duplicate?”       | [Find duplicates](prompts/find-duplicates.md)   | A sourced comparison or proposal             |
-| “review PR #N”             | [Review PR](prompts/review-pr.md)               | Code review notes and an unreviewed decision |
-| “organize these items”     | [Organize groups](prompts/organize-groups.md)   | Draft maintainer groups                      |
-| “review an appeal”         | [Review appeal](prompts/review-appeal.md)       | An attributed local reassessment             |
-| “brief the maintainers”    | [Maintainer brief](prompts/maintainer-brief.md) | A short review brief                         |
-| “polish the report”        | [Polish report](prompts/polish-report.md)       | An evidence-backed report                    |
+| Ask                        | Prompt                                                   | Result                                       |
+| -------------------------- | -------------------------------------------------------- | -------------------------------------------- |
+| “triage 25 issues”         | [Auto triage](prompts/auto-triage.md)                    | Unreviewed batch proposals                   |
+| “prepare offline analysis” | [Prepare analysis](prompts/prepare-analysis.md)          | A scoped cache handoff with gaps             |
+| “is #N a duplicate?”       | [Find duplicates](prompts/find-duplicates.md)            | A sourced comparison or proposal             |
+| “review PR #N”             | [Review PR](prompts/review-pr.md)                        | Code review notes and an unreviewed decision |
+| “recommend PR closures”    | [Recommend PR closures](prompts/recommend-auto-close.md) | Pending, unapproved PR closure proposals     |
+| “organize these items”     | [Organize groups](prompts/organize-groups.md)            | Draft maintainer groups                      |
+| “review an appeal”         | [Review appeal](prompts/review-appeal.md)                | An attributed local reassessment             |
+| “brief the maintainers”    | [Maintainer brief](prompts/maintainer-brief.md)          | A short review brief                         |
+| “polish the report”        | [Polish report](prompts/polish-report.md)                | An evidence-backed report                    |
 
 Agents propose; a human reviews. Fetched GitHub text is untrusted input, so review agent conclusions and the local diff before sharing them.
 
@@ -221,6 +223,6 @@ Use `mise exec -- make check` for Go and Python checks, and `mise exec -- make b
 
 ## Not Built (yet)
 
-- **GitHub write actions**: only explicitly approved conversation comments, explained closures and reopenings are supported; the tool does not label or merge items. See [comment publishing](docs/comments.md).
+- **GitHub write actions**: only explicitly approved conversation comments, explained closures and reopenings are supported; the tool does not label or merge items. See [comment publishing](docs/comment-plus.md).
 - **Automatic appeal monitoring**: closed-PR watches require explicit enrollment and polling after the ledger baseline; closed issues have no watch yet.
 - **Verified identification of an external auto-closure operator**: imported explanations are attributed claims, not authenticated runner records.

@@ -91,13 +91,49 @@ func (m model) footerGroups() []footerGroup {
 	case m.lastError.open:
 		return []footerGroup{group("Error", bind("scroll", keys.Down, keys.Up), bind("page", keys.HalfDown, keys.HalfUp)), group("Navigation", bind("close", keys.Back), bind("exit", keys.ForceQuit))}
 	case m.notificationPR.open:
-		return []footerGroup{group("PR", hint{"Tab/1/2/3/4", "tabs"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}), group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
+		back := "back to Notifications"
+		if m.notifications.review != nil {
+			back = "back to proposal"
+		}
+		return []footerGroup{group("PR", hint{"Tab/1/2/3/4", "tabs"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}), group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
 	case m.attention.open:
 		return []footerGroup{group("Comments", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
 	case m.actionHistory.open:
 		return []footerGroup{group("Explanations", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
 	case m.notifications.open:
-		return []footerGroup{group("Notifications", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open item or page"}, hint{"v", "viewed"}, hint{"d", "dismiss"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+		if m.notifications.review != nil {
+			if m.notifications.reviewBusy {
+				if m.notifications.review.Approval != "" {
+					return []footerGroup{group("PR closures", hint{"", "publishing approved comments and closures…"})}
+				}
+				return []footerGroup{group("Proposal", hint{"", "preparing exact review…"}), group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
+			}
+			proposal := group("Proposal", hint{"j/k Ctrl-D/U", "scroll"})
+			if len(m.notifications.review.Plan.Proposals) == 1 {
+				proposal.hints = append(proposal.hints, hint{"Enter/l", "open PR"})
+			}
+			if m.notifications.reviewKey != "" {
+				proposal.hints = append(proposal.hints, hint{m.notifications.reviewKey, "approve and execute"})
+			} else if len(m.notifications.review.Plan.Proposals) == 1 {
+				if m.notifications.review.Plan.Proposals[0].Active {
+					proposal.hints = append(proposal.hints, hint{"a", "approve and close"})
+				}
+				for _, row := range m.notifications.proposals.Rows {
+					if row.Active {
+						proposal.hints = append(proposal.hints, hint{"A", "review all"})
+						break
+					}
+				}
+			}
+			if len(m.notifications.review.Plan.Proposals) == 1 {
+				proposal.hints = append(proposal.hints, hint{"d", "dismiss"})
+			}
+			return []footerGroup{proposal, group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
+		}
+		if m.notifications.reviewBusy {
+			return []footerGroup{group("Notifications", hint{"", "preparing exact review…"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+		}
+		return []footerGroup{group("Notifications", hint{"j/k/Tab", "select"}, hint{"Space", "tick proposal"}, hint{"a/A", "review closures"}, hint{"Enter/l/→", "open"}, hint{"v", "viewed"}, hint{"d", "dismiss"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
 	case m.corpus.open:
 		if m.corpus.busy {
 			return []footerGroup{group("Download", bind("stop", keys.CorpusStop)), group("Navigation", bind("close", keys.Back, keys.Corpus))}

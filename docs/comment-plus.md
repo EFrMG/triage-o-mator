@@ -1,4 +1,4 @@
-# Publishing comments and changing item state
+# Comment-plus: publishing comments and changing item state
 
 Open an issue or PR in the TUI and press `c`. Enter the comment; `Ctrl-P` toggles between editing and a rendered Markdown preview (scroll with the arrow keys). The target URL stays visible in both views. Press `Ctrl-S` once from either view to approve the current text and target and publish. The composer closes after publication; the status line reports the result and the open live item reloads its comments. `Enter` inserts a newline. `Esc` returns from preview to editing or discards the composer from the editor. This posts a conversation comment, including on PRs; it does not post an inline review or change the item's state.
 
@@ -17,7 +17,7 @@ Press `v` on a closed issue or PR to reopen it with an explanatory comment, or `
 From an install, save the proposed text in a UTF-8 file and preview it:
 
 ```sh
-bin/comment --expected-repo OWNER/REPO --kind issue --number 123 --body-file /tmp/comment.md
+bin/comment-plus --expected-repo OWNER/REPO --kind issue --number 123 --body-file /tmp/comment.md
 ```
 
 The default is an offline dry-run: it prints the target, exact body, `state_change: "none"`, a request ID and an approval hash without saving a proposal or contacting GitHub. `--dry-run` is also accepted. For GitHub Enterprise, include `--host HOSTNAME` in both invocations; the default is `github.com`, independent of `GH_HOST`.
@@ -25,7 +25,7 @@ The default is an offline dry-run: it prints the target, exact body, `state_chan
 After a human approves that exact plan, repeat the command with the printed values:
 
 ```sh
-bin/comment --expected-repo OWNER/REPO --kind issue --number 123 --body-file /tmp/comment.md \
+bin/comment-plus --expected-repo OWNER/REPO --kind issue --number 123 --body-file /tmp/comment.md \
   --publish --request-id REQUEST_ID --approve APPROVAL_HASH
 ```
 
@@ -35,10 +35,20 @@ For a closure, add `--close` to both commands. The dry-run plan then shows `oper
 
 For reopening, add `--reopen` to both commands instead. The plan shows `operation: "reopen"` and `state_change: "open"`. Publication checks that the live item is closed and, for a PR, that it is not merged before posting. It then comments and sends a `PATCH` with `state: "open"`. A failed reopen after a successful comment leaves the comment published and the state outcome unknown. For a TUI bulk reopening, each item has its own request ID and saved outcome; successful earlier items are not repeated after a later failure.
 
-Publishing verifies the live target, then records the attempt in `data/<owner>/<repo>/writes/<request-id>.json` before sending the comment. Comment and state-change outcomes are separate; comment-only requests record `not_requested` for the state change. These records are local replay-protection and recovery state, owned by `bin/comment` and Git-ignored even in adopted installs. The request ID and approval hash prevent a repeated request from posting again; the attempted text, target and outcome let you inspect an interrupted request. They are separate from evidence and ledger review status. Deleting a record removes replay protection for its request ID. Publishing never marks a decision reviewed or changes cached evidence.
+Publishing verifies the live target, then records the attempt in `data/<owner>/<repo>/writes/<request-id>.json` before sending the comment. Comment and state-change outcomes are separate; comment-only requests record `not_requested` for the state change. These records are local replay-protection and recovery state, owned by `bin/comment-plus` and Git-ignored even in adopted installs. The request ID and approval hash prevent a repeated request from posting again; the attempted text, target and outcome let you inspect an interrupted request. They are separate from evidence and ledger review status. Deleting a record removes replay protection for its request ID. Publishing never marks a decision reviewed or changes cached evidence.
 
 Repeating a successful request returns its saved result without another write. An interrupted request or failed POST or PATCH has an `unknown` outcome: GitHub might already have accepted it. The same request is never automatically retried. Inspect GitHub and the saved record before preparing and approving a new request; a new request ID can post the same text again. Replay protection applies within this install; it is not a GitHub idempotency guarantee.
 
 The implementation uses GitHub's [conversation comment endpoint](https://docs.github.com/en/rest/issues/comments#create-an-issue-comment), shared by issues and PRs, and the [issue](https://docs.github.com/en/rest/issues/issues#update-an-issue) or [PR](https://docs.github.com/en/rest/pulls/pulls#update-a-pull-request) update endpoint for state changes. Automated tests use fake `gh` in disposable installs.
 
 `bin/install-to` maintains the ignore rule. Rerun the installer to apply it to an existing install. Ignore rules do not untrack records already added to Git or remove them from past commits.
+
+## Pending PR closure proposals
+
+The [PR closure playbook](../prompts/recommend-auto-close.md) saves a proposed rationale and exact comment through `bin/auto-close propose`. Proposal records in `data/<owner>/<repo>/auto-close/` are Git-tracked; local viewed and dismissed flags are ignored. Saving or viewing a proposal never writes to GitHub or marks a ledger decision reviewed.
+
+`bin/auto-close --expected-repo OWNER/REPO inspect --host HOSTNAME --number N` performs two read-only REST GETs. It returns the PR head SHA and the issue endpoint's `updated_at`, which `bin/comment-plus` checks again before publishing a proposed closure. The read does not create a proposal or grant approval.
+
+An exact `--replace-checkpoint` can update a pending proposal before any write attempt. The previous version remains in the tracked record and the updated proposal appears as new attention, even if the old version was dismissed. Proposals with an uncertain or completed write must be reconciled, not replaced.
+
+Notifications shows actionable proposals first. Open one with `Enter` to inspect its full target, reason, comment and close action; one `a` in that reader approves its exact saved review and starts execution. `d` there dismisses the proposal locally. On the list, `a` reviews the selected or ticked proposals, and `A` reviews every active pending proposal, including viewed ones. The second press on a list-initiated review approves the exact set and sends each proposal through `bin/comment-plus`. The comment plan includes the observed PR head SHA and issue update time; a change stops before posting. Each proposal has a durable request ID, so a process interruption after publication can be reconciled through the saved `writes/` record without posting the comment again. A failed or uncertain close stops the remaining batch. `d` excludes a dismissed proposal from the active set while retaining its record; `v` changes presentation only.

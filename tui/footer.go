@@ -98,6 +98,8 @@ func (m model) contextFooterGroups() []footerGroup {
 		back := "back to Notifications"
 		if m.notifications.review != nil {
 			back = "back to proposal"
+		} else if m.notifications.sourceOpen {
+			back = "back to sources"
 		}
 		read := group("Item", bind("previous tab", keys.TabPrev), bind("next tab", keys.TabNext), hint{"Tab/Shift-Tab", "tabs"}, hint{"1/2/3/4", "jump to tab"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, bind("", keys.Track))
 		if it, ok := m.notificationActionItem(); ok {
@@ -141,7 +143,14 @@ func (m model) contextFooterGroups() []footerGroup {
 			if len(m.notifications.review.Plan.Proposals) == 1 {
 				proposal.hints = append(proposal.hints, hint{"w", "track comments"}, hint{"d", "dismiss"})
 			}
-			return []footerGroup{proposal, group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
+			back := "back to Notifications"
+			if m.notifications.sourceOpen {
+				back = "back to sources"
+			}
+			return []footerGroup{proposal, group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
+		}
+		if m.notifications.sourceOpen {
+			return []footerGroup{group("Source", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open"}), group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
 		}
 		if m.notifications.reviewBusy {
 			return []footerGroup{group("Notifications", hint{"", "preparing exact review…"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
@@ -151,16 +160,6 @@ func (m model) contextFooterGroups() []footerGroup {
 		if len(choices) > 0 && m.notifications.selected < len(choices) {
 			choice := choices[m.notifications.selected]
 			if choice.kind == "item" {
-				if choice.proposal >= 0 {
-					notifications.hints = append(notifications.hints, hint{"1", "proposal"})
-				}
-				notifications.hints = append(notifications.hints, hint{"2", "open item"})
-				if choice.attention >= 0 {
-					notifications.hints = append(notifications.hints, hint{"3", "activity"})
-				}
-				if choice.closure >= 0 {
-					notifications.hints = append(notifications.hints, hint{"4", "actions"})
-				}
 				if choice.tracked < 0 {
 					notifications.hints = append(notifications.hints, hint{"w", "track comments"})
 				}

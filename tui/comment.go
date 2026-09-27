@@ -120,6 +120,12 @@ func (m model) openReopen(items []Item) (tea.Model, tea.Cmd) {
 		}
 		targets = append(targets, target)
 	}
+	for _, target := range targets[1:] {
+		if target.host != targets[0].host {
+			m.warn("Selected items must be on the same GitHub host to reopen together.")
+			return m, nil
+		}
+	}
 
 	return m.openCommentComposer(targets[0], false, true, targets)
 }
@@ -316,7 +322,7 @@ func (m model) finishComment(msg commentMsg) (tea.Model, tea.Cmd) {
 				return m, readCmd
 			}
 
-			next, syncCmd := m.startRefreshItems(false, c.key)
+			next, syncCmd := m.startRefreshItemsAtHost(false, c.host, c.key)
 			updated := next.(model)
 			updated.status = "Comment published and item closed. Refreshing item and ledger…"
 			updated.refreshStatus = updated.status
@@ -325,7 +331,7 @@ func (m model) finishComment(msg commentMsg) (tea.Model, tea.Cmd) {
 		if c.close {
 			readCmd := m.refreshLiveDetail()
 
-			next, syncCmd := m.startRefreshItems(false, c.key)
+			next, syncCmd := m.startRefreshItemsAtHost(false, c.host, c.key)
 			updated := next.(model)
 			updated.status = "Comment published and item closed. Refreshing ledger…"
 			updated.refreshStatus = updated.status
@@ -435,7 +441,7 @@ func (m model) finishReopenComment(msg commentMsg) (tea.Model, tea.Cmd) {
 		}
 
 		readCmd := m.refreshNotificationItem()
-		next, syncCmd := m.startRefreshItems(false, target.key)
+		next, syncCmd := m.startRefreshItemsAtHost(false, target.host, target.key)
 		updated := next.(model)
 		updated.status = "Item reopened. Refreshing item and ledger…"
 		updated.refreshStatus = updated.status
@@ -460,7 +466,7 @@ func (m model) finishReopenComment(msg commentMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	readCmd := m.refreshLiveDetail()
-	next, syncCmd := m.startRefreshItems(false, c.completed...)
+	next, syncCmd := m.startRefreshItemsAtHost(false, target.host, c.completed...)
 	updated := next.(model)
 	updated.status = "Reopened " + pluralize(len(c.completed), "item", "items") + "; refreshing ledger…"
 	updated.refreshStatus = updated.status

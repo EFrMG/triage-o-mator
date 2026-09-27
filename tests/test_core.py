@@ -112,6 +112,29 @@ class LedgerTests(Workspace):
         self.assertEqual(self.ledger()[("issue", 1)]["state"], "closed")
         self.assertEqual(self.ledger()[("issue", 2)]["state"], "open")
 
+    def test_direct_item_read_pins_enterprise_host_for_list_and_item(self):
+        host = "ghe.example"
+        row = item(1, "Enterprise issue")
+        row["url"] = f"https://{host}/owner/repo/issues/1"
+        self.responses["repos/owner/repo/issues?state=open&per_page=100"] = dict(data=[row])
+        direct = dict(number=1, html_url="https://github.com/owner/repo/issues/1", state="open", title=row["title"], user=dict(login="author"), created_at=row["created_at"], updated_at="2026-09-27T00:00:00Z", labels=[], comments=0)
+        self.responses["repos/owner/repo/issues/1"] = dict(data=direct)
+
+        self.run_cli("fetch", "--host", host, "--include-item", "issue:1", ok=False)
+        self.assertFalse((self.root / "data/owner/repo/raw/issues_and_prs.jsonl").exists())
+
+        direct["html_url"] = row["url"]
+        self.run_cli("fetch", "--host", host, "--include-item", "issue:1")
+        self.run_cli("sync")
+        self.assertEqual(self.ledger()[("issue", 1)]["url"], row["url"])
+        self.assertEqual(json.loads((self.root / "data/owner/repo/raw/fetch_meta.json").read_text())["host"], host)
+        self.assertTrue(all("--hostname" in call and call[call.index("--hostname") + 1] == host for call in self.calls()))
+
+        calls = self.calls()
+        self.run_cli("fetch", "--host", "github.com", ok=False)
+        self.assertEqual(self.calls(), calls)
+        self.assertEqual(self.ledger()[("issue", 1)]["url"], row["url"])
+
     def test_negative_duplicate_verdict_excludes_pair(self):
         self.sync()
         before = self.json_cli("similar", "--pairs")["pairs"]

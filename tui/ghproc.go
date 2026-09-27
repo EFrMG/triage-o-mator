@@ -67,10 +67,17 @@ type fetchSyncDoneMsg struct {
 }
 
 func fetchSyncCmd(installRoot, repo string, full bool, items ...Key) tea.Cmd {
+	return fetchSyncCmdAtHost(installRoot, repo, full, "", items...)
+}
+
+func fetchSyncCmdAtHost(installRoot, repo string, full bool, host string, items ...Key) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{"--expected-repo", repo}
 		if full {
 			args = append(args, "--full")
+		}
+		if host != "" {
+			args = append(args, "--host", host)
 		}
 		for _, item := range items {
 			args = append(args, "--include-item", fmt.Sprintf("%s:%d", item.Kind, item.Number))

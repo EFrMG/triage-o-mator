@@ -601,6 +601,44 @@ else:
 	}
 }
 
+func TestClosureReviewShowsTargetAndRefreshPinsHost(t *testing.T) {
+	root := baselineRoot(t)
+	m := baselineModel(t, root)
+	target := "https://ghe.example/owner/repo/pull/3"
+	m.notifications = notificationsUI{open: true, review: &autoCloseReview{}}
+	m.notifications.review.Plan.Proposals = []autoCloseRow{{Number: 3, Title: "Enterprise PR", Target: target, Comment: "Close with explanation"}}
+	if !strings.Contains(ansi.Strip(m.autoCloseReviewView()), target) {
+		t.Fatal("closure approval did not show the exact target URL")
+	}
+
+	for name, script := range map[string]string{
+		"fetch":      "#!/usr/bin/env python3\nimport json, pathlib, sys\npathlib.Path('fetch-args.json').write_text(json.dumps(sys.argv[1:]))\n",
+		"sync":       "#!/usr/bin/env python3\nprint('{}')\n",
+		"cache":      "#!/usr/bin/env python3\nprint('{\"unread_total\":0}')\n",
+		"auto-close": "#!/usr/bin/env python3\nprint('{\"repository\":\"owner/repo\",\"requests\":0,\"rows\":[]}')\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, "bin", name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result := fetchSyncCmdAtHost(root, m.repo, false, "ghe.example", Key{Kind: "pr", Number: 3})().(fetchSyncDoneMsg)
+	if result.err != nil || result.trackingErr != nil || result.proposalErr != nil {
+		t.Fatalf("host-pinned refresh failed: %+v", result)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "fetch-args.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	if err := json.Unmarshal(data, &args); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(args, " ") != "--expected-repo owner/repo --host ghe.example --include-item pr:3" {
+		t.Fatalf("refresh used unexpected target arguments: %v", args)
+	}
+}
+
 func TestProposalReaderTracksComments(t *testing.T) {
 	root := baselineRoot(t)
 	if err := os.WriteFile(filepath.Join(root, "bin", "cache"), []byte("#!/usr/bin/env python3\nprint('{\"already_tracking\": false}')\n"), 0o755); err != nil {
@@ -655,6 +693,27 @@ print('{}')
 	}
 	if strings.Count(m.notificationsView(), "PR #3: Fixture") != 1 {
 		t.Fatal("PR appears more than once in Notifications")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "1"})
+	if m.notifications.review != nil || m.notifications.sourceOpen {
+		t.Fatal("number key unexpectedly opened a notification source")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.notifications.sourceOpen || !strings.Contains(m.notificationsView(), "Current item") {
+		t.Fatal("Enter did not open the item's source list")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "j"})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.notificationPR.open {
+		t.Fatal("source list did not open the selected item")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if !m.notifications.sourceOpen || m.notificationPR.open {
+		t.Fatal("returning from the item did not restore its source list")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.notifications.sourceOpen || !m.notifications.open {
+		t.Fatal("Esc did not return from sources to Notifications")
 	}
 
 	next, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "v"})

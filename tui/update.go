@@ -557,6 +557,10 @@ func (m model) startRefresh(full bool) (tea.Model, tea.Cmd) {
 }
 
 func (m model) startRefreshItems(full bool, items ...Key) (tea.Model, tea.Cmd) {
+	return m.startRefreshItemsAtHost(full, "", items...)
+}
+
+func (m model) startRefreshItemsAtHost(full bool, host string, items ...Key) (tea.Model, tea.Cmd) {
 	if m.corpus.busy {
 		m.status = "Wait for or cancel the corpus operation before refreshing."
 		return m, nil
@@ -573,7 +577,7 @@ func (m model) startRefreshItems(full bool, items ...Key) (tea.Model, tea.Cmd) {
 
 	m.refreshStatus = m.status
 
-	return m, fetchSyncCmd(m.installRoot, m.repo, full, items...)
+	return m, fetchSyncCmdAtHost(m.installRoot, m.repo, full, host, items...)
 }
 
 // requestQuit quits immediately if nothing would be lost, otherwise asks for a second explicit quit before discarding in-memory drafts.

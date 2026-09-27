@@ -12,23 +12,26 @@ import (
 
 // Notifications presents tracked comments and retained PR records in two sections.
 type notificationsUI struct {
-	open, busy    bool
-	tracked       *trackedPage
-	attention     *attentionPage
-	closures      *actionHistoryPage
-	proposals     autoCloseList
-	ticked        map[int]bool
-	review        *autoCloseReview
-	reviewBusy    bool
-	reviewAll     bool
-	reviewKey     string
-	reviewNumbers []int
-	reviewScroll  int
-	state         notificationState
-	selected      int
-	selectAfter   string
-	selectItem    Key
-	problem       string
+	open, busy     bool
+	sourceOpen     bool
+	sourceKey      Key
+	sourceSelected int
+	tracked        *trackedPage
+	attention      *attentionPage
+	closures       *actionHistoryPage
+	proposals      autoCloseList
+	ticked         map[int]bool
+	review         *autoCloseReview
+	reviewBusy     bool
+	reviewAll      bool
+	reviewKey      string
+	reviewNumbers  []int
+	reviewScroll   int
+	state          notificationState
+	selected       int
+	selectAfter    string
+	selectItem     Key
+	problem        string
 }
 
 type notificationState struct {
@@ -60,6 +63,10 @@ type notificationChoice struct {
 	kind                                  string
 	key                                   Key
 	proposal, tracked, attention, closure int
+}
+
+type notificationSource struct {
+	name, description, action string
 }
 
 func itemChoice(key Key) notificationChoice {
@@ -194,6 +201,15 @@ func (m model) finishAutoClose(msg autoCloseMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		reviewHost := ""
+		for _, row := range msg.review.Plan.Proposals {
+			target, err := validateCommentTarget(Item{Kind: "pr", Number: row.Number, URL: row.Target}, m.repo)
+			if err != nil || reviewHost != "" && target.host != reviewHost {
+				m.fail("PR closure targets must have valid URLs on one GitHub host.")
+				return m, nil
+			}
+			reviewHost = target.host
+		}
 		m.notifications.review = &msg.review
 		m.notifications.reviewAll = msg.all
 		m.notifications.reviewKey = "a"
@@ -211,10 +227,23 @@ func (m model) finishAutoClose(msg autoCloseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if msg.action == "execute" {
+		if m.notifications.review == nil || len(m.notifications.review.Plan.Proposals) == 0 {
+			m.fail("Approved closure targets are unavailable; refresh the ledger manually.")
+			return m.openNotifications()
+		}
+		target, err := validateCommentTarget(Item{Kind: "pr", Number: m.notifications.review.Plan.Proposals[0].Number, URL: m.notifications.review.Plan.Proposals[0].Target}, m.repo)
+		if err != nil {
+			m.fail("Approved closure host is unavailable; refresh the ledger manually.")
+			return m.openNotifications()
+		}
+		keys := make([]Key, 0, len(m.notifications.review.Plan.Proposals))
+		for _, row := range m.notifications.review.Plan.Proposals {
+			keys = append(keys, Key{Kind: "pr", Number: row.Number})
+		}
 		m.notifications.review = nil
 		m.status = "Approved PR closures completed. Refreshing ledger…"
 		next, notificationCmd := m.openNotifications()
-		updated, syncCmd := next.(model).startRefresh(false)
+		updated, syncCmd := next.(model).startRefreshItemsAtHost(false, target.host, keys...)
 		return updated, tea.Batch(notificationCmd, syncCmd)
 	}
 	return m, nil
@@ -475,6 +504,44 @@ func (n notificationsUI) choices() []notificationChoice {
 	return choices
 }
 
+func (n notificationsUI) sourceChoice() (notificationChoice, bool) {
+	for _, choice := range n.choices() {
+		if choice.kind == "item" && choice.key == n.sourceKey {
+			return choice, true
+		}
+	}
+
+	return notificationChoice{}, false
+}
+
+func (n notificationsUI) sources(choice notificationChoice) []notificationSource {
+	var sources []notificationSource
+	if choice.proposal >= 0 {
+		sources = append(sources, notificationSource{name: "Closure proposal", description: "Read the proposed comment and rationale", action: "proposal"})
+	}
+	sources = append(sources, notificationSource{name: "Current item", description: "Read the current issue or PR from GitHub", action: "item"})
+	if choice.attention >= 0 {
+		sources = append(sources, notificationSource{name: "Retained activity", description: "Read saved watch activity offline", action: "watch"})
+	}
+	if choice.closure >= 0 {
+		sources = append(sources, notificationSource{name: "Imported actions", description: "Read saved closure history offline", action: "action"})
+	}
+
+	return sources
+}
+
+func (m model) openNotificationSources(choice notificationChoice) (tea.Model, tea.Cmd) {
+	sources := m.notifications.sources(choice)
+	if len(sources) == 1 {
+		return m.openNotificationSource(choice, sources[0].action)
+	}
+	m.notifications.sourceOpen = true
+	m.notifications.sourceKey = choice.key
+	m.notifications.sourceSelected = 0
+
+	return m, nil
+}
+
 func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.notifications.review != nil {
 		switch msg.String() {
@@ -563,6 +630,32 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			m.notifications.reviewScroll += maxInt(m.mainHeight()/2, 1)
 		case "ctrl+u":
 			m.notifications.reviewScroll = maxInt(0, m.notifications.reviewScroll-maxInt(m.mainHeight()/2, 1))
+		}
+		return m, nil
+	}
+	if m.notifications.sourceOpen {
+		choice, ok := m.notifications.sourceChoice()
+		if !ok {
+			m.notifications.sourceOpen = false
+			m.warn("Notification item changed; select it again.")
+			return m, nil
+		}
+		sources := m.notifications.sources(choice)
+		switch msg.String() {
+		case "?":
+			m.showHelp = !m.showHelp
+		case "q":
+			m.notificationsLifecycle.stop()
+			m.notificationsGeneration++
+			return m.requestQuit()
+		case "esc", "h", "left":
+			m.notifications.sourceOpen = false
+		case "j", "down", "tab":
+			m.notifications.sourceSelected = (m.notifications.sourceSelected + 1) % len(sources)
+		case "k", "up", "shift+tab":
+			m.notifications.sourceSelected = (m.notifications.sourceSelected - 1 + len(sources)) % len(sources)
+		case "enter", "l", "right":
+			return m.openNotificationSource(choice, sources[m.notifications.sourceSelected].action)
 		}
 		return m, nil
 	}
@@ -663,7 +756,7 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		choice := choices[m.notifications.selected]
 		switch choice.kind {
 		case "item":
-			return m.openNotificationSource(choice, "default")
+			return m.openNotificationSources(choice)
 		case "tracked-more":
 			return m.pageNotifications("tracked", *m.notifications.tracked.Next)
 		case "tracked-prev":
@@ -676,11 +769,6 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m.pageNotifications("closure", *m.notifications.closures.Pagination.Next)
 		case "closure-prev":
 			return m.pageNotifications("closure", maxInt(0, m.notifications.closures.Pagination.Offset-notificationsPageSize))
-		}
-	case "1", "2", "3", "4":
-		if len(choices) > 0 {
-			source := map[string]string{"1": "proposal", "2": "PR", "3": "watch", "4": "action"}[msg.String()]
-			return m.openNotificationSource(choices[m.notifications.selected], source)
 		}
 	}
 	return m, nil
@@ -718,6 +806,9 @@ func (m model) notificationsView() string {
 	n := m.notifications
 	if n.review != nil {
 		return m.autoCloseReviewView()
+	}
+	if n.sourceOpen {
+		return m.notificationSourcesView()
 	}
 	if n.tracked == nil {
 		n.tracked = &trackedPage{}
@@ -780,6 +871,20 @@ func (m model) notificationsView() string {
 	return vp.View()
 }
 
+func (m model) notificationSourcesView() string {
+	choice, ok := m.notifications.sourceChoice()
+	if !ok {
+		return inset(titleBar("Notification item changed", m.repo, m.menuWidth())) + "\n\n" + inset("Press Esc and select the item again.")
+	}
+	sources := m.notifications.sources(choice)
+	cards := make([][2]string, 0, len(sources))
+	for _, source := range sources {
+		cards = append(cards, [2]string{source.name, source.description})
+	}
+	heading := fmt.Sprintf("%s #%d", strings.ToUpper(choice.key.Kind), choice.key.Number)
+	return inset(titleBar(heading, "Choose what to open", m.menuWidth())) + "\n\n" + cardList(cards, m.notifications.sourceSelected, m.cardWidth(), m.mainHeight()-2)
+}
+
 func (m model) autoCloseReviewView() string {
 	n := m.notifications
 	var b strings.Builder
@@ -804,7 +909,7 @@ func (m model) autoCloseReviewView() string {
 		}
 		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Proposed action")))
 		fmt.Fprintf(&b, "%s\n", inset(action.Render("Publish the comment below, then close this PR.")))
-		fmt.Fprintf(&b, "%s\n", inset(muted.Render("Repository: "+m.repo)))
+		fmt.Fprintf(&b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), textWidth)))
 		if row.Reference != nil {
 			fmt.Fprintf(&b, "%s\n", inset(muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))
 		}

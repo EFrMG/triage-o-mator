@@ -91,17 +91,6 @@ func (m model) openNotificationSource(choice notificationChoice, source string) 
 	if choice.kind != "item" {
 		return m, nil
 	}
-	if source == "default" {
-		source = "PR"
-		switch {
-		case choice.proposal >= 0:
-			source = "proposal"
-		case choice.attention >= 0:
-			source = "watch"
-		case choice.closure >= 0:
-			source = "action"
-		}
-	}
 	switch source {
 	case "proposal":
 		if choice.proposal >= 0 {
@@ -112,7 +101,7 @@ func (m model) openNotificationSource(choice notificationChoice, source string) 
 			m.notifications.reviewKey = ""
 			m.notifications.reviewScroll = 0
 		}
-	case "PR":
+	case "item":
 		return m.openNotificationItem(choice.key)
 	case "watch":
 		if choice.attention >= 0 {
@@ -120,6 +109,7 @@ func (m model) openNotificationSource(choice notificationChoice, source string) 
 			if row.Selectable {
 				return m.readAttention(attentionLocation{section: "history", number: row.Number, checkpoint: row.WatchCheckpoint})
 			}
+			m.warn("Retained activity is unavailable; inspect its saved record.")
 		}
 	case "action":
 		if choice.closure >= 0 {
@@ -127,6 +117,7 @@ func (m model) openNotificationSource(choice notificationChoice, source string) 
 			if row.Selectable {
 				return m.readActionHistory(actionHistoryLocation{section: "entries", number: row.Number, checkpoint: row.HistoryCheckpoint})
 			}
+			m.warn("Imported actions are unavailable; inspect their saved record.")
 		}
 	}
 	return m, nil

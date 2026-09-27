@@ -3,18 +3,19 @@
 Fetch issues and PRs from GitHub into data/<owner>/<repo>/raw/ (a disposable cache, never git-tracked, safe to delete and re-run any time).
 
 Usage:
-    bin/fetch [--full] [--include-item issue:N|pr:N]
+    bin/fetch [--full] [--host HOST] [--include-item issue:N|pr:N]
 
 By default this is incremental: it asks GitHub only for items updated since the last fetch bin/sync consumed (open or closed, since closing or merging an item counts as an update), which is a page or two instead of the whole backlog. It falls back to a full fetch of every open item when there is no previous synced fetch, the repo in config/repo changed, the last full fetch is more than a day old, or --full is passed.
 
 The one thing an incremental fetch cannot see is an item that was deleted or transferred to another repo: it simply stops appearing, so it stays open in the ledger until the next full fetch, which is what marks vanished items closed. That is why full fetches still happen at least daily.
 
-This is read-only against GitHub. It retains list bodies but not PR detail or discussion. --include-item reads selected items directly after the list and lets those observations override lagging list rows. --cache-inventory captures verified provenance and imports list summaries for offline use.
+This is read-only against GitHub. It retains list bodies but not PR detail or discussion. --include-item reads selected items directly from the selected host after the list and lets those observations override lagging list rows. --cache-inventory captures verified provenance and imports list summaries for offline use.
 """
 
 import argparse
 import hashlib
 import json
+import os
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -52,13 +53,16 @@ def load_meta():
         return {}
 
 
-def full_fetch_reason(meta, forced):
+def full_fetch_reason(meta, forced, host):
     """Why this fetch must be full, or None if an incremental fetch is safe."""
     if forced:
         return "--full requested"
 
     if meta.get("repo") != REPO:
         return "no previous fetch for this repo"
+
+    if meta.get("host") != host:
+        return "no previous fetch for this host"
 
     if not meta.get("synced_through") or not meta.get("last_full_at"):
         return "no previous synced fetch"
@@ -78,7 +82,7 @@ def main():
     ap.add_argument("--expected-repo", help="refuse if the configured repository changed")
     ap.add_argument("--json", action="store_true", help="emit the inventory import result on stdout")
     ap.add_argument("--cache-inventory", action="store_true", help="capture versioned inventory and import partial summaries into the evidence cache")
-    ap.add_argument("--host", default="github.com", help="explicit host for --cache-inventory")
+    ap.add_argument("--host", help="explicit GitHub host (ordinary fetch defaults to GH_HOST or github.com; cache inventory defaults to github.com)")
     ap.add_argument("--request-budget", type=int, default=100, help="request budget for --cache-inventory, including repository verification")
     ap.add_argument("--include-item", action="append", default=[], help="also read this issue or PR directly after the list fetch (kind:number); repeat for approved state changes")
     args = ap.parse_args()
@@ -87,8 +91,8 @@ def main():
 
     if args.json and not args.cache_inventory:
         ap.error("--json requires --cache-inventory")
-    if not args.cache_inventory and (args.host != "github.com" or args.request_budget != 100):
-        ap.error("--host and --request-budget require --cache-inventory")
+    if not args.cache_inventory and args.request_budget != 100:
+        ap.error("--request-budget requires --cache-inventory")
     if args.cache_inventory and args.include_item:
         ap.error("--include-item cannot be combined with --cache-inventory")
 
@@ -100,34 +104,41 @@ def main():
 
         items.append((kind, int(number)))
     args.include_item = list(dict.fromkeys(items))
+    host = args.host or ("github.com" if args.cache_inventory else os.environ.get("GH_HOST") or "github.com")
+
+    from _evidence import repository
+
+    repository(REPO, host=host)
 
     # Serialize acquisition with sync, but never hold the ledger lock during GitHub requests.
     with locked(META_PATH):
         if args.cache_inventory:
             from _cache import EvidenceCache
-            from _evidence import repository
 
-            cache = EvidenceCache(repository(REPO, host=args.host))
+            cache = EvidenceCache(repository(REPO, host=host))
             cache.initialize()
             with locked(cache.path("acquisition")):
-                fetch(args, cache)
+                fetch(args, host, cache)
         else:
-            fetch(args)
+            fetch(args, host)
 
 
-def fetch(args, cache=None):
+def fetch(args, host, cache=None):
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     meta = load_meta()
+    if meta.get("repo") == REPO and meta.get("host") and meta["host"] != host:
+        raise ValueError("this repository's ledger was fetched from another host; use a separate install for a different host")
+
     if "inventory" in meta:
         from _evidence import version
 
         version(meta["inventory"], "inventory-observation")
-        if not cache and meta["inventory"]["repository"]["host"] != "github.com":
-            raise ValueError("this inventory uses an explicit non-default host; continue with --cache-inventory --host HOST")
+        if not cache and meta["inventory"]["repository"]["host"] != host:
+            raise ValueError("the previous inventory belongs to another host; continue with --cache-inventory --host HOST")
 
     started = now_iso()
-    reason = full_fetch_reason(meta, args.full)
-    if cache and (meta.get("inventory") or {}).get("repository", {}).get("host") != args.host:
+    reason = full_fetch_reason(meta, args.full, host)
+    if cache and (meta.get("inventory") or {}).get("repository", {}).get("host") != host:
         reason = "no previous verified inventory for this host"
 
     if reason:
@@ -147,15 +158,18 @@ def fetch(args, cache=None):
         rows, observation = capture(cache, endpoint, args.request_budget)
         lines = [json.dumps(row, ensure_ascii=False) for row in rows]
     else:
-        stdout = run_gh(["api", "--paginate", endpoint, "--jq", JQ_FILTER])
+        gh_args = ["api", "--paginate", endpoint, "--jq", JQ_FILTER]
+        if args.host:
+            gh_args.extend(["--hostname", host])
+        stdout = run_gh(gh_args)
         lines = [l for l in stdout.splitlines() if l.strip()]
 
     if args.include_item:
-        reader = GitHubReader("github.com", budget=len(args.include_item))
+        reader = GitHubReader(host, budget=len(args.include_item))
         by_key = {(row["kind"], row["number"]): row for row in map(json.loads, lines)}
         for kind, number in args.include_item:
             item, _ = reader.get(f"repos/{REPO}/issues/{number}")
-            expected_url = f"https://github.com/{REPO}/{'pull' if kind == 'pr' else 'issues'}/{number}"
+            expected_url = f"https://{host}/{REPO}/{'pull' if kind == 'pr' else 'issues'}/{number}"
             if not isinstance(item, dict) or item.get("number") != number or item.get("html_url") != expected_url or ("pull_request" in item) != (kind == "pr") or item.get("state") not in ("open", "closed"):
                 raise ValueError(f"direct item read differs from {kind}:{number}; raw fetch was not published")
 
@@ -186,7 +200,7 @@ def fetch(args, cache=None):
         meta = {}
 
     # fetch_id tells fetches apart even within the same second; bin/sync copies it to synced_fetch_id once it has merged this fetch.
-    meta.update({"repo": REPO, "fetch_id": uuid.uuid4().hex, "fetched_at": started, "mode": mode, "since": since, "issues": issues, "prs": prs, "raw_sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest()})
+    meta.update({"repo": REPO, "host": host, "fetch_id": uuid.uuid4().hex, "fetched_at": started, "mode": mode, "since": since, "issues": issues, "prs": prs, "raw_sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest()})
     meta.pop("inventory", None)
     if observation:
         from _inventory import prepare

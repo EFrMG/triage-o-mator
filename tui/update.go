@@ -1008,10 +1008,21 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case onChoice && key.Matches(msg, keys.ValuePrev):
 		m.form.CycleValue(-1)
 	case key.Matches(msg, keys.TabNext):
+		if m.form.focused != fieldContent && !m.detail.AnySectionFull() {
+			return m, nil
+		}
+		if m.sideBySide() && m.detail.active == len(m.detail.sections)-1 {
+			m.form.FocusField(fieldCategory)
+			return m, nil
+		}
 		m.detail.CycleSection(1)
 
 		return m, m.diffIfNeeded()
 	case key.Matches(msg, keys.TabPrev):
+		if m.form.focused != fieldContent && !m.detail.AnySectionFull() {
+			m.form.FocusField(fieldContent)
+			return m, nil
+		}
 		m.detail.CycleSection(-1)
 
 		return m, m.diffIfNeeded()

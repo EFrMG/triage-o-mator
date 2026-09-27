@@ -11,7 +11,7 @@ import (
 )
 
 // formField indexes the Tab-cycle stops within the detail panel: the enrichment content (Body/Comments/Diff, owned by detailModel) plus the four decision fields.
-// fieldContent is the default on selecting an item, so Enter / Shift-H / Shift-L / j / k / gg / G immediately act on the content sections rather than being swallowed by the category picker.
+// fieldContent is the default on selecting an item, so Enter / H / L / j / k / gg / G immediately act on the content sections rather than being swallowed by the category picker.
 type formField int
 
 const (

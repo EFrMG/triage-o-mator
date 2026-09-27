@@ -91,7 +91,7 @@ var keys = keyMap{
 	Quit:        key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	// ForceQuit always exits immediately, even while typing or mid-confirmation; q is just a letter in a text field, so Quit alone must not be the only way out.
 	ForceQuit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("Ctrl-C", "force quit")),
-	// Back is Esc or h (or ←, as → opens). Not Ctrl-H: some terminals send it for Backspace, and inside a text field it deletes a character. Text fields take their keys before these, so ← and → still move the cursor there.
+	// Back is Esc or h (or ←, as → opens). Uppercase H and L move through item tabs. Text fields take their keys first, so printable characters stay editable there.
 	Back: key.NewBinding(key.WithKeys("esc", "h", "left"), key.WithHelp("Esc/h", "back")),
 
 	Up:             key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k", "up")),
@@ -103,7 +103,7 @@ var keys = keyMap{
 	Enter:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("Enter", "open")),
 	Forward:        key.NewBinding(key.WithKeys("l", "right"), key.WithHelp("l", "open")),
 	TabPrev:        key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "previous tab")),
-	TabNext:        key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "next tab")),
+	TabNext:        key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "next tab or form")),
 	TabJump:        key.NewBinding(key.WithKeys("1", "2", "3", "4"), key.WithHelp("1/2/3/4", "jump to tab")),
 	Tick:           key.NewBinding(key.WithKeys("space"), key.WithHelp("Space", "tick")),
 	Search:         key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),

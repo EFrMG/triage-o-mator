@@ -21,13 +21,13 @@ Printable keys remain text while editing a text field. Destructive actions and b
 
 **Navigation**
 
-| key                                   | meaning                                                            |
-| ------------------------------------- | ------------------------------------------------------------------ |
-| `j` `k` / `g` `G` / `Ctrl-D` `Ctrl-U` | down, up / top, bottom / half page; `g` is never anything else     |
-| `Enter`                               | open or activate the selection                                     |
-| `h` / `l` (or `←` / `→`)              | back / open; in an item, between its content and the decision form |
-| `H` `L`, `1`–`4`                      | previous / next tab in the item view; jump to a tab by number      |
-| `Space`                               | tick an item for a bulk action, in every list                      |
+| key                                   | meaning                                                                                                                                      |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `j` `k` / `g` `G` / `Ctrl-D` `Ctrl-U` | down, up / top, bottom / half page; `g` is never anything else                                                                               |
+| `Enter`                               | open or activate the selection                                                                                                               |
+| `h` / `l` (or `←` / `→`)              | back / open; in an item, between its content and the decision form                                                                           |
+| `H` / `L`, `1`–`4`                    | previous / next tab in the item view; `L` enters a form on the right after the last tab, and `H` returns to the tab; jump to a tab by number |
+| `Space`                               | tick an item for a bulk action, in every list                                                                                                |
 
 **Untriaged list**
 
@@ -97,6 +97,8 @@ Press `w` on an issue or PR in a list or item view to track its comments. The ap
 Pending PR closure proposals appear first in Needs attention. On a card, `Enter`, `l` or `→` opens its proposal when present, then its retained activity or imported actions, then the current item. To open a specific source, press `1` for the proposal, `2` for the current issue or PR, `3` for retained activity, or `4` for imported actions; the footer shows available sources. In a proposal reader, one `a` approves the displayed proposal and starts execution after its exact saved review is checked; `d` dismisses that item's local sources. A completed closure proposal leaves Notifications while its saved proposal record remains available for audit; a separately tracked PR keeps its comment-tracking card. Uncertain closure outcomes stay visible for inspection. Press `w` on an item or its opened PR to track comments; repeating `w` keeps the existing comment baseline. The reader scrolls with `j`/`k` or `Ctrl-D`/`Ctrl-U`. `Enter` or `l` there opens the current PR on its Body tab, and `Esc` or `h` returns to the proposal. To handle several proposals, press `Space` on their cards to tick them, then `a` to open their exact review, or `A` to review every active pending proposal, including viewed ones. Read each proposal and press the same key again to approve the set. `Esc` cancels preparation or review. Execution stops on the first uncertain outcome and retains separate comment and close results. Viewing a proposal does not approve it; dismissing one excludes it from `A`. `q` quits the reader.
 
 The menu also shows retained PR activity and imported action history. Use `j`/`k` or `Tab` to select and `Enter`, `l` or `→` to open a PR's saved activity. `Esc` or `h` goes back. Previous/More cards page within the current menu. Opening Notifications preserves decision drafts. The separate retained PR activity reader does not cover closed issues.
+
+In an issue or PR opened from Notifications, `Tab` / `Shift-Tab` also moves between item tabs.
 
 The second screen groups the saved comments or closure explanations for that PR. Each card carries a bounded excerpt. `Enter`, `l` or `→` on a comment or explanation opens the PR item with a fresh GitHub read in the existing item view. `Esc` or `h` returns to the selected card. Select a labeled Previous/More card and press `Enter` to page. The retained card and refreshed PR details can describe different moments. `Ctrl-D`/`Ctrl-U` scrolls, `?` toggles help, and `q` quits with the usual draft confirmation.
 

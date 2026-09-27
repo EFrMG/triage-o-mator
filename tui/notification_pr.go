@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -60,6 +61,15 @@ func (m model) finishNotificationPREvidence(msg evidenceReadMsg) (tea.Model, tea
 }
 
 func (m model) handleNotificationPRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if key.Matches(msg, keys.TabPrev) {
+		m.detail.CycleSection(-1)
+		return m, nil
+	}
+	if key.Matches(msg, keys.TabNext) {
+		m.detail.CycleSection(1)
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "esc", "h", "left":
 		m.evidenceLifecycle.stop()
@@ -74,7 +84,7 @@ func (m model) handleNotificationPRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		m.showHelp = !m.showHelp
 	case "w":
 		return m.startTracking(m.notificationPR.key)
-	case "tab", "l", "right":
+	case "tab", "right":
 		m.detail.CycleSection(1)
 	case "shift+tab":
 		m.detail.CycleSection(-1)

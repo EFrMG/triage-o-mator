@@ -99,7 +99,7 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.notifications.review != nil {
 			back = "back to proposal"
 		}
-		return []footerGroup{group("PR", hint{"Tab/1/2/3/4", "tabs"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, hint{"w", "track comments"}), group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
+		return []footerGroup{group("PR", bind("previous tab", keys.TabPrev), bind("next tab", keys.TabNext), hint{"Tab/Shift-Tab", "tabs"}, hint{"1/2/3/4", "jump to tab"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, hint{"w", "track comments"}), group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
 	case m.attention.open:
 		return []footerGroup{group("Comments", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
 	case m.actionHistory.open:
@@ -249,7 +249,11 @@ func (m model) contextFooterGroups() []footerGroup {
 
 func (m model) itemFooter() []footerGroup {
 	item := group("Item", bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Approve), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Close, keys.CloseEditor), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Yank))
-	read := group("Read", bind("tabs", keys.TabPrev, keys.TabNext), bind("", keys.TabJump), bind("expand", keys.Enter), bind("scroll", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("page", keys.HalfDown, keys.HalfUp))
+	tabAction := "tabs"
+	if m.sideBySide() {
+		tabAction = "tabs / form"
+	}
+	read := group("Read", bind(tabAction, keys.TabPrev, keys.TabNext), bind("", keys.TabJump), bind("expand", keys.Enter), bind("scroll", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("page", keys.HalfDown, keys.HalfUp))
 	if m.detail.AnySectionFull() {
 		return []footerGroup{item, read, m.menusGroup(), m.navigationGroup()}
 	}
@@ -261,7 +265,7 @@ func (m model) itemFooter() []footerGroup {
 	fields := group("Fields", bind("fields", keys.FieldNext, keys.FieldPrev), hint{"h/l", "content / form"})
 	if formFieldIsEnum(m.form.focused) {
 		fields = group("Fields", bind("fields", keys.FieldNext, keys.FieldPrev, keys.ChoiceNext, keys.ChoicePrev), hint{"h", "content"}, bind("change", keys.ValueNext, keys.ValuePrev), bind("", keys.OpenList), bind("next", keys.Confirm))
-		read = group("Read", bind("tabs", keys.TabPrev, keys.TabNext), bind("", keys.TabJump))
+		read = group("Read", bind("focus tab", keys.TabPrev), bind("", keys.TabJump))
 	}
 
 	return []footerGroup{item, fields, read, m.menusGroup(), m.navigationGroup()}

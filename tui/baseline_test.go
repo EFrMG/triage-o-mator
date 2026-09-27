@@ -185,6 +185,81 @@ func TestBaselineErrorShortcutMatchesFooterAcrossViews(t *testing.T) {
 	}
 }
 
+func TestBaselineNotificationItemTabNavigation(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	m.notifications.open = true
+	next, _ := m.openNotificationItemAt(Key{Kind: "pr", Number: 3}, 1)
+	m = next.(model)
+	if !m.notificationPR.open || m.detail.active != 1 || len(m.detail.sections) != 3 {
+		t.Fatal("notification PR did not open on its comments tab")
+	}
+
+	for _, step := range []struct {
+		key  tea.KeyPressMsg
+		want int
+	}{
+		{tea.KeyPressMsg{Text: "L"}, 2},
+		{tea.KeyPressMsg{Text: "H"}, 1},
+		{tea.KeyPressMsg{Text: "H"}, 0},
+		{tea.KeyPressMsg{Code: tea.KeyTab}, 1},
+		{tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, 0},
+		{tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}, 0},
+	} {
+		m = baselineSend(m, step.key)
+		if m.detail.active != step.want {
+			t.Fatalf("%q selected tab %d, want %d", step.key.String(), m.detail.active, step.want)
+		}
+	}
+
+	for _, click := range []struct {
+		label string
+		x     int
+		want  int
+	}{
+		{"L", 0, 1},
+		{"H", 0, 0},
+	} {
+		key := mouseHintActionAt(click.label, click.x)
+		next, _ := m.mousePress(key)
+		m = next.(model)
+		if m.detail.active != click.want {
+			t.Fatalf("footer %q selected tab %d, want %d", key, m.detail.active, click.want)
+		}
+	}
+
+	m = baselineSend(m, tea.KeyPressMsg{Text: "h"})
+	if m.notificationPR.open {
+		t.Fatal("h did not return from the notification item")
+	}
+}
+
+func TestBaselineItemTabsLeadIntoForm(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	m.activateTab(untriagedTab)
+	m.selectCurrentListItem()
+	if !m.sideBySide() || m.form.focused != fieldContent || len(m.detail.sections) != 2 {
+		t.Fatal("item did not open with tabs beside its form")
+	}
+
+	m = baselineSend(m, tea.KeyPressMsg{Text: "L"})
+	if m.detail.active != 1 || m.form.focused != fieldContent {
+		t.Fatal("L did not select the last tab")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "L"})
+	if m.detail.active != 1 || m.form.focused != fieldCategory {
+		t.Fatal("L on the last tab did not focus the form")
+	}
+	m.form.FocusField(fieldAction)
+	m = baselineSend(m, tea.KeyPressMsg{Text: "H"})
+	if m.detail.active != 1 || m.form.focused != fieldContent {
+		t.Fatal("H in the form did not return focus to the active tab")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "H"})
+	if m.detail.active != 0 || m.form.focused != fieldContent {
+		t.Fatal("H did not select the previous tab")
+	}
+}
+
 func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 	for _, approve := range []bool{false, true} {
 		t.Run(map[bool]string{false: "proposal", true: "approval"}[approve], func(t *testing.T) {

@@ -199,7 +199,10 @@ func mouseHintActionAt(label string, x int) string {
 	if chosen == "Shift-Tab" {
 		return "shift+tab"
 	}
-	if len(chosen) == 1 || chosen == "Enter" || chosen == "Esc" || chosen == "Tab" {
+	if len(chosen) == 1 {
+		return chosen
+	}
+	if chosen == "Enter" || chosen == "Esc" || chosen == "Tab" {
 		return strings.ToLower(chosen)
 	}
 	return ""

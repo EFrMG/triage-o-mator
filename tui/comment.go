@@ -502,7 +502,7 @@ func (m model) commentHeader(width int) string {
 			heading = "Preview closure"
 		}
 		if m.comment.reopen {
-			heading = "Review reopening"
+			heading = "Preview opening"
 		}
 	}
 

@@ -99,7 +99,16 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.notifications.review != nil {
 			back = "back to proposal"
 		}
-		return []footerGroup{group("PR", bind("previous tab", keys.TabPrev), bind("next tab", keys.TabNext), hint{"Tab/Shift-Tab", "tabs"}, hint{"1/2/3/4", "jump to tab"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, hint{"w", "track comments"}), group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
+		read := group("Item", bind("previous tab", keys.TabPrev), bind("next tab", keys.TabNext), hint{"Tab/Shift-Tab", "tabs"}, hint{"1/2/3/4", "jump to tab"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, bind("", keys.Track))
+		if it, ok := m.notificationActionItem(); ok {
+			read.hints = append(read.hints, bind("", keys.Comment, keys.CommentEditor))
+			if it.State == "open" {
+				read.hints = append(read.hints, bind("", keys.Close, keys.CloseEditor))
+			} else {
+				read.hints = append(read.hints, bind("", keys.Reopen, keys.ReopenEditor))
+			}
+		}
+		return []footerGroup{read, group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
 	case m.attention.open:
 		return []footerGroup{group("Comments", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
 	case m.actionHistory.open:

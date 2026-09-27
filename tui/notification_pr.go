@@ -60,6 +60,57 @@ func (m model) finishNotificationPREvidence(msg evidenceReadMsg) (tea.Model, tea
 	return m, nil
 }
 
+// notificationActionItem uses only the selected fresh read for a comment target; the notification card and ledger may describe older or missing items.
+func (m model) notificationActionItem() (Item, bool) {
+	if !m.notificationPR.open || m.detail.key != m.notificationPR.key || m.detail.loading || m.detail.loadErr != nil || m.detail.enriched.Evidence == nil || m.detail.enriched.Evidence.Mode != "refresh" {
+		return Item{}, false
+	}
+
+	it := m.detail.item
+	if it.Key() != m.notificationPR.key || (it.State != "open" && it.State != "closed") {
+		return Item{}, false
+	}
+
+	target, err := validateCommentTarget(it, m.repo)
+	return it, err == nil && target.host == evidenceHost
+}
+
+func (m *model) refreshNotificationItem() tea.Cmd {
+	if !m.notificationPR.open || m.detail.key != m.notificationPR.key {
+		return nil
+	}
+
+	m.evidenceLifecycle.stop()
+	m.evidenceLifecycle.current = &readProcess{}
+	m.evidenceRequest++
+	m.detail.loading = true
+	m.detail.loadErr = nil
+	return evidenceReadCmd(m.installRoot, m.repo, m.notificationPR.key, "refresh", m.evidenceRequest, m.detail.generation, m.evidenceLifecycle.current)
+}
+
+func (m model) openNotificationCommentAction(action string) (tea.Model, tea.Cmd) {
+	it, ok := m.notificationActionItem()
+	if !ok {
+		m.warn("Current item details are unavailable. Reopen the item after it loads.")
+		return m, nil
+	}
+
+	var next tea.Model
+	var cmd tea.Cmd
+	if action == "v" || action == "V" {
+		next, cmd = m.openReopen([]Item{it})
+	} else {
+		next, cmd = m.openCommentForItem(it, action == "x" || action == "X")
+	}
+
+	m = next.(model)
+	if !m.comment.open || action != "C" && action != "X" && action != "V" {
+		return m, cmd
+	}
+
+	return m.startCommentEditor()
+}
+
 func (m model) handleNotificationPRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, keys.TabPrev) {
 		m.detail.CycleSection(-1)
@@ -84,6 +135,8 @@ func (m model) handleNotificationPRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		m.showHelp = !m.showHelp
 	case "w":
 		return m.startTracking(m.notificationPR.key)
+	case "c", "C", "v", "V", "x", "X":
+		return m.openNotificationCommentAction(msg.String())
 	case "tab", "right":
 		m.detail.CycleSection(1)
 	case "shift+tab":

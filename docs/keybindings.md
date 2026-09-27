@@ -100,6 +100,8 @@ The menu also shows retained PR activity and imported action history. Use `j`/`k
 
 In an issue or PR opened from Notifications, `Tab` / `Shift-Tab` also moves between item tabs.
 
+After the current item loads, `c` comments, `x` closes with a comment when it is open, and `v` reopens with a comment when it is closed. `C`, `X` and `V` use `$EDITOR` for the same actions. Each action uses the normal comment preview and requires approval of the exact target, text and state change before publishing. The item reader refreshes after publication.
+
 The second screen groups the saved comments or closure explanations for that PR. Each card carries a bounded excerpt. `Enter`, `l` or `→` on a comment or explanation opens the PR item with a fresh GitHub read in the existing item view. `Esc` or `h` returns to the selected card. Select a labeled Previous/More card and press `Enter` to page. The retained card and refreshed PR details can describe different moments. `Ctrl-D`/`Ctrl-U` scrolls, `?` toggles help, and `q` quits with the usual draft confirmation.
 
 Full source text, original and conflicting revisions and watch context remain available through the [offline readers](appeal-evidence.md#needs-attention-bounded-offline-readers). Reading never acknowledges activity or approves a decision.

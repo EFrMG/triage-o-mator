@@ -60,6 +60,10 @@ func (m model) openCommentFor(close bool) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	return m.openCommentForItem(it, close)
+}
+
+func (m model) openCommentForItem(it Item, close bool) (tea.Model, tea.Cmd) {
 	if close && it.State != "open" {
 		m.warn("Only an open item can be closed.")
 		return m, nil
@@ -305,6 +309,19 @@ func (m model) finishComment(msg commentMsg) (tea.Model, tea.Cmd) {
 
 		delete(m.detail.cache, c.key)
 		m.status = "Comment published."
+		if m.notificationPR.open && m.notificationPR.key == c.key {
+			readCmd := m.refreshNotificationItem()
+			if !c.close {
+				m.status = "Comment published. Refreshing item details…"
+				return m, readCmd
+			}
+
+			next, syncCmd := m.startRefresh(false)
+			updated := next.(model)
+			updated.status = "Comment published and item closed. Refreshing item and ledger…"
+			updated.refreshStatus = updated.status
+			return updated, tea.Batch(readCmd, syncCmd)
+		}
 		if c.close {
 			// The script confirmed the PATCH. Reflect that result in this view while fetch/sync updates the ledger in the background.
 			for i := range m.items {
@@ -418,6 +435,24 @@ func (m model) finishReopenComment(msg commentMsg) (tea.Model, tea.Cmd) {
 	}
 
 	c.completed = append(c.completed, target.key)
+	if m.notificationPR.open && m.notificationPR.key == target.key {
+		c.index++
+		c.open = false
+		m.clearTicks()
+		for i, section := range m.detail.sections {
+			if section.kind == commentsSection {
+				m.detail.JumpSection(i)
+				break
+			}
+		}
+
+		readCmd := m.refreshNotificationItem()
+		next, syncCmd := m.startRefresh(false)
+		updated := next.(model)
+		updated.status = "Item reopened. Refreshing item and ledger…"
+		updated.refreshStatus = updated.status
+		return updated, tea.Batch(readCmd, syncCmd)
+	}
 	for i := range m.items {
 		if m.items[i].Key() == target.key {
 			m.items[i].State = "open"

@@ -260,6 +260,88 @@ func TestBaselineItemTabsLeadIntoForm(t *testing.T) {
 	}
 }
 
+func TestBaselineNotificationItemCommentActions(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	m.notifications.open = true
+	key := Key{Kind: "issue", Number: 9}
+	next, _ := m.openNotificationItem(key)
+	m = next.(model)
+	if _, found := m.findItem(key); found {
+		t.Fatal("fixture item unexpectedly exists in the ledger")
+	}
+
+	m = baselineSend(m, tea.KeyPressMsg{Text: "c"})
+	if m.comment.open {
+		t.Fatal("comment opened before the item read completed")
+	}
+
+	read := func(state, url string) {
+		m = baselineSend(m, evidenceReadMsg{root: m.installRoot, repo: m.repo, key: key, request: m.evidenceRequest, generation: m.detail.generation, data: EnrichedItem{Kind: key.Kind, Number: key.Number, State: state, URL: url, Evidence: &batchEvidence{Mode: "refresh"}}})
+	}
+	read("open", "https://elsewhere.example/owner/repo/issues/9")
+	m = baselineSend(m, tea.KeyPressMsg{Text: "c"})
+	if m.comment.open {
+		t.Fatal("comment opened for a URL outside the pinned host")
+	}
+
+	read("open", "https://github.com/owner/repo/issues/9")
+	for _, action := range []struct {
+		key   string
+		close bool
+	}{
+		{"c", false},
+		{"x", true},
+	} {
+		m = baselineSend(m, tea.KeyPressMsg{Text: action.key})
+		if !m.comment.open || m.comment.close != action.close || m.comment.target != "https://github.com/owner/repo/issues/9" {
+			t.Fatalf("%s did not open the approved comment composer for the selected item", action.key)
+		}
+		m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	}
+
+	m = baselineSend(m, tea.KeyPressMsg{Text: "v"})
+	if m.comment.open {
+		t.Fatal("reopen composer opened for an open item")
+	}
+
+	m.refreshNotificationItem()
+	read("closed", "https://github.com/owner/repo/issues/9")
+	m = baselineSend(m, tea.KeyPressMsg{Text: "v"})
+	if !m.comment.open || !m.comment.reopen || len(m.comment.targets) != 1 || m.comment.targets[0].key != key {
+		t.Fatal("reopen composer did not target the closed notification item")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+
+	m.refreshNotificationItem()
+	read("open", "https://github.com/owner/repo/issues/9")
+	m = baselineSend(m, tea.KeyPressMsg{Text: "c"})
+	request := m.evidenceRequest
+	out := `{"comment":{"status":"succeeded","url":"https://github.com/owner/repo/issues/9#issuecomment-1"}}`
+	m = baselineSend(m, commentMsg{root: m.installRoot, repo: m.repo, publish: true, out: out})
+	if m.comment.open || !m.detail.loading || m.evidenceRequest <= request {
+		t.Fatal("published comment did not refresh the notification item")
+	}
+
+	read("open", "https://github.com/owner/repo/issues/9")
+	m = baselineSend(m, tea.KeyPressMsg{Text: "x"})
+	request = m.evidenceRequest
+	closeOut := `{"comment":{"status":"succeeded","url":"https://github.com/owner/repo/issues/9#issuecomment-2"},"state_change":{"status":"succeeded","state":"closed"}}`
+	m = baselineSend(m, commentMsg{root: m.installRoot, repo: m.repo, publish: true, out: closeOut})
+	if m.comment.open || m.detail.item.State != "open" || !m.detail.loading || m.evidenceRequest <= request || !m.refreshing {
+		t.Fatal("close outcome did not schedule an upstream item and ledger refresh")
+	}
+
+	m.refreshing = false
+	read("closed", "https://github.com/owner/repo/issues/9")
+	m = baselineSend(m, tea.KeyPressMsg{Text: "v"})
+	request = m.evidenceRequest
+	reopenOut := `{"comment":{"status":"succeeded","url":"https://github.com/owner/repo/issues/9#issuecomment-3"},"state_change":{"status":"succeeded","state":"open","url":"https://github.com/owner/repo/issues/9"}}`
+	m = baselineSend(m, commentMsg{root: m.installRoot, repo: m.repo, publish: true, out: reopenOut})
+	if m.comment.open || m.detail.item.State != "closed" || !m.detail.loading || m.evidenceRequest <= request || !m.refreshing {
+		t.Fatal("reopen outcome did not schedule an upstream item and ledger refresh")
+	}
+}
+
 func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 	for _, approve := range []bool{false, true} {
 		t.Run(map[bool]string{false: "proposal", true: "approval"}[approve], func(t *testing.T) {

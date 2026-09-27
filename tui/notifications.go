@@ -12,26 +12,23 @@ import (
 
 // Notifications presents tracked comments and retained PR records in two sections.
 type notificationsUI struct {
-	open, busy     bool
-	sourceOpen     bool
-	sourceKey      Key
-	sourceSelected int
-	tracked        *trackedPage
-	attention      *attentionPage
-	closures       *actionHistoryPage
-	proposals      autoCloseList
-	ticked         map[int]bool
-	review         *autoCloseReview
-	reviewBusy     bool
-	reviewAll      bool
-	reviewKey      string
-	reviewNumbers  []int
-	reviewScroll   int
-	state          notificationState
-	selected       int
-	selectAfter    string
-	selectItem     Key
-	problem        string
+	open, busy    bool
+	tracked       *trackedPage
+	attention     *attentionPage
+	closures      *actionHistoryPage
+	proposals     autoCloseList
+	ticked        map[int]bool
+	review        *autoCloseReview
+	reviewBusy    bool
+	reviewAll     bool
+	reviewKey     string
+	reviewNumbers []int
+	reviewScroll  int
+	state         notificationState
+	selected      int
+	selectAfter   string
+	selectItem    Key
+	problem       string
 }
 
 type notificationState struct {
@@ -63,10 +60,6 @@ type notificationChoice struct {
 	kind                                  string
 	key                                   Key
 	proposal, tracked, attention, closure int
-}
-
-type notificationSource struct {
-	name, description, action string
 }
 
 func itemChoice(key Key) notificationChoice {
@@ -504,9 +497,9 @@ func (n notificationsUI) choices() []notificationChoice {
 	return choices
 }
 
-func (n notificationsUI) sourceChoice() (notificationChoice, bool) {
+func (n notificationsUI) proposalChoice(number int) (notificationChoice, bool) {
 	for _, choice := range n.choices() {
-		if choice.kind == "item" && choice.key == n.sourceKey {
+		if choice.kind == "item" && choice.key == (Key{Kind: "pr", Number: number}) {
 			return choice, true
 		}
 	}
@@ -514,32 +507,12 @@ func (n notificationsUI) sourceChoice() (notificationChoice, bool) {
 	return notificationChoice{}, false
 }
 
-func (n notificationsUI) sources(choice notificationChoice) []notificationSource {
-	var sources []notificationSource
+func (m model) openNotificationChoice(choice notificationChoice) (tea.Model, tea.Cmd) {
 	if choice.proposal >= 0 {
-		sources = append(sources, notificationSource{name: "Closure proposal", description: "Read the proposed comment and rationale", action: "proposal"})
-	}
-	sources = append(sources, notificationSource{name: "Current item", description: "Read the current issue or PR from GitHub", action: "item"})
-	if choice.attention >= 0 {
-		sources = append(sources, notificationSource{name: "Retained activity", description: "Read saved watch activity offline", action: "watch"})
-	}
-	if choice.closure >= 0 {
-		sources = append(sources, notificationSource{name: "Imported actions", description: "Read saved closure history offline", action: "action"})
+		return m.openNotificationSource(choice, "proposal")
 	}
 
-	return sources
-}
-
-func (m model) openNotificationSources(choice notificationChoice) (tea.Model, tea.Cmd) {
-	sources := m.notifications.sources(choice)
-	if len(sources) == 1 {
-		return m.openNotificationSource(choice, sources[0].action)
-	}
-	m.notifications.sourceOpen = true
-	m.notifications.sourceKey = choice.key
-	m.notifications.sourceSelected = 0
-
-	return m, nil
+	return m.openNotificationSource(choice, "item")
 }
 
 func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -581,6 +554,16 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 					}
 				}
 				return m.startTracking(Key{Kind: "pr", Number: row.Number})
+			}
+		case "t", "i":
+			if m.notifications.reviewKey == "" && len(m.notifications.review.Plan.Proposals) == 1 {
+				row := m.notifications.review.Plan.Proposals[0]
+				if choice, ok := m.notifications.proposalChoice(row.Number); ok {
+					if msg.String() == "t" {
+						return m.openNotificationSource(choice, "watch")
+					}
+					return m.openNotificationSource(choice, "action")
+				}
 			}
 		case "d":
 			if len(m.notifications.review.Plan.Proposals) == 1 {
@@ -633,32 +616,6 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 		return m, nil
 	}
-	if m.notifications.sourceOpen {
-		choice, ok := m.notifications.sourceChoice()
-		if !ok {
-			m.notifications.sourceOpen = false
-			m.warn("Notification item changed; select it again.")
-			return m, nil
-		}
-		sources := m.notifications.sources(choice)
-		switch msg.String() {
-		case "?":
-			m.showHelp = !m.showHelp
-		case "q":
-			m.notificationsLifecycle.stop()
-			m.notificationsGeneration++
-			return m.requestQuit()
-		case "esc", "h", "left":
-			m.notifications.sourceOpen = false
-		case "j", "down", "tab":
-			m.notifications.sourceSelected = (m.notifications.sourceSelected + 1) % len(sources)
-		case "k", "up", "shift+tab":
-			m.notifications.sourceSelected = (m.notifications.sourceSelected - 1 + len(sources)) % len(sources)
-		case "enter", "l", "right":
-			return m.openNotificationSource(choice, sources[m.notifications.sourceSelected].action)
-		}
-		return m, nil
-	}
 	switch msg.String() {
 	case "?":
 		m.showHelp = !m.showHelp
@@ -683,6 +640,14 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.notifications.selected = len(choices) - 1
 	}
 	switch msg.String() {
+	case "t", "i":
+		if len(choices) > 0 && choices[m.notifications.selected].kind == "item" {
+			choice := choices[m.notifications.selected]
+			if msg.String() == "t" {
+				return m.openNotificationSource(choice, "watch")
+			}
+			return m.openNotificationSource(choice, "action")
+		}
 	case "w":
 		if len(choices) > 0 && choices[m.notifications.selected].kind == "item" {
 			choice := choices[m.notifications.selected]
@@ -756,7 +721,7 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		choice := choices[m.notifications.selected]
 		switch choice.kind {
 		case "item":
-			return m.openNotificationSources(choice)
+			return m.openNotificationChoice(choice)
 		case "tracked-more":
 			return m.pageNotifications("tracked", *m.notifications.tracked.Next)
 		case "tracked-prev":
@@ -806,9 +771,6 @@ func (m model) notificationsView() string {
 	n := m.notifications
 	if n.review != nil {
 		return m.autoCloseReviewView()
-	}
-	if n.sourceOpen {
-		return m.notificationSourcesView()
 	}
 	if n.tracked == nil {
 		n.tracked = &trackedPage{}
@@ -869,20 +831,6 @@ func (m model) notificationsView() string {
 	vp.SetContent(b.String())
 	vp.SetYOffset(maxInt(0, selectedLine-m.mainHeight()/2))
 	return vp.View()
-}
-
-func (m model) notificationSourcesView() string {
-	choice, ok := m.notifications.sourceChoice()
-	if !ok {
-		return inset(titleBar("Notification item changed", m.repo, m.menuWidth())) + "\n\n" + inset("Press Esc and select the item again.")
-	}
-	sources := m.notifications.sources(choice)
-	cards := make([][2]string, 0, len(sources))
-	for _, source := range sources {
-		cards = append(cards, [2]string{source.name, source.description})
-	}
-	heading := fmt.Sprintf("%s #%d", strings.ToUpper(choice.key.Kind), choice.key.Number)
-	return inset(titleBar(heading, "Choose what to open", m.menuWidth())) + "\n\n" + cardList(cards, m.notifications.sourceSelected, m.cardWidth(), m.mainHeight()-2)
 }
 
 func (m model) autoCloseReviewView() string {

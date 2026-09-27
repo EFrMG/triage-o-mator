@@ -241,6 +241,17 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 	if !m.notificationPR.open || m.detail.active != 1 || len(m.detail.sections) != 3 {
 		t.Fatal("notification PR did not open on its comments tab")
 	}
+	m.detail.Resize(80, 20)
+	m.detail.populate(EnrichedItem{
+		CommentBodies: []string{"A saved comment"},
+		CachedRead:    true,
+		Evidence: &batchEvidence{Mode: "refresh", Components: map[string]*evidenceComponent{
+			"comments": {Status: "complete", FetchedAt: "2026-09-27T21:33:07Z", Object: json.RawMessage(`[]`)},
+		}},
+	})
+	if view := ansi.Strip(m.detail.View()); !strings.Contains(view, "A saved comment") || strings.Contains(view, "Item details refreshed") || strings.Contains(view, "comments: complete") {
+		t.Fatalf("notification comments included redundant evidence notice: %q", view)
+	}
 
 	for _, step := range []struct {
 		key  tea.KeyPressMsg
@@ -695,25 +706,39 @@ print('{}')
 		t.Fatal("PR appears more than once in Notifications")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Text: "1"})
-	if m.notifications.review != nil || m.notifications.sourceOpen {
-		t.Fatal("number key unexpectedly opened a notification source")
+	if m.notifications.review != nil || m.notificationPR.open {
+		t.Fatal("number key unexpectedly opened the notification")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !m.notifications.sourceOpen || !strings.Contains(m.notificationsView(), "Current item") {
-		t.Fatal("Enter did not open the item's source list")
+	if m.notifications.review == nil || !strings.Contains(m.notificationsView(), "Comment to publish") {
+		t.Fatal("Enter did not open the closure proposal directly")
 	}
-	m = baselineSend(m, tea.KeyPressMsg{Text: "j"})
+	m = baselineSend(m, tea.KeyPressMsg{Text: "t"})
+	if !m.attention.open {
+		t.Fatal("saved discussion was not accessible from the proposal")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = baselineSend(m, tea.KeyPressMsg{Text: "i"})
+	if !m.actionHistory.open {
+		t.Fatal("closure history was not accessible from the proposal")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = baselineSend(m, tea.KeyPressMsg{Text: "l"})
+	if !m.notificationPR.open {
+		t.Fatal("l on the proposal did not open the PR")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.notifications.review == nil || m.notificationPR.open {
+		t.Fatal("returning from the PR did not restore its proposal")
+	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.notificationPR.open {
-		t.Fatal("source list did not open the selected item")
+		t.Fatal("Enter on the proposal did not open the PR")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if !m.notifications.sourceOpen || m.notificationPR.open {
-		t.Fatal("returning from the item did not restore its source list")
-	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if m.notifications.sourceOpen || !m.notifications.open {
-		t.Fatal("Esc did not return from sources to Notifications")
+	if m.notifications.review != nil || !m.notifications.open {
+		t.Fatal("Esc did not return from proposal to Notifications")
 	}
 
 	next, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "v"})
@@ -747,6 +772,12 @@ print('{}')
 		if !strings.Contains(string(data), command) {
 			t.Fatalf("missing %s in script calls: %s", command, data)
 		}
+	}
+
+	m.notifications.proposals.Rows = nil
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.notificationPR.open || m.notifications.review != nil {
+		t.Fatal("notification without a closure proposal did not open the item directly")
 	}
 }
 

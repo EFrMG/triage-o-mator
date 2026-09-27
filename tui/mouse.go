@@ -653,23 +653,6 @@ func (m model) clickNotifications(event tea.Mouse, _ bool) (tea.Model, tea.Cmd) 
 	if n.busy || n.review != nil || n.reviewBusy || n.problem != "" {
 		return m, nil
 	}
-	if n.sourceOpen {
-		choice, ok := n.sourceChoice()
-		if !ok {
-			return m, nil
-		}
-		sources := n.sources(choice)
-		index := mouseCardIndex(event.Y, 3, n.sourceSelected, len(sources), m.mainHeight()-2)
-		if index < 0 {
-			return m, nil
-		}
-		repeat := m.mouseTargetRepeat("notification-source:" + choice.key.Kind + ":" + strconv.Itoa(choice.key.Number) + ":" + sources[index].action)
-		if n.sourceSelected == index && repeat {
-			return m.mousePress("enter")
-		}
-		m.notifications.sourceSelected = index
-		return m, nil
-	}
 	choices := n.choices()
 	if len(choices) == 0 {
 		return m, nil

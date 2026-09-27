@@ -2,7 +2,7 @@
 
 Each `themes/*.json` file defines one complete palette. The filename without `.json` is its stable ID (for example, `nord`). The TUI reads these files whenever the theme picker opens.
 
-Press `t` outside text fields to open the theme list. Move with `j/k` or arrow keys to preview a palette, or `/` to search the names; `Enter` applies it and saves its ID in gitignored `config/theme.local`. `Esc` or `h` restores the previous palette without changing the saved preference (after a search, the first `Esc` clears it). The picker preserves your current item, group, and unsaved decisions.
+The TUI theme picker previews palettes and saves the chosen ID in gitignored `config/theme.local`. Closing it restores the previous palette without changing the saved preference. The picker preserves your current item, group, and unsaved decisions. See the [TUI tutorial](../docs/tutorial.md#1-start-from-the-overview) for controls.
 
 `TRIAGE_THEME=<id>` overrides the saved preference at startup. Selecting a different theme still works for the current session.
 

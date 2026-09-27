@@ -1,6 +1,6 @@
 # External closure records
 
-The internal contract in `bin/_external_closures.py` separates an observed closure operation, retained observations and attributed explanations. `closure-capture` creates an initial observation from one PR without claiming to know who closed it or why. The explicit-ID importer can then retain attributed explanations and corrections from selected immutable evidence. Notifications places unviewed imported actions in **Needs attention**; `v` moves them to **Past actions**. The menu opens the bounded offline history reader.
+The internal contract in `bin/_external_closures.py` separates an observed closure operation, retained observations and attributed explanations. `closure-capture` creates an initial observation from one PR without claiming to know who closed it or why. The explicit-ID importer can then retain attributed explanations and corrections from selected immutable evidence. Notifications places unviewed imported actions in **Needs attention** and opens the bounded offline history reader; the [tutorial](tutorial.md#11-track-follow-up-activity) covers its controls.
 
 ## Identity and attribution
 

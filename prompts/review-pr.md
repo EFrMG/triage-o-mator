@@ -51,7 +51,6 @@ What the tree answers, that a diff cannot:
 Read-only, always: never `checkout`, `switch`, `fetch`, `pull`, `stash` or write in that clone, and don't run its build or tests unless you were asked to ([PLAYBOOK.md](PLAYBOOK.md), rule 8). Remember that the tree is the repository's **current** code, not the PR's version of it: the PR's own content comes from the diff you already read, or, when you need a file exactly as the PR leaves it:
 
 ```sh
-gh pr view N --repo <owner>/<repo> --json baseRefName,headRefOid,files
 gh api "repos/<owner>/<repo>/contents/<path>?ref=$base_sha" --jq .content | base64 -d
 gh api "repos/<owner>/<repo>/contents/<path>?ref=<headRefOid>" --jq .content | base64 -d
 ```

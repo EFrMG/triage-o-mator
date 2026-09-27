@@ -21,7 +21,7 @@ This is how a less technical README I dislike reading would read, which given th
 
 Popular open source projects collect Issues and PRs faster than anyone can read them.
 
-[omacom/omarchy](https://github.com/omacom/omarchy), where this tool was built and first used, has about **5,000 open issues and PRs** and gets roughly **100 new ones a day**. At that scale nobody reads the backlog from the start. Duplicates pile up, good PRs go stale, and contributors wait weeks for a first response.
+[omacom/omarchy](https://github.com/omacom/omarchy) inspired the tool. At the scale of a busy backlog, nobody reads every item from the start. Duplicates pile up, good PRs go stale, and contributors wait for a first response.
 
 The usual fixes fall short:
 
@@ -39,7 +39,7 @@ A repository you don't control can carry the install locally instead using `--so
 
 ## Design principles
 
-1. **Read-only against GitHub.** Every GitHub call is a read. Nothing is labeled, commented on, closed or merged. Acting on a decision is a future step that will need explicit sign-off. At least for now anyhow.
+1. **Separate reading from writing.** Backlog acquisition reads GitHub. Publishing a comment, closing or reopening an item needs explicit approval of the exact target and text; triage decisions never trigger these writes. The tool does not label or merge.
 2. **Proposals and reviews are separate states.** A decision is first _triaged_ (by an agent or a person) and then _reviewed_ (only by a person). Nothing crosses that line by itself.
 3. **One ledger per repo, tracked in git.** `triage-o-mator/data/<owner>/<repo>/ledger.jsonl`, one JSON line per item, inside the repository it describes, so every decision and every correction shows up as a normal diff.
 4. **Scripts underneath, a TUI on top.** Everything the TUI does goes through small, testable `bin/` scripts that agents, cron jobs and people can call directly.
@@ -55,9 +55,7 @@ _triage-o-mator_ is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) a
 - **A full-screen reader** with Body, Agent notes, Comments and Diff tabs.
 - **A decision form** whose category, action and confidence cycle through the taxonomy's exact values; with a one-sentence reason for free text.
 - **Unsaved drafts per item** for the session, so you can compare several reports before deciding.
-- **One key, one meaning, everywhere:** a capital letter is the bigger version of the same action, anything destructive wants the same key twice, and `u` stands for undo, as one would imagine.
-
-- A footer that always shows the keys for the current screen; a breadcrumb that says where you are, plain-language failures (`!` for the full command and output), 15 bundled themes and custom ones without rebuilding!
+- A footer showing available controls, a breadcrumb showing location, full command output for failures, and bundled or custom themes.
 
 What more could you even expect these days?
 
@@ -75,7 +73,7 @@ Duplicates are the most common and the riskiest call to get wrong. _triage-o-mat
 
 - Our super-performant, **`bin/similar`** ranks items by title similarity, **offline** on the full backlog (in about 0.1 seconds, for a whole 5,000 set of items), weighting rare terms far above common ones.
 - **A Possible Duplicates view** lists every likely pair. You would be surprised with how many of the most common have identical titles!
-- **"Not duplicates" is a durable verdict.** Rule a pair out with `d`, and it stays out, recorded in git, so nobody re-litigates it next week.
+- **"Not duplicates" is a durable verdict.** Rule a pair out and it stays out, recorded in git, so nobody re-litigates it next week.
 - **Batches carry the candidates too**, so an Agent can name a duplicate it would otherwise never have seen, and a dedicated, Agentic playbook compares the full bodies and comments of an item and its candidates.
 
 Overall, scores are presented as leads instead of proof.
@@ -98,11 +96,11 @@ Related issues and PRs often need to be read together: a bug report, its duplica
 - **A core playbook ships with the install** becoming that install's `AGENTS.md` for the tool, and without disturbing yours. All Agents are supported.
 - **One playbook per task:** triage a batch, check duplicates, review a PR's code, organize groups, make a report decision-ready, and brief the maintainers. Ask in plain words and the Agent will pick the right one for you.
 - **The code is right there.** Because the install sits inside the repository, an agent reviewing a PR reads the actual files to check broader context and whether a fix already landed.
-- **`y` hands a screen to an agent.** Press it anywhere and what's in front of you (an item with its body and decision, ticked items, a whole batch with its file paths) is then on your clipboard as Markdown, ready to paste into a chat.
+- **The TUI hands a screen to an agent.** Item context, ticked items, or a batch with its file paths can be copied as Markdown for a chat.
 
 > [!WARNING]
-> Our documentation is open about the risk: issue text comes from unfiltered users and can contain prompt-injection attempts.
-> Running YOLO Agents in an isolated VM is recommended.
+> Our documentation is open about the risk: fetched text comes from unfiltered users and can contain prompt-injection attempts.
+> Running YOLO Agents in an isolated VM **is** recommended.
 
 ### Reporting, and a report you can decide from
 
@@ -142,7 +140,7 @@ Installing into a repository you don't control, adopting an install later, and m
 ## How you can help
 
 - **Try it on a repo you maintain** and report where the taxonomy or the workflow doesn't fit.
-- **Take on something from the roadmap.** The path to write on the remote in particular deserves careful design and review.
+- **Take on something from the roadmap.** New GitHub write actions need careful design and review.
 
 ---
 

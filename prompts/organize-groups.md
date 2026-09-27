@@ -77,7 +77,7 @@ Leave the group in `draft`. Report back:
 
 For a reusable evidence packet, export with `--enrich --cache-mode offline` (or `--diff` for PR code) and `--output data/<owner>/<repo>/exports/review.md`. Use `--format json` to retain structured component references. Read the coverage diagnostics for every member and report missing/partial/stale components; packet publication does not prove the evidence is complete. `cache-preferred` and `refresh` permit explicit read-only acquisition when needed. The saved packet keeps its group revision and per-item snapshot references after later updates; it is not a live view or a portable archive of all source objects. Use different filenames to preserve different observations. `--output` protects a previous packet if acquisition fails; ordinary shell redirection does not.
 
-Then say that a contributor should check it and mark it ready (`e` in the TUI's Groups, or `bin/group update GROUP_ID --status ready --by <them>`). Ready groups are what `bin/report` puts first for lead maintainers. Don't commit: the group files are for the contributor to review and commit.
+Then say that a contributor should check it and mark it ready in the TUI's Groups screen (see the [tutorial](../docs/tutorial.md#9-organize-related-work-into-groups)) or with `bin/group update GROUP_ID --status ready --by <them>`. Ready groups are what `bin/report` puts first for lead maintainers. Don't commit: the group files are for the contributor to review and commit.
 
 ### Optional pinned PR candidate sets
 

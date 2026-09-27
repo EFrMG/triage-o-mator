@@ -2,7 +2,7 @@
 
 triage-o-mator is installed into the repository you want to triage. You clone and build it once, and every repository you triage gets its own `triage-o-mator/` directory holding that repository's ledger, groups, reports and taxonomy, wired to your one checkout.
 
-The checkout is the program; the install is the work. Nothing runs outside an install: the scripts and the TUI look for one and say so when there is none.
+The checkout is the program; the install is the work. Install-scoped scripts require an install. Without one, the TUI opens **Switch Repo** so you can choose or create an install.
 
 ## Install it
 
@@ -50,7 +50,7 @@ target-repo/
 
 The install carries `AGENTS.md` and `CLAUDE.md`, both leading to the same playbook. Decisions, groups, duplicate verdicts, reports and taxonomy are committed. Symlinks, the install marker, working files and cache are ignored; preserve the cache separately when retained evidence depends on it.
 
-A tracked install creates the target repository's `AGENTS.md` when it is missing. Editing an existing `AGENTS.md` still asks for confirmation unless you pass `--yes`. Use `--no-agents-md` to skip the target file, or `--agents-md` to add it in solo mode.
+A tracked install creates the target repository's `AGENTS.md` when it is missing, even if that repository already has a `CLAUDE.md`; the existing `CLAUDE.md` stays untouched. Editing an existing `AGENTS.md` still asks for confirmation unless you pass `--yes`. Use `--no-agents-md` to skip the target file, or `--agents-md` to add it in solo mode.
 
 `config/repo` defaults to what the repository's `upstream` remote points at when it has one, falling back to `origin`. This makes a clone of your fork triage the original repository's backlog. Pass `--repo owner/repo` to triage something else from here. An existing install keeps its recorded repo; if it was created from a fork before upstream detection was added, re-run `bin/install-to /path/to/repository --repo owner/repo` once to correct it.
 
@@ -109,13 +109,13 @@ This is the one case where the checkout holds triage data, and it stays inside t
 
 ## Opening the app without an install
 
-Running `bin/triage-o-mator` where there is no install (in a fresh checkout, say) opens **Switch Repo** and nothing else: the installs recorded on this machine, a filter, and a field that takes a path. `Esc` quits.
+Running `bin/triage-o-mator` where there is no install (in a fresh checkout, say) opens **Switch Repo** and nothing else: the installs recorded on this machine, a filter, and a field that takes a path. See the [TUI tutorial](tutorial.md#13-move-between-repositories-without-mixing-their-work) for its controls.
 
 ## Working as a team through it
 
 Once the install is tracked, triage is ordinary repository work: contributors pull to get each other's decisions, and hand work to maintainers by opening a pull request that changes `triage-o-mator/data/<owner>/<repo>/ledger.jsonl` and `groups/`. The ledger is JSON Lines precisely so that diff is readable line by line. Everyone who clones the repository runs `bin/install-to` against it once to wire up their own symlinks; nothing tracked changes when they do.
 
-See [AGENTS.md](../AGENTS.md#working-as-a-team) for how batches, proposals and reviews divide between people and their agents.
+See the [triage playbook](../prompts/PLAYBOOK.md#working-as-a-team) for how batches, proposals and reviews divide between people and their agents.
 
 ## Upgrading, repairing, moving
 
@@ -136,7 +136,7 @@ Moving an install's data somewhere else is a plain directory move: `data/<owner>
 
 `config/taxonomy.json` and `config/taxonomy.md` are copies, committed with your repository: edit them freely. A re-run never overwrites them; when the checkout's version has changed it leaves `taxonomy.json.dist` beside yours to diff against.
 
-Prompts are symlinked one file at a time, so you can make them yours without touching the checkout:
+Prompts are symlinked one file at a time, so you can make them yours without touching the checkout. A directory symlink would put edits into the shared tool checkout and affect every install. The installer regenerates the ignored-symlink list between managed markers while leaving your own files visible to Git:
 
 - **replace one**: delete the symlink and write a file in its place. It is then yours, committed with the rest.
 - **add one**: just write it into `prompts/`.
@@ -148,9 +148,9 @@ Prompts are symlinked one file at a time, so you can make them yours without tou
 
 ## Installing from inside the app
 
-Typing the path of a repository that has no install and pressing `Enter` does not install anything: it runs `bin/install-to --dry-run` and shows you exactly what that script says it would change, line by line, with the mode it would use and nothing written. From there, `Enter` makes exactly those changes, `s` shows the same plan for the other mode (tracked or `--solo`) so you can compare before choosing, `j`/`k` scroll a plan longer than the screen, and `Esc` leaves the repository as it was. When the install is made, the session opens it.
+Opening the path of a repository that has no install runs `bin/install-to --dry-run` and shows exactly what that script would change, with nothing written. The plan can be switched between tracked and solo modes; after confirmation, the session opens the new install. The [tutorial](tutorial.md#13-move-between-repositories-without-mixing-their-work) gives the controls.
 
-`Enter` on the plan passes `--yes`, because the plan you just read is the confirmation; the app never asks the script to do anything the plan did not list. The plan defaults to a tracked install, as the command line does: it is the common case, and choosing `--solo` quietly would leave a ledger nobody else can see, which is a worse surprise than an `AGENTS.md` diff you can read. Either way you see the plan first.
+Confirming the plan passes `--yes`, because the reviewed plan is the confirmation; the app never asks the script to do anything the plan did not list. The plan defaults to a tracked install, as the command line does, so the ledger can be shared through Git.
 
 ## When something is wrong
 

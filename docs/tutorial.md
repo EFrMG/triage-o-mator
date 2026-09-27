@@ -1,6 +1,6 @@
 # Tutorial: the triage-o-mator TUI
 
-A tour of the TUI. Follow the sections in order; each takes a minute or two. The [README](../README.md) explains what the project is, and [keybindings.md](keybindings.md) lists every key.
+A tour of the TUI and its controls. Follow the sections in order; each takes a minute or two. The [README](../README.md) explains what the project is. The footer and `?` show the keys available on the current screen.
 
 Install it into the repository you want to triage ([install.md](install.md)), then launch it from there:
 
@@ -15,9 +15,11 @@ Saves, approvals and group edits change your repository's git-tracked ledger and
 
 - The overview shows triage and review progress and suggestions from `bin/next`, marked `[agent]` or `[human]` according to who should do them.
 - `j`/`k` move, `Enter` opens, and `Esc` goes back. The breadcrumb in the top border shows where you are.
-- The footer lists the keys available on the current screen; `?` explains them.
+- `g`/`G` jump to the top or bottom; `Ctrl-D`/`Ctrl-U` move half a page. `h`/`l` or the arrow keys go back or open the selection.
 - `t` opens the theme picker, where `/` searches the theme names.
 - `q` quits and warns before discarding unsaved decisions. `Ctrl-C` forces the TUI to exit.
+
+Mouse controls work alongside the keys: click a sidebar entry or tab, click a card to select it and click it again to open it, right-click a card to tick it, and scroll with the wheel. Footer shortcuts are clickable. Click a focused choice field again to open its options.
 
 Terminals smaller than 60×24 show a resize prompt.
 
@@ -49,6 +51,8 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 
 - In an untriaged item, `l` moves into the form: Category, Action, Confidence, and Reason.
 - On a choice, `j`/`k` change the value and `Enter` moves to the next field. Category, action, and confidence come from `config/taxonomy.json`; reason is free text.
+- `Tab`/`Shift-Tab` or `J`/`K` move between fields. On a choice, `l` opens all values; select with `Enter` or `l`, or close the list with `Esc` or `h`. Printable keys remain text while editing.
+- In most forms, `Ctrl-S` submits from any field; `Esc` cancels.
 - `s` saves through `bin/apply`, attributed to your `git config user.name`. An unchanged placeholder decision or an empty reason needs a second `s`. After saving, you return to the list on the next item.
 - `S` saves and approves when you are ready to confirm the decision yourself. It records your decision and human review together and returns to the list. Untouched defaults or an empty reason need a second `S`; this shortcut has no GitHub side effects.
 - While typing the reason, `Enter` saves and approves. `s` and `S` are ordinary letters there; to save for later review instead, press `Tab` then `s`. `Ctrl-S` remains an optional save-for-review alias while typing.
@@ -62,6 +66,7 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 - `s` saves a proposal for review, including any changes you make. `S` saves and approves a proposal you have checked. An unchanged proposal retains its original author, with you recorded as reviewer; a changed proposal becomes your revised decision. Agent notes are preserved either way.
 - `A` twice applies every remaining proposal as an unreviewed agent decision. Already-triaged items are kept, and the applied proposals then appear in **Pending Review**.
 - `n` in **Batches** makes a new batch; `Enter` on its last field creates it.
+- In the new-batch form, choose a group to restrict the batch to that group's untriaged open members.
 - `d` twice deletes a finished batch. Decisions already recorded in the ledger remain; unapplied proposals are lost. Batch files are ignored working copies, so Git cannot restore them.
 
 ## 7. Review proposed decisions
@@ -91,6 +96,7 @@ A group collects related items so maintainers can decide on them together ([grou
 - In **Groups**, `n` creates one.
 - On any item, `b` adds it to a group with a note; `B` adds it to the last group used.
 - `e` edits a group, including its status: `draft`, `ready` for maintainers, or `archived`.
+- In a group, `e` edits the selected member's note, and `d` twice removes selected members. In the group list, `d` twice deletes the group; archiving keeps its history available. `x` exports a Markdown packet, and `X` also fetches bodies, comments and PR diffs.
 - A ready group does not approve its members. Their individual review states remain visible in reports and exports.
 
 ## 10. Build deeper offline context when needed
@@ -99,14 +105,15 @@ A group collects related items so maintainers can decide on them together ([grou
 - `d` freezes the open backlog and begins downloading its supported evidence. `n` chooses an item limit, `r` resumes the current download, `u` measures cache size, and `y` copies the agent prompt.
 - Saved checkpoint counts refresh while downloading. `x` cancels the operation; `Esc` closes **Local dataset** without stopping it.
 
-Counts describe saved outcomes, not complete or current coverage. Custom corpus scopes and profiles remain available through the cache CLI; see [corpus preparation](evidence-reference.md#corpus-controls-in-the-tui). Dataset work changes no sync, decision, or approval state.
+Counts describe saved outcomes, not complete or current coverage. Custom corpus scopes and profiles remain available through the cache CLI; see [frozen corpus acquisition](evidence-reference.md#frozen-corpus-acquisition). Dataset work changes no sync, decision, or approval state.
 
 ## 11. Track follow-up activity
 
 - Press `w` on an issue or PR in a list or item view to track its comments. The app checks tracked items at startup and during a normal refresh with `r`.
 - **Notifications** shows one card per issue or PR. It combines comment tracking, closure proposals and retained activity for that item. A card appears under **Needs attention** while any source needs review, then under **Past actions** once those sources are viewed.
 - Select with `j`/`k` or `Tab`. `v` marks the selected item's viewable sources viewed; one `d` dismisses its local sources. Dismissing a tracked item stops its comment checks. Dismissing retained watch or imported-action activity hides the row without deleting its evidence.
-- `Enter`, `l`, or `→` opens a tracked item with a fresh read from GitHub. For retained PR activity, it first opens cards containing bounded excerpts; the same keys open a card's PR, while `Esc` or `h` returns to the selected card. Previous and More cards page within that screen.
+- `Enter`, `l`, or `→` opens the card's first available source. `1` opens a closure proposal, `2` the current item, `3` retained activity, and `4` imported actions when those sources exist. Opening the current item makes a fresh GitHub read. Retained PR activity first opens cards containing bounded excerpts; the same keys open a card's PR, while `Esc` or `h` returns to the selected card. Previous and More cards page within that screen.
+- On closure proposals, `a` in the reader approves the displayed exact plan. On the list, tick proposals with `Space` and press `a` to review them, or `A` to review all active proposals, including viewed ones; press the same key again after review to approve the set. An uncertain outcome stops execution. `d` dismisses a proposal locally without deleting its record.
 
 Opening the notification list and retained cards makes no GitHub request. Reading does not mark activity viewed, resolve an appeal, or approve a decision. A refreshed PR and its retained card can describe different moments.
 
@@ -116,7 +123,6 @@ For a requested reassessment from imported closure history through explicit enro
 
 ## 12. Hand reviewed work to maintainers
 
-- From a group, `x` exports a Markdown review packet with current decisions and notes. `X` also fetches bodies, comments, and PR diffs; the status line shows its progress and output path.
 - `bin/report` gathers ready groups and individual human-reviewed decisions. An agent following [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) can turn that report into a concise maintainer brief.
 - Exporting or reporting does not act on GitHub. Labeling, approving, and merging remain separate work.
 - On an item, `c` composes a conversation comment inline, while `C` opens `$EDITOR`. `Ctrl-P` toggles a rendered Markdown preview; `Ctrl-S` approves and publishes the exact target and text. In preview, `C` reopens `$EDITOR`; `Esc` returns to editing. From the inline editor, `Esc` discards the draft.
@@ -128,5 +134,6 @@ For a requested reassessment from imported closure history through explicit enro
 - **Switch Repo** lists repositories in this install and in every other install recorded on the machine. Each keeps its own taxonomy, ledger, batches, groups, exports, and reports.
 - Typing filters the list. `Tab` moves to the results, `j`/`k` selects one, and `Enter` opens it. An absolute path opens an install directly; an unlisted `owner/repo` starts that repository in the current install with a full fetch.
 - A path without an install opens the plan from `bin/install-to --dry-run`. Read it, press `Enter` again to install exactly that plan, or `Esc` to leave the repository untouched. See [install.md](install.md#installing-from-inside-the-app).
+- On the plan, `s` shows the other mode, tracked or solo; `j`/`k` scroll when it is longer than the screen.
 - The TUI waits for saves and fetches to finish before switching and asks you to save or discard drafts.
 - When something fails, the status line says why, and `!` shows the command and its full output.

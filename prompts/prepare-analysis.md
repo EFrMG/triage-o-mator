@@ -2,7 +2,7 @@
 
 **Use when** someone asks to download a backlog or compare items using saved data. Read [PLAYBOOK.md](PLAYBOOK.md) first. Work from an install, whose `config/repo` names the target even when the surrounding clone is a fork. Do not change that target based on Git remotes.
 
-The preferred handoff is a **corpus ID**, not a pasted dataset. Its frozen inventory describes the selected items; its member snapshots identify the evidence to read. The TUI's `f` → `d` downloads open issues and PRs with the `backlog` profile. Opening the menu restores the current download. `r` continues unfinished work within its original membership, keeping completed snapshots even when old; a new `d` includes newly opened items. `f` → `y` copies the agent prompt; `bin/cache handoff` reports the locally selected dataset, scope, gaps and offline commands. All acquisition is explicit and budgeted. See [the short evidence guide](../docs/evidence.md).
+The preferred handoff is a **corpus ID**, not a pasted dataset. Its frozen inventory describes the selected items; its member snapshots identify the evidence to read. The TUI's Local dataset downloads open issues and PRs with the `backlog` profile. Resuming continues unfinished work within its original membership, keeping completed snapshots even when old; an update includes newly opened items. The TUI can copy the agent prompt; `bin/cache handoff` reports the locally selected dataset, scope, gaps and offline commands. All acquisition is explicit and budgeted. See [the short evidence guide](../docs/evidence.md) and [TUI tutorial](../docs/tutorial.md#10-build-deeper-offline-context-when-needed).
 
 ## Find the selected dataset
 

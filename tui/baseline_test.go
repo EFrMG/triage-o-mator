@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func baselineItems() []Item {
@@ -82,6 +83,53 @@ func baselineModel(t *testing.T, root string) model {
 	m := newModel(root, "owner/repo", taxonomy, "tester", items)
 	m = baselineSend(m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	return baselineSend(m, fetchSyncDoneMsg{})
+}
+
+func TestBaselineResizePromptCentered(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	check := func(width, height int) {
+		t.Helper()
+		m = baselineSend(m, tea.WindowSizeMsg{Width: width, Height: height})
+		if !m.needsResize() {
+			t.Fatal("small terminal did not show a resize prompt")
+		}
+
+		prompt := "Please resize to at least 60 × 24."
+		lines := strings.Split(ansi.Strip(m.viewContent()), "\n")
+		for y, line := range lines {
+			if x := strings.Index(line, prompt); x >= 0 {
+				if x != (width-ansi.StringWidth(prompt))/2 || y != (height-1)/2 {
+					t.Fatalf("resize prompt at (%d, %d), want center of %d × %d", x, y, width, height)
+				}
+				return
+			}
+		}
+		t.Fatal("resize prompt missing")
+	}
+
+	check(50, 20)
+	m = baselineSend(m, tea.WindowSizeMsg{Width: 30, Height: 20})
+	wantLines := []string{"Please resize to at least", "60 × 24."}
+	seen := 0
+	for y, line := range strings.Split(ansi.Strip(m.viewContent()), "\n") {
+		if seen < len(wantLines) && strings.Contains(line, wantLines[seen]) {
+			if x := strings.Index(line, wantLines[seen]); x != (30-ansi.StringWidth(wantLines[seen]))/2 || y != 9+seen {
+				t.Fatalf("wrapped resize line %q is not centered at row %d", wantLines[seen], y)
+			}
+			seen++
+		}
+	}
+	if seen != len(wantLines) {
+		t.Fatal("wrapped resize prompt is incomplete")
+	}
+	m = baselineSend(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.activateTab(untriagedTab)
+	m.selectCurrentListItem()
+	m = baselineSend(m, tea.KeyPressMsg{Text: "c"})
+	if !m.comment.open {
+		t.Fatal("comment composer did not open")
+	}
+	check(80, 18)
 }
 
 func baselineLedgerRow(t *testing.T, root string) map[string]any {

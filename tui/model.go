@@ -655,9 +655,12 @@ func (m model) viewContent() string {
 	if !m.ready {
 		return "starting…"
 	}
+	if m.needsResize() {
+		return m.resizeView()
+	}
 
 	body := m.bodyView()
-	if m.comment.open && !m.needsResize() {
+	if m.comment.open {
 		body = m.commentOverlay(body)
 	}
 
@@ -669,14 +672,28 @@ func (m model) viewContent() string {
 	return repaint(screenStyle().Width(m.width).Height(m.height).Render(fitScreen(body+"\n"+status+"\n"+footer, m.width, m.height)))
 }
 
+func (m model) resizeView() string {
+	width, height := maxInt(m.width, 1), maxInt(m.height, 1)
+	message := fmt.Sprintf("Please resize to at least 60 × %d.", m.minimumHeight())
+	lines := strings.Split(ansi.Wrap(message, maxInt(width-4, 1), ""), "\n")
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
+	for i, line := range lines {
+		lines[i] = lipgloss.PlaceHorizontal(width, lipgloss.Center, style.Render(line))
+	}
+	frame := lipgloss.PlaceVertical(height, lipgloss.Center, strings.Join(lines, "\n"))
+
+	footer := m.footerView()
+	footerHeight := lipgloss.Height(footer)
+	if footerHeight > 0 && height-footerHeight > (height+len(lines))/2 {
+		frame = lipgloss.NewCompositor(lipgloss.NewLayer(frame), lipgloss.NewLayer(footer).Y(height-footerHeight).Z(1)).Render()
+	}
+
+	return repaint(screenStyle().Width(width).Height(height).Render(fitScreen(frame, width, height)))
+}
+
 func (m model) bodyView() string {
 	var body string
 	switch {
-	case m.needsResize():
-		body = "Please resize to at least 60 × 24."
-		if m.comment.open && m.width >= 60 {
-			body = "Please resize to fit the comment editor."
-		}
 	case m.lastError.open:
 		body = m.errorView()
 	case m.themePicker.open:
@@ -728,13 +745,15 @@ func (m model) bodyView() string {
 }
 
 func (m model) needsResize() bool {
-	if m.width < 60 {
-		return true
-	}
+	return m.width < 60 || m.height < m.minimumHeight()
+}
+
+func (m model) minimumHeight() int {
 	if m.comment.open {
-		return m.mainHeight()+2 < 16
+		return maxInt(24, lipgloss.Height(m.footerView())+17)
 	}
-	return m.height < 24
+
+	return 24
 }
 
 // switchBusy gates legacy work without cancellation/reply identities. Explicit evidence/corpus processes are stopped on switch and their stale replies are rejected. Unsaved drafts still require discard confirmation.

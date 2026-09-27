@@ -50,6 +50,22 @@ class WatchTests(Workspace):
         self.assertFalse((self.root / "data/owner/repo/cache/watches/pr-1.json").exists())
         self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
 
+    def test_closure_capture_produces_unknown_attribution_for_notifications(self):
+        captured = self.json_cli("cache", "closure-capture", "--number", "1", "--by", "operator", "--request-budget", "100")
+        entry = captured["history"]["entries"][0]
+        self.assertEqual(captured["snapshot_id"], entry["observation"]["snapshot_id"])
+        self.assertIsNone(entry["observation"]["operation_id"])
+        self.assertEqual([source["component"] for source in entry["observation"]["sources"]], ["summary"])
+        self.assertEqual(entry["claim"]["provenance"], "unknown")
+        self.assertIsNone(entry["claim"]["rationale"])
+        self.assertEqual(self.json_cli("cache", "action-list")["rows"][0]["history_checkpoint"], captured["history"]["checksum"])
+        self.assertFalse((self.root / "data/owner/repo/cache/watches/pr-1.json").exists())
+        self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
+
+        before = len(self.calls())
+        self.run_cli("cache", "closure-capture", "--number", "1", "--by", "operator", ok=False)
+        self.assertEqual(len(self.calls()), before)
+
     def test_watch_poll_records_activity_without_approval(self):
         snapshot = self.acquire()
         self.json_cli("cache", "watch-enroll", "--number", "1", "--snapshot", snapshot, "--by", "operator", "--closure-event", "99")

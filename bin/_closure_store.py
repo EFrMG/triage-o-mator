@@ -3,7 +3,7 @@
 import json
 
 from _acquire import now, summary_identity
-from _evidence import canonical, natural, same_item, same_repository, validate_payload
+from _evidence import canonical, natural, same_item, same_repository, text, validate_payload
 from _external_closures import append_entry, bound_identity, create_history, operation_id, source_pin, validate_history
 from _storage import atomic_writer, locked
 
@@ -126,6 +126,30 @@ def import_closure(cache, number, snapshot, by, claim, *, event=None, comments=(
                 out.write(canonical(result) + "\n")
 
     return dict(status="imported" if changed else "unchanged", history=result, audit=dict(status="verified-selected-sources", components=list(dict.fromkeys(source["component"] for source in observation["sources"])), scope="manifest and selected component payloads; unrelated payloads unaudited; no freshness or provenance authentication"))
+
+
+def capture_closure(cache, number, by, *, snapshot=None, budget=100, event=None, comments=()):
+    """Create one observed closure record from a fresh or explicit snapshot, without inventing an external explanation."""
+    natural(number, "PR number", 1)
+    natural(budget, "request budget", 1)
+    text(by, "capture attribution")
+    if path_for(cache, number).exists():
+        raise ValueError("closure history already exists; inspect it before importing an explicit change")
+
+    acquisition = dict(mode="selected-snapshot", requests=0)
+    if snapshot is None:
+        from _reader import read_evidence
+
+        read = read_evidence("pr", number, profile="closure-watch", mode="refresh", host=cache.identity["host"], budget=budget)
+        snapshot = read["snapshot_id"]
+        acquisition = dict(mode="refresh", **read["stats"], problems=read["problems"])
+    if snapshot is None:
+        raise ValueError("closure capture did not produce a selected snapshot")
+
+    claim = dict(external=None, actor=None, run_id=None, rationale=None, survivor=None, provenance="unknown", supports=[])
+    result = import_closure(cache, number, snapshot, by, claim, event=event, comments=comments)
+
+    return dict(result, snapshot_id=snapshot, acquisition=acquisition)
 
 
 def watch_link(cache, history):

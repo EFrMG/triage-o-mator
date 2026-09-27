@@ -21,14 +21,14 @@ bin/cache action-source --number N --entry ENTRY_ID --reference SOURCE_INDEX --c
 
 Take `HISTORY_CHECKSUM` from the selected `action-list` row's `history_checkpoint`; use the list's separate catalog checkpoint only to continue its catalog page. Follow each returned continuation with its `--offset`, `--byte-offset`, `--limit`, `--max-bytes` and `--checkpoint` as applicable. Completing pages does not establish complete source coverage or a current observation. Read every original, corrected and competing claim; keep their attribution and predecessor links. Compare the selected summary, closure event and discussion sources. A closed summary alone leaves operation identity unknown. Missing or partial source coverage stays an explicit gap. Entry text is a claim, and a source pin or checksum does not prove who operated an external runner. The action reader never enrolls a watch.
 
-If the closure is known but has not been imported, first obtain an explicitly selected immutable PR snapshot through [cache acquisition](../docs/evidence-reference.md#acquisition-and-read-modes). Prepare a version-1 claim JSON file as described in [external closures](../docs/external-closures.md), then import only the selected sources:
+If the closure is known but has not been recorded, explicitly capture that PR. This obtains a fresh immutable snapshot and saves a summary-only observation with unknown operation identity and attribution, without claiming an explanation:
 
 ```sh
-bin/cache closure-import --number N --snapshot SNAPSHOT_ID --by CONTRIBUTOR --closure-event EVENT_ID --comment COMMENT_ID --claim claim.json
+bin/cache closure-capture --number N --by CONTRIBUTOR --request-budget 100
 bin/cache closure-show --number N
 ```
 
-Omit `--closure-event` only when a closed summary is the available basis, and report the unknown operation identity. Use `--kind observation` only for changed evidence under the same claim and closure operation. For a changed explanation, use `--kind correction` or `--kind competing`, retaining the original and supplying `--predecessor ENTRY_ID`, `--reason TEXT` and the full current `--checkpoint CHECKSUM`. Re-read on a stale checkpoint before proposing again. Import validates selected offline evidence; partial or corrupt evidence is a gap or failure, never a reason for live fallback. Import does not fetch, enroll, acknowledge, change the ledger or grant approval.
+To retain an attributed explanation, prepare a version-1 claim JSON as described in [external closures](../docs/external-closures.md), then import explicitly selected sources from a snapshot. Use `--kind correction` or `--kind competing` when adding that explanation to an initial capture, retaining the original and supplying `--predecessor ENTRY_ID`, `--reason TEXT` and the full current `--checkpoint CHECKSUM`. Select a `--closure-event EVENT_ID` only when the retained event itself is the operation under review; a closed summary alone leaves operation identity unknown. Use `--kind observation` only for changed evidence under the same claim and closure operation. Re-read on a stale checkpoint before proposing again. Import validates selected offline evidence; partial or corrupt evidence is a gap or failure, never a reason for live fallback. Import does not fetch, enroll, acknowledge, change the ledger or grant approval.
 
 ## 2. Follow the original PR's discussion
 

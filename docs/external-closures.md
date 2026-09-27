@@ -1,6 +1,6 @@
 # External closure records
 
-The internal contract in `bin/_external_closures.py` separates an observed closure operation, retained observations and attributed explanations. The explicit-ID importer records one PR from a selected immutable snapshot, and the offline reader retains original explanations and corrections. Notifications places unviewed imported actions in **Needs attention**; `v` moves them to **Past actions**. The menu opens the bounded offline history reader.
+The internal contract in `bin/_external_closures.py` separates an observed closure operation, retained observations and attributed explanations. `closure-capture` creates an initial observation from one PR without claiming to know who closed it or why. The explicit-ID importer can then retain attributed explanations and corrections from selected immutable evidence. Notifications places unviewed imported actions in **Needs attention**; `v` moves them to **Past actions**. The menu opens the bounded offline history reader.
 
 ## Identity and attribution
 
@@ -22,9 +22,18 @@ Import must not rewrite an existing watch's initial closure context, enroll a wa
 
 The record location is `data/<owner>/<repo>/external-closures/`, outside the ignored cache. Tracking a record does not preserve the cache objects it references, and a solo install may itself be ignored. Retain the record and its referenced evidence together. Import does not grant human approval or execution authority.
 
-## Explicit import and offline inspection
+## Capture, explicit import and offline inspection
 
-Run these commands from an install. Acquisition is a separate explicit step; import never fetches missing evidence.
+Run this from an install to create an initial record without hand-writing a claim or looking up a snapshot ID:
+
+```sh
+bin/cache closure-capture --number 123 --by reviewer --request-budget 100
+bin/cache closure-show --number 123
+```
+
+`closure-capture` explicitly acquires one PR with read-only GitHub requests, then imports only its selected immutable summary. The saved claim has unknown provenance and no rationale, actor, runner ID or supporting source; the closure operation remains unidentified even if a timeline was captured. This makes the observation visible in Notifications without turning source text or a matching time into an attribution. An existing history stops capture before another GitHub read; inspect it and use an explicit import for changes. Add `--snapshot SNAPSHOT_ID` to use already acquired evidence entirely offline. Add `--closure-event EVENT_ID` or repeat `--comment COMMENT_ID` only when you deliberately select those retained sources; neither option invents an explanation.
+
+If you already have an attributed explanation before creating a record, acquire or select evidence separately and prepare a version-1 claim JSON. This creates the first entry directly; `closure-import` never fetches missing evidence:
 
 ```sh
 bin/cache closure-import --number 123 --snapshot SNAPSHOT_ID --by reviewer --closure-event 456 --comment 789 --claim claim.json
@@ -47,7 +56,7 @@ The claim file has the exact version-1 shape:
 
 When supplied, `external` contains `namespace` and `record_id`. Repeat `--comment` to select multiple discussion IDs. Source indexes in `supports` refer to the summary first, the optional closure event next, then comments in command order. Selecting a comment does not establish that it caused the closure. Without `--closure-event`, only a closed summary can supply a fallback observation, with unknown operation identity explicitly retained.
 
-To correct or contest a saved claim, supply `--kind correction` or `--kind competing`, `--predecessor ENTRY_ID`, `--reason TEXT` and the full `--checkpoint CHECKSUM` returned by the reader. Use `--kind observation` for changed evidence under the same claim/operation. Changes to existing history require its current checkpoint; exact retries preserve saved bytes and ingestion times. Inspect a stale checkpoint failure and reconcile the intended change before retrying.
+To add an explanation after `closure-capture`, or to correct or contest a saved claim, supply `--kind correction` or `--kind competing`, `--predecessor ENTRY_ID`, `--reason TEXT` and the full `--checkpoint CHECKSUM` returned by the reader. Use `--kind observation` for changed evidence under the same claim/operation. Changes to existing history require its current checkpoint; exact retries preserve saved bytes and ingestion times. Inspect a stale checkpoint failure and reconcile the intended change before retrying.
 
 Imports audit the selected summary and selected discussion/timeline components, including their identities, revisions and source selectors. They do not audit unrelated snapshot objects or authenticate external attribution. The reader preserves unavailable evidence as explicit audit gaps. Watch linkage is derived separately and never changes enrollment, initial closure context or acknowledgments. `closure-show` output and retained-history validation currently load full history. The bounded action readers below paginate output.
 

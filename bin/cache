@@ -168,8 +168,9 @@ def main():
             command.add_argument("--offset", type=int, default=0)
             command.add_argument("--limit", type=int, default=10)
 
-    for action in ("import", "show"):
-        command = commands.add_parser("closure-" + action, help="offline external closure history; never changes watches, holds or decisions")
+    for action in ("capture", "import", "show"):
+        help_text = "acquire one PR and record its observed closure with unknown attribution" if action == "capture" else "offline external closure history; never changes watches, holds or decisions"
+        command = commands.add_parser("closure-" + action, help=help_text)
         command.add_argument("--number", type=int, required=True)
         if action == "import":
             from _external_closures import KINDS
@@ -183,6 +184,12 @@ def main():
             command.add_argument("--predecessor")
             command.add_argument("--reason")
             command.add_argument("--checkpoint", help="full current history checksum; required for changes to existing history")
+        if action == "capture":
+            command.add_argument("--by", required=True)
+            command.add_argument("--snapshot", help="use this immutable snapshot offline instead of acquiring fresh evidence")
+            command.add_argument("--request-budget", type=int, default=100)
+            command.add_argument("--closure-event", type=int, help="explicit retained closed event ID; omission keeps operation identity unknown")
+            command.add_argument("--comment", type=int, action="append", default=[], help="explicit retained comment ID; does not attribute a rationale")
 
     for name in ("watch-enroll", "watch-show", "watch-capture", "watch-poll", "watch-status", "watch-history", "watch-source"):
         command = commands.add_parser(name, help="explicit closed-PR watch; saved observations are not acknowledgment or authority")
@@ -258,10 +265,13 @@ def main():
 
             result = select(cache, args.corpus_id) if args.command == "select" else handoff(cache, args.corpus)
         elif args.command.startswith("closure-"):
-            from _closure_store import import_closure, inspect
+            from _closure_store import capture_closure, import_closure, inspect
 
             if args.command == "closure-show":
                 result = inspect(cache, args.number)
+            elif args.command == "closure-capture":
+                result = capture_closure(cache, args.number, args.by, snapshot=args.snapshot, budget=args.request_budget,
+                                         event=args.closure_event, comments=args.comment)
             else:
                 result = import_closure(cache, args.number, args.snapshot, args.by, read_json(args.claim),
                                         event=args.closure_event, comments=args.comment, kind=args.kind,

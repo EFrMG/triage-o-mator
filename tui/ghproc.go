@@ -66,11 +66,14 @@ type fetchSyncDoneMsg struct {
 	repo                          string
 }
 
-func fetchSyncCmd(installRoot, repo string, full bool) tea.Cmd {
+func fetchSyncCmd(installRoot, repo string, full bool, items ...Key) tea.Cmd {
 	return func() tea.Msg {
-		var args []string
+		args := []string{"--expected-repo", repo}
 		if full {
 			args = append(args, "--full")
+		}
+		for _, item := range items {
+			args = append(args, "--include-item", fmt.Sprintf("%s:%d", item.Kind, item.Number))
 		}
 
 		if _, err := runScript(installRoot, "fetch", args...); err != nil {

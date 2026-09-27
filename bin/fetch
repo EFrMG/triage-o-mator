@@ -3,13 +3,13 @@
 Fetch issues and PRs from GitHub into data/<owner>/<repo>/raw/ (a disposable cache, never git-tracked, safe to delete and re-run any time).
 
 Usage:
-    bin/fetch [--full]
+    bin/fetch [--full] [--include-item issue:N|pr:N]
 
 By default this is incremental: it asks GitHub only for items updated since the last fetch bin/sync consumed (open or closed, since closing or merging an item counts as an update), which is a page or two instead of the whole backlog. It falls back to a full fetch of every open item when there is no previous synced fetch, the repo in config/repo changed, the last full fetch is more than a day old, or --full is passed.
 
 The one thing an incremental fetch cannot see is an item that was deleted or transferred to another repo: it simply stops appearing, so it stays open in the ledger until the next full fetch, which is what marks vanished items closed. That is why full fetches still happen at least daily.
 
-This is read-only against GitHub. It retains list bodies but not PR detail or discussion. --cache-inventory captures verified provenance and imports list summaries for offline use.
+This is read-only against GitHub. It retains list bodies but not PR detail or discussion. --include-item reads selected items directly after the list and lets those observations override lagging list rows. --cache-inventory captures verified provenance and imports list summaries for offline use.
 """
 
 import argparse
@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _triage import REPO, RAW_DIR, here, now_iso, run_gh
 from _storage import atomic_writer, locked
-from _acquire import ReadFailure
+from _acquire import GitHubReader, ReadFailure
 
 JQ_FILTER = (
     ".[] | {"
@@ -80,6 +80,7 @@ def main():
     ap.add_argument("--cache-inventory", action="store_true", help="capture versioned inventory and import partial summaries into the evidence cache")
     ap.add_argument("--host", default="github.com", help="explicit host for --cache-inventory")
     ap.add_argument("--request-budget", type=int, default=100, help="request budget for --cache-inventory, including repository verification")
+    ap.add_argument("--include-item", action="append", default=[], help="also read this issue or PR directly after the list fetch (kind:number); repeat for approved state changes")
     args = ap.parse_args()
     if args.expected_repo is not None and args.expected_repo != REPO:
         ap.error("configured repository does not match --expected-repo")
@@ -88,6 +89,17 @@ def main():
         ap.error("--json requires --cache-inventory")
     if not args.cache_inventory and (args.host != "github.com" or args.request_budget != 100):
         ap.error("--host and --request-budget require --cache-inventory")
+    if args.cache_inventory and args.include_item:
+        ap.error("--include-item cannot be combined with --cache-inventory")
+
+    items = []
+    for value in args.include_item:
+        kind, separator, number = value.partition(":")
+        if separator != ":" or kind not in ("issue", "pr") or not number.isdecimal() or int(number) < 1:
+            ap.error("--include-item must be issue:N or pr:N with a positive number")
+
+        items.append((kind, int(number)))
+    args.include_item = list(dict.fromkeys(items))
 
     # Serialize acquisition with sync, but never hold the ledger lock during GitHub requests.
     with locked(META_PATH):
@@ -137,6 +149,32 @@ def fetch(args, cache=None):
     else:
         stdout = run_gh(["api", "--paginate", endpoint, "--jq", JQ_FILTER])
         lines = [l for l in stdout.splitlines() if l.strip()]
+
+    if args.include_item:
+        reader = GitHubReader("github.com", budget=len(args.include_item))
+        by_key = {(row["kind"], row["number"]): row for row in map(json.loads, lines)}
+        for kind, number in args.include_item:
+            item, _ = reader.get(f"repos/{REPO}/issues/{number}")
+            expected_url = f"https://github.com/{REPO}/{'pull' if kind == 'pr' else 'issues'}/{number}"
+            if not isinstance(item, dict) or item.get("number") != number or item.get("html_url") != expected_url or ("pull_request" in item) != (kind == "pr") or item.get("state") not in ("open", "closed"):
+                raise ValueError(f"direct item read differs from {kind}:{number}; raw fetch was not published")
+
+            by_key[(kind, number)] = dict(
+                number=number,
+                kind=kind,
+                title=item.get("title", ""),
+                body=item.get("body", ""),
+                url=item["html_url"],
+                author=(item.get("user") or {}).get("login", ""),
+                created_at=item.get("created_at", ""),
+                updated_at=item.get("updated_at", ""),
+                state=item["state"],
+                state_reason=item.get("state_reason"),
+                labels=[label["name"] for label in item.get("labels", [])],
+                comments_count=item.get("comments", 0),
+            )
+
+        lines = [json.dumps(row, ensure_ascii=False) for row in by_key.values()]
 
     out_path = RAW_DIR / "issues_and_prs.jsonl"
     payload = "\n".join(lines) + ("\n" if lines else "")

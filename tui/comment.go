@@ -316,28 +316,16 @@ func (m model) finishComment(msg commentMsg) (tea.Model, tea.Cmd) {
 				return m, readCmd
 			}
 
-			next, syncCmd := m.startRefresh(false)
+			next, syncCmd := m.startRefreshItems(false, c.key)
 			updated := next.(model)
 			updated.status = "Comment published and item closed. Refreshing item and ledger…"
 			updated.refreshStatus = updated.status
 			return updated, tea.Batch(readCmd, syncCmd)
 		}
 		if c.close {
-			// The script confirmed the PATCH. Reflect that result in this view while fetch/sync updates the ledger in the background.
-			for i := range m.items {
-				if m.items[i].Key() == c.key {
-					m.items[i].State = "closed"
-					break
-				}
-			}
-			if m.detail.key == c.key {
-				m.detail.item.State = "closed"
-			}
-			m.recomputeSidebarCounts()
-			m.refreshActiveList()
 			readCmd := m.refreshLiveDetail()
 
-			next, syncCmd := m.startRefresh(false)
+			next, syncCmd := m.startRefreshItems(false, c.key)
 			updated := next.(model)
 			updated.status = "Comment published and item closed. Refreshing ledger…"
 			updated.refreshStatus = updated.status
@@ -447,23 +435,12 @@ func (m model) finishReopenComment(msg commentMsg) (tea.Model, tea.Cmd) {
 		}
 
 		readCmd := m.refreshNotificationItem()
-		next, syncCmd := m.startRefresh(false)
+		next, syncCmd := m.startRefreshItems(false, target.key)
 		updated := next.(model)
 		updated.status = "Item reopened. Refreshing item and ledger…"
 		updated.refreshStatus = updated.status
 		return updated, tea.Batch(readCmd, syncCmd)
 	}
-	for i := range m.items {
-		if m.items[i].Key() == target.key {
-			m.items[i].State = "open"
-			break
-		}
-	}
-	if m.detail.key == target.key {
-		m.detail.item.State = "open"
-	}
-	m.recomputeSidebarCounts()
-	m.refreshActiveList()
 	c.index++
 	if c.index < len(c.targets) {
 		c.approval, c.requestID = "", ""
@@ -483,7 +460,7 @@ func (m model) finishReopenComment(msg commentMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	readCmd := m.refreshLiveDetail()
-	next, syncCmd := m.startRefresh(false)
+	next, syncCmd := m.startRefreshItems(false, c.completed...)
 	updated := next.(model)
 	updated.status = "Reopened " + pluralize(len(c.completed), "item", "items") + "; refreshing ledger…"
 	updated.refreshStatus = updated.status

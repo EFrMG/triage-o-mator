@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from support import ROOT, Workspace, item
@@ -77,6 +78,18 @@ class LedgerTests(Workspace):
         self.run_cli("sync")
         self.assertEqual(self.ledger()[("issue", 1)]["category"], "bug")
         self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
+
+    def test_direct_item_read_overrides_lagging_issue_list_after_close(self):
+        self.sync()
+        meta = json.loads((self.root / "data/owner/repo/raw/fetch_meta.json").read_text())
+        since = (datetime.strptime(meta["synced_through"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.responses[f"repos/owner/repo/issues?state=all&since={since}&per_page=100"] = dict(data=[item(1, "Suspend crashes on NVIDIA")])
+        self.responses["repos/owner/repo/issues/1"] = dict(data=dict(number=1, html_url="https://github.com/owner/repo/issues/1", state="closed", title="Suspend crashes on NVIDIA", user=dict(login="author"), created_at="2025-01-01T00:00:00Z", updated_at="2025-01-02T00:00:00Z", labels=[], comments=1))
+
+        self.run_cli("fetch", "--include-item", "issue:1")
+        self.run_cli("sync")
+        self.assertEqual(self.ledger()[("issue", 1)]["state"], "closed")
+        self.assertEqual(self.ledger()[("issue", 2)]["state"], "open")
 
     def test_negative_duplicate_verdict_excludes_pair(self):
         self.sync()

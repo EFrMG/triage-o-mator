@@ -342,6 +342,34 @@ func TestBaselineNotificationItemCommentActions(t *testing.T) {
 	}
 }
 
+func TestBaselineCommentStateComesFromLedgerRefresh(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	m.activateTab(untriagedTab)
+	m.selectCurrentListItem()
+	key := m.detail.key
+	m = baselineSend(m, tea.KeyPressMsg{Text: "x"})
+	if !m.comment.open || !m.comment.close {
+		t.Fatal("close composer did not open")
+	}
+
+	out := `{"comment":{"status":"succeeded","url":"https://github.com/owner/repo/issues/1#issuecomment-1"},"state_change":{"status":"succeeded","state":"closed"}}`
+	m = baselineSend(m, commentMsg{root: m.installRoot, repo: m.repo, publish: true, out: out})
+	if m.detail.item.State != "open" || m.items[0].State != "open" || !m.refreshing {
+		t.Fatal("close response changed state before the direct item fetch")
+	}
+
+	items := append([]Item(nil), m.items...)
+	for i := range items {
+		if items[i].Key() == key {
+			items[i].State = "closed"
+		}
+	}
+	m = baselineSend(m, ledgerReloadedMsg{repo: m.repo, items: items})
+	if m.detail.item.State != "closed" {
+		t.Fatal("refreshed ledger state did not reach the open item")
+	}
+}
+
 func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 	for _, approve := range []bool{false, true} {
 		t.Run(map[bool]string{false: "proposal", true: "approval"}[approve], func(t *testing.T) {

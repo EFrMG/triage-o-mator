@@ -8,7 +8,7 @@
 
 Running it again on an install is how you upgrade it, repair its symlinks after the checkout moved, and re-point it at another checkout. It never overwrites a file you wrote: a taxonomy you edited, a prompt you replaced, and anything the generated .gitignore's markers do not cover are left as they are.
 
-The only files it touches outside the install are the target repository's AGENTS.md (a short marked block, when the install is tracked) and .git/info/exclude (one line, when it is not); both are confirmed unless --yes.
+Outside the install, a tracked run creates the target repository's AGENTS.md when absent or confirms an edit to its existing file unless --yes is given. Solo mode uses one line in .git/info/exclude instead.
 """
 
 import argparse
@@ -254,14 +254,6 @@ def agents_block(repo):
     return AGENTS_BLOCK.format(begin=AGENTS_BEGIN, end=AGENTS_END, dir=INSTALL_DIR_NAME, repo=repo)
 
 
-def agents_file(target):
-    """Where the block goes: the target's AGENTS.md, or its CLAUDE.md when that is the one it keeps."""
-    if (target / "AGENTS.md").exists() or not (target / "CLAUDE.md").exists():
-        return target / "AGENTS.md"
-
-    return target / "CLAUDE.md"
-
-
 def with_agents_block(existing, block):
     if AGENTS_BEGIN in existing and AGENTS_END in existing:
         head, rest = existing.split(AGENTS_BEGIN, 1)
@@ -412,11 +404,12 @@ def main():
     wants_agents = args.agents_md if args.agents_md is not None else not solo
     agents_path = None
     if wants_agents:
-        path = agents_file(target)
-        content = with_agents_block(path.read_text() if path.exists() else "", agents_block(repo))
-        if path.exists() and path.read_text() == content:
+        path = target / "AGENTS.md"
+        existing_agents = path.read_text() if path.exists() else None
+        content = with_agents_block(existing_agents or "", agents_block(repo))
+        if existing_agents == content:
             pass
-        elif args.dry_run or confirm(f"\nAdd triage-o-mator's section to {rel(path, target)}?", args.yes):
+        elif existing_agents is None or args.dry_run or confirm(f"\nAdd triage-o-mator's section to {rel(path, target)}?", args.yes):
             before = len(plan.lines)
             plan.write(path, content, target, "the target repository's own file")
             print("\n".join(plan.lines[before:]))

@@ -28,15 +28,18 @@ class InstallTests(unittest.TestCase):
             subprocess.run(["git", "init", "-q", str(target)], check=True)
             subprocess.run(["git", "-C", str(target), "remote", "add", "origin", "https://github.com/owner/repo.git"], check=True)
             env = dict(os.environ, XDG_CONFIG_HOME=str(base / "config-home"))
-            command = [str(checkout / "bin/install-to"), str(target), "--yes"]
+            command = [str(checkout / "bin/install-to"), str(target)]
             preview = subprocess.run([*command, "--dry-run"], env=env, capture_output=True, text=True)
             self.assertEqual(preview.returncode, 0, preview.stderr)
             self.assertFalse((target / "triage-o-mator").exists())
+            self.assertFalse((target / "AGENTS.md").exists())
 
             result = subprocess.run(command, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             install = target / "triage-o-mator"
             self.assertTrue((install / "bin").is_symlink())
+            self.assertTrue((install / "AGENTS.md").is_symlink())
+            self.assertIn("<!-- triage-o-mator:begin -->", (target / "AGENTS.md").read_text())
             self.assertEqual((install / "config/repo").read_text().strip(), "owner/repo")
             self.assertFalse((checkout / "data").exists())
 
@@ -44,6 +47,24 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(script.returncode, 0, script.stderr)
             self.assertTrue(list((install / "data/owner/repo/groups").glob("*.json")))
             self.assertFalse((checkout / "data").exists())
+
+            (target / "AGENTS.md").write_text("# Own instructions\n")
+            result = subprocess.run(command, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((target / "AGENTS.md").read_text(), "# Own instructions\n")
+            result = subprocess.run([*command, "--yes"], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("<!-- triage-o-mator:begin -->", (target / "AGENTS.md").read_text())
+
+            claude_target = base / "claude-target"
+            claude_target.mkdir()
+            subprocess.run(["git", "init", "-q", str(claude_target)], check=True)
+            subprocess.run(["git", "-C", str(claude_target), "remote", "add", "origin", "https://github.com/owner/repo.git"], check=True)
+            (claude_target / "CLAUDE.md").write_text("# Existing Claude instructions\n")
+            result = subprocess.run([str(checkout / "bin/install-to"), str(claude_target)], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("<!-- triage-o-mator:begin -->", (claude_target / "AGENTS.md").read_text())
+            self.assertEqual((claude_target / "CLAUDE.md").read_text(), "# Existing Claude instructions\n")
 
 
 class LedgerTests(Workspace):

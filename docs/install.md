@@ -28,7 +28,7 @@ Every script finds its install from its own path, not from your working director
 ```
 target-repo/
   .git/info/exclude            # solo mode only: one local line, no tracked file changed
-  AGENTS.md                    # adopted mode only: a short marked block pointing at triage-o-mator/AGENTS.md
+  AGENTS.md                    # tracked mode: a short marked block pointing at triage-o-mator/AGENTS.md
   triage-o-mator/
     bin -> ~/src/triage-o-mator/bin          symlink   ignored
     themes -> ~/src/triage-o-mator/themes    symlink   ignored
@@ -49,6 +49,8 @@ target-repo/
 ```
 
 The install carries `AGENTS.md` and `CLAUDE.md`, both leading to the same playbook. Decisions, groups, duplicate verdicts, reports and taxonomy are committed. Symlinks, the install marker, working files and cache are ignored; preserve the cache separately when retained evidence depends on it.
+
+A tracked install creates the target repository's `AGENTS.md` when it is missing. Editing an existing `AGENTS.md` still asks for confirmation unless you pass `--yes`. Use `--no-agents-md` to skip the target file, or `--agents-md` to add it in solo mode.
 
 `config/repo` defaults to what the repository's `upstream` remote points at when it has one, falling back to `origin`. This makes a clone of your fork triage the original repository's backlog. Pass `--repo owner/repo` to triage something else from here. An existing install keeps its recorded repo; if it was created from a fork before upstream detection was added, re-run `bin/install-to /path/to/repository --repo owner/repo` once to correct it.
 

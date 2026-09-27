@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -104,10 +105,10 @@ func screenStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Background(lipgloss.Color(currentTheme.Background))
 }
 
-// themeBaseSequence is the escape sequence that sets the theme's text and background colors ("" without color support).
-func themeBaseSequence() string {
+// styleStartSequence returns the leading color escape sequence from a rendered marker.
+func styleStartSequence(style lipgloss.Style) string {
 	marker := "\x00"
-	seq := screenStyle().Render(marker)
+	seq := style.Render(marker)
 	if i := strings.Index(seq, marker); i > 0 {
 		return seq[:i]
 	}
@@ -115,16 +116,65 @@ func themeBaseSequence() string {
 	return ""
 }
 
-// repaint keeps the theme's colors under everything on screen. Every styled span ends in a reset, which falls back to the terminal's own colors: invisible when the theme matches the terminal (Catppuccin Mocha on a Mocha terminal), dark blocks on a light theme and seams on the rest. Re-applying the theme's colors after each reset, and at each line start, means no text can fall through.
+// themeBaseSequence is the escape sequence that sets the theme's text and background colors ("" without color support).
+func themeBaseSequence() string { return styleStartSequence(screenStyle()) }
+
+var sgrSequence = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// repaint keeps the theme's colors under everything on screen. Compositing can combine a color reset with other style changes in one escape sequence, so restore only the color channels that remain reset after that sequence.
 func repaint(frame string) string {
 	base := themeBaseSequence()
 	if base == "" {
 		return frame
 	}
 
-	for _, reset := range []string{"\x1b[0m", "\x1b[m", "\x1b[49m", "\x1b[39m"} {
-		frame = strings.ReplaceAll(frame, reset, reset+base)
-	}
+	foreground := styleStartSequence(lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)))
+	background := styleStartSequence(lipgloss.NewStyle().Background(lipgloss.Color(currentTheme.Background)))
+	frame = sgrSequence.ReplaceAllStringFunc(frame, func(sequence string) string {
+		params := strings.Split(sequence[2:len(sequence)-1], ";")
+		resetForeground, resetBackground := false, false
+		for i := 0; i < len(params); i++ {
+			switch params[i] {
+			case "", "0":
+				resetForeground, resetBackground = true, true
+			case "39":
+				resetForeground = true
+			case "49":
+				resetBackground = true
+			case "38", "48", "58":
+				if params[i] == "38" {
+					resetForeground = false
+				} else if params[i] == "48" {
+					resetBackground = false
+				}
+				if i+1 < len(params) {
+					switch params[i+1] {
+					case "2":
+						i = minInt(i+4, len(params)-1)
+					case "5":
+						i = minInt(i+2, len(params)-1)
+					}
+				}
+			default:
+				code, err := strconv.Atoi(params[i])
+				if err == nil {
+					if code >= 30 && code <= 37 || code >= 90 && code <= 97 {
+						resetForeground = false
+					} else if code >= 40 && code <= 47 || code >= 100 && code <= 107 {
+						resetBackground = false
+					}
+				}
+			}
+		}
+
+		if resetForeground {
+			sequence += foreground
+		}
+		if resetBackground {
+			sequence += background
+		}
+		return sequence
+	})
 
 	lines := strings.Split(frame, "\n")
 	for i := range lines {

@@ -107,31 +107,23 @@ The [tutorial](docs/tutorial.md) walks through these tasks and their controls. [
 
 Mouse controls work alongside the keys: click a sidebar entry or tab, click a card to select it and click it again to open it, right-click a card to select it for a bulk action, and scroll with the wheel. Footer shortcuts are clickable too. A choice field opens on a second click; click an option to select it.
 
-1. **Start from the overview.** It shows the repository, triage and review progress, and the next work recommended by `bin/next`.
+1. **Get oriented and refresh.** The overview shows the current repository, triage and review progress, and suggestions from `bin/next`. Refresh changed issues and PRs, or run a full refresh when needed; both update the local ledger without writing to GitHub or erasing decisions and review history.
 
-2. **Refresh the backlog.** Fetch changed issues and PRs and sync them into the ledger, or perform a full refresh when needed. This reads GitHub without modifying it; existing decisions and review history stay in the local ledger.
+2. **Choose and read the work.** Open **Untriaged** or a prepared **Batch**; show issues, PRs or both, change the age order, search, or select several items for one action. Open an item to read its body, agent notes, comments and PR diff, and follow it to GitHub web whenever you need more context.
 
-3. **Choose what to work on.** Open **Untriaged** and switch between issues, PRs, or both, ordered from oldest or newest; alternatively, open a prepared batch. Lists can be searched, and several items can be selected for one action.
+3. **Make a first pass, then review it.** Take an item and choose a category, action and confidence, with a short reason. You can save a proposal for later review or save and approve a decision you have checked yourself. Give an agent copied item or list context to prepare a batch; inspect its proposals in **Batches**, then save them individually or apply the rest as unreviewed decisions. In **Pending Review**, verify and revise saved decisions before confirming them. Reviewed items leave that queue but remain in **All Items** and groups; changing one removes its previous confirmation. None of these steps performs the recommended GitHub action.
 
-4. **Read the complete item.** Move through its body, agent notes, comments, and PR diff, or open the item on GitHub when you need context outside the TUI.
+4. **Compare and organize related items.** **Possible Duplicates** and each item's candidates offer pairs to inspect (not verdicts): compare both sides, record a duplicate or rule out a false match. Put items that need a shared decision into a **Group** with evidence, member notes and an assignee. A contributor can mark a checked group `ready` for maintainers; that does not approve its members' decisions.
 
-5. **Record a decision.** Choose a category, action, and confidence, and write a short reason a maintainer can skim. Save it as an unreviewed proposal, or save and approve a decision you have personally checked. Neither choice performs the recommended action on GitHub.
+5. **Build deeper offline context.** **Local dataset** freezes and downloads evidence for the open backlog: descriptions, discussions, PR files, diffs and closing links. An agent can search and compare the saved observations without silently falling back to GitHub; missing or partial evidence remains visible too!
 
-6. **Let an agent prepare a batch.** Give an agent the current items or a complete list as Markdown, then open its result under **Batches**. Inspect and save proposals individually, or apply the remaining proposals as unreviewed decisions.
+6. **Watch follow-up activity.** Track an issue or PR for new comments. For an externally closed PR, `bin/cache closure-capture --number N --by NAME` records an observed closure with unknown attribution. **Notifications** separates items needing attention from past activity; viewing or dismissing a row does not confirm an appeal or approve a decision. Dismissing an ordinarily tracked item stops its comment checks.
 
-7. **Review proposed decisions.** Open **Pending Review**, verify the item and its evidence, revise the proposal when needed, and confirm the saved decision. Reviewed items leave that queue but remain in **All Items** and their groups; changing a reviewed decision removes its previous confirmation.
+7. **Communicate on GitHub.** You can compose a conversation comment, close an item with an explanation, or reopen selected closed items with a shared comment. Each publication requires separate approval of the exact target, text and state change; bulk reopening shows every target before publication. Labeling, approving and merging remain separate GitHub work.
 
-8. **Resolve likely duplicates.** Open **Possible Duplicates** from the sidebar or compare the candidates for an item, read both sides, and decide whether they are truly duplicates. Record the duplicate, rule out a false match, or collect related candidates into a group.
+8. **Generate the maintainer report.** Export a group for a full review packet, then run `bin/report` to gather ready groups and human-reviewed decisions into a dated Markdown handoff.
 
-9. **Organize related work into groups.** Add selected items to a group or create one from **Groups**. Record the shared decision, evidence, member notes, and assignee; after a contributor checks the packet, change its status from `draft` to `ready` for maintainers.
-
-10. **Build deeper offline context when needed.** **Local dataset** freezes and downloads evidence for the open backlog. The saved descriptions, discussions, PR files, diffs, and closing links can be searched and compared by an agent without silently falling back to live GitHub reads.
-
-11. **Track follow-up activity.** Watch an issue or PR for new comments. For an externally closed PR, run `bin/cache closure-capture --number N --by NAME` to record an observed closure with unknown attribution. **Notifications** separates items needing attention from past activity, where alerts can be viewed or dismissed; dismissing an ordinarily tracked item stops its comment checks.
-
-12. **Hand reviewed work to maintainers.** Export a group or generate a report to gather ready groups and human-reviewed decisions. The resulting packet is the handoff: labeling, approving, and merging still happen separately on GitHub. You can also compose and explicitly approve a conversation comment, close an item with an explanation, or reopen closed items with a shared comment. Bulk reopening shows every target for review before publishing.
-
-13. **Move between repositories without mixing their work.** **Switch Repo** opens another install or repository, each with its own taxonomy, ledger, batches, groups, exports, and reports.
+9. **Switch repositories when needed.** **Switch Repo** opens another install or repository, each with its own taxonomy, ledger, batches, groups, exports and reports.
 
 ### Ledger rows
 

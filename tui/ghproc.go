@@ -20,8 +20,11 @@ func runScript(installRoot, name string, args ...string) (string, error) {
 
 // runScriptLines is runScript, calling onLine (when set) with each line the script writes to stderr as it goes, e.g. bin/group export's "fetching 3/12: pr #123".
 func runScriptLines(installRoot, name string, onLine func(string), args ...string) (string, error) {
-	cmd := exec.Command(filepath.Join(installRoot, "bin", name), args...)
-	cmd.Dir = installRoot
+	cmd, err := scriptCommand(installRoot, name, args...)
+	if err != nil {
+		return "", err
+	}
+
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if onLine != nil {
@@ -35,6 +38,19 @@ func runScriptLines(installRoot, name string, onLine func(string), args ...strin
 	}
 
 	return string(out), nil
+}
+
+// scriptCommand binds both the executable and its Python install override to the selected install. Abs preserves symlinked install paths and prevents a relative root from being resolved again under cmd.Dir.
+func scriptCommand(installRoot, name string, args ...string) (*exec.Cmd, error) {
+	root, err := filepath.Abs(installRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(filepath.Join(root, "bin", name), args...)
+	cmd.Dir = root
+	cmd.Env = append(cmd.Environ(), "TRIAGE_ROOT="+root)
+	return cmd, nil
 }
 
 // lineWriter keeps everything written to it, and calls onLine with each complete line as it arrives.

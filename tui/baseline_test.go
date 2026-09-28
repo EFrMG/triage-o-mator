@@ -157,6 +157,57 @@ func TestBaselineInstallRootAndRepoBoundary(t *testing.T) {
 	}
 }
 
+func TestBaselineScriptsUseSelectedInstall(t *testing.T) {
+	oldRoot := baselineRoot(t)
+	selectedRoot := baselineRoot(t)
+	t.Setenv("TRIAGE_ROOT", oldRoot)
+
+	alias := filepath.Join(t.TempDir(), "selected")
+	if err := os.Symlink(selectedRoot, alias); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativeRoot, err := filepath.Rel(cwd, alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ledger := filepath.Join("data", "owner", "repo", "ledger.jsonl")
+	oldBefore, err := os.ReadFile(filepath.Join(oldRoot, ledger))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runScript(relativeRoot, "apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "label-only", "--reason", "selected install", "--by", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	if got := baselineLedgerRow(t, selectedRoot)["reason"]; got != "selected install" {
+		t.Fatalf("selected ledger reason = %v", got)
+	}
+	oldAfter, err := os.ReadFile(filepath.Join(oldRoot, ledger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(oldAfter) != string(oldBefore) {
+		t.Fatal("inherited TRIAGE_ROOT changed the previous install's ledger")
+	}
+
+	script := "#!/usr/bin/env python3\nfrom _install import WORK_ROOT\nprint(WORK_ROOT)\n"
+	if err := os.WriteFile(filepath.Join(selectedRoot, "bin", "selected-root"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runReadScript(&readProcess{}, relativeRoot, "selected-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(out), filepath.Clean(alias); got != want {
+		t.Fatalf("read script root = %q, want %q", got, want)
+	}
+}
+
 func TestBaselineDraftAndQuitConfirmation(t *testing.T) {
 	m := newModel(t.TempDir(), "owner/repo", baselineTaxonomy(), "tester", baselineItems())
 	m.activateTab(untriagedTab)

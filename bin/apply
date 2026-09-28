@@ -36,10 +36,12 @@ Saving and approving an unchanged decision preserves its original triager, triag
 
 import argparse
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import REPO, TRIAGE_DEFAULTS, here, load_jsonl, load_ledger, load_taxonomy, now_iso, save_ledger
+from _triage import LEDGER_PATH, REPO, TRIAGE_DEFAULTS, here, load_jsonl, load_ledger, load_taxonomy, now_iso, save_ledger
+from _storage import locked
 
 REQUIRED = {"number", "kind", "category", "action"}
 
@@ -206,104 +208,105 @@ def main():
     )
     valid_actions = set(taxonomy["actions"])
 
-    ledger = load_ledger()
-    by_key = {(r["kind"], r["number"]): r for r in ledger}
+    with nullcontext() if args.dry_run else locked(LEDGER_PATH):
+        ledger = load_ledger()
+        by_key = {(r["kind"], r["number"]): r for r in ledger}
 
-    ts = now_iso()
-    applied, missing, blank, kept, warnings, nothing = 0, [], [], [], [], []
+        ts = now_iso()
+        applied, missing, blank, kept, warnings, nothing = 0, [], [], [], [], []
 
-    for d in decisions:
-        key = (d.get("kind"), d.get("number"))
-        if key not in by_key:
-            sys.exit(here(f"error: {key} is not in the ledger — run bin/sync first"))
+        for d in decisions:
+            key = (d.get("kind"), d.get("number"))
+            if key not in by_key:
+                sys.exit(here(f"error: {key} is not in the ledger — run bin/sync first"))
 
-        rec = by_key[key]
+            rec = by_key[key]
 
-        if args.unapprove or args.clear:
-            if not (rec.get("reviewed") if args.unapprove else rec.get("category")):
-                nothing.append(key)
+            if args.unapprove or args.clear:
+                if not (rec.get("reviewed") if args.unapprove else rec.get("category")):
+                    nothing.append(key)
+
+                    continue
+
+                fields = REVIEW_FIELDS
+                if args.clear:
+                    fields += DECISION_FIELDS + ("triaged_at", "triaged_by", "batch_id")
+
+                for field in fields:
+                    rec[field] = TRIAGE_DEFAULTS[field]
+
+                applied += 1
 
                 continue
 
-            fields = REVIEW_FIELDS
-            if args.clear:
-                fields += DECISION_FIELDS + ("triaged_at", "triaged_by", "batch_id")
+            if d.get("notes_only"):
+                rec["agent_notes"] = d["agent_notes"]
+                applied += 1
 
-            for field in fields:
-                rec[field] = TRIAGE_DEFAULTS[field]
+                continue
+
+            # --approve with no category/action: review-only, leave the existing decision untouched.
+            if args.approve and not d.get("category") and not d.get("action"):
+                if not rec.get("category") or not rec.get("action"):
+                    sys.exit(
+                        f"error: cannot --approve {key} — it has no category/action yet"
+                    )
+
+                rec["reviewed"] = True
+                rec["reviewed_by"] = reviewer
+                rec["reviewed_at"] = ts
+                applied += 1
+
+                continue
+
+            if not REQUIRED.issubset(d):
+                missing.append(d)
+
+                continue
+
+            if not d.get("category") or not d.get("action"):
+                blank.append((d["kind"], d["number"]))
+
+                continue
+
+            if args.only_untriaged and rec.get("category"):
+                kept.append((d["kind"], d["number"]))
+
+                continue
+
+            if d["category"] not in valid_categories:
+                warnings.append(f"#{d['number']}: unrecognized category {d['category']!r}")
+
+            if d["action"] not in valid_actions:
+                warnings.append(f"#{d['number']}: unrecognized action {d['action']!r}")
+
+            changed = any(rec.get(f, "") != d.get(f, "") for f in DECISION_FIELDS)
+            rec["category"] = d["category"]
+            rec["action"] = d["action"]
+            rec["confidence"] = d.get("confidence", "")
+            rec["reason"] = d.get("reason", "")
+            if changed and rec.get("reviewed") and not (args.reviewed or args.approve):
+                # An approval was of the old call, not this one.
+                for field in REVIEW_FIELDS:
+                    rec[field] = TRIAGE_DEFAULTS[field]
+            if "agent_notes" in d:
+                rec["agent_notes"] = d["agent_notes"] or ""
+
+            by = args.by or d.get("proposed_by") or "agent"
+            if changed or not (args.reviewed or args.approve):
+                rec["triaged_at"] = ts
+                rec["triaged_by"] = by
+                rec["batch_id"] = batch_id
+
+            if args.reviewed or args.approve:
+                rec["reviewed"] = True
+                rec["reviewed_by"] = reviewer
+                rec["reviewed_at"] = ts
 
             applied += 1
 
-            continue
-
-        if d.get("notes_only"):
-            rec["agent_notes"] = d["agent_notes"]
-            applied += 1
-
-            continue
-
-        # --approve with no category/action: review-only, leave the existing decision untouched.
-        if args.approve and not d.get("category") and not d.get("action"):
-            if not rec.get("category") or not rec.get("action"):
-                sys.exit(
-                    f"error: cannot --approve {key} — it has no category/action yet"
-                )
-
-            rec["reviewed"] = True
-            rec["reviewed_by"] = reviewer
-            rec["reviewed_at"] = ts
-            applied += 1
-
-            continue
-
-        if not REQUIRED.issubset(d):
-            missing.append(d)
-
-            continue
-
-        if not d.get("category") or not d.get("action"):
-            blank.append((d["kind"], d["number"]))
-
-            continue
-
-        if args.only_untriaged and rec.get("category"):
-            kept.append((d["kind"], d["number"]))
-
-            continue
-
-        if d["category"] not in valid_categories:
-            warnings.append(f"#{d['number']}: unrecognized category {d['category']!r}")
-
-        if d["action"] not in valid_actions:
-            warnings.append(f"#{d['number']}: unrecognized action {d['action']!r}")
-
-        changed = any(rec.get(f, "") != d.get(f, "") for f in DECISION_FIELDS)
-        rec["category"] = d["category"]
-        rec["action"] = d["action"]
-        rec["confidence"] = d.get("confidence", "")
-        rec["reason"] = d.get("reason", "")
-        if changed and rec.get("reviewed") and not (args.reviewed or args.approve):
-            # An approval was of the old call, not this one.
-            for field in REVIEW_FIELDS:
-                rec[field] = TRIAGE_DEFAULTS[field]
-        if "agent_notes" in d:
-            rec["agent_notes"] = d["agent_notes"] or ""
-
-        by = args.by or d.get("proposed_by") or "agent"
-        if changed or not (args.reviewed or args.approve):
-            rec["triaged_at"] = ts
-            rec["triaged_by"] = by
-            rec["batch_id"] = batch_id
-
-        if args.reviewed or args.approve:
-            rec["reviewed"] = True
-            rec["reviewed_by"] = reviewer
-            rec["reviewed_at"] = ts
-
-        applied += 1
-
-    if not args.dry_run:
-        save_ledger(list(by_key.values()))
+        if not args.dry_run:
+            save_ledger(list(by_key.values()))
 
     label = (
         str(args.decisions_path)

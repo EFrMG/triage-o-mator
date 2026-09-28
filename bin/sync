@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _triage import (
     here,
+    LEDGER_PATH,
     RAW_DIR,
     TRIAGE_DEFAULTS,
     load_jsonl,
@@ -31,7 +32,7 @@ from _storage import atomic_writer, locked
 
 
 def main():
-    # The fetch metadata lock serializes sync against an inventory capture; no ledger lock is taken.
+    # The inventory metadata lock precedes the ledger lock, and no acquisition occurs under the ledger lock.
     with locked(RAW_DIR / "fetch_meta.json"):
         sync()
 
@@ -49,44 +50,45 @@ def sync():
 
     incremental = meta.get("mode") == "incremental"
 
-    ledger = load_ledger()
-    by_key = {(r["kind"], r["number"]): r for r in ledger}
-    seen_open = set()
-    ts = now_iso()
+    with locked(LEDGER_PATH):
+        ledger = load_ledger()
+        by_key = {(r["kind"], r["number"]): r for r in ledger}
+        seen_open = set()
+        ts = now_iso()
 
-    added, updated, closed = 0, 0, 0
-    for item in raw_items:
-        # Inventory bodies stay in disposable raw evidence, not the compact decision ledger. Preserve existing user-owned extra fields.
-        item = {k: v for k, v in item.items() if k not in TRIAGE_DEFAULTS and k not in ("body", "inventory_ids")}
-        key = (item["kind"], item["number"])
-        seen_open.add(key)
-        existing = by_key.get(key)
-        if existing is None and item.get("state") != "open":
-            continue
+        added, updated, closed = 0, 0, 0
+        for item in raw_items:
+            # Inventory bodies stay in disposable raw evidence, not the compact decision ledger. Preserve existing user-owned extra fields.
+            item = {k: v for k, v in item.items() if k not in TRIAGE_DEFAULTS and k not in ("body", "inventory_ids")}
+            key = (item["kind"], item["number"])
+            seen_open.add(key)
+            existing = by_key.get(key)
+            if existing is None and item.get("state") != "open":
+                continue
 
-        if existing is None:
-            rec = dict(TRIAGE_DEFAULTS)
-            rec.update(item)
-            rec["first_seen_at"] = ts
-            rec["last_synced_at"] = ts
-            by_key[key] = rec
-            added += 1
-        else:
-            if existing.get("state") == "open" and item.get("state") == "closed":
-                closed += 1
-
-            existing.update(item)
-            existing["last_synced_at"] = ts
-            updated += 1
-
-    if not incremental:
-        for key, rec in by_key.items():
-            if key not in seen_open and rec.get("state") == "open":
-                rec["state"] = "closed"
+            if existing is None:
+                rec = dict(TRIAGE_DEFAULTS)
+                rec.update(item)
+                rec["first_seen_at"] = ts
                 rec["last_synced_at"] = ts
-                closed += 1
+                by_key[key] = rec
+                added += 1
+            else:
+                if existing.get("state") == "open" and item.get("state") == "closed":
+                    closed += 1
 
-    save_ledger(list(by_key.values()))
+                existing.update(item)
+                existing["last_synced_at"] = ts
+                updated += 1
+
+        if not incremental:
+            for key, rec in by_key.items():
+                if key not in seen_open and rec.get("state") == "open":
+                    rec["state"] = "closed"
+                    rec["last_synced_at"] = ts
+                    closed += 1
+
+        save_ledger(list(by_key.values()))
 
     if meta.get("fetched_at"):
         meta["synced_through"] = meta["fetched_at"]

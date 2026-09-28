@@ -106,7 +106,9 @@ bin/export-csv --pending-review # -> data/<owner>/<repo>/exports/ledger-<date>.c
 bin/import-csv data/<owner>/<repo>/exports/ledger-<date>.csv --by <reviewer-name>
 ```
 
-Only those seven columns update ledger content. Editing GitHub-derived columns (title, labels, state, ...) remains a no-op.
+Keep each row's `kind`, `number`, and `review_revision` intact. Import checks every included row before writing; if any row is stale or missing its revision, export a new CSV and transfer your edits to it. A changed decision that was already reviewed loses review approval, even if the CSV still says `reviewed: true`; export again and explicitly approve the updated decision. A previously unreviewed decision can be edited and approved together by setting `reviewed` true and supplying a reviewer name in `reviewed_by` or `--by`.
+
+Only those seven columns are directly editable. Changing a decision also updates its triage attribution and may clear prior review approval; approving a decision records review attribution. Editing GitHub-derived columns (title, labels, state, ...) remains a no-op.
 
 If a human is triaging live in conversation instead, `bin/apply --by <name> --reviewed` on their own decisions file is fine. That is a human decision going straight in instead of an agent proposal awaiting review.
 

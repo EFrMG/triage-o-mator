@@ -65,7 +65,7 @@ The TUI never writes group JSON or the item ledger directly: it calls `bin/group
 
 To hand work to another contributor, share the relevant `data/<owner>/<repo>/groups/*.json` files through Git and/or send an exported review packet. Group files live in their repo's folder and also record the repo, so a checkout pointed at another repository neither displays nor edits them. Group records do not replace the ledger or import exported decisions automatically.
 
-This provides persistent group handoffs, assignment, and conflict detection within one checkout. It does **not** provide a shared server, authenticated access control, distributed locking between Git clones, or concurrent item-ledger writes. Separate contributors should reconcile group-file conflicts through Git review; coordinate ledger changes as before.
+This provides persistent group handoffs, assignment, and conflict detection within one checkout. It does **not** provide a shared server, authenticated access control, or distributed locking between Git clones. Ledger writers in one install serialize updates, and CSV imports also check exported row revisions. Separate contributors should reconcile group-file and ledger conflicts through Git review.
 
 Ordinary edits preserve historical structured fields already present in older group files. New review packets omit those retired fields and focus on the group's current membership, notes, assignment and status.
 

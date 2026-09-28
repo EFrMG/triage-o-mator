@@ -6,7 +6,7 @@ Usage:
     bin/export-csv [--open-only] [--pending-review]
     -> data/<owner>/<repo>/exports/ledger-<date>.csv
 
-Edit category / action / confidence / reason / reviewed / reviewed_by / reviewer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. Don't reorder or delete the `number`/`kind` columns; they are the join key.
+Edit category / action / confidence / reason / reviewed / reviewed_by / reviewer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. Keep `number`, `kind`, and `review_revision` intact; the revision rejects stale rows.
 """
 
 import argparse
@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _triage import EXPORTS_DIR, FIELDS, load_ledger
+from _csv_revision import review_revision
 
 
 def main():
@@ -38,11 +39,12 @@ def main():
 
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = EXPORTS_DIR / f"ledger-{date.today().isoformat()}.csv"
-    with out_path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
+    with out_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=[*FIELDS, "review_revision"], extrasaction="ignore")
         writer.writeheader()
         for rec in ledger:
             row = dict(rec)
+            row["review_revision"] = review_revision(rec)
             row["labels"] = ",".join(row.get("labels") or [])
             writer.writerow(row)
 

@@ -508,6 +508,113 @@ func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 	}
 }
 
+func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) {
+	root := baselineRoot(t)
+	path := filepath.Join(root, "data/owner/repo/ledger.jsonl")
+	row := strings.Replace(baselineRow(1), `"category":""`, `"category":"retired"`, 1)
+	row = strings.Replace(row, `"action":""`, `"action":"archive"`, 1)
+	row = strings.Replace(row, `"confidence":""`, `"confidence":"obsolete"`, 1)
+	if err := os.WriteFile(path, []byte(row+baselineRow(2)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := baselineModel(t, root)
+	m.activateTab(untriagedTab)
+	m.openItem(m.items[0])
+	if m.form.Category() != "retired" || m.form.Action() != "archive" || m.form.Confidence() != "obsolete" || !strings.Contains(ansi.Strip(m.form.View(100)), "not in taxonomy") {
+		t.Fatal("unlisted decision was hidden")
+	}
+	if _, cmd := m.requestSave(); cmd != nil {
+		t.Fatal("unlisted decision was accepted")
+	}
+	if got := baselineLedgerRow(t, root); got["category"] != "retired" || got["action"] != "archive" {
+		t.Fatal("blocked save changed the ledger")
+	}
+
+	m.form.FocusField(fieldCategory)
+	m.form.CycleValue(0)
+	m.form.FocusField(fieldAction)
+	m.form.CycleValue(0)
+	m.commitDraftIfDirty()
+	m.loadForm(m.items[0])
+	if m.form.Category() != "bug" || m.form.Action() != "label-only" || m.form.Confidence() != "obsolete" {
+		t.Fatal("draft lost corrected or unlisted values")
+	}
+	m.form.FocusField(fieldConfidence)
+	m.form.CycleValue(0)
+	m.commitDraftIfDirty()
+	m.loadForm(m.items[0])
+	if m.form.InvalidValues() != "" {
+		t.Fatal("corrected draft retained an invalid flag")
+	}
+	m.form.reason.SetValue("Explicitly checked")
+	_, cmd := m.requestSave()
+	if cmd == nil {
+		t.Fatal("corrected draft did not save")
+	}
+	if result := cmd().(applyDoneMsg); result.err != nil {
+		t.Fatal(result.err)
+	}
+	if got := baselineLedgerRow(t, root); got["category"] != "bug" || got["action"] != "label-only" || got["confidence"] != "low" || got["reason"] != "Explicitly checked" {
+		t.Fatalf("corrected decision = %v", got)
+	}
+
+	f := newDecisionForm(Taxonomy{})
+	f.LoadItem(Item{Kind: "issue", Category: "old-category"})
+	f.FocusField(fieldCategory)
+	f.CycleValue(1)
+	if f.Category() != "old-category" || f.InvalidValues() == "" || f.dirty {
+		t.Fatal("empty taxonomy choice changed an unsupported saved value")
+	}
+}
+
+func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
+	root := baselineRoot(t)
+	reason := strings.Repeat("Review café 🦊 evidence. ", 25) + "\n" + strings.Repeat("Second line café 🦊. ", 25)
+	path := filepath.Join(root, "data/owner/repo/ledger.jsonl")
+	var row map[string]any
+	if err := json.Unmarshal([]byte(baselineRow(1)), &row); err != nil {
+		t.Fatal(err)
+	}
+	row["category"], row["action"], row["confidence"], row["reason"] = "bug", "label-only", "", reason
+	row["reviewed"], row["reviewed_by"] = true, "tester"
+	data, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(append(data, '\n'), []byte(baselineRow(2))...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := baselineModel(t, root)
+	m.activateTab(untriagedTab)
+	m.openItem(m.items[0])
+	if m.form.Reason() != reason {
+		t.Fatal("loaded reason was truncated")
+	}
+	if m.form.Confidence() != "" {
+		t.Fatal("blank saved confidence became a taxonomy default")
+	}
+	m.form.ApplyDraft(m.form.Snapshot())
+	if m.form.Reason() != reason {
+		t.Fatal("draft reason was truncated")
+	}
+	m.form.ApplyProposal(proposal{Category: "bug", Action: "label-only", Confidence: "", Reason: reason})
+	if m.form.Reason() != reason || m.form.Confidence() != "" {
+		t.Fatal("proposal reason or confidence changed")
+	}
+	_, cmd := m.requestSave()
+	if cmd == nil {
+		t.Fatal("save produced no command")
+	}
+	if result := cmd().(applyDoneMsg); result.err != nil {
+		t.Fatal(result.err)
+	}
+	if got := baselineLedgerRow(t, root); got["reason"] != reason || got["confidence"] != "" || got["reviewed"] != true {
+		t.Fatalf("saved long reason or original approval changed: %v", got)
+	}
+}
+
 func TestBaselinePendingSavePinsRepositoryAndReleasesSwitch(t *testing.T) {
 	root := baselineRoot(t)
 	other := DataDir(root, "other/repo")

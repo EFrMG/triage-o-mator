@@ -51,6 +51,7 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 
 - In an untriaged item, `l` moves into the form: Category, Action, Confidence, and Reason.
 - On a choice, `j`/`k` change the value and `Enter` moves to the next field. Category, action, and confidence come from `config/taxonomy.json`; reason is free text.
+- Saved values missing from the current taxonomy stay visible and require an explicit supported choice before saving.
 - `Tab`/`Shift-Tab` or `J`/`K` move between fields. On a choice, `l` opens all values; select with `Enter` or `l`, or close the list with `Esc` or `h`. Printable keys remain text while editing.
 - In most forms, `Ctrl-S` submits from any field; `Esc` cancels.
 - `s` saves through `bin/apply`, attributed to your `git config user.name`. An unchanged placeholder decision or an empty reason needs a second `s`. After saving, you return to the list on the next item.

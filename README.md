@@ -48,38 +48,6 @@ Everything below is written from inside an install: paths like `data/<owner>/<re
 
 ## How it works
 
-<details>
-
-<summary>Open the screencaptures (stale, new GIFs comming soon!)</summary>
-
-![flow-0](captures/flow-0.png)
-
-![flow-1-a](captures/flow-1-a.png)
-![flow-1-b](captures/flow-1-b.png)
-
-![flow-2](captures/flow-2.png)
-
-![flow-3](captures/flow-3.png)
-
-![flow-4-a](captures/flow-4-a.png)
-![flow-4-b](captures/flow-4-b.png)
-
-![flow-5](captures/flow-5.png)
-
-![flow-6](captures/flow-6.png)
-
-![flow-7](captures/flow-7.png)
-
-![flow-8](captures/flow-8.png)
-
-![flow-9](captures/flow-9.png)
-
-![flow-10](captures/flow-10.png)
-
-![agent-writing-maintainer-brief](captures/agent-writing-maintainer-brief.png)
-
-</details>
-
 The ledger tracks item facts and local triage decisions. The cache keeps larger, versioned observations for offline analysis. Groups and reports turn reviewed work into a handoff for maintainers.
 
 ```mermaid
@@ -107,23 +75,42 @@ The [tutorial](docs/tutorial.md) walks through these tasks and their controls. [
 
 Mouse controls work alongside the keys: click a sidebar entry or tab, click a card to select it and click it again to open it, right-click a card to select it for a bulk action, and scroll with the wheel. Footer shortcuts are clickable too. A choice field opens on a second click; click an option to select it.
 
-1. **Get oriented and refresh.** The overview shows the current repository, triage and review progress, and suggestions from `bin/next`. Refresh changed issues and PRs, or run a full refresh when needed; both update the local ledger without writing to GitHub or erasing decisions and review history.
+0. **Get oriented and refresh.** The overview shows the current repository, triage and review progress, and suggestions from `bin/next`. Refresh changed issues and PRs, or run a full refresh when needed.
 
-2. **Choose and read the work.** Open **Untriaged** or a prepared **Batch**; show issues, PRs or both, change the age order, search, or select several items for one action. Open an item to read its body, agent notes, comments and PR diff, and follow it to GitHub web whenever you need more context.
+![flow-0](captures/flow-0.webp)
 
-3. **Make a first pass, then review it.** Take an item and choose a category, action and confidence, with a short reason. You can save a proposal for later review or save and approve a decision you have checked yourself. Give an agent copied item or list context to prepare a batch; inspect its proposals in **Batches**, then save them individually or apply the rest as unreviewed decisions. In **Pending Review**, verify and revise saved decisions before confirming them. Reviewed items leave that queue but remain in **All Items** and groups; changing one removes its previous confirmation. None of these steps performs the recommended GitHub action.
+1. **Choose and read the work.** Open **Untriaged** or a prepared **Batch**; show issues, PRs or both, change the age order, search, or select several items for one action. Open an item to read its body, agent notes, comments and PR diff.
 
-4. **Compare and organize related items.** **Possible Duplicates** and each item's candidates offer pairs to inspect (not verdicts): compare both sides, record a duplicate or rule out a false match. Put items that need a shared decision into a **Group** with evidence, member notes and an assignee. A contributor can mark a checked group `ready` for maintainers; that does not approve its members' decisions.
+![flow-1](captures/flow-1.webp)
 
-5. **Build deeper offline context.** **Local dataset** freezes and downloads evidence for the open backlog: descriptions, discussions, PR files, diffs and closing links. An agent can search and compare the saved observations without silently falling back to GitHub; missing or partial evidence remains visible too!
+2. **Make a first pass, then review it.** Take an item and choose a category, action and confidence, with a short reason. You can save a proposal for later review or save and approve a decision you have checked yourself. Give an agent copied item or list context to prepare a batch; inspect its proposals in **Batches**, then save them individually or apply the rest as unreviewed decisions. In **Pending Review**, verify and revise saved decisions before confirming them. Reviewed items leave that queue but remain in **All Items** and groups; changing one removes its previous confirmation. None of these steps performs the recommended GitHub action.
 
-6. **Watch follow-up activity.** Track an issue or PR for new comments. For an externally closed PR, `bin/cache closure-capture --number N --by NAME` records an observed closure with unknown attribution. **Notifications** separates items needing attention from past activity; viewing or dismissing a row does not confirm an appeal or approve a decision. Dismissing an ordinarily tracked item stops its comment checks.
+![flow-2](captures/flow-2.webp)
 
-7. **Communicate on GitHub.** You can compose a conversation comment, close an item with an explanation, or reopen selected closed items with a shared comment. Each publication requires separate approval of the exact target, text and state change; bulk reopening shows every target before publication. Labeling, approving and merging remain separate GitHub work.
+3. **Compare and organize related items.** **Possible Duplicates** and each item's candidates offer pairs to inspect: compare both sides, record a duplicate or rule out a false match. Put items that need a shared decision into a **Group** with evidence, member notes and an assignee. A contributor can mark a checked group `ready` for maintainers; that does not approve its members' decisions.
 
-8. **Generate the maintainer report.** Export a group for a full review packet, then run `bin/report` to gather ready groups and human-reviewed decisions into a dated Markdown handoff.
+![flow-3](captures/flow-3.webp)
 
-9. **Switch repositories when needed.** **Switch Repo** opens another install or repository, each with its own taxonomy, ledger, batches, groups, exports and reports.
+4. **Build deeper offline context.** **Local dataset** freezes and downloads evidence for the open backlog: descriptions, discussions, PR files, diffs and closing links. An agent can search and compare the saved observations without silently falling back to GitHub; missing or partial evidence remains visible too!
+
+![flow-4](captures/flow-4.webp)
+
+5. **Watch follow-up activity.** Track an issue or PR for new comments. For an externally closed PR, `bin/cache closure-capture --number N --by NAME` records an observed closure with unknown attribution. **Notifications** separates items needing attention from past activity; viewing or dismissing a row does not confirm an appeal or approve a decision. Dismissing an ordinarily tracked item stops its comment checks.
+
+![flow-5](captures/flow-5.webp)
+
+6. **Communicate on GitHub.** You can compose a comment, close an item with an explanation, or reopen selected closed items with a shared comment. Each publication requires separate approval of the exact target, text and state change; bulk reopening shows every target before publication. Labeling, approving and merging remain separate GitHub work.
+
+![flow-6](captures/flow-6.webp)
+
+7. **Generate a maintainer report or suggestions.** Export a group or batch for a full review packet, then gather ready groups and human-reviewed decisions into a dated Markdown handoff. One can polish these reports further with the help of Agents with its dedicated playbook, and even have the agents suggest PRs to be closed (experimental).
+
+![flow-7-a](captures/flow-7-a.webp)
+![flow-7-b](captures/flow-7-b.webp)
+
+8. **Switch repositories when needed.** **Switch Repo** opens another install or repository, each with its own taxonomy, ledger, batches, groups, exports and reports.
+
+![flow-8](captures/flow-8.webp)
 
 ### Ledger rows
 

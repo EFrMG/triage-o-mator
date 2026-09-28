@@ -13,7 +13,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from support import ROOT, Workspace, item
+from support import ROOT, Workspace, item, repository, summary
 
 
 class InstallTests(unittest.TestCase):
@@ -298,6 +298,43 @@ class LedgerTests(Workspace):
 
 
 class TrackingTests(Workspace):
+    def test_budgeted_checks_rotate_starting_subscription(self):
+        self.responses["repos/owner/repo"] = dict(data=repository())
+        for number in (1, 2):
+            self.responses[f"repos/owner/repo/issues/{number}"] = dict(data=summary("issue", number))
+            self.responses[f"repos/owner/repo/issues/{number}/comments?per_page=100&page=1"] = dict(data=[])
+
+        arguments = ("--expected-repo", "owner/repo")
+        for number in (1, 2):
+            self.json_cli("cache", *arguments, "track-add", "--kind", "issue", "--number", str(number), "--request-budget", "10")
+            self.responses[f"repos/owner/repo/issues/{number}"]["data"]["comments"] = 1
+            self.responses[f"repos/owner/repo/issues/{number}/comments?per_page=100&page=1"]["data"] = [dict(id=number, body="new", user=dict(login="author"), created_at="2026-09-23T00:00:00Z", updated_at="2026-09-23T00:00:00Z")]
+
+        def check(budget):
+            before = len(self.calls())
+            result = self.json_cli("cache", *arguments, "track-check", "--request-budget", str(budget))
+            calls = self.calls()[before:]
+            summaries = [call[-1] for call in calls if call[-1].startswith("repos/owner/repo/issues/") and "?" not in call[-1]]
+            return result, summaries
+
+        first, summaries = check(4)
+        self.assertEqual(summaries[0], "repos/owner/repo/issues/1")
+        self.assertEqual(first["checked"], 1)
+
+        second, summaries = check(5)
+        self.assertEqual(summaries[0], "repos/owner/repo/issues/2")
+        self.assertEqual(second["checked"], 1)
+        self.assertEqual(second["unread_total"], 2)
+
+        third, summaries = check(3)
+        self.assertEqual(summaries[0], "repos/owner/repo/issues/1")
+        self.assertEqual(third["checked"], 0)
+
+        fourth, summaries = check(4)
+        self.assertEqual(summaries[0], "repos/owner/repo/issues/2")
+        self.assertEqual(fourth["unread_total"], 2)
+        self.assertEqual([row["new_count"] for row in self.json_cli("cache", *arguments, "track-list")["rows"]], [1, 1])
+
     def test_repeated_enrollment_keeps_the_comment_baseline(self):
         self.seed_pr()
         arguments = ("--expected-repo", "owner/repo", "track-add", "--kind", "pr", "--number", "1", "--request-budget", "20")

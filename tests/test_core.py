@@ -17,6 +17,52 @@ from support import ROOT, Workspace, item, repository, summary
 
 
 class InstallTests(unittest.TestCase):
+    def test_solo_install_in_linked_worktree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            repository = base / "repository"
+            worktree = base / "worktree"
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.email", "test@example.com"], check=True)
+            (repository / "README.md").write_text("fixture\n")
+            subprocess.run(["git", "-C", str(repository), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(repository), "-c", "commit.gpgsign=false", "commit", "-qm", "Initial"], check=True)
+            subprocess.run(["git", "-C", str(repository), "worktree", "add", "-q", "--detach", str(worktree)], check=True)
+
+            env = dict(os.environ, XDG_CONFIG_HOME=str(base / "config-home"))
+            command = [str(ROOT / "bin/install-to"), str(worktree), "--repo", "owner/repo"]
+            exclude = Path(subprocess.run(["git", "-C", str(worktree), "rev-parse", "--git-path", "info/exclude"], check=True, capture_output=True, text=True).stdout.strip())
+            if not exclude.is_absolute():
+                exclude = worktree / exclude
+
+            before = exclude.read_bytes()
+
+            preview = subprocess.run([*command, "--solo", "--dry-run"], env=env, capture_output=True, text=True)
+            self.assertEqual(preview.returncode, 0, preview.stderr)
+            self.assertEqual(exclude.read_bytes(), before)
+            self.assertFalse((worktree / "triage-o-mator").exists())
+            self.assertFalse((base / "config-home").exists())
+
+            for _ in range(2):
+                result = subprocess.run([*command, "--solo"], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(exclude.read_text().splitlines().count("/triage-o-mator/"), 1)
+                status = subprocess.run(["git", "-C", str(worktree), "status", "--porcelain"], check=True, capture_output=True, text=True)
+                self.assertEqual(status.stdout, "")
+
+            preview = subprocess.run([*command, "--adopt", "--dry-run"], env=env, capture_output=True, text=True)
+            self.assertEqual(preview.returncode, 0, preview.stderr)
+            self.assertEqual(exclude.read_text().splitlines().count("/triage-o-mator/"), 1)
+            staged = subprocess.run(["git", "-C", str(worktree), "diff", "--cached", "--name-only"], check=True, capture_output=True, text=True)
+            self.assertEqual(staged.stdout, "")
+
+            result = subprocess.run([*command, "--adopt"], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("/triage-o-mator/", exclude.read_text().splitlines())
+            staged = subprocess.run(["git", "-C", str(worktree), "diff", "--cached", "--name-only"], check=True, capture_output=True, text=True)
+            self.assertIn("triage-o-mator/config/repo", staged.stdout.splitlines())
+
     def test_install_dry_run_and_work_root(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)

@@ -277,7 +277,7 @@ def confirm(question, assume_yes):
 
 def exclude_install(target, plan, add):
     """Keep the install out of the target's history through .git/info/exclude: local to this clone, so a repository you don't control keeps every tracked file it had."""
-    path = Path(git(target, "rev-parse", "--git-dir")) / "info" / "exclude"
+    path = Path(git(target, "rev-parse", "--git-path", "info/exclude"))
     if not path.is_absolute():
         path = target / path
 

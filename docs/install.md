@@ -97,6 +97,8 @@ To correct a backlog target later, re-run `bin/install-to` with the intended `--
 
 Installing into a clone of a repository you can't push to would still leave the install in `git status` for everyone who later pulls your branch. `--solo` avoids that: the install is listed in `.git/info/exclude`, which is local to your clone, so **no tracked file of that repository changes** and the `AGENTS.md` block is skipped (`--agents-md` adds it anyway, as a local modification you'll see in `git status`).
 
+In a linked worktree, this exclude file is shared by all worktrees of the clone, so adding or removing the solo exclusion affects them all.
+
 You then triage on your own and hand maintainers `bin/report` output and group packets, rather than commits. If they would rather ignore the directory openly, a `triage-o-mator/` line in the repository's own `.gitignore` does the same thing visibly.
 
 When they want it, `bin/install-to <path> --adopt` turns that into an install the repository keeps: the local exclude goes, the `AGENTS.md` block is written, and everything the install tracks is staged, ready to commit as the pull request that adopts the tool, carrying the backlog work you already did.

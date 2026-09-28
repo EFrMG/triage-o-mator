@@ -57,6 +57,7 @@ func (m model) requestUndo(targets []Item) (tea.Model, tea.Cmd) {
 
 	m.listConfirm = ""
 
+	m.pendingApply++
 	return m, undoCmd(m.installRoot, m.repo, unapprove, clear, m.reviewer)
 }
 
@@ -91,6 +92,7 @@ func undoQuestion(targets []Item, unapprove, clear []Key) string {
 
 // undoDoneMsg reports an undo, with the ledger re-read after it.
 type undoDoneMsg struct {
+	root                string
 	repo                string
 	unapproved, cleared []Key
 	items               []Item
@@ -99,7 +101,7 @@ type undoDoneMsg struct {
 
 func undoCmd(root, repo string, unapprove, clear []Key, by string) tea.Cmd {
 	return func() tea.Msg {
-		msg := undoDoneMsg{repo: repo}
+		msg := undoDoneMsg{root: root, repo: repo}
 		for _, step := range []struct {
 			flag string
 			keys []Key
@@ -109,7 +111,7 @@ func undoCmd(root, repo string, unapprove, clear []Key, by string) tea.Cmd {
 				continue
 			}
 
-			if _, err := runScript(root, "apply", append([]string{step.flag, "--by", by}, keyArgs(step.keys)...)...); err != nil {
+			if _, err := runScript(root, "apply", append([]string{"--expected-repo", repo, step.flag, "--by", by}, keyArgs(step.keys)...)...); err != nil {
 				msg.err = err
 
 				break
@@ -125,8 +127,12 @@ func undoCmd(root, repo string, unapprove, clear []Key, by string) tea.Cmd {
 }
 
 func (m model) onUndoDone(msg undoDoneMsg) (tea.Model, tea.Cmd) {
-	if msg.repo != m.repo {
+	if msg.root != m.installRoot || msg.repo != m.repo {
 		return m, nil
+	}
+
+	if m.pendingApply > 0 {
+		m.pendingApply--
 	}
 
 	if msg.items != nil {

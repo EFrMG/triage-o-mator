@@ -474,7 +474,7 @@ func TestBaselineCommentStateComesFromLedgerRefresh(t *testing.T) {
 			items[i].State = "closed"
 		}
 	}
-	m = baselineSend(m, ledgerReloadedMsg{repo: m.repo, items: items})
+	m = baselineSend(m, ledgerReloadedMsg{root: m.installRoot, repo: m.repo, items: items})
 	if m.detail.item.State != "closed" {
 		t.Fatal("refreshed ledger state did not reach the open item")
 	}
@@ -508,6 +508,81 @@ func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 	}
 }
 
+func TestBaselinePendingSavePinsRepositoryAndReleasesSwitch(t *testing.T) {
+	root := baselineRoot(t)
+	other := DataDir(root, "other/repo")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "ledger.jsonl"), []byte(baselineRow(1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldLedger := filepath.Join(root, "data/owner/repo/ledger.jsonl")
+	newLedger := filepath.Join(other, "ledger.jsonl")
+	oldBefore, err := os.ReadFile(oldLedger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newBefore, err := os.ReadFile(newLedger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := baselineModel(t, root)
+	m.activateTab(untriagedTab)
+	m.selectCurrentListItem()
+	m.detail.loading = false
+	m.form.ApplyProposal(proposal{Category: "bug", Action: "label-only", Reason: "old repository decision"})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "s"})
+	m = next.(model)
+	if cmd == nil || m.switchBusy() == "" {
+		t.Fatal("queued save did not block switching")
+	}
+	m.editingRepo = true
+	m.repoInput.SetValue("other/repo")
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.repo != "owner/repo" || !strings.Contains(m.status, "Can't switch yet") {
+		t.Fatal("repository picker switched during a pending save")
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "config", "repo"), []byte("other/repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msg := cmd().(applyDoneMsg)
+	if msg.err == nil || !strings.Contains(msg.err.Error(), "repository changed") {
+		t.Fatal("queued save accepted a changed config/repo")
+	}
+	m = baselineSend(m, msg)
+	if m.switchBusy() != "" || m.form.Reason() != "old repository decision" {
+		t.Fatal("failed save did not release switching or preserve the draft")
+	}
+	oldAfter, err := os.ReadFile(oldLedger)
+	if err != nil || string(oldAfter) != string(oldBefore) {
+		t.Fatal("original ledger changed", err)
+	}
+	newAfter, err := os.ReadFile(newLedger)
+	if err != nil || string(newAfter) != string(newBefore) {
+		t.Fatal("new repository ledger changed", err)
+	}
+}
+
+func TestBaselineApplyRepliesRequireOrigin(t *testing.T) {
+	root := baselineRoot(t)
+	m := baselineModel(t, root)
+	m.pendingApply = 1
+	m.drafts[Key{Kind: "issue", Number: 1}] = decisionSnapshot{}
+	key := Key{Kind: "issue", Number: 1}
+	m = baselineSend(m, applyDoneMsg{root: "another install", repo: m.repo, key: key})
+	m = baselineSend(m, applyDoneMsg{root: root, repo: "other/repo", key: key})
+	if m.pendingApply != 1 || len(m.drafts) != 1 || m.status == "Saved." {
+		t.Fatal("stale apply reply changed current state")
+	}
+	m = baselineSend(m, applyDoneMsg{root: root, repo: m.repo, key: key})
+	if m.pendingApply != 0 || len(m.drafts) != 0 {
+		t.Fatal("successful apply did not release switching or clear the draft")
+	}
+}
+
 func TestBaselineSwitchRepoClearsLocalStateAndLateReply(t *testing.T) {
 	root := baselineRoot(t)
 	dir := DataDir(root, "other/repo")
@@ -524,9 +599,13 @@ func TestBaselineSwitchRepoClearsLocalStateAndLateReply(t *testing.T) {
 	if m.repo != "other/repo" || len(m.items) != 1 || m.items[0].Number != 7 || len(m.drafts) != 0 || len(m.similar) != 0 {
 		t.Fatal("repository switch kept prior repository state")
 	}
-	m = baselineSend(m, ledgerReloadedMsg{repo: "owner/repo", items: baselineItems()})
+	m = baselineSend(m, ledgerReloadedMsg{root: root, repo: "owner/repo", items: baselineItems()})
 	if len(m.items) != 1 || m.items[0].Number != 7 {
 		t.Fatal("late reply replaced the new repository's ledger")
+	}
+	m = baselineSend(m, ledgerReloadedMsg{root: "another install", repo: "other/repo", items: baselineItems()})
+	if len(m.items) != 1 || m.items[0].Number != 7 {
+		t.Fatal("reply from another install replaced the ledger")
 	}
 }
 

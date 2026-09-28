@@ -154,7 +154,8 @@ func (m model) requestListApprove() (tea.Model, tea.Cmd) {
 
 	m.listConfirm = ""
 
-	return m, approveKeysCmd(m.installRoot, approvable, m.reviewer)
+	m.pendingApply++
+	return m, approveKeysCmd(m.installRoot, m.repo, approvable, m.reviewer)
 }
 
 // requestBatchRemove drops the targets from the open batch (their proposals too) on a second d; the ledger is untouched.
@@ -192,12 +193,12 @@ func keyArgs(keys []Key) []string {
 }
 
 // approveKeysCmd approves several saved decisions in one bin/apply call (one ledger write).
-func approveKeysCmd(root string, keys []Key, by string) tea.Cmd {
+func approveKeysCmd(root, repo string, keys []Key, by string) tea.Cmd {
 	return func() tea.Msg {
-		args := append([]string{"--approve", "--by", by}, keyArgs(keys)...)
+		args := append([]string{"--expected-repo", repo, "--approve", "--by", by}, keyArgs(keys)...)
 		_, err := runScript(root, "apply", args...)
 
-		return applyDoneMsg{approval: true, count: len(keys), approved: keys, err: err}
+		return applyDoneMsg{root: root, repo: repo, approval: true, count: len(keys), approved: keys, err: err}
 	}
 }
 

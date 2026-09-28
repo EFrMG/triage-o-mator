@@ -65,6 +65,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case installedMsg:
 		return m.onInstalled(msg)
 	case batchAppliedMsg:
+		if msg.root != m.installRoot || msg.repo != m.repo {
+			return m, nil
+		}
+
 		m.batches.busy = false
 		if msg.err != nil {
 			m.failErr("Couldn't apply the proposals", msg.err)
@@ -126,7 +130,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishTracking(msg)
 
 	case ledgerReloadedMsg:
-		if msg.repo != m.repo {
+		if msg.root != m.installRoot || msg.repo != m.repo {
 			return m, nil
 		}
 
@@ -217,6 +221,14 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishEvidenceRead(msg)
 
 	case applyDoneMsg:
+		if msg.root != m.installRoot || msg.repo != m.repo {
+			return m, nil
+		}
+
+		if m.pendingApply > 0 {
+			m.pendingApply--
+		}
+
 		if msg.err != nil {
 			what := "Couldn't save the decision"
 			if msg.approval {
@@ -639,6 +651,12 @@ func (m model) handleRepoInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 	case key.Matches(msg, keys.Enter) && m.typedInstallTarget() != "":
+		if reason := m.switchBusy(); reason != "" {
+			m.fail("Can't switch yet: " + reason)
+
+			return m, nil
+		}
+
 		path := m.typedInstallTarget()
 		m.installing = installUI{path: path, busy: true}
 		m.status = "Working out what installing into " + path + " would change…"
@@ -791,6 +809,12 @@ func (m model) onInstalled(msg installedMsg) (tea.Model, tea.Cmd) {
 	m.installing = installUI{}
 	if msg.err != nil {
 		m.failErr("Couldn't install there", msg.err)
+
+		return m, nil
+	}
+
+	if reason := m.switchBusy(); reason != "" {
+		m.fail("Can't switch yet: " + reason)
 
 		return m, nil
 	}
@@ -1176,6 +1200,7 @@ func (m model) requestDecisionSave(approve bool) (tea.Model, tea.Cmd) {
 
 	m.confirmSave = false
 
+	m.pendingApply++
 	return m, m.saveDecisionCmd(approve)
 }
 
@@ -1197,7 +1222,8 @@ func (m model) requestApprove() (tea.Model, tea.Cmd) {
 
 	m.confirmApprove = false
 
-	return m, approveCmd(m.installRoot, m.detail.key, m.reviewer)
+	m.pendingApply++
+	return m, approveCmd(m.installRoot, m.repo, m.detail.key, m.reviewer)
 }
 
 func (m model) saveDecisionCmd(approve bool) tea.Cmd {
@@ -1213,7 +1239,7 @@ func (m model) saveDecisionCmd(approve bool) tea.Cmd {
 		}
 	}
 
-	cmd := applyDecisionCmd(m.installRoot, m.detail.key, m.form.Category(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, by, m.activeBatch, reviewedBy)
+	cmd := applyDecisionCmd(m.installRoot, m.repo, m.detail.key, m.form.Category(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, by, m.activeBatch, reviewedBy)
 
 	return func() tea.Msg { msg := cmd().(applyDoneMsg); msg.snapshot = &snapshot; return msg }
 }

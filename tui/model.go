@@ -45,6 +45,9 @@ type model struct {
 	taxonomy                Taxonomy
 	reviewer                string
 
+	// pendingApply counts concurrent decision writes and undo commands; batch applies use batches.busy.
+	pendingApply int
+
 	items   []Item
 	groups  groupUI
 	batches batchUI
@@ -758,7 +761,7 @@ func (m model) minimumHeight() int {
 
 // switchBusy gates legacy work without cancellation/reply identities. Explicit evidence/corpus processes are stopped on switch and their stale replies are rejected. Unsaved drafts still require discard confirmation.
 func (m model) switchBusy() string {
-	if m.refreshing || m.groups.busy || m.batches.busy || m.dups.busy || m.detail.loading {
+	if m.refreshing || m.groups.busy || m.batches.busy || m.dups.busy || m.detail.loading || m.pendingApply > 0 {
 		return "wait for the current fetch or save to finish."
 	}
 

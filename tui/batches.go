@@ -86,6 +86,7 @@ type batchesLoadedMsg struct {
 }
 
 type batchAppliedMsg struct {
+	root, repo  string
 	id, summary string
 	err         error
 }
@@ -219,9 +220,9 @@ func applyBatchCmd(root, repo string, ids ...string) tea.Cmd {
 	return func() tea.Msg {
 		applied, kept, warnings := 0, 0, 0
 		for _, id := range ids {
-			out, err := runScript(root, "apply", filepath.Join(batchesDir(root, repo), id+".decisions.jsonl"), "--only-untriaged")
+			out, err := runScript(root, "apply", filepath.Join(batchesDir(root, repo), id+".decisions.jsonl"), "--only-untriaged", "--expected-repo", repo)
 			if err != nil {
-				return batchAppliedMsg{id: id, err: err}
+				return batchAppliedMsg{root: root, repo: repo, id: id, err: err}
 			}
 
 			// Keep the status line to what was written and what was protected; bin/apply also lists the still-blank rows, which is noise here.
@@ -253,7 +254,7 @@ func applyBatchCmd(root, repo string, ids ...string) tea.Cmd {
 			summary += fmt.Sprintf(" · %d value(s) not in the taxonomy, see bin/apply --dry-run", warnings)
 		}
 
-		return batchAppliedMsg{id: ids[0], summary: summary + "."}
+		return batchAppliedMsg{root: root, repo: repo, id: ids[0], summary: summary + "."}
 	}
 }
 

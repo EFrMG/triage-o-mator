@@ -136,6 +136,7 @@ func fetchSyncCmdAtHost(installRoot, repo string, full bool, host string, items 
 
 // ledgerReloadedMsg carries a freshly re-read ledger after fetch / sync or an apply.
 type ledgerReloadedMsg struct {
+	root  string
 	repo  string // which repo's ledger this is, so a reload that finishes after Switch Repo is dropped
 	items []Item
 	err   error
@@ -144,7 +145,7 @@ type ledgerReloadedMsg struct {
 func reloadLedgerCmd(installRoot, repo string) tea.Cmd {
 	return func() tea.Msg {
 		items, err := LoadLedger(installRoot, repo)
-		return ledgerReloadedMsg{repo: repo, items: items, err: err}
+		return ledgerReloadedMsg{root: installRoot, repo: repo, items: items, err: err}
 	}
 }
 
@@ -220,9 +221,10 @@ func enrichItemCmd(installRoot, repo string, key Key, generation uint64, withDif
 
 // applyDoneMsg reports the result of an apply (decision save or approve).
 type applyDoneMsg struct {
-	snapshot *decisionSnapshot
-	approval bool
-	key      Key
+	root, repo string
+	snapshot   *decisionSnapshot
+	approval   bool
+	key        Key
 	// count is set for a bulk approval of ticked items (key is then unset); approved holds the approved items either way.
 	count    int
 	approved []Key
@@ -232,9 +234,10 @@ type applyDoneMsg struct {
 // applyDecisionCmd saves one decision; batchID, when set, stamps it with the batch it was made in (bin/apply defaults to "tui").
 // agentNotes, when non-empty, carries a batch proposal's notes into the ledger along with the decision saved from it; empty leaves the item's existing notes alone.
 // reviewedBy records an explicit human confirmation with the save; by remains the decision author, which can be the author of an unchanged batch proposal.
-func applyDecisionCmd(installRoot string, key Key, category, action, confidence, reason, agentNotes, by, batchID, reviewedBy string) tea.Cmd {
+func applyDecisionCmd(installRoot, repo string, key Key, category, action, confidence, reason, agentNotes, by, batchID, reviewedBy string) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{
+			"--expected-repo", repo,
 			"--number", strconv.Itoa(key.Number), "--kind", key.Kind,
 			"--category", category, "--action", action,
 			"--reason", reason, "--by", by,
@@ -258,15 +261,15 @@ func applyDecisionCmd(installRoot string, key Key, category, action, confidence,
 
 		_, err := runScript(installRoot, "apply", args...)
 
-		return applyDoneMsg{key: key, err: err, approval: reviewedBy != "", approved: []Key{key}}
+		return applyDoneMsg{root: installRoot, repo: repo, key: key, err: err, approval: reviewedBy != "", approved: []Key{key}}
 	}
 }
 
-func approveCmd(installRoot string, key Key, by string) tea.Cmd {
+func approveCmd(installRoot, repo string, key Key, by string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := runScript(installRoot, "apply", "--number", strconv.Itoa(key.Number), "--kind", key.Kind, "--approve", "--by", by)
+		_, err := runScript(installRoot, "apply", "--expected-repo", repo, "--number", strconv.Itoa(key.Number), "--kind", key.Kind, "--approve", "--by", by)
 
-		return applyDoneMsg{key: key, err: err, approval: true, approved: []Key{key}}
+		return applyDoneMsg{root: installRoot, repo: repo, key: key, err: err, approval: true, approved: []Key{key}}
 	}
 }
 

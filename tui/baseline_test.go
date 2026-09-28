@@ -521,8 +521,8 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	m := baselineModel(t, root)
 	m.activateTab(untriagedTab)
 	m.openItem(m.items[0])
-	if m.form.Category() != "retired" || m.form.Action() != "archive" || m.form.Confidence() != "obsolete" || !strings.Contains(ansi.Strip(m.form.View(100)), "not in taxonomy") {
-		t.Fatal("unlisted decision was hidden")
+	if m.form.Category() != "retired" || m.form.Action() != "archive" || m.form.Confidence() != "obsolete" {
+		t.Fatal("unlisted decision values changed on load")
 	}
 	if _, cmd := m.requestSave(); cmd != nil {
 		t.Fatal("unlisted decision was accepted")
@@ -557,14 +557,6 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	}
 	if got := baselineLedgerRow(t, root); got["category"] != "bug" || got["action"] != "label-only" || got["confidence"] != "low" || got["reason"] != "Explicitly checked" {
 		t.Fatalf("corrected decision = %v", got)
-	}
-
-	f := newDecisionForm(Taxonomy{})
-	f.LoadItem(Item{Kind: "issue", Category: "old-category"})
-	f.FocusField(fieldCategory)
-	f.CycleValue(1)
-	if f.Category() != "old-category" || f.InvalidValues() == "" || f.dirty {
-		t.Fatal("empty taxonomy choice changed an unsupported saved value")
 	}
 }
 

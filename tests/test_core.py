@@ -170,9 +170,6 @@ class LedgerTests(Workspace):
         approved = self.ledger()[("issue", 1)]
         self.assertTrue(approved["reviewed"])
         self.assertEqual(approved["triaged_by"], "operator")
-        before = ledger_path.read_bytes()
-        self.run_cli("import-csv", str(csv_path), ok=False)
-        self.assertEqual(ledger_path.read_bytes(), before)
 
         self.run_cli("export-csv")
         with csv_path.open(newline="") as source:

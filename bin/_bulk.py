@@ -257,6 +257,7 @@ def acquire_batch(cache, reader, kind, members):
             first, last = initial[number], final[number]
             original = mapped_summary(first, kind, observed)
             identity, revision = summary_identity(original, kind, number, observed)
+            published = dict(original, state="merged" if kind == "pr" and original["merged"] else original["state"])
             latest = cache.latest(kind, number)
             if latest:
                 same_item(latest[1]["identity"], identity)
@@ -264,7 +265,7 @@ def acquire_batch(cache, reader, kind, members):
             stable = all(first.get(key) == last.get(key) for key in ("id", "databaseId", "state", "updatedAt", "baseRefOid", "headRefOid", "changedFiles", "additions", "deletions")) and first["comments"]["totalCount"] == last["comments"]["totalCount"]
             payloads = {}
             resource = f"graphql repository/{cache.identity['full_name']}/{kind}/{number}"
-            summary = component(resource, revision, original, payloads, transport="graphql", complete=stable, error="item changed during batch acquisition")
+            summary = component(resource, revision, published, payloads, transport="graphql", complete=stable, error="item changed during batch acquisition")
             comments, comments_complete = comment_rows(first)
             comment_value = component(resource + "/comments", revision, comments, payloads, transport="graphql", complete=stable and comments_complete,
                                       error="comments changed or require another page", count=len(comments), expected=first["comments"]["totalCount"])

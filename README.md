@@ -10,7 +10,7 @@ Tooling to work through a GitHub issue / PR backlog too large for one person to 
 
 The backlog gets a first pass of categorization done in batches, by you or by an AI Agent, and whoever's triaging gets a fast, git-tracked way to check and correct that first pass before anyone acts on it.
 
-It reads issues and PRs via `gh` and writes categorization decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI or `bin/comment-plus`; publishing defaults to dry-run and never follows automatically from a triage decision.
+It reads issues and PRs via `gh` and writes categorization decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI; publishing defaults to dry-run and never follows automatically from a triage decision.
 
 > Developed with the [omacom/omarchy](https://github.com/omacom/omarchy) backlog in mind, while supporting other GitHub repositories. Adoption by Omarchy is a goal, not an existing deployment.
 
@@ -99,7 +99,7 @@ Mouse controls work alongside the keys: click a sidebar entry or tab, click a ca
 
 ![flow-5](captures/flow-5.webp)
 
-6. **Communicate on GitHub.** You can compose a comment, close an item with an explanation, or reopen selected closed items with a shared comment. Each publication requires separate approval of the exact target, text and state change; bulk reopening shows every target before publication. Labeling, approving and merging remain separate GitHub work.
+6. **Communicate on GitHub.** You can compose a sole comment, and close or reopen items with a shared comment. Each publication requires separate approval of the exact target, text and state change; bulk reopening shows every target before publication. Labeling, approving and merging remain future work.
 
 ![flow-6](captures/flow-6.webp)
 

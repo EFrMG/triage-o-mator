@@ -29,7 +29,8 @@ def packet(group, enrich=False, diff=False, options=None):
         item = dict(row) if row else dict(kind=member["kind"], number=member["number"], missing_from_ledger=True)
         context = context_index.collect(member["kind"], member["number"], include_rows=False)
         item["local_context"] = dict(context_revision=context["context_revision"], ledger_present=context["ledger_present"],
-                                     ledger=context["ledger_guidance"], relevant_group_ids=[entry["id"] for entry in context["relevant_groups"]])
+                                     ledger=context["ledger_guidance"], relevant_group_ids=[entry["id"] for entry in context["relevant_groups"]],
+                                     feedback_checkpoint=context["feedback_checkpoint"], feedback=context["feedback"])
         for entry in context["relevant_groups"]:
             if entry["id"] != group["id"]:
                 related_groups[entry["id"]] = entry
@@ -113,6 +114,20 @@ def markdown(data):
 
         if prose(item.get("agent_notes")):
             lines += ["", "### Agent notes", "", prose(item["agent_notes"])]
+
+        if context["feedback"]:
+            lines += ["", "### Prior proposal feedback", "",
+                      "Saved objections and write outcomes are separate from ledger review and do not prove a recommendation was right.", ""]
+            for event in context["feedback"]:
+                if event["kind"] == "rejection":
+                    lines += [f"- Rejected by {event['by']} at {event['at']} (proposal {event['proposal_checkpoint']}): {prose(event['reason'])}"]
+                elif event["kind"] == "write_outcome":
+                    lines += [f"- Recorded {event['status']} write outcome for request {event['request_id']}: comment {event['comment_status']}; close {event['state_status']}."]
+                    for field in ("comment_error", "state_error"):
+                        if event.get(field):
+                            lines += [f"  {field}: {prose(event[field])}"]
+                else:
+                    lines += [f"- Unreconciled write attempt for request {event['request_id']}; inspect the saved write receipt before another action."]
 
         evidence = item.get("evidence")
         if evidence:

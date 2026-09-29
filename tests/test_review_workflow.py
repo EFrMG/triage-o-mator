@@ -1,5 +1,6 @@
 """Local review aids preserve the distinction between context and approval."""
 
+import hashlib
 import json
 
 from support import Workspace, item
@@ -169,6 +170,73 @@ class ProposalFeedbackTests(Workspace):
         self.auto_close("reject", "--number", "2", "--checkpoint", attempted["checkpoint"],
                         "--by", "maintainer", "--reason", "Too late", ok=False)
         self.assertEqual(saved.read_bytes(), before)
+        self.assertEqual(ledger.read_bytes(), original)
+        self.assertEqual(self.calls(), [])
+
+    def test_second_pass_reads_objection_and_uncertain_outcome_offline(self):
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text(json.dumps(item(1, "First PR", "pr")) + "\n" + json.dumps(item(2, "Second PR", "pr")) + "\n")
+        original = ledger.read_bytes()
+        group = self.json_cli("group", "create", "--title", "Choose a fix", "--description", "Compare both PRs", "--by", "maintainer")
+        for number in (1, 2):
+            self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", str(number), "--by", "maintainer")
+
+        def context(number, *args, ok=True):
+            return self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", str(number), *args, ok=ok)
+
+        before = context(1)
+        pending = self.propose(1)
+        self.assertIsNone(context(1)["feedback_checkpoint"])
+        self.assertEqual(context(1)["checkpoint"], before["checkpoint"])
+
+        reason = "é" * 300
+        self.auto_close("reject", "--number", "1", "--checkpoint", pending["checkpoint"], "--by", "maintainer", "--reason", reason)
+        rejected = context(1)
+        self.assertEqual(rejected["context_revision"], before["context_revision"])
+        self.assertIsNotNone(rejected["feedback_checkpoint"])
+        self.assertEqual(rejected["feedback_count"], 1)
+        self.assertNotEqual(rejected["checkpoint"], before["checkpoint"])
+        context(1, "--checkpoint", before["checkpoint"], ok=False)
+        feedback = next(row for row in rejected["rows"] if row["kind"] == "feedback")
+        self.assertEqual(feedback["fields"]["by"]["preview"], "maintainer")
+        self.assertGreater(feedback["fields"]["reason"]["omitted_bytes"], 0)
+        fragment = self.json_cli("item-context", "--expected-repo", "owner/repo", "source", "--kind", "pr", "--number", "1",
+                                 "--row", feedback["id"], "--field", "reason", "--checkpoint", rejected["checkpoint"], "--max-bytes", "5")
+        self.assertEqual(fragment["text"], "éé")
+
+        self.propose(2)
+        path = self.root / "data/owner/repo/auto-close/pr-2.json"
+        saved = json.loads(path.read_text())
+        writes = self.root / "data/owner/repo/writes"
+        writes.mkdir()
+        writes.joinpath(saved["request_id"] + ".json").write_text("{}\n")
+        attempted = context(2)
+        self.assertEqual(attempted["feedback_count"], 1)
+        self.assertEqual(next(row for row in attempted["rows"] if row["kind"] == "feedback")["fields"]["kind"]["preview"], "unreconciled_attempt")
+
+        saved.pop("checksum")
+        saved["status"] = "uncertain"
+        saved["outcome"] = dict(request_id=saved["request_id"], comment=dict(status="succeeded", url="https://github.com/owner/repo/issues/2#issuecomment-5"),
+                                state_change=dict(status="unknown", error="connection lost"))
+        saved["checksum"] = hashlib.sha256(json.dumps(saved, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        path.write_text(json.dumps(saved) + "\n")
+
+        uncertain = context(2)
+        self.assertEqual(uncertain["feedback_count"], 1)
+        self.assertNotEqual(uncertain["feedback_checkpoint"], attempted["feedback_checkpoint"])
+        outcome = next(row for row in uncertain["rows"] if row["kind"] == "feedback")
+        self.assertEqual(outcome["fields"]["status"]["preview"], "uncertain")
+        self.assertEqual(outcome["fields"]["comment_status"]["preview"], "succeeded")
+        self.assertEqual(outcome["fields"]["state_status"]["preview"], "unknown")
+
+        packet = self.json_cli("group", "export", group["id"], "--format", "json")
+        by_number = {entry["number"]: entry["local_context"] for entry in packet["items"]}
+        self.assertEqual(by_number[1]["feedback"][0]["reason"], reason)
+        self.assertEqual(by_number[1]["feedback_checkpoint"], rejected["feedback_checkpoint"])
+        self.assertEqual(by_number[2]["feedback"][0]["state_error"], "connection lost")
+        markdown = self.run_cli("group", "export", group["id"]).stdout
+        self.assertIn("Prior proposal feedback", markdown)
+        self.assertIn("connection lost", markdown)
         self.assertEqual(ledger.read_bytes(), original)
         self.assertEqual(self.calls(), [])
 

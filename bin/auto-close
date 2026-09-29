@@ -13,12 +13,9 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 
 from _evidence import canonical, digest
+from _auto_close_records import load, proposal_path
 from _storage import atomic_writer, locked
 from _triage import DATA_DIR, now_iso, read_repo
-
-
-def proposal_path(number):
-    return DATA_DIR / "auto-close" / f"pr-{number}.json"
 
 
 def state_path():
@@ -38,48 +35,6 @@ def save(path, value):
     value["checksum"] = digest(canonical(value))
     with atomic_writer(path) as out:
         out.write(canonical(value) + "\n")
-
-
-def valid_rejection(value):
-    rejection = value.get("rejection")
-    if not isinstance(rejection, dict):
-        return False
-
-    by, reason, at, checkpoint = (rejection.get(field) for field in ("by", "reason", "at", "proposal_checkpoint"))
-    if not isinstance(by, str) or not by.strip() or not isinstance(reason, str) or not reason.strip():
-        return False
-    if not isinstance(at, str) or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", at):
-        return False
-    if not isinstance(checkpoint, str) or not re.fullmatch(r"[0-9a-f]{64}", checkpoint):
-        return False
-
-    history = value.get("history")
-    if not isinstance(history, list) or not history or not isinstance(history[-1], dict):
-        return False
-
-    previous = history[-1]
-    return previous.get("checksum") == checkpoint and previous.get("status") == "pending" and previous.get("request_id") == value.get("request_id") and value.get("outcome") is None
-
-
-def load(path, repo):
-    if path.parent.is_symlink() or path.is_symlink() or not path.is_file():
-        raise ValueError(f"unavailable proposal: {path.name}")
-    value = json.loads(path.read_text(encoding="utf-8"))
-    checksum = value.pop("checksum", None)
-    if not isinstance(checksum, str) or digest(canonical(value)) != checksum:
-        raise ValueError(f"proposal checksum changed: {path.name}")
-    value["checksum"] = checksum
-    if value.get("artifact") != "auto-close-proposal" or value.get("schema_version") != 1 or value.get("repo") != repo or value.get("number") != int(path.stem.removeprefix("pr-")) or value.get("status") not in ("pending", "rejected", "executed", "uncertain"):
-        raise ValueError(f"invalid proposal identity or status: {path.name}")
-    if value.get("target") != f"https://{value.get('host')}/{repo}/pull/{value['number']}":
-        raise ValueError(f"invalid proposal target: {path.name}")
-    if value["status"] == "rejected":
-        if not valid_rejection(value):
-            raise ValueError(f"invalid proposal rejection: {path.name}")
-    elif value.get("rejection") is not None:
-        raise ValueError(f"rejection on non-rejected proposal: {path.name}")
-
-    return value
 
 
 def proposals(repo):

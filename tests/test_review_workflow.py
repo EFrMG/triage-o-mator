@@ -20,6 +20,57 @@ class GroupTests(Workspace):
         self.assertEqual(self.calls(), [])
 
 
+class ItemContextTests(Workspace):
+    def context(self, *args, ok=True):
+        return self.json_cli("item-context", "--expected-repo", "owner/repo", *args, ok=ok)
+
+    def test_offline_context_pages_and_revision_checked_text(self):
+        absent = self.context("read", "--kind", "pr", "--number", "2")
+        self.assertFalse(absent["ledger_present"])
+        self.assertEqual(absent["group_count"], 0)
+        self.assertEqual(absent["rows"][0]["fields"], {})
+
+        row = dict(item(1, "Keep this change", "pr"), category="enhancement", action="keep-open", confidence="high",
+                   reason="Maintainer wants the work", triaged_by="maintainer", triaged_at="2026-09-29T00:00:00Z",
+                   agent_notes="Agent comparison", reviewed=True, reviewed_by="reviewer", reviewed_at="2026-09-29T01:00:00Z",
+                   reviewer_notes="Wait for the dependency", last_synced_at="2026-09-29T02:00:00Z")
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text(json.dumps(row) + "\n")
+        notes = "é" * 300
+        group = self.json_cli("group", "create", "--title", "Shared decision", "--description", "Compare the fixes", "--by", "maintainer")
+        self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", "1", "--notes", notes, "--by", "maintainer")
+
+        first = self.context("read", "--kind", "pr", "--number", "1", "--limit", "2")
+        self.assertEqual(first["requests"], 0)
+        self.assertTrue(first["ledger_present"])
+        self.assertEqual(first["rows"][0]["fields"]["reviewed"], True)
+        self.assertEqual(first["rows"][0]["fields"]["reviewer_notes"]["preview"], "Wait for the dependency")
+        self.assertEqual(first["rows"][1]["revision"], 2)
+        self.assertEqual(first["pagination"]["omitted_after"], 1)
+        self.context("read", "--kind", "pr", "--number", "1", "--offset", "2", ok=False)
+
+        second = self.context("read", "--kind", "pr", "--number", "1", "--offset", "2", "--limit", "2", "--checkpoint", first["checkpoint"])
+        member = second["rows"][0]
+        self.assertEqual(member["fields"]["updated_by"]["preview"], "maintainer")
+        self.assertGreater(member["fields"]["notes"]["omitted_bytes"], 0)
+
+        source = self.context("source", "--kind", "pr", "--number", "1", "--row", member["id"], "--field", "notes",
+                              "--checkpoint", first["checkpoint"], "--max-bytes", "5")
+        self.assertEqual(source["text"], "éé")
+        self.assertEqual(source["continuation"]["byte_offset"], 4)
+
+        row["last_synced_at"] = "2026-09-29T03:00:00Z"
+        ledger.write_text(json.dumps(row) + "\n")
+        self.assertEqual(self.context("read", "--kind", "pr", "--number", "1")["context_revision"], first["context_revision"])
+
+        self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", "1", "--notes", "New guidance", "--by", "maintainer")
+        changed = self.context("read", "--kind", "pr", "--number", "1")
+        self.assertNotEqual(changed["context_revision"], first["context_revision"])
+        self.context("source", "--kind", "pr", "--number", "1", "--row", member["id"], "--field", "notes",
+                     "--checkpoint", first["checkpoint"], ok=False)
+        self.assertEqual(self.calls(), [])
+
+
 class WatchTests(Workspace):
     def setUp(self):
         super().setUp()

@@ -40,6 +40,27 @@ def save(path, value):
         out.write(canonical(value) + "\n")
 
 
+def valid_rejection(value):
+    rejection = value.get("rejection")
+    if not isinstance(rejection, dict):
+        return False
+
+    by, reason, at, checkpoint = (rejection.get(field) for field in ("by", "reason", "at", "proposal_checkpoint"))
+    if not isinstance(by, str) or not by.strip() or not isinstance(reason, str) or not reason.strip():
+        return False
+    if not isinstance(at, str) or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", at):
+        return False
+    if not isinstance(checkpoint, str) or not re.fullmatch(r"[0-9a-f]{64}", checkpoint):
+        return False
+
+    history = value.get("history")
+    if not isinstance(history, list) or not history or not isinstance(history[-1], dict):
+        return False
+
+    previous = history[-1]
+    return previous.get("checksum") == checkpoint and previous.get("status") == "pending" and previous.get("request_id") == value.get("request_id") and value.get("outcome") is None
+
+
 def load(path, repo):
     if path.parent.is_symlink() or path.is_symlink() or not path.is_file():
         raise ValueError(f"unavailable proposal: {path.name}")
@@ -48,10 +69,15 @@ def load(path, repo):
     if not isinstance(checksum, str) or digest(canonical(value)) != checksum:
         raise ValueError(f"proposal checksum changed: {path.name}")
     value["checksum"] = checksum
-    if value.get("artifact") != "auto-close-proposal" or value.get("schema_version") != 1 or value.get("repo") != repo or value.get("number") != int(path.stem.removeprefix("pr-")) or value.get("status") not in ("pending", "executed", "uncertain"):
+    if value.get("artifact") != "auto-close-proposal" or value.get("schema_version") != 1 or value.get("repo") != repo or value.get("number") != int(path.stem.removeprefix("pr-")) or value.get("status") not in ("pending", "rejected", "executed", "uncertain"):
         raise ValueError(f"invalid proposal identity or status: {path.name}")
     if value.get("target") != f"https://{value.get('host')}/{repo}/pull/{value['number']}":
         raise ValueError(f"invalid proposal target: {path.name}")
+    if value["status"] == "rejected":
+        if not valid_rejection(value):
+            raise ValueError(f"invalid proposal rejection: {path.name}")
+    elif value.get("rejection") is not None:
+        raise ValueError(f"rejection on non-rejected proposal: {path.name}")
 
     return value
 
@@ -94,7 +120,11 @@ def row(proposal, state):
     presentation = state["rows"].get(str(proposal["number"]), {})
     active = proposal["status"] == "pending" and visible(proposal, state)
     needs = active and presentation.get("viewed_checkpoint") != proposal["checksum"]
-    return dict(number=proposal["number"], title=proposal["title"], target=proposal["target"], rationale=proposal["rationale"], comment=proposal["comment"], reference=proposal["reference"], head_sha=proposal["head_sha"], updated_at=proposal["updated_at"], status=proposal["status"], checkpoint=proposal["checksum"], active=active, needs_attention=needs, dismissed=not visible(proposal, state), outcome=proposal.get("outcome"))
+    result = dict(number=proposal["number"], title=proposal["title"], target=proposal["target"], rationale=proposal["rationale"], comment=proposal["comment"], reference=proposal["reference"], head_sha=proposal["head_sha"], updated_at=proposal["updated_at"], status=proposal["status"], checkpoint=proposal["checksum"], active=active, needs_attention=needs, dismissed=not visible(proposal, state), outcome=proposal.get("outcome"))
+    if proposal["status"] == "rejected":
+        result["rejection"] = proposal["rejection"]
+
+    return result
 
 
 def choose(repo, numbers, all_pending):
@@ -200,6 +230,27 @@ def change(repo, action, number, checkpoint):
     return dict(number=number, action=action)
 
 
+def reject(repo, number, checkpoint, by, reason):
+    if number < 1 or not by.strip() or not reason.strip() or len(by) > 200 or len(reason) > 10000 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in by + reason):
+        raise ValueError("rejection requires a positive PR number, contributor and valid reason")
+
+    path = proposal_path(number)
+    with guarded_lock(path):
+        proposal = load(path, repo)
+        if proposal["checksum"] != checkpoint or proposal["status"] != "pending":
+            raise ValueError("proposal changed or is not pending; inspect it before rejecting")
+        if (DATA_DIR / "writes" / (proposal["request_id"] + ".json")).exists():
+            raise ValueError("proposal has a write attempt; reconcile it before changing feedback")
+
+        previous = {key: value for key, value in proposal.items() if key != "history"}
+        proposal["history"] = proposal.get("history", []) + [previous]
+        proposal["status"] = "rejected"
+        proposal["rejection"] = dict(proposal_checkpoint=checkpoint, by=by, at=now_iso(), reason=reason)
+        save(path, proposal)
+
+    return row(proposal, local_state(repo))
+
+
 def call_comment(repo, proposal):
     script = Path(__file__).absolute().with_name("comment-plus")
     base = [str(script), "--expected-repo", repo, "--host", proposal["host"], "--kind", "pr", "--number", str(proposal["number"]),
@@ -271,6 +322,11 @@ def main():
         command = commands.add_parser(action)
         command.add_argument("--number", type=int, required=True)
         command.add_argument("--checkpoint", required=True)
+    rejection = commands.add_parser("reject", help="retain attributed rejection of one exact pending proposal; no GitHub write")
+    rejection.add_argument("--number", type=int, required=True)
+    rejection.add_argument("--checkpoint", required=True)
+    rejection.add_argument("--by", required=True)
+    rejection.add_argument("--reason", required=True)
     for action in ("review", "execute"):
         command = commands.add_parser(action)
         selection = command.add_mutually_exclusive_group(required=True)
@@ -292,6 +348,8 @@ def main():
         result = dict(repository=repo, rows=[row(p, state) for p in proposals(repo)], requests=0)
     elif args.command in ("view", "dismiss"):
         result = change(repo, args.command, args.number, args.checkpoint)
+    elif args.command == "reject":
+        result = reject(repo, args.number, args.checkpoint, args.by, args.reason)
     elif args.command == "review" or not args.publish:
         result = review(repo, args.number, args.all)
     else:

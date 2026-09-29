@@ -119,6 +119,60 @@ class ItemContextTests(Workspace):
         self.assertEqual(self.calls(), [])
 
 
+class ProposalFeedbackTests(Workspace):
+    def auto_close(self, *args, ok=True):
+        return self.json_cli("auto-close", "--expected-repo", "owner/repo", *args, ok=ok)
+
+    def propose(self, number):
+        comment = self.root / "comment.md"
+        comment.write_text("Thanks for the work; this PR is superseded.\n")
+
+        return self.auto_close("propose", "--number", str(number), "--title", "An older fix",
+                               "--head-sha", "b" * 40, "--updated-at", "2026-09-29T00:00:00Z",
+                               "--rationale", "Superseded by another PR", "--comment-file", str(comment), "--by", "agent:helper")
+
+    def test_rejection_retains_exact_proposal_and_never_publishes(self):
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text(json.dumps(dict(item(1, "An older fix", "pr"), reviewed=True, reviewed_by="maintainer")) + "\n")
+        original = ledger.read_bytes()
+        pending = self.propose(1)
+        reviewed = self.auto_close("review", "--number", "1")
+        self.assertNotIn("rejection", reviewed["plan"]["proposals"][0])
+        self.auto_close("dismiss", "--number", "1", "--checkpoint", pending["checkpoint"])
+
+        rejected = self.auto_close("reject", "--number", "1", "--checkpoint", pending["checkpoint"],
+                                   "--by", "maintainer", "--reason", "Keep the compatibility work open")
+        record = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
+        self.assertEqual(rejected["status"], "rejected")
+        self.assertFalse(rejected["active"])
+        self.assertFalse(rejected["dismissed"])
+        self.assertEqual(rejected["rejection"]["by"], "maintainer")
+        self.assertEqual(rejected["rejection"]["reason"], "Keep the compatibility work open")
+        self.assertEqual(rejected["rejection"]["proposal_checkpoint"], pending["checkpoint"])
+        self.assertEqual(record["history"][-1]["checksum"], pending["checkpoint"])
+        self.assertEqual(record["request_id"], record["history"][-1]["request_id"])
+        self.assertEqual(self.auto_close("list")["rows"][0]["rejection"], rejected["rejection"])
+
+        self.auto_close("review", "--number", "1", ok=False)
+        self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], ok=False)
+        self.auto_close("reject", "--number", "1", "--checkpoint", pending["checkpoint"],
+                        "--by", "maintainer", "--reason", "Stale retry", ok=False)
+        self.auto_close("dismiss", "--number", "1", "--checkpoint", rejected["checkpoint"])
+        self.assertTrue(self.auto_close("list")["rows"][0]["dismissed"])
+
+        attempted = self.propose(2)
+        saved = self.root / "data/owner/repo/auto-close/pr-2.json"
+        before = saved.read_bytes()
+        writes = self.root / "data/owner/repo/writes"
+        writes.mkdir()
+        writes.joinpath(json.loads(before)["request_id"] + ".json").write_text("{}\n")
+        self.auto_close("reject", "--number", "2", "--checkpoint", attempted["checkpoint"],
+                        "--by", "maintainer", "--reason", "Too late", ok=False)
+        self.assertEqual(saved.read_bytes(), before)
+        self.assertEqual(ledger.read_bytes(), original)
+        self.assertEqual(self.calls(), [])
+
+
 class WatchTests(Workspace):
     def setUp(self):
         super().setUp()

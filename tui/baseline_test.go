@@ -1012,10 +1012,25 @@ print('{}')
 
 func TestCompletedClosureLeavesNotificationsWithoutTracking(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
-	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Title: "Completed fixture", Status: "executed"}, {Number: 4, Title: "Needs inspection", Status: "uncertain"}}}}
+	rejected := autoCloseRow{Number: 5, Title: "Keep this PR", Status: "rejected", Rejection: &autoCloseRejection{By: "maintainer", At: "2026-09-29T00:00:00Z", Reason: "Compatibility work remains useful"}}
+	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Title: "Completed fixture", Status: "executed"}, {Number: 4, Title: "Needs inspection", Status: "uncertain"}, rejected}}}
 	choices := m.notifications.choices()
-	if len(choices) != 1 || choices[0].key != (Key{Kind: "pr", Number: 4}) || strings.Contains(m.notificationsView(), "PR #3") {
+	if len(choices) != 2 || choices[0].key != (Key{Kind: "pr", Number: 4}) || choices[1].key != (Key{Kind: "pr", Number: 5}) || strings.Contains(m.notificationsView(), "PR #3") {
 		t.Fatalf("completed closure remained a notification: %+v", choices)
+	}
+	view := ansi.Strip(m.notificationsView())
+	if !strings.Contains(view, "Closure proposal rejected") || strings.Index(view, "PR #5") < strings.Index(view, "Past actions") {
+		t.Fatal("rejected proposal was not shown under Past actions")
+	}
+	m.notifications.review = &autoCloseReview{}
+	m.notifications.review.Plan.Proposals = []autoCloseRow{rejected}
+	view = ansi.Strip(m.autoCloseReviewView())
+	if !strings.Contains(view, "Compatibility work remains useful") || !strings.Contains(view, "maintainer") || strings.Contains(view, "Publish the comment below") {
+		t.Fatal("rejected proposal reader hid the reason or offered publication")
+	}
+	_, command := m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if command != nil {
+		t.Fatal("rejected proposal started approval")
 	}
 }
 

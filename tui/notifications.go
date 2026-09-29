@@ -76,13 +76,14 @@ type autoCloseRow struct {
 		Kind   string `json:"kind"`
 		Number int    `json:"number"`
 	} `json:"reference"`
-	HeadSHA    string `json:"head_sha"`
-	UpdatedAt  string `json:"updated_at"`
-	Checkpoint string `json:"checkpoint"`
-	Status     string `json:"status"`
-	Active     bool   `json:"active"`
-	Needs      bool   `json:"needs_attention"`
-	Dismissed  bool   `json:"dismissed"`
+	HeadSHA    string              `json:"head_sha"`
+	UpdatedAt  string              `json:"updated_at"`
+	Checkpoint string              `json:"checkpoint"`
+	Status     string              `json:"status"`
+	Active     bool                `json:"active"`
+	Needs      bool                `json:"needs_attention"`
+	Dismissed  bool                `json:"dismissed"`
+	Rejection  *autoCloseRejection `json:"rejection"`
 	Outcome    *struct {
 		RequestID string `json:"request_id"`
 		Comment   struct {
@@ -94,6 +95,13 @@ type autoCloseRow struct {
 			URL    string `json:"url"`
 		} `json:"state_change"`
 	} `json:"outcome"`
+}
+
+type autoCloseRejection struct {
+	ProposalCheckpoint string `json:"proposal_checkpoint"`
+	By                 string `json:"by"`
+	At                 string `json:"at"`
+	Reason             string `json:"reason"`
 }
 
 type autoCloseList struct {
@@ -839,6 +847,8 @@ func (m model) autoCloseReviewView() string {
 	title := "PR closure proposal"
 	if n.review.Approval != "" {
 		title = "Review PR closures"
+	} else if len(n.review.Plan.Proposals) == 1 && n.review.Plan.Proposals[0].Status == "rejected" {
+		title = "Rejected PR closure proposal"
 	}
 	fmt.Fprintf(&b, "%s\n\n", inset(titleBar(title, m.repo, m.menuWidth())))
 	section := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(currentTheme.Accent))
@@ -856,15 +866,28 @@ func (m model) autoCloseReviewView() string {
 			fmt.Fprintf(&b, "%s\n", inset(muted.Render(fmt.Sprintf("%d of %d", i+1, len(n.review.Plan.Proposals)))))
 		}
 		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Proposed action")))
-		fmt.Fprintf(&b, "%s\n", inset(action.Render("Publish the comment below, then close this PR.")))
+		if row.Status == "rejected" {
+			fmt.Fprintf(&b, "%s\n", inset(muted.Render("This proposal was rejected; no GitHub action is available.")))
+		} else {
+			fmt.Fprintf(&b, "%s\n", inset(action.Render("Publish the comment below, then close this PR.")))
+		}
 		fmt.Fprintf(&b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), textWidth)))
 		if row.Reference != nil {
 			fmt.Fprintf(&b, "%s\n", inset(muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))
 		}
 		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Reason")))
 		fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(row.Rationale), textWidth)))
-		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Comment to publish")))
+		commentTitle := "Comment to publish"
+		if row.Status == "rejected" {
+			commentTitle = "Proposed comment (not published)"
+		}
+		fmt.Fprintf(&b, "\n%s\n", inset(section.Render(commentTitle)))
 		fmt.Fprintf(&b, "%s\n", inset(comment.Render(wrapText(sanitize(row.Comment), textWidth-2))))
+		if row.Rejection != nil {
+			fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Rejection")))
+			fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(row.Rejection.By)+" · At: "+sanitize(row.Rejection.At), textWidth)))
+			fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(row.Rejection.Reason), textWidth)))
+		}
 		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Observed PR revision")))
 		fmt.Fprintf(&b, "%s\n", inset(muted.Render("Head: "+sanitize(row.HeadSHA))))
 		fmt.Fprintf(&b, "%s\n", inset(muted.Render("Updated: "+sanitize(row.UpdatedAt))))
@@ -897,6 +920,8 @@ func renderNotificationChoice(n notificationsUI, choice notificationChoice, card
 				parts = append(parts, "Comment and closure completed")
 			case "uncertain":
 				parts = append(parts, "Closure outcome uncertain")
+			case "rejected":
+				parts = append(parts, "Closure proposal rejected")
 			}
 		}
 		if choice.tracked >= 0 {

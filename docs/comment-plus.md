@@ -43,4 +43,12 @@ The [PR closure playbook](../prompts/recommend-auto-close.md) saves a proposed r
 
 An exact `--replace-checkpoint` can update a pending proposal before any write attempt. The previous version remains in the tracked record and the updated proposal appears as new attention, even if the old version was dismissed. Proposals with an uncertain or completed write must be reconciled, not replaced.
 
+To reject one pending proposal with shared feedback, use its exact checkpoint from `bin/auto-close --expected-repo OWNER/REPO list`:
+
+```sh
+bin/auto-close --expected-repo OWNER/REPO reject --number N --checkpoint CHECKPOINT --by NAME --reason 'Why this proposal should not proceed'
+```
+
+The tracked proposal keeps the earlier version and records who rejected it, when and why. Rejection refuses stale checkpoints and any saved GitHub write attempt; it makes that version ineligible for review or execution without changing the ledger or GitHub. A rejected proposal by itself appears under **Past actions** in Notifications with the reason available to read; other activity on the same item can still put its combined card under **Needs attention**. A previous local dismissal does not hide the newly saved rejection; dismiss it separately if desired. Dismissal changes only local presentation, and reconsideration of a rejected proposal is a later, explicit workflow.
+
 Notifications shows actionable proposals first. The [tutorial](tutorial.md#11-track-follow-up-activity) explains how to inspect, approve or dismiss them. A successfully executed proposal leaves Notifications immediately but remains in the saved proposal record for audit; an uncertain outcome stays visible for inspection. The comment plan includes the observed PR head SHA and issue update time; a change stops before posting. Each proposal has a durable request ID, so a process interruption after publication can be reconciled through the saved `writes/` record without posting the comment again. A failed or uncertain close stops the remaining batch. Dismissal excludes a proposal from the active set while retaining its record; marking it viewed changes presentation only.

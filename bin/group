@@ -28,7 +28,7 @@ def packet(group, enrich=False, diff=False, options=None):
         row = ledger.get((member["kind"], member["number"]))
         item = dict(row) if row else dict(kind=member["kind"], number=member["number"], missing_from_ledger=True)
         context = context_index.collect(member["kind"], member["number"], include_rows=False)
-        item["local_context"] = dict(context_revision=context["context_revision"], ledger_present=context["ledger_present"],
+        item["local_context"] = dict(context_revision=context["context_revision"], checkpoint=context["checkpoint"], ledger_present=context["ledger_present"],
                                      ledger=context["ledger_guidance"], relevant_group_ids=[entry["id"] for entry in context["relevant_groups"]],
                                      feedback_checkpoint=context["feedback_checkpoint"], feedback=context["feedback"])
         for entry in context["relevant_groups"]:

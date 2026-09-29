@@ -43,6 +43,8 @@ The [PR closure playbook](../prompts/recommend-auto-close.md) saves a proposed r
 
 An exact `--replace-checkpoint` can update a pending proposal before any write attempt. The previous version remains in the tracked record and the updated proposal appears as new attention, even if the old version was dismissed. Proposals with an uncertain or completed write must be reconciled, not replaced.
 
+New proposals declare the current `item-context` checkpoint and any selected fixed cache snapshots. A group handoff also declares every exported member checkpoint. `propose` checks these offline inputs before saving and includes their revisions, selected component references and explicit evidence gaps in the proposal checkpoint and exact review. Existing proposals without declared inputs stay visible for inspection but are inactive and cannot enter a new executable review; replace a pending one with current inputs first. Evidence checks establish provenance and coverage, not approval or correctness. A later step adds fresh context checks immediately before approval and execution.
+
 To reject one pending proposal with shared feedback, use its exact checkpoint from `bin/auto-close --expected-repo OWNER/REPO list`:
 
 ```sh

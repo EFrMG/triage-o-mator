@@ -13,6 +13,7 @@ repo=$(cat config/repo)
 host=github.com # use the explicitly selected Enterprise host when applicable
 bin/cache --expected-repo "$repo" --host "$host" fetch --kind pr --number N --profile pr-comparison --mode refresh --request-budget 50
 bin/cache --expected-repo "$repo" --host "$host" read --kind pr --number N --profile pr-comparison
+bin/item-context --expected-repo "$repo" read --kind pr --number N
 bin/auto-close --expected-repo "$repo" inspect --host "$host" --number N
 ```
 
@@ -24,9 +25,10 @@ Put an explanation in the proposed comment that a contributor can understand wit
 bin/auto-close --expected-repo OWNER/REPO propose \
   --number 123 --title 'PR title' --head-sha HEAD_SHA --updated-at 2026-09-25T00:00:00Z \
   --rationale 'Why this PR should close, and what evidence supports that judgment' \
-  --comment-file data/OWNER/REPO/exports/pr-123-close.md --reference-kind pr --reference-number 456 --by agent:NAME
+  --comment-file data/OWNER/REPO/exports/pr-123-close.md --reference-kind pr --reference-number 456 --by agent:NAME \
+  --context-checkpoint CONTEXT_CHECKPOINT --evidence pr:123:SNAPSHOT_ID
 ```
 
-Omit `--reference-kind` and `--reference-number` together when there is no referenced item. Add `--host HOSTNAME` for GitHub Enterprise. The command writes one Git-tracked proposal in `data/<owner>/<repo>/auto-close/` and makes no GitHub request. It refuses to overwrite an existing proposal. After inspecting an existing pending proposal, use `--replace-checkpoint CHECKSUM` with the other `propose` arguments to correct it; the prior version remains in the record. A proposal with a GitHub write attempt cannot be replaced.
+Use the exact `checkpoint` from the item-context read and the fixed `snapshot_id` returned by cache acquisition. Add another `--evidence KIND:NUMBER:SNAPSHOT_ID` for each selected referenced item. State any missing selected evidence with `--evidence-gap 'What is missing'`; when no snapshot was selected, at least one gap is required. For a group handoff, add `--group-id ID` and one `--member-context KIND:NUMBER:CHECKPOINT` for every member in the current JSON `group export`, using each member's `local_context.checkpoint`. The proposal records the group's current revision and all member context. A changed checkpoint or an unavailable or corrupt selected snapshot stops saving. Omit `--reference-kind` and `--reference-number` together when there is no referenced item. Add `--host HOSTNAME` for GitHub Enterprise. The command writes one Git-tracked proposal in `data/<owner>/<repo>/auto-close/` and makes no GitHub request. It refuses to overwrite an existing proposal. After inspecting an existing pending proposal, use `--replace-checkpoint CHECKSUM` with the other `propose` arguments to correct it; the prior version remains in the record. A proposal with a GitHub write attempt cannot be replaced.
 
 Run `bin/auto-close --expected-repo OWNER/REPO list` to verify the saved proposal. Report its PR URL, rationale, proposed comment and reference to the person who requested the review. Explain any uncertainty or evidence gaps. A saved proposal is not approval to comment or close the PR.

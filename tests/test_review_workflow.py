@@ -124,19 +124,57 @@ class ProposalFeedbackTests(Workspace):
     def auto_close(self, *args, ok=True):
         return self.json_cli("auto-close", "--expected-repo", "owner/repo", *args, ok=ok)
 
-    def propose(self, number):
+    def propose(self, number, *extra):
         comment = self.root / "comment.md"
         comment.write_text("Thanks for the work; this PR is superseded.\n")
+        context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", str(number))
 
         return self.auto_close("propose", "--number", str(number), "--title", "An older fix",
                                "--head-sha", "b" * 40, "--updated-at", "2026-09-29T00:00:00Z",
-                               "--rationale", "Superseded by another PR", "--comment-file", str(comment), "--by", "agent:helper")
+                               "--rationale", "Superseded by another PR", "--comment-file", str(comment), "--by", "agent:helper",
+                               "--context-checkpoint", context["checkpoint"], *extra)
+
+    def test_proposal_binds_group_context_and_verified_selected_evidence(self):
+        self.seed_pr()
+        snapshot = self.json_cli("cache", "fetch", "--kind", "pr", "--number", "1", "--profile", "discussion",
+                                 "--mode", "refresh", "--request-budget", "100")["snapshot_id"]
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text(json.dumps(item(1, "Candidate PR", "pr")) + "\n" + json.dumps(item(2, "Original report")) + "\n")
+        group = self.json_cli("group", "create", "--title", "Compare options", "--by", "maintainer")
+        self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", "1", "--notes", "Keep if compatible", "--by", "maintainer")
+        self.run_cli("group", "add", group["id"], "--kind", "issue", "--number", "2", "--notes", "Original report", "--by", "maintainer")
+        packet = self.json_cli("group", "export", group["id"], "--format", "json")
+        members = [f"{item['kind']}:{item['number']}:{item['local_context']['checkpoint']}" for item in packet["items"]]
+        before = len(self.calls())
+
+        selected = self.propose(1, "--group-id", group["id"], *[part for member in members for part in ("--member-context", member)],
+                                "--evidence", f"pr:1:{snapshot}", "--evidence-gap", "Issue #2 has no selected evidence")
+        inputs = selected["inputs"]
+        self.assertEqual(inputs["group"]["id"], group["id"])
+        self.assertEqual([(row["kind"], row["number"]) for row in inputs["group"]["members"]], [("pr", 1), ("issue", 2)])
+        self.assertEqual(inputs["evidence"][0]["snapshot_id"], snapshot)
+        self.assertIn("summary", inputs["evidence"][0]["components"])
+        self.assertEqual(inputs["evidence_gaps"], ["Issue #2 has no selected evidence"])
+        self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["inputs"], inputs)
+        self.assertEqual(len(self.calls()), before)
+
+        path = self.root / "data/owner/repo/auto-close/pr-1.json"
+        legacy = json.loads(path.read_text())
+        legacy.pop("checksum")
+        legacy.pop("inputs")
+        legacy["checksum"] = hashlib.sha256(json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        path.write_text(json.dumps(legacy) + "\n")
+        listed = self.auto_close("list")["rows"][0]
+        self.assertTrue(listed["legacy_unbound"])
+        self.assertIsNone(listed["inputs"])
+        self.auto_close("review", "--number", "1", ok=False)
+        self.assertEqual(len(self.calls()), before)
 
     def test_rejection_retains_exact_proposal_and_never_publishes(self):
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         ledger.write_text(json.dumps(dict(item(1, "An older fix", "pr"), reviewed=True, reviewed_by="maintainer")) + "\n")
         original = ledger.read_bytes()
-        pending = self.propose(1)
+        pending = self.propose(1, "--evidence-gap", "No selected cache snapshot")
         reviewed = self.auto_close("review", "--number", "1")
         self.assertNotIn("rejection", reviewed["plan"]["proposals"][0])
         self.auto_close("dismiss", "--number", "1", "--checkpoint", pending["checkpoint"])
@@ -161,7 +199,7 @@ class ProposalFeedbackTests(Workspace):
         self.auto_close("dismiss", "--number", "1", "--checkpoint", rejected["checkpoint"])
         self.assertTrue(self.auto_close("list")["rows"][0]["dismissed"])
 
-        attempted = self.propose(2)
+        attempted = self.propose(2, "--evidence-gap", "No selected cache snapshot")
         saved = self.root / "data/owner/repo/auto-close/pr-2.json"
         before = saved.read_bytes()
         writes = self.root / "data/owner/repo/writes"
@@ -185,7 +223,7 @@ class ProposalFeedbackTests(Workspace):
             return self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", str(number), *args, ok=ok)
 
         before = context(1)
-        pending = self.propose(1)
+        pending = self.propose(1, "--evidence-gap", "No selected cache snapshot")
         self.assertIsNone(context(1)["feedback_checkpoint"])
         self.assertEqual(context(1)["checkpoint"], before["checkpoint"])
 
@@ -204,7 +242,7 @@ class ProposalFeedbackTests(Workspace):
                                  "--row", feedback["id"], "--field", "reason", "--checkpoint", rejected["checkpoint"], "--max-bytes", "5")
         self.assertEqual(fragment["text"], "éé")
 
-        self.propose(2)
+        self.propose(2, "--evidence-gap", "No selected cache snapshot")
         path = self.root / "data/owner/repo/auto-close/pr-2.json"
         saved = json.loads(path.read_text())
         writes = self.root / "data/owner/repo/writes"

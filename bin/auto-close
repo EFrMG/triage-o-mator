@@ -107,8 +107,38 @@ def choose(repo, numbers, all_pending):
     return chosen
 
 
-def review(repo, numbers, all_pending):
+def check_current_context(proposal):
+    inputs = proposal["inputs"]
+    index = ContextIndex()
+    target = index.collect("pr", proposal["number"], include_rows=False)
+    if target["checkpoint"] != inputs["context_checkpoint"]:
+        raise ValueError(f"local context changed for PR #{proposal['number']}; prepare a fresh proposal and review")
+
+    handoff = inputs["group"]
+    if handoff is None:
+        return
+
+    group = load_group(handoff["id"])
+    if group["status"] == "archived" or group["revision"] != handoff["revision"]:
+        raise ValueError(f"group handoff changed for PR #{proposal['number']}; export it and review again")
+
+    members = [(member["kind"], member["number"]) for member in group["members"]]
+    declared = [(member["kind"], member["number"]) for member in handoff["members"]]
+    if members != declared or ("pr", proposal["number"]) not in members:
+        raise ValueError(f"group handoff members changed for PR #{proposal['number']}; export it and review again")
+
+    for member in handoff["members"]:
+        current = index.collect(member["kind"], member["number"], include_rows=False)
+        if current["checkpoint"] != member["checkpoint"]:
+            raise ValueError(f"group member context changed for {member['kind']} #{member['number']}; prepare a fresh proposal and review")
+
+
+def review(repo, numbers, all_pending, check_context=True):
     chosen = choose(repo, numbers, all_pending)
+    if check_context:
+        for proposal in chosen:
+            check_current_context(proposal)
+
     rows = [row(p, local_state(repo)) for p in chosen]
     plan = dict(version=1, repo=repo, operation="comment-and-close-pr", proposals=rows)
 
@@ -304,7 +334,8 @@ def call_comment(repo, proposal):
 
 
 def execute(repo, numbers, all_pending, approval):
-    prepared = review(repo, numbers, all_pending)
+    # Approval still binds the saved plan when a prior attempt needs reconciliation; fresh context is checked per item below.
+    prepared = review(repo, numbers, all_pending, check_context=False)
     if approval != prepared["approval"]:
         raise ValueError("proposals changed or approval does not match the exact review")
     results = []
@@ -314,6 +345,10 @@ def execute(repo, numbers, all_pending, approval):
             proposal = load(path, repo)
             if proposal["checksum"] != selected["checkpoint"] or proposal["status"] != "pending":
                 raise ValueError("proposal changed during execution; stop and review remaining proposals")
+            receipt = DATA_DIR / "writes" / (proposal["request_id"] + ".json")
+            if not receipt.exists():
+                check_current_context(proposal)
+
             outcome, ok = call_comment(repo, proposal)
             proposal["outcome"] = dict(request_id=proposal["request_id"], comment=outcome["comment"], state_change=outcome["state_change"])
             proposal["status"] = "executed" if ok and outcome["comment"]["status"] == "succeeded" and outcome["state_change"]["status"] == "succeeded" else "uncertain"

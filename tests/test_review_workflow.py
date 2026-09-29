@@ -124,7 +124,7 @@ class ProposalFeedbackTests(Workspace):
     def auto_close(self, *args, ok=True):
         return self.json_cli("auto-close", "--expected-repo", "owner/repo", *args, ok=ok)
 
-    def propose(self, number, *extra):
+    def propose(self, number, *extra, ok=True):
         comment = self.root / "comment.md"
         comment.write_text("Thanks for the work; this PR is superseded.\n")
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", str(number))
@@ -132,7 +132,7 @@ class ProposalFeedbackTests(Workspace):
         return self.auto_close("propose", "--number", str(number), "--title", "An older fix",
                                "--head-sha", "b" * 40, "--updated-at", "2026-09-29T00:00:00Z",
                                "--rationale", "Superseded by another PR", "--comment-file", str(comment), "--by", "agent:helper",
-                               "--context-checkpoint", context["checkpoint"], *extra)
+                               "--context-checkpoint", context["checkpoint"], *extra, ok=ok)
 
     def test_proposal_binds_group_context_and_verified_selected_evidence(self):
         self.seed_pr()
@@ -208,6 +208,57 @@ class ProposalFeedbackTests(Workspace):
         self.auto_close("reject", "--number", "2", "--checkpoint", attempted["checkpoint"],
                         "--by", "maintainer", "--reason", "Too late", ok=False)
         self.assertEqual(saved.read_bytes(), before)
+        self.assertEqual(ledger.read_bytes(), original)
+        self.assertEqual(self.calls(), [])
+
+    def test_group_handoff_reconsideration_retains_objection_and_attribution(self):
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text(json.dumps(dict(item(1, "An older fix", "pr"), reviewer_notes="Keep compatibility in view", reviewed=True)) +
+                          "\n" + json.dumps(item(2, "Related report")) + "\n")
+        original = ledger.read_bytes()
+        group = self.json_cli("group", "create", "--title", "Compare fixes", "--by", "maintainer")
+        self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", "1", "--notes", "Check the old API", "--by", "maintainer")
+        self.run_cli("group", "add", group["id"], "--kind", "issue", "--number", "2", "--by", "maintainer")
+
+        def handoff():
+            packet = self.json_cli("group", "export", group["id"], "--format", "json")
+            return ("--group-id", group["id"], *[part for member in packet["items"] for part in
+                                                 ("--member-context", f"{member['kind']}:{member['number']}:{member['local_context']['checkpoint']}")])
+
+        initial = self.propose(1, *handoff(), "--evidence-gap", "No selected snapshot")
+        rejected = self.auto_close("reject", "--number", "1", "--checkpoint", initial["checkpoint"],
+                                   "--by", "maintainer", "--reason", "Do not close until compatibility is resolved")
+        before = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
+        self.assertEqual(next(row for row in before["rows"] if row["kind"] == "feedback")["fields"]["reason"]["preview"],
+                         rejected["rejection"]["reason"])
+        self.assertEqual(self.json_cli("group", "export", group["id"], "--format", "json")["items"][0]["local_context"]["feedback"][0]["reason"],
+                         rejected["rejection"]["reason"])
+        self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", "1",
+                     "--notes", "Old API no longer needed; closure may proceed", "--by", "maintainer")
+
+        path = self.root / "data/owner/repo/auto-close/pr-1.json"
+        unchanged = path.read_bytes()
+        self.propose(1, *handoff(), "--evidence-gap", "No selected snapshot", "--replace-checkpoint", rejected["checkpoint"], ok=False)
+        self.propose(1, *handoff(), "--evidence-gap", "No selected snapshot", "--replace-checkpoint", initial["checkpoint"],
+                     "--reconsideration-reason", "Maintainer resolved compatibility", ok=False)
+        self.assertEqual(path.read_bytes(), unchanged)
+
+        explanation = "Maintainer confirmed in the group that the old API is no longer needed"
+        reconsidered = self.propose(1, *handoff(), "--evidence-gap", "No selected snapshot", "--replace-checkpoint", rejected["checkpoint"],
+                                    "--reconsideration-reason", explanation)
+        record = json.loads(path.read_text())
+        self.assertEqual(reconsidered["reconsideration"]["by"], "agent:helper")
+        self.assertEqual(reconsidered["reconsideration"]["reason"], explanation)
+        self.assertEqual(reconsidered["reconsideration"]["rejected_checkpoint"], rejected["checkpoint"])
+        self.assertEqual(record["history"][-1]["checksum"], rejected["checkpoint"])
+        self.assertEqual(record["history"][-1]["rejection"]["reason"], rejected["rejection"]["reason"])
+        self.assertNotEqual(record["request_id"], record["history"][-1]["request_id"])
+        self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["reconsideration"], reconsidered["reconsideration"])
+        self.assertEqual(self.json_cli("group", "export", group["id"], "--format", "json")["items"][0]["local_context"]["feedback"][0]["reason"],
+                         rejected["rejection"]["reason"])
+
+        edited = self.propose(1, *handoff(), "--evidence-gap", "No selected snapshot", "--replace-checkpoint", reconsidered["checkpoint"])
+        self.assertEqual(edited["reconsideration"], reconsidered["reconsideration"])
         self.assertEqual(ledger.read_bytes(), original)
         self.assertEqual(self.calls(), [])
 

@@ -164,6 +164,30 @@ class AutoCloseWriteTests(Workspace):
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
         self.assertEqual(self.write_calls()[2]["body"]["body"], fresh["comment"])
 
+    def test_reconsidered_rejection_requires_a_new_exact_approval(self):
+        pending = self.propose(1)
+        old = self.auto_close("review", "--number", "1")
+        rejected = self.auto_close("reject", "--number", "1", "--checkpoint", pending["checkpoint"],
+                                   "--by", "maintainer", "--reason", "Keep the old API")
+        self.auto_close("execute", "--number", "1", "--publish", "--approve", old["approval"], ok=False)
+        self.assertEqual(self.write_calls(), [])
+
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        rows[0]["reviewer_notes"] = "Old API concern resolved; closure may proceed"
+        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        fresh = self.propose(1, "--replace-checkpoint", rejected["checkpoint"],
+                             "--reconsideration-reason", "Maintainer resolved the old API concern in local guidance")
+        reviewed = self.auto_close("review", "--number", "1")
+        self.assertNotEqual(reviewed["approval"], old["approval"])
+        self.auto_close("execute", "--number", "1", "--publish", "--approve", old["approval"], ok=False)
+        self.assertEqual(self.write_calls(), [])
+
+        result = self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"])
+        self.assertEqual(result["results"][0]["status"], "executed")
+        self.assertEqual(self.auto_close("list")["rows"][0]["reconsideration"], fresh["reconsideration"])
+        self.assertEqual(self.write_calls()[2]["body"]["body"], fresh["comment"])
+
     def test_execution_rechecks_remaining_items(self):
         self.propose(1)
         self.propose(2)

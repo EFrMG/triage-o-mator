@@ -35,6 +35,31 @@ def valid_rejection(value):
     return previous.get("checksum") == checkpoint and previous.get("status") == "pending" and previous.get("request_id") == value.get("request_id") and value.get("outcome") is None
 
 
+def valid_reconsideration(value):
+    history = value.get("history", [])
+    if not isinstance(history, list):
+        return False
+
+    rejected_index = next((index for index in range(len(history) - 1, -1, -1)
+                           if isinstance(history[index], dict) and history[index].get("status") == "rejected"), None)
+    reconsideration = value.get("reconsideration")
+    if rejected_index is None:
+        return reconsideration is None
+    if not isinstance(reconsideration, dict):
+        return False
+
+    rejected = history[rejected_index]
+    prior = history[rejected_index - 1] if rejected_index else None
+    rejection = rejected.get("rejection")
+    by, reason, at, checkpoint = (reconsideration.get(field) for field in ("by", "reason", "at", "rejected_checkpoint"))
+    return (isinstance(by, str) and bool(by.strip()) and len(by) <= 200 and
+            isinstance(reason, str) and bool(reason.strip()) and len(reason) <= 10000 and
+            isinstance(at, str) and bool(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", at)) and
+            isinstance(checkpoint, str) and checkpoint == rejected.get("checksum") and
+            isinstance(rejection, dict) and isinstance(prior, dict) and prior.get("status") == "pending" and
+            rejection.get("proposal_checkpoint") == prior.get("checksum") and rejected.get("request_id") == prior.get("request_id"))
+
+
 def load(path, repo):
     if path.parent.is_symlink() or path.is_symlink() or not path.is_file():
         raise ValueError(f"unavailable proposal: {path.name}")
@@ -52,6 +77,8 @@ def load(path, repo):
             raise ValueError(f"invalid proposal rejection: {path.name}")
     elif value.get("rejection") is not None:
         raise ValueError(f"rejection on non-rejected proposal: {path.name}")
+    if not valid_reconsideration(value):
+        raise ValueError(f"invalid proposal reconsideration: {path.name}")
 
     return value
 

@@ -19,6 +19,54 @@ class GroupTests(Workspace):
         self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
         self.assertEqual(self.calls(), [])
 
+    def test_group_export_carries_shared_context_and_missing_members(self):
+        first = dict(item(1, "First fix", "pr"), category="enhancement", action="keep-open", confidence="high",
+                     reason="Wait for the dependency", triaged_by="maintainer", agent_notes="Agent comparison",
+                     reviewed=True, reviewed_by="reviewer", reviewer_notes="Check compatibility")
+        second = item(2, "Related issue")
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
+
+        group = self.json_cli("group", "create", "--title", "Decide on the fix", "--description", "Compare both members", "--by", "agent:helper")
+        self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", "1", "--notes", "[fix candidate]", "--by", "maintainer")
+        self.run_cli("group", "add", group["id"], "--kind", "issue", "--number", "2", "--notes", "[report]", "--by", "maintainer")
+        other = self.json_cli("group", "create", "--title", "Dependency decision", "--description", "Human guidance", "--by", "maintainer")
+        self.run_cli("group", "add", other["id"], "--kind", "pr", "--number", "1", "--notes", "Wait until version 2", "--by", "maintainer")
+
+        ledger.write_text(json.dumps(first) + "\n")
+        original = ledger.read_bytes()
+        packet = self.json_cli("group", "export", group["id"], "--format", "json")
+        by_key = {(entry["kind"], entry["number"]): entry for entry in packet["items"]}
+        context = by_key[("pr", 1)]["local_context"]
+        direct = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
+
+        self.assertEqual(packet["group"]["revision"], 3)
+        self.assertEqual(context["context_revision"], direct["context_revision"])
+        self.assertEqual(context["ledger"]["reviewer_notes"], "Check compatibility")
+        self.assertEqual(context["relevant_group_ids"], sorted((group["id"], other["id"])))
+        self.assertEqual([entry["id"] for entry in packet["related_groups"]], [other["id"]])
+        self.assertEqual(packet["related_groups"][0]["members"][0]["notes"], "Wait until version 2")
+        self.assertTrue(by_key[("issue", 2)]["missing_from_ledger"])
+        self.assertFalse(by_key[("issue", 2)]["local_context"]["ledger_present"])
+
+        markdown = self.run_cli("group", "export", group["id"]).stdout
+        self.assertIn("Local context revision:", markdown)
+        self.assertIn("Dependency decision", markdown)
+        self.assertEqual(ledger.read_bytes(), original)
+        self.assertEqual(self.calls(), [])
+
+        self.seed_pr()
+        snapshot = self.json_cli("cache", "fetch", "--kind", "pr", "--number", "1", "--profile", "discussion",
+                                 "--mode", "refresh", "--request-budget", "100")["snapshot_id"]
+        before = len(self.calls())
+        enriched = self.json_cli("group", "export", group["id"], "--enrich", "--cache-mode", "offline", "--format", "json")
+        evidence = {(entry["kind"], entry["number"]): entry["evidence"] for entry in enriched["items"]}
+        self.assertEqual(evidence[("pr", 1)]["snapshot_id"], snapshot)
+        self.assertIsNone(evidence[("issue", 2)]["snapshot_id"])
+        self.assertIn("missing", evidence[("issue", 2)]["problems"]["summary"])
+        self.assertEqual(len(self.calls()), before)
+        self.assertEqual(ledger.read_bytes(), original)
+
 
 class ItemContextTests(Workspace):
     def context(self, *args, ok=True):

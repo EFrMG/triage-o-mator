@@ -13,8 +13,7 @@ MEMBER_FIELDS = ("kind", "number", "notes", "added_by", "added_at", "updated_by"
 PREVIEW_BYTES = 512
 
 
-def selected_ledger(kind, number):
-    matches = [row for row in load_ledger() if row.get("kind") == kind and row.get("number") == number]
+def selected_ledger(matches):
     if len(matches) > 1:
         raise ValueError("duplicate item in ledger")
     if not matches:
@@ -27,39 +26,57 @@ def selected_ledger(kind, number):
     return result
 
 
+class ContextIndex:
+    def __init__(self, ledger_rows=None, groups=None):
+        self.ledger = {}
+        for row in load_ledger() if ledger_rows is None else ledger_rows:
+            self.ledger.setdefault((row.get("kind"), row.get("number")), []).append(row)
+
+        self.groups = {}
+        for group in list_groups() if groups is None else groups:
+            if group["status"] == "archived":
+                continue
+
+            projected = {field: group[field] for field in GROUP_FIELDS}
+            projected["members"] = [{field: member.get(field) for field in MEMBER_FIELDS} for member in group["members"]]
+            for member in projected["members"]:
+                self.groups.setdefault((member["kind"], member["number"]), []).append((group, projected))
+
+        for entries in self.groups.values():
+            entries.sort(key=lambda entry: entry[0]["id"])
+
+    def collect(self, kind, number, include_rows=True):
+        if kind not in ("issue", "pr") or type(number) is not int or number < 1:
+            raise ValueError("select an issue or PR with a positive number")
+
+        ledger = selected_ledger(self.ledger.get((kind, number), []))
+        groups = self.groups.get((kind, number), [])
+        projection = dict(repository=REPO, item=dict(kind=kind, number=number, ledger=ledger),
+                          groups=[value for _, value in groups])
+        revision = "v1:" + digest(canonical([POLICY, projection]))
+        checkpoint = "v1:" + digest(canonical([POLICY, revision, [(group["id"], group["revision"]) for group, _ in groups]]))
+        rows = [dict(id="ledger", kind="ledger", present=ledger is not None, fields=ledger or {})] if include_rows else []
+        relevant_groups = []
+
+        for group, projected in groups:
+            group_id = group["id"]
+            relevant_groups.append(dict(projected, revision=group["revision"], updated_by=group["updated_by"], updated_at=group["updated_at"]))
+            if include_rows:
+                rows.append(dict(id=f"group:{group_id}", kind="group", group_id=group_id, revision=group["revision"],
+                                 fields={**{field: projected[field] for field in GROUP_FIELDS},
+                                         "updated_by": group["updated_by"], "updated_at": group["updated_at"]}))
+
+                for member in projected["members"]:
+                    rows.append(dict(id=f"member:{group_id}:{member['kind']}:{member['number']}", kind="member",
+                                     group_id=group_id, selected=(member["kind"], member["number"]) == (kind, number), fields=member))
+
+        return dict(repository=REPO, item=dict(kind=kind, number=number), context_revision=revision,
+                    checkpoint=checkpoint, ledger_present=ledger is not None, group_count=len(groups),
+                    ledger_guidance=ledger, relevant_groups=relevant_groups, rows=rows)
+
+
 def collect(kind, number):
-    if kind not in ("issue", "pr") or type(number) is not int or number < 1:
-        raise ValueError("select an issue or PR with a positive number")
-
-    ledger = selected_ledger(kind, number)
-    groups = []
-    for group in list_groups():
-        if group["status"] == "archived" or not any((member["kind"], member["number"]) == (kind, number) for member in group["members"]):
-            continue
-
-        projected = {field: group[field] for field in GROUP_FIELDS}
-        projected["members"] = [{field: member.get(field) for field in MEMBER_FIELDS} for member in group["members"]]
-        groups.append((group, projected))
-
-    groups.sort(key=lambda entry: entry[0]["id"])
-    projection = dict(repository=REPO, item=dict(kind=kind, number=number, ledger=ledger),
-                      groups=[value for _, value in groups])
-    revision = "v1:" + digest(canonical([POLICY, projection]))
-    checkpoint = "v1:" + digest(canonical([POLICY, revision, [(group["id"], group["revision"]) for group, _ in groups]]))
-    rows = [dict(id="ledger", kind="ledger", present=ledger is not None, fields=ledger or {})]
-
-    for group, projected in groups:
-        group_id = group["id"]
-        rows.append(dict(id=f"group:{group_id}", kind="group", group_id=group_id, revision=group["revision"],
-                         fields={**{field: projected[field] for field in GROUP_FIELDS},
-                                 "updated_by": group["updated_by"], "updated_at": group["updated_at"]}))
-
-        for member in projected["members"]:
-            rows.append(dict(id=f"member:{group_id}:{member['kind']}:{member['number']}", kind="member",
-                             group_id=group_id, selected=(member["kind"], member["number"]) == (kind, number), fields=member))
-
-    return dict(repository=REPO, item=dict(kind=kind, number=number), context_revision=revision,
-                checkpoint=checkpoint, ledger_present=ledger is not None, group_count=len(groups), rows=rows)
+    return ContextIndex().collect(kind, number)
 
 
 def preview(value):
@@ -86,6 +103,8 @@ def read(kind, number, offset=0, limit=10, checkpoint=None):
         raise ValueError("local context changed; restart at offset zero")
 
     rows = context.pop("rows")
+    context.pop("ledger_guidance")
+    context.pop("relevant_groups")
     chosen = rows[offset:offset + limit]
     pagination = page(len(rows), offset, len(chosen))
 

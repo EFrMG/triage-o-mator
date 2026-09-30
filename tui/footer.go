@@ -115,6 +115,9 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{group("Explanations", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
 	case m.notifications.open:
 		if m.notifications.review != nil {
+			if m.notifications.notesOpen {
+				return []footerGroup{group("Local notes", hint{"j/k Ctrl-D/U", "scroll"}, hint{"m or Esc", "close"}), group("Navigation", hint{"q", "quit"})}
+			}
 			if m.notifications.reviewBusy {
 				if m.notifications.review.Approval != "" {
 					return []footerGroup{group("PR closures", hint{"", "publishing approved comments and closures…"})}
@@ -123,7 +126,7 @@ func (m model) contextFooterGroups() []footerGroup {
 			}
 			proposal := group("Proposal", hint{"j/k Ctrl-D/U", "scroll"})
 			if len(m.notifications.review.Plan.Proposals) == 1 {
-				proposal.hints = append(proposal.hints, hint{"Enter/l", "open PR"})
+				proposal.hints = append(proposal.hints, hint{"Enter/l", "View item"}, hint{"m", "local notes"})
 				if choice, ok := m.notifications.proposalChoice(m.notifications.review.Plan.Proposals[0].Number); ok && m.notifications.reviewKey == "" {
 					if choice.attention >= 0 {
 						proposal.hints = append(proposal.hints, hint{"t", "saved discussion"})

@@ -663,6 +663,9 @@ func (m model) viewContent() string {
 	}
 
 	body := m.bodyView()
+	if m.notifications.open && m.notifications.review != nil && m.notifications.notesOpen {
+		body = m.proposalNotesOverlay(body)
+	}
 	if m.comment.open {
 		body = m.commentOverlay(body)
 	}

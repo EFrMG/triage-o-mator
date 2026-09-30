@@ -1034,6 +1034,141 @@ func TestCompletedClosureLeavesNotificationsWithoutTracking(t *testing.T) {
 	}
 }
 
+func TestProposalReaderShowsCurrentGuidanceAndBlocksStaleApproval(t *testing.T) {
+	root := baselineRoot(t)
+	script := `#!/usr/bin/env python3
+import json, pathlib, sys
+args = sys.argv[1:]
+row = dict(number=3, title="Fixture PR", target="https://github.com/owner/repo/pull/3", rationale="Superseded", comment="Exact closure comment", checkpoint="proposal-1", status="pending", active=True, inputs=dict(context_checkpoint="ctx-1", evidence=[dict(kind="pr", number=3, snapshot_id="snapshot-1", components={"summary": {"status": "complete"}})], evidence_gaps=["Gap one", "Gap two", "Gap three", "Gap four", "Gap five"]))
+if "context" in args:
+    stale = pathlib.Path("stale-context").exists()
+    omitted = 30 if pathlib.Path("long-context").exists() else 0
+    item = dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-2" if stale else "ctx-1", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(category=dict(preview="enhancement", omitted_bytes=0), action=dict(preview="keep-open", omitted_bytes=0), reviewer_notes=dict(preview="Check compatibility", omitted_bytes=omitted), reviewed=True)), dict(kind="group", id="group:g1", fields=dict(title=dict(preview="Compatibility review", omitted_bytes=0), status=dict(preview="draft", omitted_bytes=0), description=dict(preview="Compare alternatives", omitted_bytes=0))), dict(kind="member", id="member:g1:pr:3", selected=True, fields=dict(notes=dict(preview="Keep the old API", omitted_bytes=0)))])
+    print(json.dumps(dict(repository="owner/repo", number=3, proposal_checkpoint="proposal-1", current=not stale, reason="local context changed" if stale else None, item_context=item, latest_rejection=dict(by="maintainer", at="2026-09-29T00:00:00Z", reason="Earlier objection", proposal_checkpoint="older"), requests=0)))
+elif "review" in args:
+    print(json.dumps(dict(plan=dict(repo="owner/repo", operation="comment-and-close-pr", proposals=[row]), approval="fresh-approval")))
+else:
+    sys.exit("unexpected auto-close command")
+`
+	if err := os.WriteFile(filepath.Join(root, "bin", "auto-close"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sourceScript := `#!/usr/bin/env python3
+import json
+text = "Check compatibility across all supported versions"
+print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-1", row="ledger", field="reviewer_notes", text=text, bytes=dict(offset=0, returned=len(text.encode())), continuation=None, requests=0)))
+`
+	if err := os.WriteFile(filepath.Join(root, "bin", "item-context"), []byte(sourceScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var row autoCloseRow
+	if err := json.Unmarshal([]byte(`{"number":3,"title":"Fixture PR","target":"https://github.com/owner/repo/pull/3","rationale":"Superseded","comment":"Exact closure comment","checkpoint":"proposal-1","status":"pending","active":true,"inputs":{"context_checkpoint":"ctx-1","evidence":[{"kind":"pr","number":3,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}}],"evidence_gaps":["Gap one","Gap two","Gap three","Gap four","Gap five"]}}`), &row); err != nil {
+		t.Fatal(err)
+	}
+
+	m := baselineModel(t, root)
+	m.drafts[Key{Kind: "issue", Number: 1}] = decisionSnapshot{}
+	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{row}}}
+	choice := m.notifications.choices()[0]
+	next, cmd := m.openNotificationSource(choice, "proposal")
+	m = next.(model)
+	if cmd == nil || !m.notifications.contextBusy {
+		t.Fatal("proposal did not start a local context read")
+	}
+	_, approval := m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if approval != nil {
+		t.Fatal("approval was available before context loaded")
+	}
+	current := cmd().(autoCloseContextMsg)
+	if current.err != nil {
+		t.Fatal(current.err)
+	}
+	m = baselineSend(m, current)
+	m = baselineSend(m, tea.WindowSizeMsg{Width: 120, Height: 100})
+	view := ansi.Strip(m.autoCloseReviewView())
+	for _, expected := range []string{"Check compatibility", "Keep the old API", "Earlier objection", "snapshot-1", "Gap one", "Gap five", "Exact closure comment"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("proposal reader omitted %q: %s", expected, view)
+		}
+	}
+	last := -1
+	for _, section := range []string{"Proposed action", "Comment to publish", "Reason", "Human context", "Selected evidence"} {
+		at := strings.Index(view, section)
+		if at <= last {
+			t.Fatalf("proposal sections out of order near %q", section)
+		}
+		last = at
+	}
+	m = baselineSend(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	for range 200 {
+		m = baselineSend(m, tea.KeyPressMsg{Text: "j"})
+	}
+	bottom := m.notifications.reviewScroll
+	if bottom == 0 {
+		t.Fatal("proposal never scrolled to its last line")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "k"})
+	if m.notifications.reviewScroll != bottom-1 {
+		t.Fatal("proposal kept invisible scroll steps beyond its last line")
+	}
+	m.notifications.reviewScroll = 0
+	_, reviewCmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if reviewCmd == nil {
+		t.Fatal("current proposal did not prepare exact review")
+	}
+	review := reviewCmd().(autoCloseMsg)
+	if review.err != nil || !review.review.Contexts[3].Current {
+		t.Fatalf("exact review did not retain checked context: %+v", review.err)
+	}
+	missingContext := review
+	missingContext.review.Contexts = nil
+	_, publish := m.finishAutoClose(missingContext)
+	if publish != nil {
+		t.Fatal("exact review without a checked context offered publication")
+	}
+	if err := os.WriteFile(filepath.Join(root, "long-context"), []byte("yes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	next, cmd = m.openNotificationSource(choice, "proposal")
+	m = next.(model)
+	m = baselineSend(m, cmd().(autoCloseContextMsg))
+	underlying := m.autoCloseReviewView()
+	next, notesCmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "m"})
+	m = next.(model)
+	if notesCmd == nil || !m.notifications.notesOpen {
+		t.Fatal("longer local guidance was not available from the proposal")
+	}
+	m = baselineSend(m, notesCmd().(autoCloseNotesMsg))
+	if !strings.Contains(ansi.Strip(m.proposalNotesViewport().View()), "across all supported versions") || m.autoCloseReviewView() != underlying {
+		t.Fatal("floating notes failed to show full text without reflowing the proposal")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "m"})
+	if m.notifications.notesOpen {
+		t.Fatal("m did not close the floating notes window")
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "stale-context"), []byte("yes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	next, cmd = m.openNotificationSource(choice, "proposal")
+	m = next.(model)
+	wrong := current
+	wrong.generation++
+	m = baselineSend(m, wrong)
+	if !m.notifications.contextBusy {
+		t.Fatal("late context reply replaced the pending read")
+	}
+	m = baselineSend(m, cmd().(autoCloseContextMsg))
+	view = ansi.Strip(m.autoCloseReviewView())
+	if !strings.Contains(view, "Changed context") || strings.Contains(view, "Publish the comment below") {
+		t.Fatal("stale proposal appeared executable")
+	}
+	_, approval = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if approval != nil || len(m.drafts) != 1 {
+		t.Fatal("stale proposal gained approval or discarded a draft")
+	}
+}
+
 func TestBaselineReadCancellationStopsChildProcess(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "bin"), 0o755); err != nil {

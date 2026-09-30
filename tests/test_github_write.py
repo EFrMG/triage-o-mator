@@ -239,6 +239,9 @@ class AutoCloseWriteTests(Workspace):
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
         rows[1]["reviewer_notes"] = "Prefer the other fix"
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        context_status = self.auto_close("context", "--number", "1", "--checkpoint", pending["checkpoint"])
+        self.assertFalse(context_status["current"])
+        self.assertIn("group member context changed", context_status["reason"])
         self.auto_close("review", "--number", "1", ok=False)
 
         fresh = self.propose(1, *handoff_args(), "--replace-checkpoint", pending["checkpoint"])

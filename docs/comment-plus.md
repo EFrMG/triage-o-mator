@@ -47,6 +47,8 @@ New proposals declare the current `item-context` checkpoint and any selected fix
 
 `auto-close review` rechecks the PR's current ledger/group guidance and prior feedback against the saved context checkpoint. For a group handoff it also checks the group's revision, membership and every exported member checkpoint. An edit to relevant guidance, membership or rejection stops exact review until a new proposal is prepared from current context. `execute --publish` checks each pending proposal again immediately before starting a new `comment-plus` request; a change stops that proposal and the rest of the selected set before another GitHub write. A request with an existing write receipt is reconciled against that receipt first, even if local guidance changed after the attempt. The local check and GitHub publication have no shared transaction: an edit after the final check can race the write. `comment-plus` independently checks the live PR target, head and activity before posting.
 
+`bin/auto-close --expected-repo OWNER/REPO context --number N --checkpoint CHECKPOINT` checks one saved proposal against current local guidance without GitHub or managed-data writes. It returns a bounded `item-context` page, the latest attributed objection and a `current` flag with a reason when review is unavailable. Use `--offset` and `--context-checkpoint` with the returned item-context checkpoint to read another page. Notifications uses this reader when opening a proposal and again while preparing exact review, so changed group handoffs and local decisions are marked before approval.
+
 To reject one pending proposal with shared feedback, use its exact checkpoint from `bin/auto-close --expected-repo OWNER/REPO list`:
 
 ```sh

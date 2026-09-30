@@ -100,6 +100,11 @@ func (m model) openNotificationSource(choice notificationChoice, source string) 
 			m.notifications.review.Plan.Proposals = []autoCloseRow{row}
 			m.notifications.reviewKey = ""
 			m.notifications.reviewScroll = 0
+			m.notifications.notesOpen = false
+			m.notifications.notesBusy = false
+			m.notifications.notesText = ""
+			m.notifications.notesError = ""
+			return m.beginAutoCloseContext(row.Number, row.Checkpoint, 0, "")
 		}
 	case "item":
 		return m.openNotificationItem(choice.key)

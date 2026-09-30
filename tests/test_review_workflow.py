@@ -226,8 +226,15 @@ class ProposalFeedbackTests(Workspace):
                                                  ("--member-context", f"{member['kind']}:{member['number']}:{member['local_context']['checkpoint']}")])
 
         initial = self.propose(1, *handoff(), "--evidence-gap", "No selected snapshot")
+        shown = self.auto_close("context", "--number", "1", "--checkpoint", initial["checkpoint"])
+        self.assertTrue(shown["current"])
+        self.assertEqual(shown["item_context"]["rows"][0]["fields"]["reviewer_notes"]["preview"], "Keep compatibility in view")
+        self.assertEqual(shown["requests"], 0)
         rejected = self.auto_close("reject", "--number", "1", "--checkpoint", initial["checkpoint"],
                                    "--by", "maintainer", "--reason", "Do not close until compatibility is resolved")
+        rejected_view = self.auto_close("context", "--number", "1", "--checkpoint", rejected["checkpoint"])
+        self.assertFalse(rejected_view["current"])
+        self.assertEqual(rejected_view["latest_rejection"]["reason"], rejected["rejection"]["reason"])
         before = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
         self.assertEqual(next(row for row in before["rows"] if row["kind"] == "feedback")["fields"]["reason"]["preview"],
                          rejected["rejection"]["reason"])
@@ -254,6 +261,7 @@ class ProposalFeedbackTests(Workspace):
         self.assertEqual(record["history"][-1]["rejection"]["reason"], rejected["rejection"]["reason"])
         self.assertNotEqual(record["request_id"], record["history"][-1]["request_id"])
         self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["reconsideration"], reconsidered["reconsideration"])
+        self.assertTrue(self.auto_close("context", "--number", "1", "--checkpoint", reconsidered["checkpoint"])["current"])
         self.assertEqual(self.json_cli("group", "export", group["id"], "--format", "json")["items"][0]["local_context"]["feedback"][0]["reason"],
                          rejected["rejection"]["reason"])
 

@@ -21,6 +21,7 @@ When someone asks for one of these in plain words, open the matching playbook in
 | "prepare offline analysis", "reuse cached evidence", "download evidence for this review" | [`prompts/prepare-analysis.md`](prompts/prepare-analysis.md)                      |
 | "is #N a duplicate?", "go through the possible duplicates"                               | [`prompts/find-duplicates.md`](prompts/find-duplicates.md)                        |
 | "review PR #N", "which PRs are safe to merge?"                                           | [`prompts/review-pr.md`](prompts/review-pr.md)                                    |
+| "which of these PRs should stay?", "review candidate group X"                            | [`prompts/review-candidate-set.md`](prompts/review-candidate-set.md)              |
 | "which PRs should close?", "recommend PR closures"                                       | [`prompts/recommend-auto-close.md`](prompts/recommend-auto-close.md)              |
 | "review an appeal", "reassess the closure of PR #N"                                      | [`prompts/review-appeal.md`](prompts/review-appeal.md)                            |
 | "organize groups", "collect everything about X", "prepare this for maintainers"          | [`prompts/organize-groups.md`](prompts/organize-groups.md)                        |

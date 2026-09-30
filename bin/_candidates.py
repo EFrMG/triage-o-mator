@@ -1,6 +1,8 @@
 """Pinned offline PR discovery: direct signals propose review sets, never redundancy."""
 
 import json
+import math
+import re
 from collections import Counter, defaultdict
 from itertools import combinations
 from datetime import datetime, timezone
@@ -9,13 +11,26 @@ from _chunks import corpus_listing, page, window
 from _evidence import DEFAULT_MAX_AGE, canonical, component_problems, digest, fields, natural, repository, same_repository, text, timestamp, validate_payload, validate_item, validate_repository
 from _similar import TitleIndex
 
-POLICY = "pr-candidate-sets-v1"
-COMPONENTS = ("summary", "files", "closing_issues")
+POLICY = "pr-candidate-sets-v2"
+# Groups keep the policy they were discovered under; v1 origins (no changed-line signal) stay valid.
+POLICIES = ("pr-candidate-sets-v1", POLICY)
+COMPONENTS = ("summary", "files", "closing_issues", "diff")
 MAX_MEMBERS = 5000
 MAX_BYTES = 256 * 1024 * 1024
 MAX_FEATURES = 1000
 SIGNAL_PREVIEW = 10
 BROAD_PATHS = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "go.sum", "poetry.lock", "uv.lock", "Gemfile.lock", "composer.lock"}
+# A diff changing more lines than this is a bulk rewrite: it shares original lines with everything, so it gets a hold instead of line features.
+MAX_DIFF_LINES = 3000
+# Lines like "fi", "}" or "end" appear in every change and say nothing about which one this is.
+MIN_LINE_CHARS = 12
+# Tests and docs ride along with most fixes, so rewriting the same test line is weaker evidence than rewriting the same code line.
+SECONDARY_WEIGHT = 0.2
+SECONDARY_PARTS = {"test", "tests", "spec", "specs", "__tests__", "doc", "docs", "manual"}
+SECONDARY_NAME = re.compile(r"(?i)(readme|changelog)[^/]*|.*\.md|test_.*|.*[_.](test|spec)\.\w+")
+DIFF_HEADER = re.compile(r"diff --git a/(\S+) b/(\S+)")
+# The TUI's duplicate prefill writes this prefix; a reviewed reason that names its kept PR otherwise stays unpaired rather than guessed at.
+DUPLICATE_OF = re.compile(r"Duplicate of #(\d+)\b")
 
 
 def scope(cache, snapshot, corpus):
@@ -65,7 +80,7 @@ def observe(cache, member, repo, as_of, max_age):
     record = member.get("record")
     result = dict(item=member["identity"], snapshot_id=member["snapshot_id"], revision=record["revision"] if record else None,
                   components={}, exclusions=[], holds=["semantic-comparison-required"], title=None, base_branch=None)
-    features = dict(files=set(), closing_issues=set())
+    features = dict(files=set(), closing_issues=set(), changed_lines=set(), diff_paths=set())
     if member["identity"]["kind"] != "pr":
         result["exclusions"].append("issue-policy-unsupported")
         return result, features
@@ -89,7 +104,7 @@ def observe(cache, member, repo, as_of, max_age):
             else:
                 validate_payload(name, descriptor, "pr", payload)
                 result["components"][name]["payload_verified"] = True
-                payloads[name] = json.loads(payload)
+                payloads[name] = payload if name == "diff" else json.loads(payload)
 
         if problems:
             result["holds"].append(f"discovery-evidence-gap:{name}")
@@ -158,20 +173,127 @@ def observe(cache, member, repo, as_of, max_age):
 
                 features[name].add(canonical(dict(repository=linked_repo, identity=linked)))
 
+    if "diff" in payloads and not result["components"]["diff"]["problems"]:
+        paths, removed, changed = removed_lines(payloads["diff"])
+        if changed > MAX_DIFF_LINES:
+            result["holds"].append("discovery-feature-limit:diff")
+        else:
+            features["diff_paths"], features["changed_lines"] = paths, removed
+
     return result, features
+
+
+def removed_lines(diff):
+    """A diff's paths, the original lines it removes or rewrites as canonical [path, line] keys, and how many lines it changes. Whitespace is collapsed so reindentation still matches."""
+    paths, removed, changed = set(), set(), 0
+    path, in_hunks = None, False
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            match = DIFF_HEADER.fullmatch(line)
+            path, in_hunks = (match[2] if match else None), False
+            if path:
+                paths.add(path)
+        elif path is None:
+            continue
+        elif line.startswith("@@"):
+            in_hunks = True
+        elif in_hunks and line.startswith(("+", "-")):
+            changed += 1
+            original = " ".join(line[1:].split())
+            if line.startswith("-") and len(original) >= MIN_LINE_CHARS:
+                removed.add(canonical([path, original]))
+
+    return paths, removed, changed
 
 
 def broad_path(path):
     return path.rsplit("/", 1)[-1] in BROAD_PATHS or any(part in ("vendor", "generated", "node_modules", "dist") for part in path.split("/"))
 
 
+def secondary_path(path):
+    parts = path.split("/")
+    return any(part in SECONDARY_PARTS for part in parts[:-1]) or bool(SECONDARY_NAME.fullmatch(parts[-1]))
+
+
+def line_signals(features, max_frequency, threshold):
+    """Pairs that rewrite the same original lines. Coverage is the geometric mean of how much of each PR's changed paths the shared lines fall in, weighted by path rarity with tests and docs discounted, so one shared line between a 200-file PR and a 2-file PR stays below the threshold: real duplicates overlap from both sides."""
+    frequency = Counter(value for signals in features.values() for value in signals["changed_lines"])
+    postings = defaultdict(list)
+    for number, signals in features.items():
+        for value in signals["changed_lines"]:
+            if frequency[value] <= max_frequency and not broad_path(json.loads(value)[0]):
+                postings[value].append(number)
+
+    shared = defaultdict(list)
+    for value, numbers in postings.items():
+        for pair in combinations(sorted(numbers), 2):
+            shared[pair].append(json.loads(value))
+
+    path_counts = Counter(path for signals in features.values() for path in signals["diff_paths"])
+    diffs = sum(1 for signals in features.values() if signals["diff_paths"])
+    weight = {path: math.log(1 + diffs / count) * (SECONDARY_WEIGHT if secondary_path(path) else 1.0) for path, count in path_counts.items()}
+
+    signals = {}
+    for (left, right), lines in shared.items():
+        by_path = defaultdict(list)
+        for path, line in lines:
+            by_path[path].append(line)
+
+        overlap = sum(weight[path] for path in by_path)
+        coverage = math.sqrt(overlap / sum(weight[path] for path in features[left]["diff_paths"]) * overlap / sum(weight[path] for path in features[right]["diff_paths"]))
+        if coverage < threshold:
+            continue
+
+        paths = [dict(path=path, lines=len(values), sample=min(values, key=lambda value: (len(value), value))[:160]) for path, values in sorted(by_path.items())]
+        signals[left, right] = dict(signal="changed_lines", coverage=round(coverage, 3), paths=paths[:SIGNAL_PREVIEW], omitted_paths=max(0, len(paths) - SIGNAL_PREVIEW))
+
+    return signals, frequency
+
+
+def confirmed_duplicates(numbers):
+    """Human-reviewed duplicate-pr ledger decisions inside the scope, keyed by pair. The ledger is where a human confirms a decision; an unreviewed duplicate-pr row is a proposal and stays a lead."""
+    from _triage import load_ledger
+
+    pairs, unpaired = {}, []
+    for row in load_ledger():
+        if row.get("kind") != "pr" or row.get("number") not in numbers or row.get("category") != "duplicate-pr" or row.get("reviewed") is not True:
+            continue
+
+        claim = dict(duplicate=row["number"], reason=row.get("reason"), reviewed_by=row.get("reviewed_by"), reviewed_at=row.get("reviewed_at"))
+        match = DUPLICATE_OF.match(row.get("reason") or "")
+        survivor = int(match[1]) if match else None
+        if survivor is None or survivor == row["number"] or survivor not in numbers:
+            unpaired.append(claim)
+            continue
+
+        members = sorted((row["number"], survivor))
+        record = pairs.setdefault(tuple(members), dict(type="confirmed-duplicate", members=members, survivor=survivor, claims=[]))
+        record["claims"].append(dict(claim, survivor=survivor))
+        # Two reviewed rows each naming the other as the one to keep: the pair is settled as duplicates, the survivor is not.
+        if record["survivor"] != survivor:
+            record["survivor"] = None
+
+    return pairs, sorted(unpaired, key=lambda claim: claim["duplicate"])
+
+
+def reviewed_state(pairs, unpaired):
+    return canonical([[pairs[pair] for pair in sorted(pairs)], unpaired])
+
+
+def broad_signal(name, value):
+    """Whether a file or changed-line signal sits on a known broad path; closing issues have no path."""
+    path = value if name == "files" else json.loads(value)[0] if name == "changed_lines" else None
+    return bool(path) and broad_path(path)
+
+
 def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=None, max_age=DEFAULT_MAX_AGE, as_of=None,
-             title_threshold=0.8, max_frequency=10):
+             title_threshold=0.8, max_frequency=10, line_threshold=0.3):
     window(offset, limit, 100)
     natural(max_age, "maximum age")
     natural(max_frequency, "maximum signal frequency", 2)
-    if type(title_threshold) not in (int, float) or not 0 < title_threshold <= 1:
-        raise ValueError("title threshold must be greater than zero and at most one")
+    for name, value in (("title", title_threshold), ("line", line_threshold)):
+        if type(value) not in (int, float) or not 0 < value <= 1:
+            raise ValueError(f"{name} threshold must be greater than zero and at most one")
     if offset and (checkpoint is None or as_of is None):
         raise ValueError("candidate continuation requires checkpoint and as-of")
 
@@ -197,6 +319,8 @@ def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=N
             negatives.append(verdict)
             excluded[key] = [verdict]
 
+    confirmed, unpaired = confirmed_duplicates(numbers)
+    reviewed = reviewed_state(confirmed, unpaired)
     observations, features = [], {}
     for member in members:
         observed, signals = observe(cache, member, source["repository"], as_of, max_age)
@@ -241,8 +365,16 @@ def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=N
                 pair_signals[left, right].append(dict(signal=name, value=json.loads(value) if name == "closing_issues" else value,
                                                       frequency=frequencies[name][value]))
 
+    lines, frequencies["changed_lines"] = line_signals(features, max_frequency, line_threshold)
+    for pair, signal in lines.items():
+        # First, so a pair's strongest evidence survives the signal preview cap.
+        pair_signals[pair].insert(0, signal)
+
     edges, rejected, suppressed = {}, [], []
     for (left, right), reasons in sorted(pair_signals.items()):
+        # A human already confirmed this pair as duplicates: it is listed once, under confirmed duplicates, never again as a lead.
+        if (left, right) in confirmed:
+            continue
 
         pair = dict(members=[left, right], signals=reasons[:SIGNAL_PREVIEW], omitted_signals=max(0, len(reasons) - SIGNAL_PREVIEW))
         verdicts = excluded.get(("pr", left, right), [])
@@ -255,10 +387,10 @@ def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=N
             edges[left, right] = pair
 
     for name, counts in frequencies.items():
-        values = [dict(value=json.loads(value) if name == "closing_issues" else value, frequency=count,
+        values = [dict(value=value if name == "files" else json.loads(value), frequency=count,
                        reasons=(["frequent-in-selected-scope"] if count > max_frequency else []) +
-                               (["known-broad-path"] if name == "files" and broad_path(value) else []))
-                  for value, count in sorted(counts.items()) if count > max_frequency or (name == "files" and broad_path(value))]
+                               (["known-broad-path"] if broad_signal(name, value) else []))
+                  for value, count in sorted(counts.items()) if count > max_frequency or broad_signal(name, value)]
         suppressed.append(dict(signal=name, total=len(values), preview=values[:SIGNAL_PREVIEW], omitted=max(0, len(values) - SIGNAL_PREVIEW)))
 
     if omitted_title_terms:
@@ -286,9 +418,14 @@ def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=N
                           relationship="unassessed", survivor=None)
         suggestions.append(dict(suggestion, id=digest(canonical(suggestion))))
 
+    for pair, record in confirmed.items():
+        # What discovery would have said about the pair, so a reviewer can see which confirmed duplicates the signals find.
+        record["signals"] = pair_signals.get(pair, [])[:SIGNAL_PREVIEW]
+
     options = dict(snapshot=snapshot, corpus=corpus, max_age=max_age, as_of=as_of,
-                   title_threshold=title_threshold, max_frequency=max_frequency)
+                   title_threshold=title_threshold, max_frequency=max_frequency, line_threshold=line_threshold)
     evaluated = dict(policy=POLICY, source=source, options=options, observations=observations, negative_verdicts=negatives,
+                     confirmed_duplicates=[confirmed[pair] for pair in sorted(confirmed)], unpaired_confirmations=unpaired,
                      suppressed_signals=suppressed, results=suggestions + rejected)
     token = digest(canonical(evaluated))
     if checkpoint is not None and checkpoint != token:
@@ -297,15 +434,17 @@ def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=N
         raise ValueError("corpus checkpoint changed during candidate discovery")
     if all_negatives != negative_verdicts():
         raise ValueError("negative verdicts changed during candidate discovery")
+    if reviewed != reviewed_state(*confirmed_duplicates(numbers)):
+        raise ValueError("reviewed duplicate decisions changed during candidate discovery")
 
     results = evaluated.pop("results")
     selected = results[offset:offset + limit]
     pagination = page(len(results), offset, len(selected))
     return dict(schema_version=1, **evaluated, checkpoint=token, results=selected, pagination=pagination,
-                candidate_sets=len(suggestions), excluded_pairs=len(rejected),
+                candidate_sets=len(suggestions), excluded_pairs=len(rejected), confirmed_pairs=len(confirmed),
                 continuation=dict(options, offset=pagination["next_offset"], limit=limit, checkpoint=token) if pagination["next_offset"] is not None else None,
-                requests=0, mode="offline", limits=dict(members=MAX_MEMBERS, payload_bytes=MAX_BYTES, features_per_component=MAX_FEATURES, signal_preview=SIGNAL_PREVIEW),
-                meaning="Discovery proposals only. Every pair has a direct signal, never proven redundancy. No survivor, approval or closure authority.",
+                requests=0, mode="offline", limits=dict(members=MAX_MEMBERS, payload_bytes=MAX_BYTES, features_per_component=MAX_FEATURES, diff_lines=MAX_DIFF_LINES, signal_preview=SIGNAL_PREVIEW),
+                meaning="Discovery proposals only. Every pair has a direct signal, never proven redundancy. No survivor, approval or closure authority. Confirmed duplicates are human-reviewed ledger decisions, listed separately and never proposed again as leads.",
                 coverage="All members of this bounded frozen scope examined; gaps and suppressed signals prevent any exhaustive backlog or negative verdict claim.")
 
 
@@ -368,7 +507,7 @@ def create_from_packet(packet, identifier, by):
 def validate_origin(group):
     origin = group["candidate_origin"]
     fields(origin, ("schema_version", "policy", "source", "options", "checkpoint", "suggestion", "by", "at", "digest"))
-    if type(origin["schema_version"]) is not int or origin["schema_version"] != 1 or origin["policy"] != POLICY:
+    if type(origin["schema_version"]) is not int or origin["schema_version"] != 1 or origin["policy"] not in POLICIES:
         raise ValueError("unsupported candidate origin")
     if origin["digest"] != digest(canonical({key: value for key, value in origin.items() if key != "digest"})):
         raise ValueError("candidate origin checksum mismatch")

@@ -108,6 +108,14 @@ def suggestions(ledger):
     groups = list_groups()
     drafts = [g for g in groups if g["status"] == "draft" and g["members"]]
     ready = [g for g in groups if g["status"] == "ready"]
+
+    # Discovery made these groups and no member is proposed as a duplicate yet: nobody has compared the PRs.
+    uncompared = [g for g in drafts if "candidate_origin" in g
+                  and not any((by_key.get((m["kind"], m["number"])) or {}).get("category") == "duplicate-pr" for m in g["members"])]
+    if uncompared:
+        add("agent", f"Pick the PR to keep in {len(uncompared)} candidate group{'' if len(uncompared) == 1 else 's'}",
+            f"prompts/review-candidate-set.md (e.g. group {uncompared[0]['id']})", "discovery linked their PRs; nobody has compared them yet")
+
     for g in drafts:
         add("human", f"Finish group \"{g['title']}\" ({len(g['members'])} items) and mark it ready",
             f"TUI: b -> group -> e (status ready); or bin/group update {g['id']} --status ready --by <you>",

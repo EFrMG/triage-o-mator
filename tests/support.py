@@ -30,13 +30,16 @@ if "--paginate" in args:
 if args[args.index("--method") + 1] != "GET":
     sys.exit("unexpected GitHub operation")
 endpoint = args[-1]
+# A raw diff shares its endpoint with the JSON summary; only the Accept header tells them apart.
+if "Accept: application/vnd.github.diff" in args:
+    endpoint += "#diff"
 responses = json.loads((root / "responses.json").read_text())
 if endpoint not in responses:
     sys.exit("unexpected endpoint: " + endpoint)
 response = responses[endpoint]
 print("HTTP/2.0 " + str(response.get("status", 200)))
 print()
-print(json.dumps(response.get("data")))
+print(response["text"] if "text" in response else json.dumps(response.get("data")))
 '''
 
 

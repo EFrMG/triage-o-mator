@@ -81,15 +81,26 @@ bin/group create-candidate --file candidates.json --candidate CANDIDATE_ID --by 
 
 Use a `candidate-set` ID from the returned page. `--compact` keeps selected proposal IDs and bounds pair previews while summarizing all-scope diagnostics; omit it when the full observations and negative-verdict records are needed. Saving reconstructs and verifies the complete suggestion from pinned evidence and current negative verdicts under the group transaction; altered result text is not trusted. The new group is a draft with generic membership and a checksummed `candidate_origin`. It has no duplicate verdict, survivor decision or approval. Repeating the explicit creation command creates another group; inspect existing groups before saving it again. Creation needs the cache; later group reads/exports retain provenance even if the cache becomes unavailable. Membership edits leave the original proposal intact as historical provenance, not a claim about the edited set. JSON and Markdown exports include that origin.
 
-`pr-candidate-sets-v1` uses these independent discovery signals:
+`pr-candidate-sets-v2` uses these independent discovery signals:
 
+- Shared changed lines: both PRs remove or rewrite the same original line (whitespace collapsed, at least 12 characters) from the pinned `diff` component. The signal needs two-sided coverage of at least `--line-threshold 0.3`: the geometric mean of how much of each PR's changed paths the shared lines fall in, weighted by path rarity, with test and documentation paths counted at a fifth. A PR changing more than 3,000 lines gets a `discovery-feature-limit:diff` hold instead, because a bulk rewrite shares lines with everything. The signal is listed first in a pair's preview.
 - Shared exact file paths, excluding known lockfile basenames and paths containing `vendor`, `generated`, `node_modules` or `dist`.
 - Shared closing-issue identities, including their repository identity, from the pinned `closing_issues` component.
 - Title similarity, with `--title-threshold 0.8` by default.
 
-Every pair in a proposed set must share a direct signal; graph connectivity alone is insufficient. `--max-frequency 10` suppresses broad file/link signals. Missing, partial, stale and suppressed evidence remains explicit, and recorded `not-duplicate` verdicts exclude their pairs. These are discovery leads, not duplicate verdicts or survivor choices.
+Changed lines catch the case the file signal can't: a file so many PRs touch that `--max-frequency` suppresses it, where two of those PRs still rewrite the very same lines. The same frequency limit applies to each changed line.
 
-Discovery reads only the selected snapshot or pinned corpus progress and never fetches replacements. Continuations bind the evidence, verdicts and options. The current scope limit is 5,000 members and 256 MiB of declared summary, file and closing-link payloads; larger scopes fail without partial suggestions. No existing group or decision is rewritten.
+Every pair in a proposed set must share a direct signal; graph connectivity alone is insufficient. `--max-frequency 10` suppresses broad file, link and line signals. Missing, partial, stale and suppressed evidence remains explicit, and recorded `not-duplicate` verdicts exclude their pairs. These are discovery leads, not duplicate verdicts or survivor choices.
+
+Groups created under `pr-candidate-sets-v1` keep their origin and stay valid.
+
+### Confirmed duplicates
+
+A pair a human has already settled is listed once, under `confirmed_duplicates`, and never again as a lead. A confirmation is a **reviewed** `duplicate-pr` ledger decision whose reason starts `Duplicate of #N`, the form the TUI's duplicate prefill writes, where both PRs are in the selected scope. Each record keeps the reviewer's claim and the signals discovery found for the pair, so a reviewer can see which confirmed duplicates the signals catch. An unreviewed `duplicate-pr` proposal stays a lead. A reviewed reason that doesn't name an in-scope PR that way is listed under `unpaired_confirmations` rather than guessed at. Two reviewed rows naming each other confirm the pair but leave `survivor` null.
+
+[Review candidate set](../prompts/review-candidate-set.md) is the playbook that turns a lead into such a proposal for a human to review.
+
+Discovery reads only the selected snapshot or pinned corpus progress and never fetches replacements. Continuations bind the evidence, verdicts, reviewed duplicate decisions and options. The current scope limit is 5,000 members and 256 MiB of declared summary, file, closing-link and diff payloads; larger scopes fail without partial suggestions. No existing group or decision is rewritten.
 
 ## Pairs already ruled out
 

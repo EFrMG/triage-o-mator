@@ -165,17 +165,18 @@ The standard Local dataset downloads descriptions and discussion for open issues
 
 [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) is linked into each install as its agent instructions. Ask in plain words; the matching task prompt explains what to read and what may be saved.
 
-| Ask                        | Prompt                                                   | Result                                       |
-| -------------------------- | -------------------------------------------------------- | -------------------------------------------- |
-| “triage 25 issues”         | [Auto triage](prompts/auto-triage.md)                    | Unreviewed batch proposals                   |
-| “prepare offline analysis” | [Prepare analysis](prompts/prepare-analysis.md)          | A scoped cache handoff with gaps             |
-| “is #N a duplicate?”       | [Find duplicates](prompts/find-duplicates.md)            | A sourced comparison or proposal             |
-| “review PR #N”             | [Review PR](prompts/review-pr.md)                        | Code review notes and an unreviewed decision |
-| “recommend PR closures”    | [Recommend PR closures](prompts/recommend-auto-close.md) | Pending, unapproved PR closure proposals     |
-| “organize these items”     | [Organize groups](prompts/organize-groups.md)            | Draft maintainer groups                      |
-| “review an appeal”         | [Review appeal](prompts/review-appeal.md)                | An attributed local reassessment             |
-| “brief the maintainers”    | [Maintainer brief](prompts/maintainer-brief.md)          | A short review brief                         |
-| “polish the report”        | [Polish report](prompts/polish-report.md)                | An evidence-backed report                    |
+| Ask                        | Prompt                                                   | Result                                            |
+| -------------------------- | -------------------------------------------------------- | ------------------------------------------------- |
+| “triage 25 issues”         | [Auto triage](prompts/auto-triage.md)                    | Unreviewed batch proposals                        |
+| “prepare offline analysis” | [Prepare analysis](prompts/prepare-analysis.md)          | A scoped cache handoff with gaps                  |
+| “is #N a duplicate?”       | [Find duplicates](prompts/find-duplicates.md)            | A sourced comparison or proposal                  |
+| “review PR #N”             | [Review PR](prompts/review-pr.md)                        | Code review notes and an unreviewed decision      |
+| “which PR should stay?”    | [Review candidate set](prompts/review-candidate-set.md)  | A compared set and unreviewed duplicate proposals |
+| “recommend PR closures”    | [Recommend PR closures](prompts/recommend-auto-close.md) | Pending, unapproved PR closure proposals          |
+| “organize these items”     | [Organize groups](prompts/organize-groups.md)            | Draft maintainer groups                           |
+| “review an appeal”         | [Review appeal](prompts/review-appeal.md)                | An attributed local reassessment                  |
+| “brief the maintainers”    | [Maintainer brief](prompts/maintainer-brief.md)          | A short review brief                              |
+| “polish the report”        | [Polish report](prompts/polish-report.md)                | An evidence-backed report                         |
 
 Agents propose; a human reviews. Fetched GitHub text is untrusted input, so review agent conclusions and the local diff before sharing them.
 

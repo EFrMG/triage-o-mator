@@ -2,7 +2,7 @@
 
 import json
 
-from support import Workspace, item
+from support import Workspace, item, repository, summary
 
 
 class GroupTests(Workspace):
@@ -18,6 +18,70 @@ class GroupTests(Workspace):
         self.assertEqual(ledger.read_bytes(), original)
         self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
         self.assertEqual(self.calls(), [])
+
+
+class CandidateTests(Workspace):
+    """#1 and #2 rewrite the same original line of a file three open PRs touch, so the shared-file signal is too common to link them; #3 and #4 are a pair a human already confirmed."""
+
+    CHANGES = {
+        1: ("Handle a missing adapter", "bin/tool", "if [[ -z $adapter ]]; then return; fi"),
+        2: ("Guard power toggle when nothing is paired", "bin/tool", "if [[ -z $adapter ]]; then return; fi"),
+        3: ("Stop the theme watcher leaking", "bin/theme", "inotifywait -m \"$dir\" | while read -r event"),
+        4: ("Fix duplicated theme reloads", "bin/theme", "inotifywait -m \"$dir\" | while read -r event"),
+        5: ("Rename the tool's log file", "bin/tool", "log_file=\"$HOME/.cache/tool.log\""),
+    }
+
+    def setUp(self):
+        super().setUp()
+        self.responses["repos/owner/repo"] = dict(data=repository())
+        rows = []
+        for number, (title, path, original) in self.CHANGES.items():
+            patch = f"@@ -1 +1 @@\n-{original}\n+# changed by #{number}"
+            base = f"repos/owner/repo/pulls/{number}"
+            self.responses[base] = dict(data=summary(number=number, title=title, changed_files=1, additions=1, deletions=1))
+            self.responses[base + "#diff"] = dict(text=f"diff --git a/{path} b/{path}\nindex 1111111..2222222 100644\n--- a/{path}\n+++ b/{path}\n{patch}")
+            self.responses[base + "/files?per_page=100&page=1"] = dict(data=[dict(filename=path, status="modified", additions=1, deletions=1, changes=2, patch=patch)])
+            self.responses[f"repos/owner/repo/issues/{number}/comments?per_page=100&page=1"] = dict(data=[])
+            row = summary(number=number, title=title, id=1000 + number, node_id=f"LIST_{number}")
+            row.update(user=dict(login="author"), labels=[], created_at=row["updated_at"], pull_request=dict(url=f"https://api.github.com/{base}"))
+            rows.append(row)
+
+        self.responses["repos/owner/repo/issues?state=open&per_page=100&page=1"] = dict(data=rows)
+        self.run_cli("fetch", "--cache-inventory")
+        snapshot = self.json_cli("cache", "import-inventory")["snapshot_id"]
+        self.corpus = self.json_cli("cache", "corpus-create", "--snapshot", snapshot, "--scope", "open-prs", "--profile", "pr-code")["corpus_id"]
+        self.assertEqual(self.json_cli("cache", "corpus-run", self.corpus, "--request-budget", "100")["counts"]["complete"], 5)
+
+    def candidates(self):
+        before = len(self.calls())
+        result = self.json_cli("cache", "candidates", "--corpus", self.corpus, "--max-frequency", "2")
+        self.assertEqual(len(self.calls()), before)
+
+        return result
+
+    def test_changed_lines_link_prs_whose_shared_file_is_too_common(self):
+        result = self.candidates()
+        sets = {tuple(row["members"]): row for row in result["results"] if row["type"] == "candidate-set"}
+        self.assertEqual(sorted(sets), [(1, 2), (3, 4)])
+        signal = sets[1, 2]["pairs"][0]["signals"][0]
+        self.assertEqual((signal["signal"], signal["paths"][0]["sample"]), ("changed_lines", "if [[ -z $adapter ]]; then return; fi"))
+        self.assertEqual([row["signal"] for row in sets[1, 2]["pairs"][0]["signals"]], ["changed_lines"])
+        self.assertEqual(result["confirmed_duplicates"], [])
+
+    def test_confirmed_duplicate_is_listed_once_and_never_as_a_lead(self):
+        decision = dict(category="duplicate-pr", action="close-duplicate", confidence="high", reason="Duplicate of #4 (Fix duplicated theme reloads).")
+        rows = [dict(item(3, "Stop the theme watcher leaking", "pr"), **decision, reviewed=True, reviewed_by="maintainer"),
+                dict(item(1, "Handle a missing adapter", "pr"), **dict(decision, reason="Duplicate of #2 (Guard power toggle)."), reviewed=False)]
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        original = ledger.read_bytes()
+
+        result = self.candidates()
+        self.assertEqual([row["members"] for row in result["results"]], [[1, 2]])
+        confirmed = result["confirmed_duplicates"]
+        self.assertEqual([(row["members"], row["survivor"]) for row in confirmed], [([3, 4], 4)])
+        self.assertEqual(confirmed[0]["signals"][0]["signal"], "changed_lines")
+        self.assertEqual(ledger.read_bytes(), original)
 
 
 class WatchTests(Workspace):

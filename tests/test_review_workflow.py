@@ -208,6 +208,13 @@ class ProposalFeedbackTests(Workspace):
         self.auto_close("reject", "--number", "2", "--checkpoint", attempted["checkpoint"],
                         "--by", "maintainer", "--reason", "Too late", ok=False)
         self.assertEqual(saved.read_bytes(), before)
+
+        optional = self.propose(3, "--evidence-gap", "No selected cache snapshot")
+        no_reason = self.auto_close("reject", "--number", "3", "--checkpoint", optional["checkpoint"], "--by", "maintainer")
+        self.assertEqual(no_reason["rejection"]["reason"], "")
+        self.assertEqual(self.auto_close("list")["rows"][-1]["rejection"]["reason"], "")
+        context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "3")
+        self.assertEqual(next(row for row in context["rows"] if row["kind"] == "feedback")["fields"]["reason"]["preview"], "")
         self.assertEqual(ledger.read_bytes(), original)
         self.assertEqual(self.calls(), [])
 

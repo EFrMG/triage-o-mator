@@ -907,9 +907,16 @@ func TestNotificationsShowOneCardPerItemAndViewEachSource(t *testing.T) {
 	root := baselineRoot(t)
 	logScript := `#!/usr/bin/env python3
 import json, pathlib, sys
+args = sys.argv[1:]
 with pathlib.Path('notification-calls.jsonl').open('a') as out:
-    out.write(json.dumps(sys.argv[1:]) + '\n')
-print('{}')
+    out.write(json.dumps(args) + '\n')
+if 'reject' in args:
+    if pathlib.Path('reject-fail').exists():
+        sys.exit(1)
+    print(json.dumps(dict(number=3, status='rejected', checkpoint='d' * 64,
+                          rejection=dict(proposal_checkpoint='a' * 64, by='tester', reason=args[args.index('--reason') + 1]))))
+else:
+    print('{}')
 `
 	for _, name := range []string{"cache", "auto-close"} {
 		if err := os.WriteFile(filepath.Join(root, "bin", name), []byte(logScript), 0o755); err != nil {
@@ -960,6 +967,14 @@ print('{}')
 	if m.notifications.review == nil || m.notificationPR.open {
 		t.Fatal("returning from the PR did not restore its proposal")
 	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "d"})
+	if !m.comment.open || m.notifications.review == nil {
+		t.Fatal("d in proposal review did not open the rejection composer")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.comment.open || m.notifications.review == nil {
+		t.Fatal("canceling rejection did not restore proposal review")
+	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.notificationPR.open {
 		t.Fatal("Enter on the proposal did not open the PR")
@@ -969,8 +984,22 @@ print('{}')
 	if m.notifications.review != nil || !m.notifications.open {
 		t.Fatal("Esc did not return from proposal to Notifications")
 	}
+	t.Setenv("TMPDIR", t.TempDir())
+	next, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "D"})
+	m = next.(model)
+	if cmd == nil || !m.comment.open || !m.comment.busy || m.comment.rejectionCheckpoint != strings.Repeat("a", 64) {
+		t.Fatal("D did not open the rejection reason in $EDITOR")
+	}
+	m = baselineSend(m, commentEditorMsg{root: root, repo: m.repo, key: Key{Kind: "pr", Number: 3}, body: "Reason from editor"})
+	if !m.comment.previewing || m.comment.text.Value() != "Reason from editor" {
+		t.Fatal("edited rejection reason did not return to proposal preview")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.comment.open || m.notifications.review != nil {
+		t.Fatal("canceling the edited rejection left a modal open")
+	}
 
-	next, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "v"})
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "v"})
 	if cmd == nil {
 		t.Fatal("v did not act on the grouped item")
 	}
@@ -988,25 +1017,104 @@ print('{}')
 		}
 	}
 
-	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
-	dismissed := cmd().(notificationItemDoneMsg)
-	if dismissed.err != nil || dismissed.completed != 4 {
-		t.Fatalf("d did not dismiss every source: %+v", dismissed)
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
+	m = next.(model)
+	if !m.comment.open || m.comment.rejectionCheckpoint != strings.Repeat("a", 64) {
+		t.Fatal("d did not open the comment composer for rejection")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.comment.open {
+		t.Fatal("Esc did not cancel rejection")
+	}
+	next, _ = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
+	m = next.(model)
+	m.comment.text.SetValue("Reason retained on failure")
+	if err := os.WriteFile(filepath.Join(root, "reject-fail"), []byte("yes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	next, cmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = baselineSend(next.(model), cmd().(notificationRejectionDoneMsg))
+	if !m.comment.open || m.comment.text.Value() != "Reason retained on failure" {
+		t.Fatal("failed rejection lost the composer draft")
+	}
+	if err := os.Remove(filepath.Join(root, "reject-fail")); err != nil {
+		t.Fatal(err)
+	}
+	m.comment.text.SetValue("")
+	next, cmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	dismissed := cmd().(notificationRejectionDoneMsg)
+	if dismissed.err != nil || !dismissed.rejected || dismissed.completed != 4 {
+		t.Fatalf("d did not reject and dismiss every source: %+v", dismissed)
+	}
+	finished, _ := next.(model).finishNotificationRejection(dismissed)
+	if finished.(model).comment.open || finished.(model).notifications.review != nil {
+		t.Fatal("completed rejection left the composer or exact review open")
 	}
 	data, err = os.ReadFile(filepath.Join(root, "notification-calls.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, command := range []string{"\"dismiss\"", "\"track-remove\"", "\"notification-dismiss\""} {
+	for _, command := range []string{"\"reject\"", "\"--reason\", \"\"", "\"dismiss\"", strings.Repeat("d", 64), "\"track-remove\"", "\"notification-dismiss\""} {
 		if !strings.Contains(string(data), command) {
 			t.Fatalf("missing %s in script calls: %s", command, data)
 		}
 	}
 
+	m.comment.open = false
 	m.notifications.proposals.Rows = nil
+	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
+	if cmd == nil {
+		t.Fatal("d did not dismiss a notification without a pending proposal")
+	}
+	plainDismissal := cmd().(notificationItemDoneMsg)
+	if plainDismissal.err != nil || plainDismissal.completed != 3 {
+		t.Fatalf("presentation-only dismissal changed: %+v", plainDismissal)
+	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.notificationPR.open || m.notifications.review != nil {
 		t.Fatal("notification without a closure proposal did not open the item directly")
+	}
+}
+
+func TestCommentComposerEditorAndPreviewExit(t *testing.T) {
+	root := baselineRoot(t)
+	target := commentTarget{key: Key{Kind: "pr", Number: 3}, host: "github.com", url: "https://github.com/owner/repo/pull/3"}
+	for _, flow := range []string{"comment", "close", "reopen", "rejection"} {
+		for _, fromPreview := range []bool{false, true} {
+			name := flow + "/composer"
+			if fromPreview {
+				name = flow + "/preview"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Setenv("TMPDIR", t.TempDir())
+				m := baselineModel(t, root)
+				var targets []commentTarget
+				if flow == "reopen" {
+					targets = []commentTarget{target}
+				}
+				next, _ := m.openCommentComposer(target, flow == "close", flow == "reopen", targets)
+				m = next.(model)
+				if flow == "rejection" {
+					m.comment.rejectionCheckpoint = strings.Repeat("a", 64)
+				}
+				m.comment.text.SetValue("Current draft")
+				m.comment.previewing = fromPreview
+
+				next, editorCmd := m.handleCommentKey(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+				m = next.(model)
+				if editorCmd == nil || !m.comment.open || !m.comment.busy {
+					t.Fatal("Ctrl-E did not open $EDITOR for the current composer")
+				}
+				m = baselineSend(m, commentEditorMsg{root: root, repo: m.repo, key: target.key, body: "Edited draft"})
+				if !m.comment.open || !m.comment.previewing || m.comment.text.Value() != "Edited draft" {
+					t.Fatal("edited draft did not return to preview")
+				}
+				m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+				if m.comment.open {
+					t.Fatal("Esc from preview did not close the floating window")
+				}
+			})
+		}
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -19,6 +20,8 @@ import (
 type commentComposer struct {
 	previewText                           string
 	open, busy, previewing, close, reopen bool
+	rejectionCheckpoint                   string
+	rejectionChoice                       notificationChoice
 	key                                   Key
 	host, target, requestID, approval     string
 	targets                               []commentTarget
@@ -143,6 +146,37 @@ func (m model) openCommentComposer(target commentTarget, close, reopen bool, tar
 	return m, cmd
 }
 
+func (m model) openRejectionComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
+	if choice.proposal < 0 || strings.TrimSpace(m.reviewer) == "" {
+		m.warn("A reviewer name is required to reject a proposal.")
+		return m, nil
+	}
+
+	row := m.notifications.proposals.Rows[choice.proposal]
+	if row.Status != "pending" {
+		return m.changeNotificationItem(choice, "dismiss")
+	}
+
+	target := commentTarget{key: choice.key, url: row.Target}
+	next, cmd := m.openCommentComposer(target, false, false, nil)
+	m = next.(model)
+	m.comment.rejectionCheckpoint = row.Checkpoint
+	m.comment.rejectionChoice = choice
+	m.comment.text.Placeholder = "Optional reason for rejecting this proposal"
+	m.comment.text.CharLimit = 10000
+	return m, cmd
+}
+
+func (m model) openExternalRejectionComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
+	next, cmd := m.openRejectionComposer(choice)
+	m = next.(model)
+	if !m.comment.open || m.comment.rejectionCheckpoint == "" {
+		return m, cmd
+	}
+
+	return m.startCommentEditor()
+}
+
 func (m model) commentCmd(publish bool) tea.Cmd {
 	root, repo, c := m.installRoot, m.repo, m.comment
 
@@ -173,13 +207,7 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg.String() == "esc" {
-		if c.previewing {
-			c.previewing = false
-			cmd := c.text.Focus()
-
-			return m, cmd
-		}
-		if c.referenceActive {
+		if c.referenceActive && !c.previewing {
 			c.referenceActive = false
 			m.layoutComment()
 			return m, nil
@@ -187,6 +215,9 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 		c.open = false
 		return m, nil
+	}
+	if key.Matches(msg, keys.ComposerEditor) {
+		return m.startCommentEditor()
 	}
 	if c.referenceActive && !c.previewing {
 		switch msg.String() {
@@ -205,6 +236,9 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if c.previewing {
 		editorKey := "C"
+		if c.rejectionCheckpoint != "" {
+			editorKey = "D"
+		}
 		if c.close {
 			editorKey = "X"
 		}
@@ -231,6 +265,11 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "ctrl+s":
+		if c.rejectionCheckpoint != "" {
+			c.busy = true
+			m.status = "Rejecting proposal and dismissing notification…"
+			return m, m.rejectNotificationCmd()
+		}
 		if strings.TrimSpace(c.text.Value()) == "" {
 			m.warn("Write a comment before publishing.")
 			return m, nil
@@ -496,6 +535,9 @@ func (m model) stopReopening(target commentTarget, err error, uncertain bool) (t
 
 func (m model) commentHeader(width int) string {
 	heading, color := "Compose comment", currentTheme.Info
+	if m.comment.rejectionCheckpoint != "" {
+		heading = "Reject closure proposal"
+	}
 	if m.comment.close {
 		heading = "Close with comment"
 	}
@@ -504,6 +546,9 @@ func (m model) commentHeader(width int) string {
 	}
 	if m.comment.previewing {
 		heading, color = "Preview Markdown", currentTheme.Success
+		if m.comment.rejectionCheckpoint != "" {
+			heading = "Preview rejection reason"
+		}
 		if m.comment.close {
 			heading = "Preview closure"
 		}

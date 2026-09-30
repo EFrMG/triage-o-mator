@@ -34,6 +34,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishAutoCloseNotes(msg)
 	case notificationItemDoneMsg:
 		return m.finishNotificationItem(msg)
+	case notificationRejectionDoneMsg:
+		return m.finishNotificationRejection(msg)
 	case actionHistoryMsg:
 		return m.finishActionHistory(msg)
 	case attentionMsg:

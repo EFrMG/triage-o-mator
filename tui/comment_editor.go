@@ -119,6 +119,9 @@ func (m model) startCommentEditor() (tea.Model, tea.Cmd) {
 	root, repo, key := m.installRoot, m.repo, m.comment.key
 	m.comment.busy = true
 	m.status = "Editing comment in $EDITOR…"
+	if m.comment.rejectionCheckpoint != "" {
+		m.status = "Editing rejection reason in $EDITOR…"
+	}
 
 	return m, tea.ExecProcess(command, func(err error) tea.Msg {
 		body, readErr := readCommentEditor(path, err)
@@ -145,6 +148,9 @@ func (m model) finishCommentEditor(msg commentEditorMsg) (tea.Model, tea.Cmd) {
 	c.setPreview(c.text.Value())
 	c.preview.GotoTop()
 	m.status = "Comment loaded. Review it before publishing."
+	if c.rejectionCheckpoint != "" {
+		m.status = "Rejection reason loaded. Review it before dismissing."
+	}
 	if c.close {
 		m.status = "Comment loaded. Review it before closing with a comment."
 	}

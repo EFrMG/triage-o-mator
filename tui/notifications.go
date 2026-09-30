@@ -662,11 +662,20 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 					return m.openNotificationSource(choice, "action")
 				}
 			}
-		case "d":
+		case "d", "D":
 			if len(m.notifications.review.Plan.Proposals) == 1 {
 				row := m.notifications.review.Plan.Proposals[0]
 				for _, choice := range m.notifications.choices() {
 					if choice.kind == "item" && choice.key == (Key{Kind: "pr", Number: row.Number}) {
+						if row.Status == "pending" {
+							if msg.String() == "D" {
+								return m.openExternalRejectionComposer(choice)
+							}
+							return m.openRejectionComposer(choice)
+						}
+						if msg.String() == "D" {
+							return m, nil
+						}
 						m.notifications.review = nil
 						return m.changeNotificationItem(choice, "dismiss")
 					}
@@ -832,11 +841,21 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			break
 		}
 		return m.changeNotificationItem(choices[m.notifications.selected], "view")
-	case "d":
+	case "d", "D":
 		if len(choices) == 0 || m.trackingBusy {
 			break
 		}
-		return m.changeNotificationItem(choices[m.notifications.selected], "dismiss")
+		choice := choices[m.notifications.selected]
+		if choice.kind == "item" && choice.proposal >= 0 && m.notifications.proposals.Rows[choice.proposal].Status == "pending" {
+			if msg.String() == "D" {
+				return m.openExternalRejectionComposer(choice)
+			}
+			return m.openRejectionComposer(choice)
+		}
+		if msg.String() == "D" {
+			return m, nil
+		}
+		return m.changeNotificationItem(choice, "dismiss")
 	case "j", "down", "tab":
 		if len(choices) > 0 {
 			m.notifications.selected = (m.notifications.selected + 1) % len(choices)
@@ -1049,7 +1068,7 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		if row.Rejection != nil {
 			fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Rejection")))
 			fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(row.Rejection.By)+" · At: "+sanitize(row.Rejection.At), textWidth)))
-			fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(row.Rejection.Reason), textWidth)))
+			fmt.Fprintf(&b, "%s\n", inset(wrapText(orPlaceholder(sanitize(row.Rejection.Reason), "(no reason given)"), textWidth)))
 		}
 		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Observed PR revision")))
 		fmt.Fprintf(&b, "%s\n", inset(muted.Render("Head: "+sanitize(row.HeadSHA))))

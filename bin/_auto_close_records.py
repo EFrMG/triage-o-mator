@@ -20,7 +20,7 @@ def valid_rejection(value):
         return False
 
     by, reason, at, checkpoint = (rejection.get(field) for field in ("by", "reason", "at", "proposal_checkpoint"))
-    if not isinstance(by, str) or not by.strip() or not isinstance(reason, str) or not reason.strip():
+    if not isinstance(by, str) or not by.strip() or not isinstance(reason, str) or len(reason) > 10000:
         return False
     if not isinstance(at, str) or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", at):
         return False
@@ -112,7 +112,7 @@ def feedback(number, repo):
         status = version.get("status")
         if status == "rejected":
             rejection = version.get("rejection")
-            if not isinstance(rejection, dict) or not all(isinstance(rejection.get(field), str) and rejection[field].strip() for field in ("by", "at", "reason", "proposal_checkpoint")):
+            if not isinstance(rejection, dict) or not all(isinstance(rejection.get(field), str) and rejection[field].strip() for field in ("by", "at", "proposal_checkpoint")) or not isinstance(rejection.get("reason"), str):
                 raise ValueError("invalid historical proposal rejection")
             if not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", rejection["at"]) or not re.fullmatch(r"[0-9a-f]{64}", rejection["proposal_checkpoint"]):
                 raise ValueError("invalid historical rejection reference")

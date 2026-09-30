@@ -327,8 +327,8 @@ def change(repo, action, number, checkpoint):
 
 
 def reject(repo, number, checkpoint, by, reason):
-    if number < 1 or not by.strip() or not reason.strip() or len(by) > 200 or len(reason) > 10000 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in by + reason):
-        raise ValueError("rejection requires a positive PR number, contributor and valid reason")
+    if number < 1 or not by.strip() or len(by) > 200 or len(reason) > 10000 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in by + reason):
+        raise ValueError("rejection requires a positive PR number and contributor; any supplied reason must be valid")
 
     path = proposal_path(number)
     with guarded_lock(path):
@@ -438,7 +438,7 @@ def main():
     rejection.add_argument("--number", type=int, required=True)
     rejection.add_argument("--checkpoint", required=True)
     rejection.add_argument("--by", required=True)
-    rejection.add_argument("--reason", required=True)
+    rejection.add_argument("--reason", default="")
     for action in ("review", "execute"):
         command = commands.add_parser(action)
         selection = command.add_mutually_exclusive_group(required=True)

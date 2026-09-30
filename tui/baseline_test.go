@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1205,6 +1206,115 @@ print(json.dumps(dict(number=3, status='pending', checkpoint='b' * 64, comment=c
 	m = next.(model)
 	if contextCmd == nil || m.notifications.review == nil || m.notifications.review.Plan.Proposals[0].Checkpoint != fresh.Checkpoint {
 		t.Fatal("edited proposal did not return to its new review")
+	}
+}
+
+func TestGroupHandoffCopiesCurrentEditedContextForSelectedMembers(t *testing.T) {
+	root := baselineRoot(t)
+	script, err := os.ReadFile(filepath.Join("..", "bin", "group"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "group"), script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var pr map[string]any
+	if err := json.Unmarshal([]byte(baselineRow(1)), &pr); err != nil {
+		t.Fatal(err)
+	}
+	pr["kind"], pr["number"], pr["title"] = "pr", 3, "Reviewed candidate"
+	pr["url"], pr["category"], pr["action"], pr["confidence"] = "https://github.com/owner/repo/pull/3", "enhancement", "keep-open", "high"
+	pr["reason"], pr["reviewed"], pr["reviewed_by"], pr["reviewer_notes"] = "Maintainer guidance", true, "maintainer", "Check compatibility first"
+	prJSON, err := json.Marshal(pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "data/owner/repo/ledger.jsonl"), append(append(prJSON, '\n'), []byte(baselineRow(2))...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	call := func(args ...string) Group {
+		t.Helper()
+		out, err := runScript(root, "group", args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var group Group
+		if err := json.Unmarshal([]byte(out), &group); err != nil {
+			t.Fatal(err)
+		}
+		return group
+	}
+	g := call("create", "--title", "Compare fixes", "--description", "Agent's draft guidance", "--by", "agent:helper")
+	g = call("add", g.ID, "--kind", "pr", "--number", "3", "--notes", "Agent's candidate note", "--by", "agent:helper")
+	g = call("add", g.ID, "--kind", "issue", "--number", "2", "--notes", "Original report", "--by", "agent:helper")
+	g = call("update", g.ID, "--revision", strconv.Itoa(g.Revision), "--description", "Maintainer edited the group question", "--by", "maintainer")
+	g = call("add", g.ID, "--revision", strconv.Itoa(g.Revision), "--kind", "pr", "--number", "3", "--notes", "Maintainer wants the candidate reconsidered", "--by", "maintainer")
+
+	m := baselineModel(t, root)
+	m.groups = groupUI{open: true, detail: true, records: []Group{g}, member: 1, ticked: map[Key]bool{{Kind: "pr", Number: 3}: true}}
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "y"})
+	m = next.(model)
+	if cmd == nil || !m.groups.busy {
+		t.Fatal("y did not start a fresh group handoff")
+	}
+	handoff := cmd().(groupHandoffMsg)
+	if handoff.err != nil || len(handoff.selected) != 1 || handoff.selected[0] != (Key{Kind: "pr", Number: 3}) {
+		t.Fatalf("y did not scope the handoff to the ticked member: %+v", handoff)
+	}
+	text := groupHandoffText(m.yankHeader("group handoff"), handoff)
+	scope := strings.SplitN(text, "Assess these members", 2)[0]
+	for _, expected := range []string{"- pr #3", "Maintainer edited the group question", "Maintainer wants the candidate reconsidered", "Check compatibility first", "Human review: confirmed by maintainer", "#### issue #2", "Current member checkpoints"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("edited context missing from group handoff: %s", expected)
+		}
+	}
+	for _, excess := range []string{"```json", `"local_context"`, `"labels": []`, "- Assignee:", "- Agent note:"} {
+		if strings.Contains(text, excess) {
+			t.Fatalf("group handoff copied empty or raw fields: %s", excess)
+		}
+	}
+	raw, err := runScript(root, "group", "--expected-repo", "owner/repo", "export", g.ID, "--format", "json")
+	if err != nil || len(text) >= len(raw) {
+		t.Fatal("group handoff did not reduce the agent context compared with the full packet")
+	}
+	if strings.Contains(scope, "- issue #2") {
+		t.Fatal("y included an unticked member in the proposal scope")
+	}
+	next, copyCmd := m.finishGroupHandoff(handoff)
+	m = next.(model)
+	if copyCmd == nil || m.groups.busy {
+		t.Fatal("completed handoff did not reach the existing copy path")
+	}
+
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "Y"})
+	m = next.(model)
+	all := cmd().(groupHandoffMsg)
+	if all.err != nil || len(all.selected) != 2 || all.selected[1] != (Key{Kind: "issue", Number: 2}) {
+		t.Fatal("Y did not explicitly select all group members")
+	}
+	next, _ = m.finishGroupHandoff(all)
+	m = next.(model)
+	m.groups.ticked = map[Key]bool{}
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "y"})
+	m = next.(model)
+	hovered := cmd().(groupHandoffMsg)
+	if hovered.err != nil || len(hovered.selected) != 1 || hovered.selected[0] != (Key{Kind: "issue", Number: 2}) {
+		t.Fatal("y without ticks did not select the hovered member")
+	}
+	next, _ = m.finishGroupHandoff(hovered)
+	m = next.(model)
+
+	call("update", g.ID, "--revision", strconv.Itoa(g.Revision), "--description", "Changed again", "--by", "maintainer")
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "y"})
+	m = next.(model)
+	stale := cmd().(groupHandoffMsg)
+	if stale.err == nil || stale.packet.Group.ID != "" {
+		t.Fatal("changed group revision became an agent handoff")
+	}
+	_, copyCmd = m.finishGroupHandoff(stale)
+	if copyCmd != nil {
+		t.Fatal("stale group handoff reached the clipboard path")
 	}
 }
 

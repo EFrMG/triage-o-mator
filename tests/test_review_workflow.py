@@ -53,6 +53,9 @@ class GroupTests(Workspace):
         markdown = self.run_cli("group", "export", group["id"]).stdout
         self.assertIn("Local context revision:", markdown)
         self.assertIn("Dependency decision", markdown)
+        self.assertIn("Check compatibility", markdown)
+        self.assertNotIn("- labels: []", markdown)
+        self.assertNotIn("- last_synced_at: ", markdown)
         self.assertEqual(ledger.read_bytes(), original)
         self.assertEqual(self.calls(), [])
 

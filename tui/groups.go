@@ -16,25 +16,29 @@ import (
 )
 
 type GroupMember struct {
-	Kind    string `json:"kind"`
-	Number  int    `json:"number"`
-	Notes   string `json:"notes"`
-	AddedBy string `json:"added_by"`
+	Kind      string `json:"kind"`
+	Number    int    `json:"number"`
+	Notes     string `json:"notes"`
+	AddedBy   string `json:"added_by"`
+	UpdatedBy string `json:"updated_by"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 func (member GroupMember) Key() Key { return Key{Kind: member.Kind, Number: member.Number} }
 
 type Group struct {
-	ID          string        `json:"id"`
-	Title       string        `json:"title"`
-	Description string        `json:"description"`
-	Assignee    string        `json:"assignee"`
-	Status      string        `json:"status"`
-	Revision    int           `json:"revision"`
-	CreatedBy   string        `json:"created_by"`
-	UpdatedBy   string        `json:"updated_by"`
-	UpdatedAt   string        `json:"updated_at"`
-	Members     []GroupMember `json:"members"`
+	ID              string          `json:"id"`
+	Repo            string          `json:"repo"`
+	Title           string          `json:"title"`
+	Description     string          `json:"description"`
+	Assignee        string          `json:"assignee"`
+	Status          string          `json:"status"`
+	Revision        int             `json:"revision"`
+	CreatedBy       string          `json:"created_by"`
+	UpdatedBy       string          `json:"updated_by"`
+	UpdatedAt       string          `json:"updated_at"`
+	Members         []GroupMember   `json:"members"`
+	CandidateOrigin json.RawMessage `json:"candidate_origin"`
 }
 
 type groupUI struct {
@@ -58,6 +62,7 @@ type groupUI struct {
 	pick dropdown
 	// exporting is what a running export is doing, e.g. "Full export of \"Wifi\"", and progress bin/group's last progress line.
 	exporting, progress string
+	handoffRequest      uint64
 }
 
 type groupsLoadedMsg struct {

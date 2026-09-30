@@ -58,6 +58,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onExportProgress(msg)
 	case groupsLoadedMsg:
 		return m.onGroupsLoaded(msg)
+	case groupHandoffMsg:
+		return m.finishGroupHandoff(msg)
 	case batchesLoadedMsg:
 		return m.onBatchesLoaded(msg)
 	case similarLoadedMsg:
@@ -432,6 +434,12 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if (key.Matches(msg, keys.Yank) || key.Matches(msg, keys.YankAll)) && !m.typingText() && !m.themePicker.open && !m.editingRepo {
+		if m.groups.open && m.groups.detail {
+			if m.groups.busy {
+				return m, nil
+			}
+			return m.startGroupHandoff(key.Matches(msg, keys.YankAll))
+		}
 		text, what := m.yankText(key.Matches(msg, keys.YankAll))
 		m.status = "Taking " + what + "…"
 

@@ -98,6 +98,7 @@ A group collects related items so maintainers can decide on them together ([grou
 - On any item, `b` adds it to a group with a note; `B` adds it to the last group used.
 - `e` edits a group, including its status: `draft`, `ready` for maintainers, or `archived`.
 - In a group, `e` edits the selected member's note, and `d` twice removes selected members. In the group list, `d` twice deletes the group; archiving keeps its history available. `x` exports a Markdown packet, and `X` also fetches bodies, comments and PR diffs.
+- After reviewing a group, tick the members for the next agent pass with `Space` and press `y` to copy a proposal handoff. With no ticks, `y` selects the hovered member; `Y` selects every member, including already-triaged ones. The handoff reads a fresh offline group export and copies a concise Markdown summary of current decisions, notes, prior feedback and exact member checkpoints, omitting empty fields. It names the selected scope and the command for the full packet. A changed group requires a refresh before copying. This only copies context; it does not launch an agent or approve a proposal.
 - A ready group does not approve its members. Their individual review states remain visible in reports and exports.
 
 ## 10. Build deeper offline context when needed

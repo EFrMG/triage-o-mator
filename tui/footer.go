@@ -327,6 +327,7 @@ func (m model) groupFooter() []footerGroup {
 	if m.groups.detail {
 		if g != nil && len(g.Members) > 0 {
 			groups = append(groups, group("Member", bind("open", keys.Enter), bind("notes", keys.Edit), bind("", keys.Tick), bind("", keys.Reopen, keys.ReopenEditor), bind("remove", keys.Delete)), group("Context", bind("scroll notes", keys.HalfDown, keys.HalfUp)))
+			groups = append(groups, group("Handoff", bind("selected", keys.Yank), bind("all", keys.YankAll)))
 		}
 	}
 

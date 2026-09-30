@@ -110,6 +110,9 @@ def markdown(data):
 
         for field in ("missing_from_ledger", "state", "author", "labels", "category", "action", "confidence", "reason", "triaged_by", "triaged_at", "reviewed", "reviewed_by", "reviewed_at", "reviewer_notes", "last_synced_at", "additions", "deletions", "changed_files", "is_draft", "mergeable"):
             if field in item:
+                value = item[field]
+                if value is None or (isinstance(value, str) and not value.strip()) or (isinstance(value, (list, dict)) and not value):
+                    continue
                 lines.append(f"- {field}: {item[field]}")
 
         if prose(item.get("agent_notes")):

@@ -12,32 +12,33 @@ import (
 
 // Notifications presents tracked comments and retained PR records in two sections.
 type notificationsUI struct {
-	open, busy    bool
-	tracked       *trackedPage
-	attention     *attentionPage
-	closures      *actionHistoryPage
-	proposals     autoCloseList
-	ticked        map[int]bool
-	review        *autoCloseReview
-	reviewBusy    bool
-	reviewAll     bool
-	reviewKey     string
-	reviewNumbers []int
-	reviewScroll  int
-	context       *autoCloseContext
-	contextBusy   bool
-	contextError  string
-	notesOpen     bool
-	notesBusy     bool
-	notesText     string
-	notesError    string
-	notesScroll   int
-	notesRequest  uint64
-	state         notificationState
-	selected      int
-	selectAfter   string
-	selectItem    Key
-	problem       string
+	open, busy        bool
+	tracked           *trackedPage
+	attention         *attentionPage
+	closures          *actionHistoryPage
+	proposals         autoCloseList
+	ticked            map[int]bool
+	review            *autoCloseReview
+	reviewBusy        bool
+	reviewAll         bool
+	reviewKey         string
+	reviewNumbers     []int
+	reviewScroll      int
+	context           *autoCloseContext
+	contextBusy       bool
+	contextError      string
+	notesOpen         bool
+	notesBusy         bool
+	notesText         string
+	notesError        string
+	notesScroll       int
+	notesRequest      uint64
+	state             notificationState
+	selected          int
+	selectAfter       string
+	selectItem        Key
+	openProposalAfter Key
+	problem           string
 }
 
 type notificationState struct {
@@ -452,6 +453,13 @@ func (m model) finishNotifications(msg notificationsMsg) (tea.Model, tea.Cmd) {
 		}
 		m.notifications.selectItem = Key{}
 	}
+	if m.notifications.openProposalAfter.Number > 0 {
+		key := m.notifications.openProposalAfter
+		m.notifications.openProposalAfter = Key{}
+		if choice, ok := m.notifications.proposalChoice(key.Number); ok && choice.proposal >= 0 {
+			return m.openNotificationSource(choice, "proposal")
+		}
+	}
 	return m, nil
 }
 
@@ -641,6 +649,15 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m, nil
 		}
 		switch msg.String() {
+		case "e":
+			if len(m.notifications.review.Plan.Proposals) == 1 {
+				row := m.notifications.review.Plan.Proposals[0]
+				if choice, ok := m.notifications.proposalChoice(row.Number); ok && choice.proposal >= 0 && m.notifications.proposals.Rows[choice.proposal].Checkpoint == row.Checkpoint {
+					return m.openProposalEdit(choice)
+				}
+				m.warn("Proposal changed; reopen Notifications before editing.")
+				return m, nil
+			}
 		case "w":
 			if len(m.notifications.review.Plan.Proposals) == 1 {
 				row := m.notifications.review.Plan.Proposals[0]
@@ -780,6 +797,10 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.notifications.selected = len(choices) - 1
 	}
 	switch msg.String() {
+	case "e":
+		if len(choices) > 0 && !m.trackingBusy {
+			return m.openProposalEdit(choices[m.notifications.selected])
+		}
 	case "t", "i":
 		if len(choices) > 0 && choices[m.notifications.selected].kind == "item" {
 			choice := choices[m.notifications.selected]

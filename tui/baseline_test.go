@@ -1118,6 +1118,96 @@ func TestCommentComposerEditorAndPreviewExit(t *testing.T) {
 	}
 }
 
+func TestPendingProposalEditKeepsDraftAndReturnsToNewReview(t *testing.T) {
+	root := baselineRoot(t)
+	t.Setenv("TMPDIR", t.TempDir())
+	script := `#!/usr/bin/env python3
+import json, pathlib, sys
+args = sys.argv[1:]
+if 'edit' not in args:
+    sys.exit('unexpected auto-close operation')
+if pathlib.Path('edit-fail').exists():
+    sys.exit('saved proposal changed')
+comment = pathlib.Path(args[args.index('--comment-file') + 1]).read_text()
+print(json.dumps(dict(number=3, status='pending', checkpoint='b' * 64, comment=comment,
+                      rationale=args[args.index('--rationale') + 1])))
+`
+	if err := os.WriteFile(filepath.Join(root, "bin", "auto-close"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := baselineModel(t, root)
+	old := autoCloseRow{Number: 3, Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Status: "pending", Active: true,
+		Checkpoint: strings.Repeat("a", 64), Comment: "Original comment", Rationale: "Original rationale", Inputs: &autoCloseInputs{ContextCheckpoint: "context"}}
+	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{old}}, ticked: map[int]bool{3: true}, review: &autoCloseReview{}}
+	m.notifications.review.Plan.Proposals = []autoCloseRow{old}
+	next, _ := m.handleNotificationsKey(tea.KeyPressMsg{Text: "e"})
+	m = next.(model)
+	if !m.comment.open || m.comment.text.Value() != old.Comment || m.comment.rationale.Value() != old.Rationale || m.comment.editRationale {
+		t.Fatal("proposal edit did not start with the comment above the rationale and focused first")
+	}
+	fields := ansi.Strip(m.proposalEditFieldsView())
+	sections := strings.SplitN(fields, "\nRationale\n", 2)
+	if len(sections) != 2 || !strings.HasPrefix(sections[0], "Comment\n") || !strings.Contains(sections[0], "┃") || strings.Contains(sections[1], "┃") || strings.Contains(fields, "│") || strings.Contains(fields, ">") {
+		t.Fatalf("proposal edit did not show comment first with only its focused border: %q", fields)
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if !m.comment.editRationale {
+		t.Fatal("Tab did not focus the rationale")
+	}
+	fields = ansi.Strip(m.proposalEditFieldsView())
+	sections = strings.SplitN(fields, "\nRationale\n", 2)
+	if len(sections) != 2 || strings.Contains(sections[0], "┃") || !strings.Contains(sections[1], "┃") || strings.Contains(fields, "│") {
+		t.Fatal("proposal edit did not move the left border to the focused rationale")
+	}
+	next, editorCmd := m.handleCommentKey(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	m = next.(model)
+	if editorCmd == nil || !m.comment.busy {
+		t.Fatal("Ctrl-E did not open the focused rationale in $EDITOR")
+	}
+	m = baselineSend(m, commentEditorMsg{root: root, repo: m.repo, key: Key{Kind: "pr", Number: 3}, field: "rationale", body: "Edited rationale"})
+	if m.comment.rationale.Value() != "Edited rationale" || m.comment.text.Value() != old.Comment || !m.comment.previewing {
+		t.Fatal("external editor changed the wrong proposal field")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m.comment.text.SetValue("Edited exact comment")
+	if err := os.WriteFile(filepath.Join(root, "edit-fail"), []byte("yes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	next, saveCmd := m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = baselineSend(next.(model), saveCmd().(proposalEditDoneMsg))
+	if !m.comment.open || m.comment.text.Value() != "Edited exact comment" || m.comment.rationale.Value() != "Edited rationale" || m.notifications.review == nil {
+		t.Fatal("failed proposal edit discarded its draft or old review")
+	}
+	if err := os.Remove(filepath.Join(root, "edit-fail")); err != nil {
+		t.Fatal(err)
+	}
+
+	next, saveCmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	saved := saveCmd().(proposalEditDoneMsg)
+	late := saved
+	late.generation++
+	ignored, _ := m.finishProposalEdit(late)
+	if !ignored.(model).comment.busy {
+		t.Fatal("stale proposal edit reply changed the active composer")
+	}
+	next, reloadCmd := m.finishProposalEdit(saved)
+	m = next.(model)
+	if reloadCmd == nil || m.comment.open || m.notifications.review != nil || len(m.notifications.ticked) != 0 || m.notifications.openProposalAfter != (Key{Kind: "pr", Number: 3}) {
+		t.Fatal("saved proposal edit kept an old review or selected-set plan")
+	}
+	fresh := old
+	fresh.Checkpoint, fresh.Comment, fresh.Rationale = strings.Repeat("b", 64), "Edited exact comment", "Edited rationale"
+	loaded := notificationsMsg{root: root, repo: m.repo, generation: m.notificationsGeneration, proposals: autoCloseList{Rows: []autoCloseRow{fresh}}, tracked: trackedPage{}, attention: attentionPage{}, closures: actionHistoryPage{}}
+	next, contextCmd := m.finishNotifications(loaded)
+	m = next.(model)
+	if contextCmd == nil || m.notifications.review == nil || m.notifications.review.Plan.Proposals[0].Checkpoint != fresh.Checkpoint {
+		t.Fatal("edited proposal did not return to its new review")
+	}
+}
+
 func TestCompletedClosureLeavesNotificationsWithoutTracking(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
 	rejected := autoCloseRow{Number: 5, Title: "Keep this PR", Status: "rejected", Rejection: &autoCloseRejection{By: "maintainer", At: "2026-09-29T00:00:00Z", Reason: "Compatibility work remains useful"}}

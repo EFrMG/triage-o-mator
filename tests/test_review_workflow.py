@@ -158,6 +158,14 @@ class ProposalFeedbackTests(Workspace):
         self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["inputs"], inputs)
         self.assertEqual(len(self.calls()), before)
 
+        edited_comment = self.root / "edited-comment.md"
+        edited_comment.write_text("The maintainer refined this closure comment.\n")
+        edited = self.auto_close("edit", "--number", "1", "--checkpoint", selected["checkpoint"],
+                                 "--rationale", "Maintainer refined the explanation", "--comment-file", str(edited_comment), "--by", "maintainer")
+        self.assertEqual(edited["inputs"], inputs)
+        self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["checkpoint"], edited["checkpoint"])
+        self.assertEqual(len(self.calls()), before)
+
         path = self.root / "data/owner/repo/auto-close/pr-1.json"
         legacy = json.loads(path.read_text())
         legacy.pop("checksum")

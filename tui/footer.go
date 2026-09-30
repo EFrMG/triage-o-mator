@@ -66,6 +66,12 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.comment.busy {
 			return []footerGroup{group("Comment", hint{"", "working…"})}
 		}
+		if m.comment.proposalEditCheckpoint != "" {
+			if m.comment.previewing {
+				return []footerGroup{group("Proposal edit", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save edit"}, hint{"Esc", "discard"})}
+			}
+			return []footerGroup{group("Proposal edit", hint{"Tab/Shift-Tab", "fields"}, hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save edit"}, hint{"Esc", "discard"})}
+		}
 		if m.comment.rejectionCheckpoint != "" {
 			if m.comment.previewing {
 				return []footerGroup{group("Rejection", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("$EDITOR reason", keys.ComposerEditor, keys.RejectEditor), hint{"Ctrl-S", "reject & dismiss"}, hint{"Esc", "cancel"})}
@@ -133,6 +139,9 @@ func (m model) contextFooterGroups() []footerGroup {
 			proposal := group("Proposal", hint{"j/k Ctrl-D/U", "scroll"})
 			if len(m.notifications.review.Plan.Proposals) == 1 {
 				proposal.hints = append(proposal.hints, hint{"Enter/l", "View item"}, hint{"m", "local notes"})
+				if m.notifications.review.Plan.Proposals[0].Status == "pending" && m.notifications.review.Plan.Proposals[0].Inputs != nil {
+					proposal.hints = append(proposal.hints, hint{"e", "edit proposal"})
+				}
 				if choice, ok := m.notifications.proposalChoice(m.notifications.review.Plan.Proposals[0].Number); ok && m.notifications.reviewKey == "" {
 					if choice.attention >= 0 {
 						proposal.hints = append(proposal.hints, hint{"t", "saved discussion"})
@@ -173,6 +182,12 @@ func (m model) contextFooterGroups() []footerGroup {
 		if len(choices) > 0 && m.notifications.selected < len(choices) {
 			choice := choices[m.notifications.selected]
 			if choice.kind == "item" {
+				if choice.proposal >= 0 {
+					row := m.notifications.proposals.Rows[choice.proposal]
+					if row.Status == "pending" && row.Inputs != nil {
+						notifications.hints = append(notifications.hints, hint{"e", "edit proposal"})
+					}
+				}
 				if choice.attention >= 0 {
 					notifications.hints = append(notifications.hints, hint{"t", "saved discussion"})
 				}

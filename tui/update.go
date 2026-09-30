@@ -36,6 +36,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishNotificationItem(msg)
 	case notificationRejectionDoneMsg:
 		return m.finishNotificationRejection(msg)
+	case proposalEditDoneMsg:
+		return m.finishProposalEdit(msg)
 	case actionHistoryMsg:
 		return m.finishActionHistory(msg)
 	case attentionMsg:
@@ -302,8 +304,12 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		var cmd tea.Cmd
-		m.comment.text, cmd = m.comment.text.Update(msg)
-		m.updateCommentReferences()
+		if m.comment.proposalEditCheckpoint != "" && m.comment.editRationale {
+			m.comment.rationale, cmd = m.comment.rationale.Update(msg)
+		} else {
+			m.comment.text, cmd = m.comment.text.Update(msg)
+			m.updateCommentReferences()
+		}
 		return m, cmd
 	case m.confirmQuit || m.lastError.open || m.notificationPR.open || m.attention.open || m.actionHistory.open || m.notifications.open || m.corpus.open:
 		return m, nil

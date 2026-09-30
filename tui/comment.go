@@ -18,21 +18,25 @@ import (
 )
 
 type commentComposer struct {
-	previewText                           string
-	open, busy, previewing, close, reopen bool
-	rejectionCheckpoint                   string
-	rejectionChoice                       notificationChoice
-	key                                   Key
-	host, target, requestID, approval     string
-	targets                               []commentTarget
-	index                                 int
-	completed                             []Key
-	text                                  textarea.Model
-	preview                               viewport.Model
-	referenceQuery                        string
-	referenceActive                       bool
-	referenceMatches                      []Item
-	referenceSelected, referenceOffset    int
+	previewText                                string
+	open, busy, previewing, close, reopen      bool
+	rejectionCheckpoint                        string
+	rejectionChoice                            notificationChoice
+	proposalEditCheckpoint                     string
+	editOriginalComment, editOriginalRationale string
+	editRationale                              bool
+	key                                        Key
+	host, target, requestID, approval          string
+	targets                                    []commentTarget
+	index                                      int
+	completed                                  []Key
+	text                                       textarea.Model
+	rationale                                  textarea.Model
+	preview                                    viewport.Model
+	referenceQuery                             string
+	referenceActive                            bool
+	referenceMatches                           []Item
+	referenceSelected, referenceOffset         int
 }
 
 type commentTarget struct {
@@ -177,6 +181,53 @@ func (m model) openExternalRejectionComposer(choice notificationChoice) (tea.Mod
 	return m.startCommentEditor()
 }
 
+func (m model) openProposalEdit(choice notificationChoice) (tea.Model, tea.Cmd) {
+	if choice.kind != "item" || choice.proposal < 0 || strings.TrimSpace(m.reviewer) == "" {
+		m.warn("Select one pending proposal and set a reviewer name before editing.")
+		return m, nil
+	}
+
+	row := m.notifications.proposals.Rows[choice.proposal]
+	if row.Status != "pending" || row.Checkpoint == "" || row.Inputs == nil {
+		m.warn("This proposal cannot be edited; inspect its current context first.")
+		return m, nil
+	}
+
+	target := commentTarget{key: choice.key, url: row.Target}
+	next, cmd := m.openCommentComposer(target, false, false, nil)
+	m = next.(model)
+	m.comment.proposalEditCheckpoint = row.Checkpoint
+	m.comment.editOriginalComment, m.comment.editOriginalRationale = row.Comment, row.Rationale
+	m.comment.text.Placeholder = "Comment to publish"
+	m.comment.text.SetValue(row.Comment)
+	m.comment.rationale = textarea.New()
+	m.comment.rationale.Placeholder = "Why this action is justified"
+	m.comment.rationale.CharLimit = 10000
+	m.comment.rationale.ShowLineNumbers = false
+	themeTextarea(&m.comment.rationale)
+	m.comment.rationale.SetValue(row.Rationale)
+	m.comment.setProposalEditFocus(false)
+	m.layoutComment()
+	return m, cmd
+}
+
+func (c *commentComposer) setProposalEditFocus(rationale bool) {
+	c.editRationale = rationale
+	c.text.Prompt, c.rationale.Prompt = "  ", "  "
+	if rationale {
+		c.rationale.Prompt = textarea.New().Prompt
+	} else {
+		c.text.Prompt = textarea.New().Prompt
+	}
+}
+
+func (c commentComposer) draftPreview() string {
+	if c.proposalEditCheckpoint != "" {
+		return "Comment:\n\n" + c.text.Value() + "\n\nRationale:\n\n" + c.rationale.Value()
+	}
+	return c.text.Value()
+}
+
 func (m model) commentCmd(publish bool) tea.Cmd {
 	root, repo, c := m.installRoot, m.repo, m.comment
 
@@ -219,6 +270,17 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, keys.ComposerEditor) {
 		return m.startCommentEditor()
 	}
+	if c.proposalEditCheckpoint != "" && !c.previewing && (msg.String() == "tab" || msg.String() == "shift+tab") {
+		c.setProposalEditFocus(!c.editRationale)
+		c.referenceActive = false
+		m.layoutComment()
+		if c.editRationale {
+			c.text.Blur()
+			return m, c.rationale.Focus()
+		}
+		c.rationale.Blur()
+		return m, c.text.Focus()
+	}
 	if c.referenceActive && !c.previewing {
 		switch msg.String() {
 		case "down", "ctrl+j", "ctrl+n":
@@ -254,17 +316,39 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+p":
 		c.previewing = !c.previewing
 		if !c.previewing {
+			if c.proposalEditCheckpoint != "" && c.editRationale {
+				return m, c.rationale.Focus()
+			}
 			cmd := c.text.Focus()
 
 			return m, cmd
 		}
 
 		c.text.Blur()
-		c.setPreview(c.text.Value())
+		if c.proposalEditCheckpoint != "" {
+			c.rationale.Blur()
+		}
+		c.referenceActive = false
+		m.layoutComment()
+		c.setPreview(c.draftPreview())
 		c.preview.GotoTop()
 		return m, nil
 
 	case "ctrl+s":
+		if c.proposalEditCheckpoint != "" {
+			if c.text.Value() == c.editOriginalComment && c.rationale.Value() == c.editOriginalRationale {
+				c.open = false
+				m.status = "Proposal text is unchanged."
+				return m, nil
+			}
+			if strings.TrimSpace(c.text.Value()) == "" || strings.TrimSpace(c.rationale.Value()) == "" {
+				m.warn("Both the exact comment and rationale are required.")
+				return m, nil
+			}
+			c.busy = true
+			m.status = "Saving edited proposal…"
+			return m, m.editProposalCmd()
+		}
 		if c.rejectionCheckpoint != "" {
 			c.busy = true
 			m.status = "Rejecting proposal and dismissing notification…"
@@ -299,6 +383,8 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	if c.previewing {
 		c.preview, cmd = c.preview.Update(msg)
+	} else if c.proposalEditCheckpoint != "" && c.editRationale {
+		c.rationale, cmd = c.rationale.Update(msg)
 	} else {
 		c.text, cmd = c.text.Update(msg)
 		m.updateCommentReferences()
@@ -535,6 +621,9 @@ func (m model) stopReopening(target commentTarget, err error, uncertain bool) (t
 
 func (m model) commentHeader(width int) string {
 	heading, color := "Compose comment", currentTheme.Info
+	if m.comment.proposalEditCheckpoint != "" {
+		heading = "Edit closure proposal"
+	}
 	if m.comment.rejectionCheckpoint != "" {
 		heading = "Reject closure proposal"
 	}
@@ -546,6 +635,9 @@ func (m model) commentHeader(width int) string {
 	}
 	if m.comment.previewing {
 		heading, color = "Preview Markdown", currentTheme.Success
+		if m.comment.proposalEditCheckpoint != "" {
+			heading = "Review proposal edit"
+		}
 		if m.comment.rejectionCheckpoint != "" {
 			heading = "Preview rejection reason"
 		}
@@ -571,6 +663,8 @@ func (m model) commentView() string {
 	content := m.comment.text.View()
 	if m.comment.previewing {
 		content = m.comment.preview.View()
+	} else if m.comment.proposalEditCheckpoint != "" {
+		content = m.proposalEditFieldsView()
 	}
 
 	if m.comment.referenceActive && !m.comment.previewing {
@@ -594,6 +688,11 @@ func (m model) commentView() string {
 	}
 
 	return panelStyle(true).BorderBackground(lipgloss.Color(currentTheme.Background)).Width(m.commentWidth()).Height(m.commentHeight()).Padding(0, 1).Render(m.commentHeader(m.commentWidth()-4) + "\n\n" + content)
+}
+
+func (m model) proposalEditFieldsView() string {
+	heading := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true)
+	return heading.Render("Comment") + "\n" + m.comment.text.View() + "\n" + heading.Render("Rationale") + "\n" + m.comment.rationale.View()
 }
 
 func (m model) commentWidth() int {
@@ -656,7 +755,15 @@ func (m *model) layoutComment() {
 		height = maxInt(height-6, 3)
 	}
 	c.text.SetWidth(width)
-	c.text.SetHeight(height)
+	if c.proposalEditCheckpoint != "" {
+		available := maxInt(height-3, 6)
+		commentHeight := maxInt(available*2/3, 3)
+		c.text.SetHeight(commentHeight)
+		c.rationale.SetWidth(width)
+		c.rationale.SetHeight(maxInt(available-commentHeight, 3))
+	} else {
+		c.text.SetHeight(height)
+	}
 	resized := c.preview.Width() != width
 	c.preview.SetWidth(width)
 	c.preview.SetHeight(height)

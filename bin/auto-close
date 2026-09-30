@@ -285,6 +285,33 @@ def propose(args, repo):
     return row(value, local_state(repo))
 
 
+def edit(args, repo):
+    previous = load(proposal_path(args.number), repo)
+    if previous["checksum"] != args.checkpoint or previous["status"] != "pending" or "inputs" not in previous:
+        raise ValueError("proposal changed or has no editable pending context; reopen Notifications")
+    if (DATA_DIR / "writes" / (previous["request_id"] + ".json")).exists():
+        raise ValueError("proposal has a write attempt; reconcile it before editing")
+
+    comment = args.comment_file.read_text(encoding="utf-8")
+    if comment == previous["comment"] and args.rationale == previous["rationale"]:
+        raise ValueError("proposal text is unchanged")
+
+    inputs = previous["inputs"]
+    handoff = inputs["group"]
+    reference = previous["reference"] or {}
+    replacement = argparse.Namespace(number=args.number, title=previous["title"], host=previous["host"],
+                                     head_sha=previous["head_sha"], updated_at=previous["updated_at"],
+                                     rationale=args.rationale, comment_file=args.comment_file, by=args.by,
+                                     reference_kind=reference.get("kind"), reference_number=reference.get("number"),
+                                     context_checkpoint=inputs["context_checkpoint"],
+                                     group_id=handoff["id"] if handoff else None,
+                                     member_context=[f"{member['kind']}:{member['number']}:{member['checkpoint']}" for member in handoff["members"]] if handoff else [],
+                                     evidence=[f"{item['kind']}:{item['number']}:{item['snapshot_id']}" for item in inputs["evidence"]],
+                                     evidence_gap=inputs["evidence_gaps"], replace_checkpoint=args.checkpoint,
+                                     reconsideration_reason=None)
+    return propose(replacement, repo)
+
+
 def inspect(repo, host, number):
     if number < 1 or not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)*", host):
         raise ValueError("invalid PR number or host")
@@ -421,6 +448,12 @@ def main():
     add.add_argument("--evidence-gap", action="append", default=[], help="explicitly missing evidence or a reason no snapshot was selected")
     add.add_argument("--replace-checkpoint", help="replace this exact pending or rejected revision after inspecting it; retains prior versions")
     add.add_argument("--reconsideration-reason", help="explain changed guidance or human resolution when replacing a rejected revision")
+    change_text = commands.add_parser("edit", help="replace one pending proposal's rationale and exact comment from its current checkpoint")
+    change_text.add_argument("--number", type=int, required=True)
+    change_text.add_argument("--checkpoint", required=True)
+    change_text.add_argument("--rationale", required=True)
+    change_text.add_argument("--comment-file", type=Path, required=True)
+    change_text.add_argument("--by", required=True)
     local_context = commands.add_parser("context", help="read bounded local guidance and check one saved proposal without GitHub")
     local_context.add_argument("--number", type=int, required=True)
     local_context.add_argument("--checkpoint", required=True)
@@ -453,6 +486,8 @@ def main():
         raise ValueError("configured repository changed; reopen the proposals")
     if args.command == "propose":
         result = propose(args, repo)
+    elif args.command == "edit":
+        result = edit(args, repo)
     elif args.command == "inspect":
         result = inspect(repo, args.host, args.number)
     elif args.command == "list":

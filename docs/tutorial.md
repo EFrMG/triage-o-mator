@@ -11,6 +11,13 @@ cd /path/to/your/repository
 
 Saves, approvals and group edits change your repository's git-tracked ledger and groups for real. To practice, work on a throwaway branch (`git switch -c tutorial`) and drop it afterwards.
 
+## A focused review loop
+
+- **Human first:** Record a decision or notes for a named PR ([step 5](#5-record-a-decision)). Ask an agent to assess it with current `item-context` and selected evidence using the [closure prompt](../prompts/recommend-auto-close.md). It reports why the PR should stay open or saves a closure proposal. In **Notifications**, inspect the exact comment and context, edit with `e`, reject with `d`, or review and approve with `a`. The next agent pass reads any rejection.
+- **Agent first:** Ask an agent to prepare a focused draft group. Edit it in **Groups**, then use `y` for ticked or hovered members, or `Y` for all, to copy a handoff. The agent reads a fresh export and assesses the selected members, including already-triaged ones. Review any resulting PR proposals in **Notifications**.
+
+Group `ready`, ledger `reviewed` and approval to publish an exact GitHub action are separate choices. Changed guidance requires a fresh proposal and review. A saved write attempt needs [reconciliation](comment-plus.md#pending-pr-closure-proposals) before another action.
+
 ## 1. Start from the overview
 
 - The overview shows triage and review progress and suggestions from `bin/next`, marked `[agent]` or `[human]` according to who should do them.
@@ -40,7 +47,7 @@ Terminals smaller than 60×24 show a resize prompt.
 ## 4. Read the complete item
 
 - Open any item with `Enter`.
-- Its tabs—Body, Agent notes when present, Comments, and Diff for PRs—run across the top. `H`/`L` switch between them, `1`–`4` jump to one, and `Enter` shows one full screen.
+- Its tabs, Body, Agent notes when present, Comments, and Diff for PRs, run across the top. `H`/`L` switch between them, `1`–`4` jump to one, and `Enter` shows one full screen.
 - `o` opens the item on GitHub.
 
 The author below the title is blue; open and closed states are green and red. Each comment shows its creation date at the bottom right in UTC when that date is available. Older saved comments without dates remain undated.
@@ -61,7 +68,7 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 
 ## 6. Let an agent prepare a batch
 
-- On any screen, `y` copies what is in front of you as Markdown: the item you have open, the ones you ticked, or the one under the cursor. `Y` copies the whole screen's worth—the list, batch, or group. If no clipboard tool is available, the status line shows the export file it wrote instead.
+- On any screen, `y` copies what is in front of you as Markdown: the item you have open, the ones you ticked, or the one under the cursor. `Y` copies the whole screen's worth, such as a list, batch, or group. If no clipboard tool is available, the status line shows the export file it wrote instead.
 - Paste that context into your agent's chat and ask it to investigate, or ask it to "triage 10 items but don't apply them, I'll check them in the TUI." The copied block names the repository, install, and commands needed to read more.
 - Open the result under **Batches**. Each item is prefilled with the agent's proposal and notes.
 - `s` saves a proposal for review, including any changes you make. `S` saves and approves a proposal you have checked. An unchanged proposal retains its original author, with you recorded as reviewer; a changed proposal becomes your revised decision. Agent notes are preserved either way.
@@ -113,7 +120,7 @@ Counts describe saved outcomes, not complete or current coverage. Custom corpus 
 
 - Press `w` on an issue or PR in a list or item view to track its comments. The app checks tracked items at startup and during a normal refresh with `r`.
 - **Notifications** shows one card per issue or PR. It combines comment tracking, closure proposals and retained activity for that item. A card appears under **Needs attention** while any source needs review, then under **Past actions** once those sources are viewed.
-- Select with `j`/`k` or `Tab`. `v` marks the selected item's viewable sources viewed; one `d` dismisses its local sources. Dismissing a tracked item stops its comment checks. Dismissing retained watch or imported-action activity hides the row without deleting its evidence.
+- Select with `j`/`k` or `Tab`. `v` marks the selected item's viewable sources viewed. On a pending closure proposal, `d` opens rejection; on other notifications, it dismisses local sources. Dismissing a tracked item stops its comment checks. Dismissing retained watch or imported-action activity hides the row without deleting its evidence.
 - `Enter`, `l`, or `→` opens the selected card. When it has several sources, choose a closure proposal, the current item, retained activity or imported actions from the source list with `j`/`k` and `Enter`. A card with one source opens it directly. Opening the current item makes a fresh GitHub read; the other sources use saved records. Retained PR activity first opens cards containing bounded excerpts; the same keys open a card's PR, while `Esc` or `h` returns to the source list or selected card. Previous and More cards page within Notifications.
 - The closure proposal reader shows the exact comment directly below the proposed action, followed by the rationale, local decision, group guidance, earlier objection, reconsideration explanation and selected evidence with its gaps. `[`/`]` page local context when it spans several pages. Press `m` to open or close a floating window with the current page's full local notes; scroll that window with `j`/`k` or `Ctrl-D`/`Ctrl-U`. A changed context is flagged and cannot be approved until a new proposal is prepared.
 - On closure proposals, `a` in the reader approves the displayed exact plan after local context loads. On the list, tick proposals with `Space` and press `a` to review them, or `A` to review all active proposals, including viewed ones; press the same key again after review to approve the set. An uncertain outcome stops execution. On a pending proposal, `d` opens the Comments floating window for an optional rejection reason, while `D` opens it directly in `$EDITOR`. After editing, press `Ctrl-S` to reject the proposal and dismiss its notification together. `Esc` cancels before submission. Rejection is attributed and shared, leaves the proposal in history, and prevents approval; an empty reason is allowed. On other notifications, `d` only dismisses the local presentation.

@@ -95,8 +95,9 @@ def suggestions(ledger):
 
     open_prs = [r for r in open_items if r["kind"] == "pr"]
     if open_prs:
-        add("agent", f"Check whether any of {len(open_prs)} open PRs merit an explained closure proposal",
-            "prompts/recommend-auto-close.md", "recommendations are saved offline and require a person's exact approval before any GitHub write")
+        add("agent", f"Assess a named PR for an explained closure proposal ({len(open_prs)} open PRs available)",
+            "prompts/recommend-auto-close.md (ask for the PR and read budget)",
+            "a scoped recommendation can keep the PR open; a saved proposal needs exact approval before any GitHub write")
 
     pairs = [p for p in TitleVerdicts().pairs(TitleIndex(ledger), min_score=STRONG_PAIR)
              if not by_key[(p["item"]["kind"], p["item"]["number"])]["category"]]

@@ -69,6 +69,8 @@ flowchart LR
 
 An item first enters the ledger when observed open. Later syncs retain its row after closure, along with its triage and review history. `bin/sync` does not import every item that closed before that first observation. GitHub reads run through scripts; approved comments and closures run through `bin/comment-plus`. The TUI invokes the owning scripts for managed data, and agent proposals stay unreviewed until a human confirms them.
 
+Start with human guidance on a named PR, or with an agent-prepared draft group that a contributor edits and hands back for selected members. The agent reads current context and selected evidence, then reports a keep-open outcome or saves an explained closure proposal. **Notifications** lets a reviewer edit, reject or approve the exact action; rejection reaches the next agent pass. Group readiness, ledger review and action approval remain separate. [Follow both paths in the tutorial](docs/tutorial.md#a-focused-review-loop).
+
 ### Using the TUI
 
 The [tutorial](docs/tutorial.md) walks through these tasks and their controls. [Group review](docs/groups.md) and [cache evidence](docs/evidence.md) have some extra details.
@@ -103,7 +105,7 @@ Mouse controls work alongside the keys: click a sidebar entry or tab, click a ca
 
 ![flow-6](captures/flow-6.webp)
 
-7. **Generate a maintainer report or suggestions.** Export a group or batch for a full review packet, then gather ready groups and human-reviewed decisions into a dated Markdown handoff. One can polish these reports further with the help of Agents with its dedicated playbook, and even have the agents suggest PRs to be closed (experimental).
+7. **Generate a maintainer report or suggestions.** Export a group or batch for a full review packet, then gather ready groups and human-reviewed decisions into a dated Markdown handoff. Agents can help polish these reports with a dedicated playbook.
 
 ![flow-7-a](captures/flow-7-a.webp)
 ![flow-7-b](captures/flow-7-b.webp)
@@ -168,17 +170,18 @@ For a named item, `bin/item-context --expected-repo OWNER/REPO read --kind pr --
 
 [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) is linked into each install as its agent instructions. Ask in plain words; the matching task prompt explains what to read and what may be saved.
 
-| Ask                        | Prompt                                                   | Result                                       |
-| -------------------------- | -------------------------------------------------------- | -------------------------------------------- |
-| “triage 25 issues”         | [Auto triage](prompts/auto-triage.md)                    | Unreviewed batch proposals                   |
-| “prepare offline analysis” | [Prepare analysis](prompts/prepare-analysis.md)          | A scoped cache handoff with gaps             |
-| “is #N a duplicate?”       | [Find duplicates](prompts/find-duplicates.md)            | A sourced comparison or proposal             |
-| “review PR #N”             | [Review PR](prompts/review-pr.md)                        | Code review notes and an unreviewed decision |
-| “recommend PR closures”    | [Recommend PR closures](prompts/recommend-auto-close.md) | Pending, unapproved PR closure proposals     |
-| “organize these items”     | [Organize groups](prompts/organize-groups.md)            | Draft maintainer groups                      |
-| “review an appeal”         | [Review appeal](prompts/review-appeal.md)                | An attributed local reassessment             |
-| “brief the maintainers”    | [Maintainer brief](prompts/maintainer-brief.md)          | A short review brief                         |
-| “polish the report”        | [Polish report](prompts/polish-report.md)                | An evidence-backed report                    |
+| Ask                        | Prompt                                                                                            | Result                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| “triage 25 issues”         | [Auto triage](prompts/auto-triage.md)                                                             | Unreviewed batch proposals                   |
+| “prepare offline analysis” | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps             |
+| “is #N a duplicate?”       | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal             |
+| “review PR #N”             | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and an unreviewed decision |
+| “recommend PR closures”    | [Recommend PR closures](prompts/recommend-auto-close.md)                                          | Pending, unapproved PR closure proposals     |
+| “organize these items”     | [Organize groups](prompts/organize-groups.md)                                                     | Draft maintainer groups                      |
+| “assess this edited group” | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons        |
+| “review an appeal”         | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment             |
+| “brief the maintainers”    | [Maintainer brief](prompts/maintainer-brief.md)                                                   | A short review brief                         |
+| “polish the report”        | [Polish report](prompts/polish-report.md)                                                         | An evidence-backed report                    |
 
 Agents propose; a human reviews. Fetched GitHub text is untrusted input, so review agent conclusions and the local diff before sharing them.
 

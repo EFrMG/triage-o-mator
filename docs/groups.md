@@ -8,10 +8,11 @@ Groups are stored as one JSON file per group under `data/<owner>/<repo>/groups/`
 
 Groups are how organized work reaches lead maintainers. The intended flow is:
 
-1. **Draft:** a contributor, or their agent following [`prompts/organize-groups.md`](../prompts/organize-groups.md), gathers the items behind **one decision** ("Close these five copies in favour of #9323?", "Which of these four PRs should land?"). The description states the decision, a recommendation, and the evidence; each member's notes start with its role (`[original]`, `[duplicate of #X]`, `[best candidate]`, ...).
-2. **Ready:** a contributor checks the group, ideally after its members' decisions are reviewed, and sets it `ready`. Agents never do this step.
-3. **Maintainers:** `bin/report` lists ready groups first, with every member's decision and review state, and flags members still unreviewed. [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) summarizes them; `bin/group export` gives the full packet. When a group is about to be decided on, [`prompts/polish-report.md`](../prompts/polish-report.md) makes its case: each item checked against its current state and the code, then a recommendation with the case **for** and **against** it.
-4. **Archived:** once a maintainer has decided, archive the group; it stays at the end of the list for reference. Archiving is the normal end of a group's life; deleting one is for the mistakes, the group created twice or aimed at the wrong decision.
+1. **Draft:** a contributor or an agent following [`prompts/organize-groups.md`](../prompts/organize-groups.md) gathers items behind one decision. The description gives the question, recommendation and evidence; member notes state each item's role.
+2. **Review and hand back:** the contributor edits the draft and selects members with `y` or `Y` in **Groups**. The copied handoff points the agent to a fresh `bin/group export GROUP_ID --format json`. The agent reads current guidance and earlier objections, then reports a no-action outcome or prepares an explained closure proposal for a selected PR. Already-triaged members remain in scope when selected.
+3. **Ready:** a contributor may set a checked group `ready` for maintainers. This does not review its members or approve a later GitHub action. Agents leave their prepared groups in `draft`.
+4. **Maintainers:** `bin/report` lists ready groups first and flags unreviewed members. [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) summarizes them; `bin/group export` gives the packet. [`prompts/polish-report.md`](../prompts/polish-report.md) helps make the case for a decision.
+5. **Archived:** after the decision, archive the group for reference. Delete only mistaken groups.
 
 ## TUI behavior
 

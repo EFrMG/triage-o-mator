@@ -39,6 +39,12 @@ The implementation uses GitHub's [conversation comment endpoint](https://docs.gi
 
 The [PR closure playbook](../prompts/recommend-auto-close.md) saves a proposed rationale and exact comment through `bin/auto-close propose`. Proposal records in `data/<owner>/<repo>/auto-close/` are Git-tracked; local viewed and dismissed flags are ignored. Saving or viewing a proposal never writes to GitHub or marks a ledger decision reviewed.
 
+For a named PR or [selected group members](groups.md#from-draft-to-maintainers), the review loop is:
+
+1. The agent reads current local guidance, earlier objections and selected evidence. It reports a justified keep-open outcome or saves an explained closure proposal.
+2. In **Notifications**, the reviewer checks the target, exact comment, rationale, human guidance and gaps. `e` edits a pending proposal; `d` rejects it with an optional reason and dismisses its notification. On other notifications, `d` only dismisses local presentation. Canceling a rejection records neither action.
+3. If guidance changed, prepare a replacement from current context and review it again. If a GitHub write was attempted, inspect its saved outcome before another action. Only the reviewer approves the exact final comment and close action with `a`; neither group readiness nor ledger review supplies that approval.
+
 `bin/auto-close --expected-repo OWNER/REPO inspect --host HOSTNAME --number N` performs two read-only REST GETs. It returns the PR head SHA and the issue endpoint's `updated_at`, which `bin/comment-plus` checks again before publishing a proposed closure. The read does not create a proposal or grant approval.
 
 An exact `--replace-checkpoint` can update a pending proposal before any write attempt. The previous version remains in the tracked record and the updated proposal appears as new attention, even if the old version was dismissed. A rejected proposal can be reconsidered through the same option with an attributed explanation, as described below. Proposals with an uncertain or completed write must be reconciled, not replaced.

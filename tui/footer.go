@@ -146,7 +146,7 @@ func (m model) contextFooterGroups() []footerGroup {
 			}
 			proposal := group("Proposal", hint{"j/k Ctrl-D/U", "scroll"})
 			if len(m.notifications.review.Plan.Proposals) == 1 {
-				proposal.hints = append(proposal.hints, hint{"Enter/l", "View item"})
+				proposal.hints = append(proposal.hints, hint{"Enter/l", "View item"}, hint{"y", "copy for agent"})
 				if row := m.notifications.review.Plan.Proposals[0]; !m.notifications.contextBusy && hasExpandableProposalNotes(m.notifications.proposalContext(row)) {
 					proposal.hints = append(proposal.hints, hint{"m", "full notes"})
 				}
@@ -194,6 +194,7 @@ func (m model) contextFooterGroups() []footerGroup {
 			choice := choices[m.notifications.selected]
 			if choice.kind == "item" {
 				if choice.proposal >= 0 {
+					notifications.hints = append(notifications.hints, hint{"y", "copy for agent"})
 					row := m.notifications.proposals.Rows[choice.proposal]
 					if row.Status == "pending" && row.Inputs != nil {
 						notifications.hints = append(notifications.hints, hint{"e", "edit proposal"})

@@ -160,24 +160,25 @@ func (c autoCloseContext) guidanceBlocks() []guidanceBlock {
 		case "ledger":
 			block := guidanceBlock{title: "Local decision"}
 			if len(row.Fields) == 0 {
-				block.lines = append(block.lines, "No ledger decision recorded")
+				block.lines = append(block.lines, "No local ledger row for this PR")
 			} else {
 				call := strings.Trim(strings.Join([]string{contextField(row.Fields, "category"), contextField(row.Fields, "action"), contextField(row.Fields, "confidence")}, " · "), " ·")
 				if call == "" {
-					call = "No decision recorded"
-				}
-				block.lines = append(block.lines, "Call: "+call)
-				review := "Unreviewed"
-				if contextField(row.Fields, "reviewed") == "true" {
-					review = "Reviewed"
-					if by := contextField(row.Fields, "reviewed_by"); by != "" {
-						review += " by " + by
+					block.lines = append(block.lines, "No local triage decision yet")
+				} else {
+					block.lines = append(block.lines, "Call: "+call)
+					review := "Unreviewed"
+					if contextField(row.Fields, "reviewed") == "true" {
+						review = "Reviewed"
+						if by := contextField(row.Fields, "reviewed_by"); by != "" {
+							review += " by " + by
+						}
 					}
+					if by := contextField(row.Fields, "triaged_by"); by != "" {
+						review += " · proposed by " + by
+					}
+					block.lines = append(block.lines, review)
 				}
-				if by := contextField(row.Fields, "triaged_by"); by != "" {
-					review += " · proposed by " + by
-				}
-				block.lines = append(block.lines, review)
 				for _, field := range []struct{ key, label string }{{"reason", "Reason"}, {"reviewer_notes", "Reviewer note"}, {"agent_notes", "Agent note"}} {
 					if value := contextField(row.Fields, field.key); value != "" {
 						block.lines = append(block.lines, field.label+": "+contextExcerpt(value))
@@ -233,24 +234,43 @@ func (n notificationsUI) proposalContext(row autoCloseRow) *autoCloseContext {
 	return nil
 }
 
-func proposalEvidenceLines(row autoCloseRow) []string {
+type proposalEvidenceLine struct {
+	item, missing string
+	complete      bool
+}
+
+func proposalEvidenceLines(row autoCloseRow) []proposalEvidenceLine {
 	if row.Inputs == nil {
-		return []string{"This older proposal has no declared evidence or local context."}
+		return []proposalEvidenceLine{{item: "This older proposal has no declared evidence or local context."}}
 	}
-	var lines []string
+	var lines []proposalEvidenceLine
 	for _, evidence := range row.Inputs.Evidence {
-		components := make([]string, 0, len(evidence.Components))
+		missing := make([]string, 0, len(evidence.Components))
 		for name, component := range evidence.Components {
-			components = append(components, name+": "+component.Status)
+			if component.Status != "complete" && component.Status != "not_applicable" {
+				missing = append(missing, strings.ReplaceAll(name, "_", " "))
+			}
 		}
-		sort.Strings(components)
-		lines = append(lines, fmt.Sprintf("%s #%d · snapshot %s · %s", evidence.Kind, evidence.Number, evidence.SnapshotID, strings.Join(components, ", ")))
+		sort.Strings(missing)
+		kind := "Issue"
+		if evidence.Kind == "pr" {
+			kind = "PR"
+		}
+		line := proposalEvidenceLine{item: fmt.Sprintf("%s #%d", kind, evidence.Number)}
+		if len(evidence.Components) == 0 {
+			line.missing = "component details"
+		} else if len(missing) > 0 {
+			line.missing = strings.Join(missing, ", ")
+		} else {
+			line.complete = true
+		}
+		lines = append(lines, line)
 	}
 	for _, gap := range row.Inputs.EvidenceGaps {
-		lines = append(lines, "Gap: "+gap)
+		lines = append(lines, proposalEvidenceLine{item: "Gap", missing: gap})
 	}
 	if len(lines) == 0 {
-		lines = append(lines, "No selected evidence or declared gap")
+		lines = append(lines, proposalEvidenceLine{item: "No selected evidence or declared gap"})
 	}
 	return lines
 }

@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Notifications presents tracked comments and retained PR records in two sections.
@@ -516,7 +517,7 @@ func (n notificationsUI) choices() []notificationChoice {
 		}
 	}
 	for i, row := range n.proposals.Rows {
-		if !row.Dismissed && row.Status != "executed" {
+		if !row.Dismissed && (row.Status == "pending" || row.Status == "uncertain") {
 			add(Key{Kind: "pr", Number: row.Number}, "proposal", i)
 		}
 	}
@@ -648,6 +649,12 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m, nil
 		}
 		switch msg.String() {
+		case "y":
+			if len(m.notifications.review.Plan.Proposals) == 1 {
+				text, what := m.yankNotificationProposal(m.notifications.review.Plan.Proposals[0])
+				m.status = "Taking " + what + "…"
+				return m, yankCmd(m.installRoot, m.repo, what, text)
+			}
 		case "e":
 			if len(m.notifications.review.Plan.Proposals) == 1 {
 				row := m.notifications.review.Plan.Proposals[0]
@@ -800,6 +807,13 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.notifications.selected = len(choices) - 1
 	}
 	switch msg.String() {
+	case "y":
+		if len(choices) > 0 && choices[m.notifications.selected].kind == "item" && choices[m.notifications.selected].proposal >= 0 {
+			row := m.notifications.proposals.Rows[choices[m.notifications.selected].proposal]
+			text, what := m.yankNotificationProposal(row)
+			m.status = "Taking " + what + "…"
+			return m, yankCmd(m.installRoot, m.repo, what, text)
+		}
 	case "e":
 		if len(choices) > 0 && !m.trackingBusy {
 			return m.openProposalEdit(choices[m.notifications.selected])
@@ -1021,6 +1035,7 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 	target := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(currentTheme.Info))
 	action := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
 	danger := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Error)).Bold(true)
+	success := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Success))
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
 	comment := lipgloss.NewStyle().BorderLeft(true).BorderForeground(lipgloss.Color(currentTheme.Accent)).PaddingLeft(1)
 	textWidth := maxInt(m.menuWidth()-4, 1)
@@ -1061,7 +1076,7 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		} else if context == nil {
 			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Local guidance has not been checked.")))
 		} else {
-			if !context.Current {
+			if !context.Current && row.Status == "pending" {
 				detail := strings.TrimSuffix(context.Reason, "; prepare a fresh proposal and review")
 				fmt.Fprintf(&b, "%s\n", inset(action.Render(wrapText("Why: "+sanitize(detail), textWidth))))
 			}
@@ -1071,8 +1086,8 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 					fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(line), textWidth)))
 				}
 			}
-			if context.LatestRejection != nil {
-				fmt.Fprintf(&b, "\n%s\n", inset(muted.Bold(true).Render("Earlier objection · "+sanitize(context.LatestRejection.By))))
+			if context.LatestRejection != nil && row.Status != "rejected" {
+				fmt.Fprintf(&b, "\n%s\n", inset(muted.Bold(true).Render("Earlier objection · By: "+sanitize(context.LatestRejection.By))))
 				fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(context.LatestRejection.Reason), textWidth)))
 			}
 			if context.ItemContext.Pagination.Offset > 0 || context.ItemContext.Pagination.Next != nil {
@@ -1085,7 +1100,13 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		}
 		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Selected evidence")))
 		for _, line := range proposalEvidenceLines(row) {
-			fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(line), textWidth)))
+			value := sanitize(line.item)
+			if line.complete {
+				value += " · " + success.Render("Complete")
+			} else if line.missing != "" {
+				value += " · " + danger.Render("Not found:") + " " + sanitize(line.missing)
+			}
+			fmt.Fprintf(&b, "%s\n", inset(ansi.Wrap(value, textWidth, "")))
 		}
 		if row.Rejection != nil {
 			fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Rejection")))

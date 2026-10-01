@@ -1384,22 +1384,28 @@ func TestGroupContextScrollStopsAtVisibleBoundary(t *testing.T) {
 	}
 }
 
-func TestCompletedClosureLeavesNotificationsWithoutTracking(t *testing.T) {
+func TestSettledProposalsLeaveNotificationsWithoutTracking(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
-	rejected := autoCloseRow{Number: 5, Title: "Keep this PR", Status: "rejected", Rejection: &autoCloseRejection{By: "maintainer", At: "2026-09-29T00:00:00Z", Reason: "Compatibility work remains useful"}}
+	rejected := autoCloseRow{Number: 5, Title: "Keep this PR", Status: "rejected", Checkpoint: "rejected-5", Rejection: &autoCloseRejection{By: "maintainer", At: "2026-09-29T00:00:00Z", Reason: "Compatibility work remains useful"}}
 	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Title: "Completed fixture", Status: "executed"}, {Number: 4, Title: "Needs inspection", Status: "uncertain"}, rejected}}}
 	choices := m.notifications.choices()
-	if len(choices) != 2 || choices[0].key != (Key{Kind: "pr", Number: 4}) || choices[1].key != (Key{Kind: "pr", Number: 5}) || strings.Contains(m.notificationsView(), "PR #3") {
-		t.Fatalf("completed closure remained a notification: %+v", choices)
+	if len(choices) != 1 || choices[0].key != (Key{Kind: "pr", Number: 4}) {
+		t.Fatalf("completed or rejected closure remained a notification: %+v", choices)
 	}
 	view := ansi.Strip(m.notificationsView())
-	if !strings.Contains(view, "Closure proposal rejected") || strings.Index(view, "PR #5") < strings.Index(view, "Past actions") {
-		t.Fatal("rejected proposal was not shown under Past actions")
+	if strings.Contains(view, "PR #3") || strings.Contains(view, "PR #5") {
+		t.Fatal("completed or rejected proposal appeared in Notifications")
 	}
 	m.notifications.review = &autoCloseReview{}
 	m.notifications.review.Plan.Proposals = []autoCloseRow{rejected}
+	context := autoCloseContext{Number: 5, ProposalCheckpoint: "rejected-5", Reason: "proposal is rejected", LatestRejection: rejected.Rejection}
+	if err := json.Unmarshal([]byte(`{"rows":[{"kind":"ledger","fields":{"category":{"preview":""},"action":{"preview":""}}}]}`), &context.ItemContext); err != nil {
+		t.Fatal(err)
+	}
+	m.notifications.context = &context
 	view = ansi.Strip(m.autoCloseReviewView())
-	if !strings.Contains(view, "Compatibility work remains useful") || !strings.Contains(view, "maintainer") || strings.Contains(view, "Publish the comment below") {
+	if !strings.Contains(view, "Compatibility work remains useful") || !strings.Contains(view, "By: maintainer") || !strings.Contains(view, "No local triage decision yet") ||
+		strings.Contains(view, "Publish the comment below") || strings.Contains(view, "Why: proposal is rejected") || strings.Contains(view, "Earlier objection") {
 		t.Fatal("rejected proposal reader hid the reason or offered publication")
 	}
 	_, command := m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
@@ -1413,7 +1419,7 @@ func TestProposalReaderShowsCurrentGuidanceAndBlocksStaleApproval(t *testing.T) 
 	script := `#!/usr/bin/env python3
 import json, pathlib, sys
 args = sys.argv[1:]
-row = dict(number=3, title="Fixture PR", target="https://github.com/owner/repo/pull/3", rationale="Superseded", comment="Exact closure comment", checkpoint="proposal-1", status="pending", active=True, inputs=dict(context_checkpoint="ctx-1", evidence=[dict(kind="pr", number=3, snapshot_id="snapshot-1", components={"summary": {"status": "complete"}})], evidence_gaps=["Gap one", "Gap two", "Gap three", "Gap four", "Gap five"]))
+row = dict(number=3, title="Fixture PR", target="https://github.com/owner/repo/pull/3", rationale="Superseded", comment="Exact closure comment", checkpoint="proposal-1", status="pending", active=True, inputs=dict(context_checkpoint="ctx-1", evidence=[dict(kind="pr", number=3, snapshot_id="snapshot-1", components={"summary": {"status": "complete"}}), dict(kind="issue", number=4, snapshot_id="snapshot-2", components={"summary": {"status": "complete"}, "comments": {"status": "partial"}})], evidence_gaps=["Gap one", "Gap two", "Gap three", "Gap four", "Gap five"]))
 if "context" in args:
     stale = pathlib.Path("stale-context").exists()
     omitted = 30 if pathlib.Path("long-context").exists() else 0
@@ -1436,7 +1442,7 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 		t.Fatal(err)
 	}
 	var row autoCloseRow
-	if err := json.Unmarshal([]byte(`{"number":3,"title":"Fixture PR","target":"https://github.com/owner/repo/pull/3","rationale":"Superseded","comment":"Exact closure comment","checkpoint":"proposal-1","status":"pending","active":true,"inputs":{"context_checkpoint":"ctx-1","evidence":[{"kind":"pr","number":3,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}}],"evidence_gaps":["Gap one","Gap two","Gap three","Gap four","Gap five"]}}`), &row); err != nil {
+	if err := json.Unmarshal([]byte(`{"number":3,"title":"Fixture PR","target":"https://github.com/owner/repo/pull/3","rationale":"Superseded","comment":"Exact closure comment","checkpoint":"proposal-1","status":"pending","active":true,"inputs":{"context_checkpoint":"ctx-1","evidence":[{"kind":"pr","number":3,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}},{"kind":"issue","number":4,"snapshot_id":"snapshot-2","components":{"summary":{"status":"complete"},"comments":{"status":"partial"}}}],"evidence_gaps":["Gap one","Gap two","Gap three","Gap four","Gap five"]}}`), &row); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1460,10 +1466,25 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	m = baselineSend(m, current)
 	m = baselineSend(m, tea.WindowSizeMsg{Width: 120, Height: 100})
 	view := ansi.Strip(m.autoCloseReviewView())
-	for _, expected := range []string{"Check compatibility", "Keep the old API", "Earlier objection", "snapshot-1", "Gap one", "Gap five", "Exact closure comment"} {
+	for _, expected := range []string{"Check compatibility", "Keep the old API", "Earlier objection · By: maintainer", "PR #3 · Complete", "Issue #4 · Not found: comments", "Gap · Not found: Gap one", "Gap · Not found: Gap five", "Exact closure comment"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("proposal reader omitted %q: %s", expected, view)
 		}
+	}
+	if strings.Contains(view, "snapshot-1") || strings.Contains(view, "summary: complete") {
+		t.Fatal("proposal reader displayed technical evidence identifiers or component states")
+	}
+	copyText, _ := m.yankNotificationProposal(row)
+	for _, expected := range []string{"snapshot-1", "snapshot-2", "--number 3 --checkpoint proposal-1", "Not found: Issue #4 · comments", "Gap one", "Current guidance and feedback:"} {
+		if !strings.Contains(copyText, expected) {
+			t.Fatalf("proposal handoff omitted %q: %s", expected, copyText)
+		}
+	}
+	if strings.Contains(copyText, "summary: complete") {
+		t.Fatal("proposal handoff repeated complete component details")
+	}
+	if _, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "y"}); cmd == nil {
+		t.Fatal("y did not offer the proposal handoff from the reader")
 	}
 	if strings.Contains(view, "Superseded") {
 		t.Fatal("legacy rationale duplicated the proposed comment in review")

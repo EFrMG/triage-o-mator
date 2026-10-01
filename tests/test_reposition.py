@@ -7,6 +7,8 @@ import sqlite3
 import subprocess
 import sys
 import unittest
+import venv
+from pathlib import Path
 
 from support import Workspace, summary
 
@@ -31,6 +33,8 @@ class RepositionTests(Workspace):
         self.assertEqual(result["matched_items"], 1)
         missing = self.offline("query", "--snapshot", self.snapshot, "--query", "Renderer", no_site=True, expected=2)
         self.assertIn("install Reposition 0.2.0.dev1", missing.stderr)
+        abbreviated_cache = self.offline("query", "--snapshot", self.snapshot, "--cach", str(self.root / "other-cache"), "--query", "Renderer", no_site=True, expected=2)
+        self.assertIn("cache namespace is owned by this install", abbreviated_cache.stderr)
 
         unsupported = self.root / "unsupported/reposition"
         unsupported.mkdir(parents=True)
@@ -39,6 +43,13 @@ class RepositionTests(Workspace):
         environment = dict(self.env, PYTHONPATH=str(unsupported.parent))
         rejected = self.offline("query", "--snapshot", self.snapshot, "--query", "Renderer", no_site=True, expected=2, environment=environment)
         self.assertIn("installed version is 999.0", rejected.stderr)
+
+        broken = self.root / "broken/reposition"
+        broken.mkdir(parents=True)
+        (broken / "__init__.py").write_text("import missing_reposition_runtime_capability\n")
+        environment = dict(self.env, PYTHONPATH=str(broken.parent))
+        failed = self.offline("query", "--snapshot", self.snapshot, "--query", "Renderer", no_site=True, expected=2, environment=environment)
+        self.assertIn("Reposition cannot load because Python module 'missing_reposition_runtime_capability' is unavailable", failed.stderr)
         fallback = json.loads(self.offline("search", "--snapshot", self.snapshot, "--query", "Renderer", "--component", "summary", no_site=True, environment=environment).stdout)
         self.assertEqual(fallback["matched_items"], 1)
         self.assertEqual(self.calls(), calls)
@@ -82,3 +93,15 @@ class RepositionTests(Workspace):
         self.assertEqual(after, before)
         self.assertEqual(self.calls(), calls)
         self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
+
+    def test_checkout_virtual_environment_is_used_without_activation(self):
+        venv.create(self.root / ".reposition-venv", with_pip=False)
+        python = self.root / ".reposition-venv/bin/python"
+        site_packages = subprocess.check_output([str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"], text=True).strip()
+        package = Path(site_packages) / "reposition"
+        package.mkdir()
+        (package / "__init__.py").write_text('__version__ = "999.0"\n')
+        (package / "cli.py").write_text("def main(argv):\n    raise AssertionError('untested engine must not run')\n")
+
+        result = self.offline("query", "--help", expected=2)
+        self.assertIn("installed version is 999.0", result.stderr)

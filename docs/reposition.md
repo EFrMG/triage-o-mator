@@ -14,18 +14,35 @@ validator originates at triage-o-mator commit
 uses `80cdcdd77d875c4fdcd96f3367f2f8a7d253e63a`. This is commit-level validation,
 not a claim that every release or future cache format is supported.
 
-Install into the Python environment used by `bin/cache` (Python 3.10+ with FTS5):
+Create one optional virtual environment in the **triage-o-mator code checkout**,
+not in each repository being triaged. The four ranked-retrieval commands use it
+automatically through the install's linked `bin/`; shell activation is not needed.
+Use Python 3.10+ with SQLite FTS5:
 
 ```sh
-python3 -m pip install --no-deps \
+cd /path/to/triage-o-mator
+python3 -m venv .reposition-venv
+.reposition-venv/bin/python -m pip install --no-deps \
   'git+https://github.com/Univeracity/reposition.git@10bd0641b50d514984dad6dee480f140ab86ee44'
+.reposition-venv/bin/python -c 'import reposition, sqlite3; assert reposition.__version__ == "0.2.0.dev1"; sqlite3.connect(":memory:").execute("CREATE VIRTUAL TABLE fts_check USING fts5(text)"); print("Reposition and FTS5 ready")'
+cd /path/to/your/repository/triage-o-mator
+bin/cache query --help
 ```
 
 Use this Git source, not the unrelated PyPI package with the same name. Installing
 may require network access; indexing, query, retrieval and metadata inspection
 remain offline. There are no runtime models, credentials, servers or third-party
-Python dependencies. The bridge rejects an untested Reposition version with an
-actionable error; literal search continues to work.
+Python dependencies. The final command verifies that `bin/cache` reaches the
+pinned engine; an absent or unsupported version fails before reading a cache.
+An isolated `pipx` installation is not visible to this bridge. The checkout's
+`.reposition-venv/` is ignored by Git and shared by its installs; ordinary literal search
+does not need it.
+
+To remove the option, run `.reposition-venv/bin/python -m pip uninstall reposition` in the
+code checkout; existing literal search remains available. For a future supported
+engine, update the tested commit and version in the bridge and this guide after
+compatibility checks, then reinstall into `.reposition-venv` with `--force-reinstall`.
+The bridge rejects untested versions rather than silently adopting them.
 
 Run the synthetic integration check whenever the cache contract, adapter or
 supported engine version changes. The normal test job verifies the legacy path

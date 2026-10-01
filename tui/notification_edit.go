@@ -13,7 +13,7 @@ type proposalEditDoneMsg struct {
 	root, repo, checkpoint string
 	generation             uint64
 	key                    Key
-	comment, rationale     string
+	comment                string
 	saved                  bool
 	row                    autoCloseRow
 	err                    error
@@ -22,10 +22,10 @@ type proposalEditDoneMsg struct {
 func (m model) editProposalCmd() tea.Cmd {
 	root, repo, generation := m.installRoot, m.repo, m.notificationsGeneration
 	checkpoint, key := m.comment.proposalEditCheckpoint, m.comment.key
-	comment, rationale, by := m.comment.text.Value(), m.comment.rationale.Value(), m.reviewer
+	comment, by := m.comment.text.Value(), m.reviewer
 
 	return func() tea.Msg {
-		msg := proposalEditDoneMsg{root: root, repo: repo, generation: generation, checkpoint: checkpoint, key: key, comment: comment, rationale: rationale}
+		msg := proposalEditDoneMsg{root: root, repo: repo, generation: generation, checkpoint: checkpoint, key: key, comment: comment}
 		draft, err := os.CreateTemp("", "triage-proposal-edit-*.md")
 		if err != nil {
 			msg.err = err
@@ -42,7 +42,7 @@ func (m model) editProposalCmd() tea.Cmd {
 			return msg
 		}
 
-		out, err := runScript(root, "auto-close", "--expected-repo", repo, "edit", "--number", strconv.Itoa(key.Number), "--checkpoint", checkpoint, "--rationale", rationale, "--comment-file", draft.Name(), "--by", by)
+		out, err := runScript(root, "auto-close", "--expected-repo", repo, "edit", "--number", strconv.Itoa(key.Number), "--checkpoint", checkpoint, "--comment-file", draft.Name(), "--by", by)
 		if err != nil {
 			msg.err = err
 			return msg
@@ -50,7 +50,7 @@ func (m model) editProposalCmd() tea.Cmd {
 		msg.saved = true
 		if err := json.Unmarshal([]byte(out), &msg.row); err != nil {
 			msg.err = fmt.Errorf("could not read edited proposal: %w", err)
-		} else if msg.row.Number != key.Number || msg.row.Status != "pending" || msg.row.Checkpoint == "" || msg.row.Checkpoint == checkpoint || msg.row.Comment != comment || msg.row.Rationale != rationale {
+		} else if msg.row.Number != key.Number || msg.row.Status != "pending" || msg.row.Checkpoint == "" || msg.row.Checkpoint == checkpoint || msg.row.Comment != comment {
 			msg.err = fmt.Errorf("saved proposal did not match the edited text")
 		}
 		return msg

@@ -113,10 +113,6 @@ func (m model) openExternalReopen(items []Item) (tea.Model, tea.Cmd) {
 func (m model) startCommentEditor() (tea.Model, tea.Cmd) {
 	field, body := "comment", m.comment.text.Value()
 	charLimit := m.comment.text.CharLimit
-	if m.comment.proposalEditCheckpoint != "" && m.comment.editRationale {
-		field, body = "rationale", m.comment.rationale.Value()
-		charLimit = m.comment.rationale.CharLimit
-	}
 	command, path, err := prepareCommentEditor(body)
 	if err != nil {
 		m.failErr("Couldn't open comment editor", err)
@@ -151,20 +147,15 @@ func (m model) finishCommentEditor(msg commentEditorMsg) (tea.Model, tea.Cmd) {
 	}
 
 	c := &m.comment
-	if c.proposalEditCheckpoint != "" && msg.field == "rationale" {
-		c.rationale.SetValue(msg.body)
-		c.rationale.Blur()
-	} else {
-		c.text.SetValue(msg.body)
-	}
+	c.text.SetValue(msg.body)
 	c.text.Blur()
 	c.previewing = true
 	c.approval, c.requestID = "", ""
-	c.setPreview(c.draftPreview())
+	c.setPreview(c.text.Value())
 	c.preview.GotoTop()
 	m.status = "Comment loaded. Review it before publishing."
 	if c.proposalEditCheckpoint != "" {
-		m.status = "Proposal text loaded. Review the comment and rationale before saving."
+		m.status = "Proposal comment loaded. Review it before saving."
 	}
 	if c.rejectionCheckpoint != "" {
 		m.status = "Rejection reason loaded. Review it before dismissing."

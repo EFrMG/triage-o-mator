@@ -133,7 +133,7 @@ class AutoCloseWriteTests(Workspace):
         comment = self.root / f"comment-{number}.md"
         comment.write_text(f"PR #{number} is superseded.\n")
         return self.auto_close("propose", "--number", str(number), "--title", f"PR {number}", "--head-sha", "b" * 40,
-                               "--updated-at", "2026-09-29T00:00:00Z", "--rationale", "Superseded", "--comment-file", str(comment),
+                               "--updated-at", "2026-09-29T00:00:00Z", "--comment-file", str(comment),
                                "--by", "agent:helper", "--context-checkpoint", context["checkpoint"],
                                "--evidence-gap", "No selected snapshot", *extra)
 
@@ -142,7 +142,7 @@ class AutoCloseWriteTests(Workspace):
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
     def test_changed_guidance_requires_fresh_review_and_approval(self):
-        self.propose(1)
+        self.assertNotIn("rationale", self.propose(1))
         old = self.auto_close("review", "--number", "1")
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
@@ -189,23 +189,24 @@ class AutoCloseWriteTests(Workspace):
         self.assertEqual(self.write_calls()[2]["body"]["body"], fresh["comment"])
 
     def test_pending_edit_retains_history_and_invalidates_selected_plan(self):
-        first = self.propose(1)
+        first = self.propose(1, "--rationale", "Legacy assessment")
         self.propose(2)
         old = self.auto_close("review", "--number", "1", "--number", "2")
         comment = self.root / "edited-comment.md"
         comment.write_text("The maintainer revised this explanation.\n")
 
         edited = self.auto_close("edit", "--number", "1", "--checkpoint", first["checkpoint"],
-                                 "--rationale", "Maintainer revised the rationale", "--comment-file", str(comment), "--by", "maintainer")
+                                 "--comment-file", str(comment), "--by", "maintainer")
         record = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
         self.assertEqual(edited["comment"], comment.read_text())
-        self.assertEqual(edited["rationale"], "Maintainer revised the rationale")
+        self.assertNotIn("rationale", edited)
+        self.assertEqual(record["history"][-1]["rationale"], "Legacy assessment")
         self.assertEqual(record["proposed_by"], "maintainer")
         self.assertEqual(record["history"][-1]["checksum"], first["checkpoint"])
         self.assertEqual(record["inputs"], record["history"][-1]["inputs"])
         self.assertNotEqual(record["request_id"], record["history"][-1]["request_id"])
         self.auto_close("edit", "--number", "1", "--checkpoint", first["checkpoint"],
-                        "--rationale", "A stale change", "--comment-file", str(comment), "--by", "maintainer", ok=False)
+                        "--comment-file", str(comment), "--by", "maintainer", ok=False)
         self.auto_close("execute", "--number", "1", "--number", "2", "--publish", "--approve", old["approval"], ok=False)
         self.assertEqual(self.write_calls(), [])
 
@@ -213,7 +214,7 @@ class AutoCloseWriteTests(Workspace):
         receipt.parent.mkdir(exist_ok=True)
         receipt.write_text("{}\n")
         self.auto_close("edit", "--number", "1", "--checkpoint", edited["checkpoint"],
-                        "--rationale", "Too late", "--comment-file", str(comment), "--by", "maintainer", ok=False)
+                        "--comment-file", str(comment), "--by", "maintainer", ok=False)
         self.assertEqual(json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text()), record)
         receipt.unlink()
 
@@ -222,7 +223,7 @@ class AutoCloseWriteTests(Workspace):
         self.auto_close("execute", "--number", "1", "--number", "2", "--publish", "--approve", fresh["approval"])
         self.assertEqual(self.write_calls()[2]["body"]["body"], comment.read_text())
         self.auto_close("edit", "--number", "1", "--checkpoint", edited["checkpoint"],
-                        "--rationale", "Too late", "--comment-file", str(comment), "--by", "maintainer", ok=False)
+                        "--comment-file", str(comment), "--by", "maintainer", ok=False)
 
     def test_execution_rechecks_remaining_items(self):
         self.propose(1)

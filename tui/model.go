@@ -487,6 +487,7 @@ func (m model) formPanelWidth() int {
 
 func (m *model) layout() {
 	m.layoutComment()
+	m.layoutGroupNote()
 	listW, _ := m.panelWidths()
 	if m.listReady {
 		m.list.SetSize(listW, maxInt(m.mainHeight()-listHeaderHeight, 1))
@@ -511,6 +512,11 @@ func (m *model) layout() {
 func (m model) formPanel(width int) string {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
 	lines := append(strings.Split(m.form.View(width), "\n"), "")
+	appendMuted := func(text string) {
+		for _, line := range strings.Split(ansi.Wrap(text, maxInt(width, 1), ""), "\n") {
+			lines = append(lines, muted.Render(line))
+		}
+	}
 	if it, ok := m.findItem(m.detail.key); ok && !it.Untriaged() {
 		triaged := "triaged by " + orPlaceholder(it.TriagedBy, "?") + " · " + shortDate(it.TriagedAt)
 		if it.BatchID != "" && it.BatchID != "tui" {
@@ -522,10 +528,11 @@ func (m model) formPanel(width int) string {
 			reviewed = "reviewed by " + orPlaceholder(it.ReviewedBy, "?") + " · " + shortDate(it.ReviewedAt)
 		}
 
-		lines = append(lines, muted.Render(triaged), muted.Render(reviewed))
+		appendMuted(triaged)
+		appendMuted(reviewed)
 	}
 
-	lines = append(lines, muted.Render("you: "+m.reviewer))
+	appendMuted("you: " + m.reviewer)
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], width, "…")
 	}
@@ -666,6 +673,9 @@ func (m model) viewContent() string {
 	if m.notifications.open && m.notifications.review != nil && m.notifications.notesOpen {
 		body = m.proposalNotesOverlay(body)
 	}
+	if m.groups.open && m.groups.editing == "notes" {
+		body = m.groupNoteOverlay(body)
+	}
 	if m.comment.open {
 		body = m.commentOverlay(body)
 	}
@@ -755,7 +765,7 @@ func (m model) needsResize() bool {
 }
 
 func (m model) minimumHeight() int {
-	if m.comment.open {
+	if m.comment.open || m.groups.editing == "notes" {
 		return maxInt(24, lipgloss.Height(m.footerView())+17)
 	}
 

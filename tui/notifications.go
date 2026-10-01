@@ -80,7 +80,6 @@ type autoCloseRow struct {
 	Number    int    `json:"number"`
 	Title     string `json:"title"`
 	Target    string `json:"target"`
-	Rationale string `json:"rationale"`
 	Comment   string `json:"comment"`
 	Reference *struct {
 		Kind   string `json:"kind"`
@@ -729,8 +728,12 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 				return m, nil
 			}
 			if len(m.notifications.review.Plan.Proposals) == 1 && m.notifications.review.Plan.Proposals[0].Active {
-				if m.notifications.context == nil || !m.notifications.context.Current {
-					m.status = "Local context changed or is still loading; prepare fresh review."
+				if m.notifications.context == nil {
+					m.warn("Read current proposal context before approval.")
+					return m, nil
+				}
+				if !m.notifications.context.Current {
+					m.fail("Local context changed; prepare fresh review.")
 					return m, nil
 				}
 				return m.beginAutoCloseReview(false, true, []int{m.notifications.review.Plan.Proposals[0].Number})
@@ -1050,8 +1053,6 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		}
 		fmt.Fprintf(&b, "\n%s\n", inset(section.Render(commentTitle)))
 		fmt.Fprintf(&b, "%s\n", inset(comment.Render(wrapText(sanitize(row.Comment), textWidth-2))))
-		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Reason")))
-		fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(row.Rationale), textWidth)))
 		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Human context")))
 		if n.contextBusy {
 			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Reading current local guidance…")))

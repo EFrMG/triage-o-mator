@@ -298,6 +298,9 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.groups.open && m.groups.editing == "notes" {
+		return m, nil
+	}
 	if m.themePicker.open {
 		return m.clickTheme(event, repeat)
 	}
@@ -566,6 +569,7 @@ func (m model) clickGroups(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
 		repeat := m.mouseTargetRepeat("group-member:" + g.ID + ":" + g.Members[index].Kind + ":" + strconv.Itoa(g.Members[index].Number))
 		if m.groups.member != index {
 			m.groups.member = index
+			m.groups.previewOffset = 0
 			if event.Button != tea.MouseRight {
 				return m, nil
 			}

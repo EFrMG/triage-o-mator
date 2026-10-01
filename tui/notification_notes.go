@@ -62,6 +62,18 @@ func proposalNotes(context *autoCloseContext) []proposalNote {
 	return notes
 }
 
+func hasExpandableProposalNotes(context *autoCloseContext) bool {
+	if context == nil {
+		return false
+	}
+	for _, note := range proposalNotes(context) {
+		if note.omitted > 0 || contextExcerpt(note.preview) != note.preview {
+			return true
+		}
+	}
+	return false
+}
+
 func autoCloseNotesCmd(root, repo string, generation, request uint64, number int, proposalCheckpoint, contextCheckpoint string, notes []proposalNote) tea.Cmd {
 	return func() tea.Msg {
 		msg := autoCloseNotesMsg{root: root, repo: repo, generation: generation, request: request, number: number,
@@ -143,6 +155,10 @@ func (m model) toggleAutoCloseNotes(row autoCloseRow) (tea.Model, tea.Cmd) {
 	context := m.notifications.proposalContext(row)
 	if context == nil || m.notifications.contextBusy {
 		m.status = "Read local context before opening its notes."
+		return m, nil
+	}
+	if !hasExpandableProposalNotes(context) {
+		m.status = "Full local notes are already shown in the proposal."
 		return m, nil
 	}
 	m.notifications.notesOpen = true

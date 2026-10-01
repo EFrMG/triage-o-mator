@@ -57,7 +57,7 @@ func (m model) footerGroups() []footerGroup {
 }
 
 func (m model) contextFooterGroups() []footerGroup {
-	if m.width < 60 || m.height < 24 && !m.comment.open {
+	if m.width < 60 || m.height < 24 && !m.comment.open && m.groups.editing != "notes" {
 		return []footerGroup{group("Navigation", bind("back", keys.Cancel), bind("quit", keys.ForceQuit))}
 	}
 
@@ -70,7 +70,7 @@ func (m model) contextFooterGroups() []footerGroup {
 			if m.comment.previewing {
 				return []footerGroup{group("Proposal edit", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save edit"}, hint{"Esc", "discard"})}
 			}
-			return []footerGroup{group("Proposal edit", hint{"Tab/Shift-Tab", "fields"}, hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save edit"}, hint{"Esc", "discard"})}
+			return []footerGroup{group("Proposal edit", hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save edit"}, hint{"Esc", "discard"})}
 		}
 		if m.comment.rejectionCheckpoint != "" {
 			if m.comment.previewing {
@@ -102,6 +102,14 @@ func (m model) contextFooterGroups() []footerGroup {
 			return []footerGroup{group("Comment", hint{"↑/↓ Ctrl-J/N/K/P", "choose reference"}, hint{"Enter/Tab", "insert"}, bind("", keys.ComposerEditor), hint{"Esc", "dismiss"}, hint{"Ctrl-S", action})}
 		}
 		return []footerGroup{group("Comment", hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", action}, hint{"Esc", "discard"})}
+	case m.groups.open && m.groups.editing == "notes":
+		if m.groups.busy {
+			return []footerGroup{group("Member note", hint{"", "working…"})}
+		}
+		if m.groups.note.previewing {
+			return []footerGroup{group("Member note", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
+		}
+		return []footerGroup{group("Member note", hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
 	case m.confirmQuit:
 		return []footerGroup{group("Quit", bind("discard drafts", keys.Quit), hint{"any key", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.lastError.open:
@@ -138,7 +146,10 @@ func (m model) contextFooterGroups() []footerGroup {
 			}
 			proposal := group("Proposal", hint{"j/k Ctrl-D/U", "scroll"})
 			if len(m.notifications.review.Plan.Proposals) == 1 {
-				proposal.hints = append(proposal.hints, hint{"Enter/l", "View item"}, hint{"m", "local notes"})
+				proposal.hints = append(proposal.hints, hint{"Enter/l", "View item"})
+				if row := m.notifications.review.Plan.Proposals[0]; !m.notifications.contextBusy && hasExpandableProposalNotes(m.notifications.proposalContext(row)) {
+					proposal.hints = append(proposal.hints, hint{"m", "full notes"})
+				}
 				if m.notifications.review.Plan.Proposals[0].Status == "pending" && m.notifications.review.Plan.Proposals[0].Inputs != nil {
 					proposal.hints = append(proposal.hints, hint{"e", "edit proposal"})
 				}

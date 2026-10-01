@@ -22,6 +22,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case commentEditorMsg:
 		return m.finishCommentEditor(msg)
+	case groupNoteEditorMsg:
+		return m.finishGroupNoteEditor(msg)
 	case commentMsg:
 		return m.finishComment(msg)
 	case notificationsMsg:
@@ -306,12 +308,8 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		var cmd tea.Cmd
-		if m.comment.proposalEditCheckpoint != "" && m.comment.editRationale {
-			m.comment.rationale, cmd = m.comment.rationale.Update(msg)
-		} else {
-			m.comment.text, cmd = m.comment.text.Update(msg)
-			m.updateCommentReferences()
-		}
+		m.comment.text, cmd = m.comment.text.Update(msg)
+		m.updateCommentReferences()
 		return m, cmd
 	case m.confirmQuit || m.lastError.open || m.notificationPR.open || m.attention.open || m.actionHistory.open || m.notifications.open || m.corpus.open:
 		return m, nil
@@ -330,6 +328,14 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	case m.groups.open:
 		if m.groups.busy || m.groups.editing == "" || m.onGroupStatusField() {
 			return m, nil
+		}
+		if m.groups.editing == "notes" {
+			if m.groups.note.previewing {
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.groups.note.text, cmd = m.groups.note.text.Update(msg)
+			return m, cmd
 		}
 		var cmd tea.Cmd
 		m.groups.inputs[m.groups.field], cmd = m.groups.inputs[m.groups.field].Update(msg)

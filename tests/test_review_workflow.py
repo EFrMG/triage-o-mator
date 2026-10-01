@@ -134,7 +134,7 @@ class ProposalFeedbackTests(Workspace):
 
         return self.auto_close("propose", "--number", str(number), "--title", "An older fix",
                                "--head-sha", "b" * 40, "--updated-at", "2026-09-29T00:00:00Z",
-                               "--rationale", "Superseded by another PR", "--comment-file", str(comment), "--by", "agent:helper",
+                               "--comment-file", str(comment), "--by", "agent:helper",
                                "--context-checkpoint", context["checkpoint"], *extra, ok=ok)
 
     def test_proposal_binds_group_context_and_verified_selected_evidence(self):
@@ -164,7 +164,7 @@ class ProposalFeedbackTests(Workspace):
         edited_comment = self.root / "edited-comment.md"
         edited_comment.write_text("The maintainer refined this closure comment.\n")
         edited = self.auto_close("edit", "--number", "1", "--checkpoint", selected["checkpoint"],
-                                 "--rationale", "Maintainer refined the explanation", "--comment-file", str(edited_comment), "--by", "maintainer")
+                                 "--comment-file", str(edited_comment), "--by", "maintainer")
         self.assertEqual(edited["inputs"], inputs)
         self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["checkpoint"], edited["checkpoint"])
         self.assertEqual(len(self.calls()), before)

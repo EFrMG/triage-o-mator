@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1130,8 +1131,9 @@ if 'edit' not in args:
 if pathlib.Path('edit-fail').exists():
     sys.exit('saved proposal changed')
 comment = pathlib.Path(args[args.index('--comment-file') + 1]).read_text()
-print(json.dumps(dict(number=3, status='pending', checkpoint='b' * 64, comment=comment,
-                      rationale=args[args.index('--rationale') + 1])))
+if '--rationale' in args:
+    sys.exit('unexpected rationale')
+print(json.dumps(dict(number=3, status='pending', checkpoint='b' * 64, comment=comment)))
 `
 	if err := os.WriteFile(filepath.Join(root, "bin", "auto-close"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -1139,46 +1141,30 @@ print(json.dumps(dict(number=3, status='pending', checkpoint='b' * 64, comment=c
 
 	m := baselineModel(t, root)
 	old := autoCloseRow{Number: 3, Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Status: "pending", Active: true,
-		Checkpoint: strings.Repeat("a", 64), Comment: "Original comment", Rationale: "Original rationale", Inputs: &autoCloseInputs{ContextCheckpoint: "context"}}
+		Checkpoint: strings.Repeat("a", 64), Comment: "Original comment", Inputs: &autoCloseInputs{ContextCheckpoint: "context"}}
 	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{old}}, ticked: map[int]bool{3: true}, review: &autoCloseReview{}}
 	m.notifications.review.Plan.Proposals = []autoCloseRow{old}
 	next, _ := m.handleNotificationsKey(tea.KeyPressMsg{Text: "e"})
 	m = next.(model)
-	if !m.comment.open || m.comment.text.Value() != old.Comment || m.comment.rationale.Value() != old.Rationale || m.comment.editRationale {
-		t.Fatal("proposal edit did not start with the comment above the rationale and focused first")
-	}
-	fields := ansi.Strip(m.proposalEditFieldsView())
-	sections := strings.SplitN(fields, "\nRationale\n", 2)
-	if len(sections) != 2 || !strings.HasPrefix(sections[0], "Comment\n") || !strings.Contains(sections[0], "┃") || strings.Contains(sections[1], "┃") || strings.Contains(fields, "│") || strings.Contains(fields, ">") {
-		t.Fatalf("proposal edit did not show comment first with only its focused border: %q", fields)
-	}
-	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
-	if !m.comment.editRationale {
-		t.Fatal("Tab did not focus the rationale")
-	}
-	fields = ansi.Strip(m.proposalEditFieldsView())
-	sections = strings.SplitN(fields, "\nRationale\n", 2)
-	if len(sections) != 2 || strings.Contains(sections[0], "┃") || !strings.Contains(sections[1], "┃") || strings.Contains(fields, "│") {
-		t.Fatal("proposal edit did not move the left border to the focused rationale")
+	if !m.comment.open || m.comment.text.Value() != old.Comment || strings.Contains(ansi.Strip(m.commentView()), "Rationale") {
+		t.Fatal("proposal edit did not open a single comment draft")
 	}
 	next, editorCmd := m.handleCommentKey(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
 	m = next.(model)
 	if editorCmd == nil || !m.comment.busy {
-		t.Fatal("Ctrl-E did not open the focused rationale in $EDITOR")
+		t.Fatal("Ctrl-E did not open the proposal comment in $EDITOR")
 	}
-	m = baselineSend(m, commentEditorMsg{root: root, repo: m.repo, key: Key{Kind: "pr", Number: 3}, field: "rationale", body: "Edited rationale"})
-	if m.comment.rationale.Value() != "Edited rationale" || m.comment.text.Value() != old.Comment || !m.comment.previewing {
-		t.Fatal("external editor changed the wrong proposal field")
+	m = baselineSend(m, commentEditorMsg{root: root, repo: m.repo, key: Key{Kind: "pr", Number: 3}, field: "comment", body: "Edited exact comment"})
+	if m.comment.text.Value() != "Edited exact comment" || !m.comment.previewing {
+		t.Fatal("external editor did not return the proposal comment for review")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
-	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
-	m.comment.text.SetValue("Edited exact comment")
 	if err := os.WriteFile(filepath.Join(root, "edit-fail"), []byte("yes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	next, saveCmd := m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = baselineSend(next.(model), saveCmd().(proposalEditDoneMsg))
-	if !m.comment.open || m.comment.text.Value() != "Edited exact comment" || m.comment.rationale.Value() != "Edited rationale" || m.notifications.review == nil {
+	if !m.comment.open || m.comment.text.Value() != "Edited exact comment" || m.notifications.review == nil {
 		t.Fatal("failed proposal edit discarded its draft or old review")
 	}
 	if err := os.Remove(filepath.Join(root, "edit-fail")); err != nil {
@@ -1200,7 +1186,7 @@ print(json.dumps(dict(number=3, status='pending', checkpoint='b' * 64, comment=c
 		t.Fatal("saved proposal edit kept an old review or selected-set plan")
 	}
 	fresh := old
-	fresh.Checkpoint, fresh.Comment, fresh.Rationale = strings.Repeat("b", 64), "Edited exact comment", "Edited rationale"
+	fresh.Checkpoint, fresh.Comment = strings.Repeat("b", 64), "Edited exact comment"
 	loaded := notificationsMsg{root: root, repo: m.repo, generation: m.notificationsGeneration, proposals: autoCloseList{Rows: []autoCloseRow{fresh}}, tracked: trackedPage{}, attention: attentionPage{}, closures: actionHistoryPage{}}
 	next, contextCmd := m.finishNotifications(loaded)
 	m = next.(model)
@@ -1249,11 +1235,46 @@ func TestGroupHandoffCopiesCurrentEditedContextForSelectedMembers(t *testing.T) 
 	g = call("add", g.ID, "--kind", "pr", "--number", "3", "--notes", "Agent's candidate note", "--by", "agent:helper")
 	g = call("add", g.ID, "--kind", "issue", "--number", "2", "--notes", "Original report", "--by", "agent:helper")
 	g = call("update", g.ID, "--revision", strconv.Itoa(g.Revision), "--description", "Maintainer edited the group question", "--by", "maintainer")
-	g = call("add", g.ID, "--revision", strconv.Itoa(g.Revision), "--kind", "pr", "--number", "3", "--notes", "Maintainer wants the candidate reconsidered", "--by", "maintainer")
 
 	m := baselineModel(t, root)
-	m.groups = groupUI{open: true, detail: true, records: []Group{g}, member: 1, ticked: map[Key]bool{{Kind: "pr", Number: 3}: true}}
-	next, cmd := m.Update(tea.KeyPressMsg{Text: "y"})
+	m.reviewer = "maintainer"
+	m.groups = groupUI{open: true, detail: true, records: []Group{g}, member: 0, ticked: map[Key]bool{{Kind: "pr", Number: 3}: true}}
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "e"})
+	m = next.(model)
+	if cmd == nil || m.groups.editing != "notes" || m.groups.note.text.Value() != "Agent's candidate note" || !strings.Contains(ansi.Strip(m.viewContent()), "Member note") {
+		t.Fatal("e did not open the member note in a floating editor")
+	}
+	longNote := "Maintainer wants the candidate reconsidered.\nKeep its unique behavior across all supported versions."
+	m.groups.note.text.SetValue(longNote)
+	m = baselineSend(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	preview := ansi.Strip(m.viewContent())
+	if !m.groups.note.previewing || !strings.Contains(preview, "Preview member note") || !strings.Contains(preview, "Keep its unique behavior") {
+		t.Fatal("multiline member note did not render in the floating preview")
+	}
+	t.Setenv("TMPDIR", t.TempDir())
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.groups.busy {
+		t.Fatal("Ctrl-E did not open the current member note in $EDITOR")
+	}
+	note := m.groups.note
+	m = baselineSend(m, groupNoteEditorMsg{root: root, repo: m.repo, groupID: note.groupID, revision: note.revision,
+		member: note.member, request: note.request, text: longNote})
+	if m.groups.busy || !m.groups.note.previewing || m.groups.note.text.Value() != longNote {
+		t.Fatal("external editor did not retain the multiline member note for review")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.groups.busy {
+		t.Fatal("Ctrl-S did not save the member note through bin/group")
+	}
+	m = baselineSend(m, cmd().(groupsLoadedMsg))
+	g = *m.selectedGroup()
+	if m.groups.editing != "" || g.Members[0].Notes != longNote || g.Members[0].UpdatedBy != "maintainer" {
+		t.Fatal("saved member note did not return to the group with attribution")
+	}
+	m.groups.member = 1
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "y"})
 	m = next.(model)
 	if cmd == nil || !m.groups.busy {
 		t.Fatal("y did not start a fresh group handoff")
@@ -1312,9 +1333,54 @@ func TestGroupHandoffCopiesCurrentEditedContextForSelectedMembers(t *testing.T) 
 	if stale.err == nil || stale.packet.Group.ID != "" {
 		t.Fatal("changed group revision became an agent handoff")
 	}
-	_, copyCmd = m.finishGroupHandoff(stale)
+	next, copyCmd = m.finishGroupHandoff(stale)
+	m = next.(model)
 	if copyCmd != nil {
 		t.Fatal("stale group handoff reached the clipboard path")
+	}
+	m.groups.member = 0
+	next, _ = m.Update(tea.KeyPressMsg{Text: "e"})
+	m = next.(model)
+	m.groups.note.text.SetValue(longNote + "\nOne more requested check.")
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	m = baselineSend(m, cmd().(groupsLoadedMsg))
+	if m.groups.editing != "notes" || m.groups.note.text.Value() != longNote+"\nOne more requested check." || !m.statusIsError() {
+		t.Fatal("stale member-note save did not retain the draft and report the error")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.groups.editing != "" {
+		t.Fatal("Esc from member-note preview did not close the floating window")
+	}
+}
+
+func TestGroupContextScrollStopsAtVisibleBoundary(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("note line %d", i)
+	}
+	g := Group{ID: "focused", Title: "Review notes", Revision: 1, Members: []GroupMember{
+		{Kind: "issue", Number: 1, Notes: strings.Join(lines, "\n")},
+		{Kind: "issue", Number: 2, Notes: "Short note"},
+	}}
+	m.groups = groupUI{open: true, detail: true, records: []Group{g}}
+	for range 20 {
+		m = baselineSend(m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	}
+	vp := m.groupContextViewport(g, m.menuWidth(), m.mainHeight())
+	if !vp.AtBottom() || m.groups.previewOffset != vp.YOffset() || !strings.Contains(ansi.Strip(vp.View()), "note line 39") {
+		t.Fatal("group context stopped before its last visible note")
+	}
+	bottom := m.groups.previewOffset
+	m = baselineSend(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	if m.groups.previewOffset >= bottom {
+		t.Fatal("Ctrl-U did not move immediately after scrolling to the bottom")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "j"})
+	if m.groups.member != 1 || m.groups.previewOffset != 0 {
+		t.Fatal("the next member inherited the previous note's scroll position")
 	}
 }
 
@@ -1399,8 +1465,11 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 			t.Fatalf("proposal reader omitted %q: %s", expected, view)
 		}
 	}
+	if strings.Contains(view, "Superseded") {
+		t.Fatal("legacy rationale duplicated the proposed comment in review")
+	}
 	last := -1
-	for _, section := range []string{"Proposed action", "Comment to publish", "Reason", "Human context", "Selected evidence"} {
+	for _, section := range []string{"Proposed action", "Comment to publish", "Human context", "Selected evidence"} {
 		at := strings.Index(view, section)
 		if at <= last {
 			t.Fatalf("proposal sections out of order near %q", section)
@@ -1433,6 +1502,10 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	_, publish := m.finishAutoClose(missingContext)
 	if publish != nil {
 		t.Fatal("exact review without a checked context offered publication")
+	}
+	next, shortNotesCmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "m"})
+	if shortNotesCmd != nil || next.(model).notifications.notesOpen {
+		t.Fatal("short local notes opened a duplicate reader")
 	}
 	if err := os.WriteFile(filepath.Join(root, "long-context"), []byte("yes"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1471,9 +1544,10 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	if !strings.Contains(view, "Changed context") || strings.Contains(view, "Publish the comment below") {
 		t.Fatal("stale proposal appeared executable")
 	}
-	_, approval = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	if approval != nil || len(m.drafts) != 1 {
-		t.Fatal("stale proposal gained approval or discarded a draft")
+	next, approval = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	m = next.(model)
+	if approval != nil || len(m.drafts) != 1 || !m.statusIsError() {
+		t.Fatal("stale proposal gained approval, discarded a draft or failed to report the refusal")
 	}
 }
 

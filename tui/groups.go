@@ -54,6 +54,8 @@ type groupUI struct {
 	ticked        map[Key]bool
 	editing       string
 	inputs        []textinput.Model
+	note          groupNoteEditor
+	noteRequest   uint64
 	field         int
 	previewOffset int
 	// confirm is the key ("d") whose second press will act; any other key disarms it.
@@ -207,6 +209,7 @@ func (m model) onGroupsLoaded(msg groupsLoadedMsg) (tea.Model, tea.Cmd) {
 	if g := m.selectedGroup(); g != nil {
 		m.groups.member = minInt(m.groups.member, maxInt(len(g.Members)-1, 0))
 	}
+	m.groups.previewOffset = 0
 	if msg.selectedID != "" {
 		m.lastGroupID = msg.selectedID
 	}
@@ -217,6 +220,7 @@ func (m model) onGroupsLoaded(msg groupsLoadedMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.groups.editing = ""
+	m.groups.note = groupNoteEditor{}
 	m.status = msg.status
 	return m, nil
 }
@@ -239,15 +243,10 @@ func (m *model) editGroup(mode string) {
 		values = []string{group.Title, group.Description, group.Status, group.Assignee}
 	}
 
-	if mode == "add" || mode == "notes" {
+	if mode == "add" {
 		values = []string{""}
 		if group := m.selectedGroup(); group != nil {
 			for _, member := range group.Members {
-				if mode == "notes" && m.groups.member < len(group.Members) {
-					values[0] = group.Members[m.groups.member].Notes
-					break
-				}
-
 				if len(m.groups.sources) == 1 && member.Key() == m.groups.sources[0] {
 					values[0] = member.Notes
 				}
@@ -291,16 +290,12 @@ func (m model) saveGroupForm() (tea.Model, tea.Cmd) {
 		assignee := m.groups.inputs[len(m.groups.inputs)-1].Value()
 		args = append(args, "--title", m.groups.inputs[0].Value(), "--description", m.groups.inputs[1].Value(), "--assignee", assignee)
 
-	case "add", "notes":
+	case "add":
 		if g == nil {
 			return m, nil
 		}
 
 		targets := m.groups.sources
-		if m.groups.editing == "notes" && m.groups.member < len(g.Members) {
-			targets = []Key{g.Members[m.groups.member].Key()}
-		}
-
 		if len(targets) == 0 {
 			return m, nil
 		}
@@ -338,8 +333,12 @@ func (m *model) cycleGroupStatus(delta int) {
 	input.SetValue(groupStatuses[(i+delta+len(groupStatuses))%len(groupStatuses)])
 }
 
-// handleGroupEditorKey edits a group or a member's notes: Tab / Enter move down the fields and Enter on the last one saves; on the Status choice, j/k (or the arrows) change the value and l / → open the list of statuses.
+// handleGroupEditorKey routes member notes to the floating editor; group fields and add-to-group notes keep the form's Tab / Enter navigation.
 func (m model) handleGroupEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.groups.editing == "notes" {
+		return m.handleGroupNoteKey(msg)
+	}
+
 	last := len(m.groups.inputs) - 1
 	move := func(delta int) {
 		m.groups.inputs[m.groups.field].Blur()
@@ -448,7 +447,7 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Edit):
 		// e edits the selection: a member's notes inside a group, the group itself in the list.
 		if m.groups.detail && g != nil && len(g.Members) > 0 {
-			m.editGroup("notes")
+			return m.openGroupNote()
 		} else if g != nil {
 			m.editGroup("edit")
 		}
@@ -463,7 +462,11 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.groups.detail && g != nil && m.groups.member < len(g.Members) {
 			k := g.Members[m.groups.member].Key()
 			m.groups.ticked[k] = !m.groups.ticked[k]
-			m.groups.member = minInt(m.groups.member+1, len(g.Members)-1)
+			member := minInt(m.groups.member+1, len(g.Members)-1)
+			if member != m.groups.member {
+				m.groups.previewOffset = 0
+			}
+			m.groups.member = member
 		}
 	case key.Matches(msg, keys.Reopen), key.Matches(msg, keys.ReopenEditor):
 		if !m.groups.detail || g == nil || len(g.Members) == 0 {
@@ -521,6 +524,7 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.groups.busy = true
 		m.groups.ticked = map[Key]bool{}
 		m.groups.member = maxInt(m.groups.member-len(targets), 0)
+		m.groups.previewOffset = 0
 
 		return m, groupBulkCmd(m.installRoot, *g, "remove", targets, "", m.reviewer)
 	case key.Matches(msg, keys.Export), key.Matches(msg, keys.ExportFull):
@@ -545,9 +549,9 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Down), key.Matches(msg, keys.Up), key.Matches(msg, keys.Top), key.Matches(msg, keys.Bottom):
 		m.moveGroupCursor(msg)
 	case key.Matches(msg, keys.HalfDown):
-		m.groups.previewOffset += 4
+		m.scrollGroupContext(4)
 	case key.Matches(msg, keys.HalfUp):
-		m.groups.previewOffset = maxInt(0, m.groups.previewOffset-4)
+		m.scrollGroupContext(-4)
 	case key.Matches(msg, keys.Enter), key.Matches(msg, keys.Forward):
 		if g == nil {
 			return m, nil
@@ -601,7 +605,11 @@ func (m *model) moveGroupCursor(msg tea.KeyPressMsg) {
 	}
 
 	if g := m.selectedGroup(); m.groups.detail && g != nil {
-		m.groups.member = move(m.groups.member, len(g.Members))
+		member := move(m.groups.member, len(g.Members))
+		if member != m.groups.member {
+			m.groups.previewOffset = 0
+		}
+		m.groups.member = member
 	} else {
 		m.groups.selected = move(m.groups.selected, len(m.groups.records))
 		if chosen := m.selectedGroup(); chosen != nil {
@@ -623,6 +631,8 @@ func minInt(a, b int) int {
 func (m model) groupsView() string {
 	w, h := m.menuWidth(), m.mainHeight()
 	switch g := m.selectedGroup(); {
+	case m.groups.editing == "notes" && m.groups.detail && g != nil:
+		return m.withSidebar(m.groupMembersView(*g, w, h), true)
 	case m.groups.editing != "":
 		return m.withSidebar(inset(m.groupEditorView(w)), true)
 	case m.groups.detail && g != nil:
@@ -699,6 +709,29 @@ func (m model) groupSummary(g Group) string {
 	return strings.Join(parts, " · ")
 }
 
+func (m model) groupContextViewport(g Group, w, h int) viewport.Model {
+	context := []string{orPlaceholder(g.Description, "(no description)"), mutedText(fmt.Sprintf("created by %s · updated by %s, %s · revision %d", g.CreatedBy, g.UpdatedBy, shortDate(g.UpdatedAt), g.Revision))}
+	if m.groups.member < len(g.Members) {
+		member := g.Members[m.groups.member]
+		context = append(context, "", fmt.Sprintf("Notes on #%d: %s", member.Number, orPlaceholder(member.Notes, "(none)")), mutedText("added by "+member.AddedBy))
+	}
+
+	vp := viewport.New(viewport.WithWidth(w), viewport.WithHeight(minInt(6, maxInt(h/3, 2))))
+	vp.SetContent(wrapText(strings.Join(context, "\n"), w))
+	vp.SetYOffset(m.groups.previewOffset)
+	return vp
+}
+
+func (m *model) scrollGroupContext(lines int) {
+	g := m.selectedGroup()
+	if !m.groups.detail || g == nil {
+		return
+	}
+	vp := m.groupContextViewport(*g, m.menuWidth(), m.mainHeight())
+	vp.SetYOffset(vp.YOffset() + lines)
+	m.groups.previewOffset = vp.YOffset()
+}
+
 // groupMembersView is a group's context (its description, who made it, the selected member's notes; Ctrl-D/U scroll it) above its members, drawn as the item lists' cards.
 func (m model) groupMembersView(g Group, w, h int) string {
 	subtitle := g.Status + " · " + pluralize(len(g.Members), "member", "members")
@@ -717,15 +750,7 @@ func (m model) groupMembersView(g Group, w, h int) string {
 		}
 	}
 
-	context := []string{orPlaceholder(g.Description, "(no description)"), mutedText(fmt.Sprintf("created by %s · updated by %s, %s · revision %d", g.CreatedBy, g.UpdatedBy, shortDate(g.UpdatedAt), g.Revision))}
-	if m.groups.member < len(g.Members) {
-		member := g.Members[m.groups.member]
-		context = append(context, "", fmt.Sprintf("Notes on #%d: %s", member.Number, orPlaceholder(member.Notes, "(none)")), mutedText("added by "+member.AddedBy))
-	}
-
-	vp := viewport.New(viewport.WithWidth(w), viewport.WithHeight(minInt(6, maxInt(h/3, 2))))
-	vp.SetContent(wrapText(strings.Join(context, "\n"), w))
-	vp.SetYOffset(m.groups.previewOffset)
+	vp := m.groupContextViewport(g, w, h)
 
 	cards := make([][2]string, len(g.Members))
 	marks := make([]cardMark, len(g.Members))
@@ -763,9 +788,6 @@ func (m model) groupEditorView(w int) string {
 	case "add":
 		labels = []string{"Notes"}
 		title, subtitle = "Add to group", "why these items belong here, for whoever reads the group"
-	case "notes":
-		labels = []string{"Notes"}
-		title, subtitle = "Member notes", "why this item belongs here, for whoever reads the group"
 	}
 
 	if g := m.selectedGroup(); g != nil && m.groups.editing != "new" {

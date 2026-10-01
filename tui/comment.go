@@ -18,25 +18,23 @@ import (
 )
 
 type commentComposer struct {
-	previewText                                string
-	open, busy, previewing, close, reopen      bool
-	rejectionCheckpoint                        string
-	rejectionChoice                            notificationChoice
-	proposalEditCheckpoint                     string
-	editOriginalComment, editOriginalRationale string
-	editRationale                              bool
-	key                                        Key
-	host, target, requestID, approval          string
-	targets                                    []commentTarget
-	index                                      int
-	completed                                  []Key
-	text                                       textarea.Model
-	rationale                                  textarea.Model
-	preview                                    viewport.Model
-	referenceQuery                             string
-	referenceActive                            bool
-	referenceMatches                           []Item
-	referenceSelected, referenceOffset         int
+	previewText                           string
+	open, busy, previewing, close, reopen bool
+	rejectionCheckpoint                   string
+	rejectionChoice                       notificationChoice
+	proposalEditCheckpoint                string
+	editOriginalComment                   string
+	key                                   Key
+	host, target, requestID, approval     string
+	targets                               []commentTarget
+	index                                 int
+	completed                             []Key
+	text                                  textarea.Model
+	preview                               viewport.Model
+	referenceQuery                        string
+	referenceActive                       bool
+	referenceMatches                      []Item
+	referenceSelected, referenceOffset    int
 }
 
 type commentTarget struct {
@@ -197,35 +195,11 @@ func (m model) openProposalEdit(choice notificationChoice) (tea.Model, tea.Cmd) 
 	next, cmd := m.openCommentComposer(target, false, false, nil)
 	m = next.(model)
 	m.comment.proposalEditCheckpoint = row.Checkpoint
-	m.comment.editOriginalComment, m.comment.editOriginalRationale = row.Comment, row.Rationale
+	m.comment.editOriginalComment = row.Comment
 	m.comment.text.Placeholder = "Comment to publish"
 	m.comment.text.SetValue(row.Comment)
-	m.comment.rationale = textarea.New()
-	m.comment.rationale.Placeholder = "Why this action is justified"
-	m.comment.rationale.CharLimit = 10000
-	m.comment.rationale.ShowLineNumbers = false
-	themeTextarea(&m.comment.rationale)
-	m.comment.rationale.SetValue(row.Rationale)
-	m.comment.setProposalEditFocus(false)
 	m.layoutComment()
 	return m, cmd
-}
-
-func (c *commentComposer) setProposalEditFocus(rationale bool) {
-	c.editRationale = rationale
-	c.text.Prompt, c.rationale.Prompt = "  ", "  "
-	if rationale {
-		c.rationale.Prompt = textarea.New().Prompt
-	} else {
-		c.text.Prompt = textarea.New().Prompt
-	}
-}
-
-func (c commentComposer) draftPreview() string {
-	if c.proposalEditCheckpoint != "" {
-		return "Comment:\n\n" + c.text.Value() + "\n\nRationale:\n\n" + c.rationale.Value()
-	}
-	return c.text.Value()
 }
 
 func (m model) commentCmd(publish bool) tea.Cmd {
@@ -270,17 +244,6 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, keys.ComposerEditor) {
 		return m.startCommentEditor()
 	}
-	if c.proposalEditCheckpoint != "" && !c.previewing && (msg.String() == "tab" || msg.String() == "shift+tab") {
-		c.setProposalEditFocus(!c.editRationale)
-		c.referenceActive = false
-		m.layoutComment()
-		if c.editRationale {
-			c.text.Blur()
-			return m, c.rationale.Focus()
-		}
-		c.rationale.Blur()
-		return m, c.text.Focus()
-	}
 	if c.referenceActive && !c.previewing {
 		switch msg.String() {
 		case "down", "ctrl+j", "ctrl+n":
@@ -316,33 +279,27 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+p":
 		c.previewing = !c.previewing
 		if !c.previewing {
-			if c.proposalEditCheckpoint != "" && c.editRationale {
-				return m, c.rationale.Focus()
-			}
 			cmd := c.text.Focus()
 
 			return m, cmd
 		}
 
 		c.text.Blur()
-		if c.proposalEditCheckpoint != "" {
-			c.rationale.Blur()
-		}
 		c.referenceActive = false
 		m.layoutComment()
-		c.setPreview(c.draftPreview())
+		c.setPreview(c.text.Value())
 		c.preview.GotoTop()
 		return m, nil
 
 	case "ctrl+s":
 		if c.proposalEditCheckpoint != "" {
-			if c.text.Value() == c.editOriginalComment && c.rationale.Value() == c.editOriginalRationale {
+			if c.text.Value() == c.editOriginalComment {
 				c.open = false
-				m.status = "Proposal text is unchanged."
+				m.status = "Proposal comment is unchanged."
 				return m, nil
 			}
-			if strings.TrimSpace(c.text.Value()) == "" || strings.TrimSpace(c.rationale.Value()) == "" {
-				m.warn("Both the exact comment and rationale are required.")
+			if strings.TrimSpace(c.text.Value()) == "" {
+				m.warn("Write a comment before saving the proposal.")
 				return m, nil
 			}
 			c.busy = true
@@ -383,8 +340,6 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	if c.previewing {
 		c.preview, cmd = c.preview.Update(msg)
-	} else if c.proposalEditCheckpoint != "" && c.editRationale {
-		c.rationale, cmd = c.rationale.Update(msg)
 	} else {
 		c.text, cmd = c.text.Update(msg)
 		m.updateCommentReferences()
@@ -620,51 +575,31 @@ func (m model) stopReopening(target commentTarget, err error, uncertain bool) (t
 }
 
 func (m model) commentHeader(width int) string {
-	heading, color := "Compose comment", currentTheme.Info
+	heading, preview := "Compose comment", "Preview Markdown"
 	if m.comment.proposalEditCheckpoint != "" {
-		heading = "Edit closure proposal"
+		heading, preview = "Edit closure proposal", "Review proposal edit"
 	}
 	if m.comment.rejectionCheckpoint != "" {
-		heading = "Reject closure proposal"
+		heading, preview = "Reject closure proposal", "Preview rejection reason"
 	}
 	if m.comment.close {
-		heading = "Close with comment"
+		heading, preview = "Close with comment", "Preview closure"
 	}
 	if m.comment.reopen {
-		heading = "Reopen with comment"
-	}
-	if m.comment.previewing {
-		heading, color = "Preview Markdown", currentTheme.Success
-		if m.comment.proposalEditCheckpoint != "" {
-			heading = "Review proposal edit"
-		}
-		if m.comment.rejectionCheckpoint != "" {
-			heading = "Preview rejection reason"
-		}
-		if m.comment.close {
-			heading = "Preview closure"
-		}
-		if m.comment.reopen {
-			heading = "Preview opening"
-		}
+		heading, preview = "Reopen with comment", "Preview opening"
 	}
 
-	title := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true).Render(heading)
 	linkText := m.comment.target
 	if m.comment.reopen && len(m.comment.targets) > 1 {
 		linkText = pluralize(len(m.comment.targets), "target", "targets")
 	}
-	link := ansi.Truncate(linkText, maxInt(width-ansi.StringWidth(title)-1, 1), "…")
-	gap := strings.Repeat(" ", maxInt(width-ansi.StringWidth(title)-ansi.StringWidth(link), 1))
-	return title + gap + link
+	return composerHeader(heading, preview, linkText, m.comment.previewing, width)
 }
 
 func (m model) commentView() string {
 	content := m.comment.text.View()
 	if m.comment.previewing {
 		content = m.comment.preview.View()
-	} else if m.comment.proposalEditCheckpoint != "" {
-		content = m.proposalEditFieldsView()
 	}
 
 	if m.comment.referenceActive && !m.comment.previewing {
@@ -687,12 +622,7 @@ func (m model) commentView() string {
 		}
 	}
 
-	return panelStyle(true).BorderBackground(lipgloss.Color(currentTheme.Background)).Width(m.commentWidth()).Height(m.commentHeight()).Padding(0, 1).Render(m.commentHeader(m.commentWidth()-4) + "\n\n" + content)
-}
-
-func (m model) proposalEditFieldsView() string {
-	heading := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true)
-	return heading.Render("Comment") + "\n" + m.comment.text.View() + "\n" + heading.Render("Rationale") + "\n" + m.comment.rationale.View()
+	return m.composerPanel(m.commentHeader(m.commentWidth()-4), content)
 }
 
 func (m model) commentWidth() int {
@@ -719,9 +649,7 @@ func (m model) commentReferenceRow() int {
 }
 
 func (m model) commentOverlay(background string) string {
-	x, y := m.commentPosition()
-	base := screenStyle().Width(m.width).Height(m.mainHeight() + 2).Render(fitScreen(background, m.width, m.mainHeight()+2))
-	return lipgloss.NewCompositor(lipgloss.NewLayer(base), lipgloss.NewLayer(m.commentView()).X(x).Y(y).Z(1)).Render()
+	return m.composerOverlay(background, m.commentView())
 }
 
 func (c *commentComposer) setPreview(text string) {
@@ -755,15 +683,7 @@ func (m *model) layoutComment() {
 		height = maxInt(height-6, 3)
 	}
 	c.text.SetWidth(width)
-	if c.proposalEditCheckpoint != "" {
-		available := maxInt(height-3, 6)
-		commentHeight := maxInt(available*2/3, 3)
-		c.text.SetHeight(commentHeight)
-		c.rationale.SetWidth(width)
-		c.rationale.SetHeight(maxInt(available-commentHeight, 3))
-	} else {
-		c.text.SetHeight(height)
-	}
+	c.text.SetHeight(height)
 	resized := c.preview.Width() != width
 	c.preview.SetWidth(width)
 	c.preview.SetHeight(height)

@@ -597,6 +597,16 @@ func (m model) openNotificationChoice(choice notificationChoice) (tea.Model, tea
 }
 
 func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "f" && !m.notifications.notesOpen {
+		if m.notifications.reviewBusy && m.notifications.review != nil && m.notifications.review.Approval != "" {
+			return m, nil
+		}
+		m.notificationsLifecycle.stop()
+		m.notificationsGeneration++
+		m.notifications = notificationsUI{}
+		m.corpus.returnToNotifications = true
+		return m.openCorpus()
+	}
 	if m.notifications.review != nil {
 		if m.notifications.notesOpen && msg.String() != "q" {
 			switch msg.String() {

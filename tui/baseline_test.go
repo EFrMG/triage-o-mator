@@ -808,8 +808,8 @@ func TestBaselineAutomaticDatasetPreferenceAndContinuation(t *testing.T) {
 	if enabled, err := loadCorpusAuto(root, m.repo); err != nil || !enabled {
 		t.Fatalf("automatic download preference was not saved: %v", err)
 	}
-	if shown := ansi.Strip(datasetAutoToggle(true, 30)); strings.TrimSpace(shown) != "ON OFF" || strings.Index(shown, "ON OFF") < 10 {
-		t.Fatalf("automatic download choices were not centered: %q", shown)
+	if lines := strings.Split(ansi.Strip(datasetAutoToggle(true, 30)), "\n"); len(lines) != 3 || strings.TrimSpace(lines[0]) != "" || strings.TrimSpace(lines[2]) != "" || strings.TrimSpace(lines[1]) != "ON   OFF" || strings.Index(lines[1], "ON") < 10 {
+		t.Fatalf("automatic download choices were not padded and centered: %q", lines)
 	}
 
 	next, cmd = m.finishCorpus(corpusMsg{root: root, epoch: m.corpusEpoch, operation: m.corpus.operation,
@@ -875,6 +875,43 @@ func TestBaselineAutomaticDatasetPreferenceAndContinuation(t *testing.T) {
 		if cmd != nil || fresh.corpus.busy {
 			t.Fatalf("retired dataset key %q still started work", oldKey)
 		}
+	}
+}
+
+func TestBaselineDatasetMenuAndNotificationShortcut(t *testing.T) {
+	root := baselineRoot(t)
+	m := baselineModel(t, root)
+	m.corpus.progress = &corpusProgress{ID: strings.Repeat("a", 64), Members: 1, Status: "finished", Counts: map[string]int{"complete": 1}}
+	m.corpus.inventoryNotice = "Listed 1 open items; preparing the download."
+	m.corpus.busy, m.corpus.action = true, "run"
+	next, _ := m.finishCorpus(corpusMsg{root: root, epoch: m.corpusEpoch, operation: m.corpus.operation, action: "run", id: m.corpus.progress.ID, progress: *m.corpus.progress})
+	m = next.(model)
+	if strings.Contains(m.datasetText(), "preparing the download") {
+		t.Fatal("completed download retained its preparation notice")
+	}
+	menuText := ansi.Strip(m.datasetText())
+	if !strings.Contains(menuText, "Automatic download\n\n") || !strings.Contains(menuText, "ON starts at startup and after a backlog refresh.") || strings.Contains(menuText, "Press o to toggle.") || strings.Contains(menuText, "· Full cache management") {
+		t.Fatal("dataset toggle spacing, guidance, or title did not match the menu")
+	}
+	for _, removed := range []string{"update reuse within", "Updates at saved item checkpoints", "Analyze with an agent", "Download limits", "request allowance", "Local data:"} {
+		if strings.Contains(menuText, removed) {
+			t.Fatalf("dataset menu retained removed guidance: %q", removed)
+		}
+	}
+	lines := strings.Split(ansi.Strip(m.datasetView()), "\n")
+	if len(lines) != m.mainHeight() || !strings.Contains(lines[len(lines)-1], "Reuse eligible data within one day") || !strings.Contains(lines[len(lines)-1], "storage ceiling 5 GB") {
+		t.Fatalf("dataset footer was not fixed to the pane bottom: %q", lines)
+	}
+
+	next, _ = m.openNotifications()
+	m = next.(model)
+	m = baselineSend(m, tea.KeyPressMsg{Text: "f"})
+	if !m.corpus.open || m.notifications.open == true || !m.corpus.returnToNotifications {
+		t.Fatal("f did not open the dataset from Notifications")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.corpus.open || !m.notifications.open {
+		t.Fatal("closing the dataset did not return to Notifications")
 	}
 }
 

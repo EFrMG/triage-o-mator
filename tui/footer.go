@@ -183,10 +183,10 @@ func (m model) contextFooterGroups() []footerGroup {
 				}
 				proposal.hints = append(proposal.hints, hint{"w", "track comments"}, hint{"d", dismiss})
 			}
-			return []footerGroup{proposal, group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
+			return []footerGroup{proposal, group("Navigation", bind("dataset", keys.Corpus), hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
 		}
 		if m.notifications.reviewBusy {
-			return []footerGroup{group("Notifications", hint{"", "preparing exact review…"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+			return []footerGroup{group("Notifications", hint{"", "preparing exact review…"}), group("Navigation", bind("dataset", keys.Corpus), hint{"Esc/h", "back"}, hint{"q", "quit"})}
 		}
 		notifications := group("Notifications", hint{"j/k/Tab", "select"}, hint{"Space", "tick proposal"}, hint{"a/A", "review closures"}, hint{"Enter/l/→", "open"})
 		choices := m.notifications.choices()
@@ -223,7 +223,7 @@ func (m model) contextFooterGroups() []footerGroup {
 			}
 		}
 		notifications.hints = append(notifications.hints, hint{"d", dismiss})
-		return []footerGroup{notifications, group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+		return []footerGroup{notifications, group("Navigation", bind("dataset", keys.Corpus), hint{"Esc/h", "back"}, hint{"q", "quit"})}
 	case m.corpus.open:
 		if m.corpus.busy {
 			return []footerGroup{group("Download", hint{"o", "automatic ON/OFF"}, bind("stop", keys.CorpusStop)), group("Navigation", bind("close", keys.Back, keys.Corpus))}

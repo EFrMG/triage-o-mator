@@ -556,20 +556,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Refresh), key.Matches(msg, keys.RefreshFull):
 		return m.startRefresh(key.Matches(msg, keys.RefreshFull))
 	case key.Matches(msg, keys.Corpus):
-		if m.noInstall() {
-			return m, nil
-		}
-		m.corpus.open = true
-		if !m.corpus.busy {
-			m.corpus.operation++
-			if m.corpusObserverLifecycle == nil {
-				m.corpusObserverLifecycle = &readLifecycle{}
-			}
-			m.corpusObserverLifecycle.stop()
-			m.corpusObserverLifecycle.current = &readProcess{}
-			return m, corpusCommand(m.installRoot, m.repo, m.corpusEpoch, m.corpus, "restore", m.corpusObserverLifecycle.current)
-		}
-		return m, nil
+		return m.openCorpus()
 	case key.Matches(msg, keys.Group):
 		return m.openGroups()
 	case key.Matches(msg, keys.Search) && m.focus == FocusList && m.listReady:

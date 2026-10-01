@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -49,7 +48,6 @@ type datasetUsage struct {
 }
 
 type corpusUI struct {
-	usage                   *datasetUsage
 	preparing               bool
 	reuseID                 string
 	automatic, autoRestore  bool
@@ -58,9 +56,9 @@ type corpusUI struct {
 	autoBefore, autoStalls  int
 	preferenceProblem       string
 	action, progressProblem string
-	previousRun             string
 	observing               bool
 	open, busy              bool
+	returnToNotifications   bool
 	snapshot, id            string
 	inventoryNotice         string
 	offset                  int
@@ -173,10 +171,6 @@ func (m model) startCorpus(action string) (tea.Model, tea.Cmd) {
 	}
 	m.corpus.busy = true
 	m.corpus.action, m.corpus.progressProblem, m.corpus.observing = action, "", false
-	m.corpus.previousRun = ""
-	if m.corpus.progress != nil && m.corpus.progress.LastRun != nil {
-		m.corpus.previousRun = m.corpus.progress.LastRun.StartedAt
-	}
 	m.corpus.operation++
 	m.corpus.observation++
 	m.corpusObserverLifecycle.stop()
@@ -199,6 +193,10 @@ func (m model) handleCorpusKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if key.Matches(msg, keys.Back, keys.Corpus) {
 		m.corpus.open = false
+		if m.corpus.returnToNotifications {
+			m.corpus.returnToNotifications = false
+			return m.openNotifications()
+		}
 		return m, nil
 	}
 	if msg.String() == "o" {
@@ -227,6 +225,23 @@ func (m model) handleCorpusKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.startCorpus("handoff")
 	}
 	m.corpus.offset = 0
+	return m, nil
+}
+
+func (m model) openCorpus() (tea.Model, tea.Cmd) {
+	if m.noInstall() {
+		return m, nil
+	}
+	m.corpus.open = true
+	if !m.corpus.busy {
+		m.corpus.operation++
+		if m.corpusObserverLifecycle == nil {
+			m.corpusObserverLifecycle = &readLifecycle{}
+		}
+		m.corpusObserverLifecycle.stop()
+		m.corpusObserverLifecycle.current = &readProcess{}
+		return m, corpusCommand(m.installRoot, m.repo, m.corpusEpoch, m.corpus, "restore", m.corpusObserverLifecycle.current)
+	}
 	return m, nil
 }
 
@@ -263,6 +278,9 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.err != nil {
 		m.corpus.preparing = false
+		if msg.action == "create" || msg.action == "run" {
+			m.corpus.inventoryNotice = ""
+		}
 		m.corpus.autoQueued, m.corpus.autoRestore = false, false
 		m.corpus.retryHard = false
 		if msg.action == "capture" {
@@ -277,8 +295,7 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if msg.action == "usage" {
-		m.corpus.usage = msg.usage
-		m.status = "Local cache size measured."
+		m.status = fmt.Sprintf("Local storage: %.2f / %.2f GB (%d files)", float64(msg.usage.Total)/1e9, float64(msg.usage.Limit)/1e9, msg.usage.Files)
 		if m.corpus.autoQueued {
 			return m.requestAutomaticCorpus()
 		}
@@ -340,6 +357,9 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 		return m.startCorpus("run")
 	}
 	m.corpus.preparing = false
+	if msg.action == "create" || msg.action == "run" {
+		m.corpus.inventoryNotice = ""
+	}
 	m.status = "Dataset: " + msg.progress.Status + "."
 	if msg.action == "run" && m.corpus.automatic && msg.progress.Status == "stopped" && msg.progress.LastRun != nil && autoResumeReason(msg.progress.LastRun.Reason) {
 		if autoProcessed(&msg.progress) <= m.corpus.autoBefore {
@@ -382,8 +402,13 @@ func (m model) datasetPrompt() string {
 func (m model) datasetScroll(text string) string {
 	lines := strings.Split(ansi.Wrap(text, m.menuWidth(), ""), "\n")
 	height := m.mainHeight()
-	offset := minInt(m.corpus.offset, maxInt(len(lines)-height, 0))
-	return inset(strings.Join(lines[offset:minInt(offset+height, len(lines))], "\n"))
+	bodyHeight := maxInt(height-1, 0)
+	offset := minInt(m.corpus.offset, maxInt(len(lines)-bodyHeight, 0))
+	visible := append([]string{}, lines[offset:minInt(offset+bodyHeight, len(lines))]...)
+	for len(visible) < bodyHeight {
+		visible = append(visible, "")
+	}
+	return inset(strings.Join(append(visible, mutedText(datasetFooter(m.menuWidth()))), "\n"))
 }
 
 func (m model) datasetView() string {
@@ -391,16 +416,27 @@ func (m model) datasetView() string {
 }
 
 func (m model) corpusScrollLimit() int {
-	return maxInt(len(strings.Split(ansi.Wrap(m.datasetText(), m.menuWidth(), ""), "\n"))-m.mainHeight(), 0)
+	return maxInt(len(strings.Split(ansi.Wrap(m.datasetText(), m.menuWidth(), ""), "\n"))-maxInt(m.mainHeight()-1, 0), 0)
+}
+
+func datasetFooter(width int) string {
+	left := "Reuse eligible data within one day"
+	right := "storage ceiling 5 GB"
+	if width <= ansi.StringWidth(left)+ansi.StringWidth(right) {
+		left = ansi.Truncate(left, maxInt(width-ansi.StringWidth(right)-1, 1), "…")
+	}
+	right = ansi.Truncate(right, maxInt(width-ansi.StringWidth(left)-1, 1), "…")
+	return ansi.Truncate(left+strings.Repeat(" ", maxInt(width-ansi.StringWidth(left)-ansi.StringWidth(right), 1))+right, width, "…")
 }
 
 func (m model) datasetText() string {
 	c := m.corpus
 	heading := lipgloss.NewStyle().Bold(true).Foreground(focusedBorderColor)
-	text := titleBar(singleLine(m.repo), "· Full cache management for local search & comparison", m.menuWidth()) + "\n\n"
+	subtitle := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Render("Full cache management for local search & comparison")
+	text := ansi.Truncate(titleBar(singleLine(m.repo), "", m.menuWidth())+"  "+subtitle, m.menuWidth(), "…") + "\n\n"
 	text += heading.Render("Automatic download") + "\n"
-	text += datasetAutoToggle(c.automatic, m.menuWidth()) + "\n"
-	text += mutedText("Press o to toggle. ON starts at startup and after a backlog refresh.") + "\n\n"
+	text += "\n" + datasetAutoToggle(c.automatic, m.menuWidth()) + "\n\n"
+	text += mutedText("ON starts at startup and after a backlog refresh.") + "\n\n"
 	if c.preferenceProblem != "" {
 		text += lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render(c.preferenceProblem) + "\n\n"
 	}
@@ -425,23 +461,9 @@ func (m model) datasetText() string {
 		done := p.Counts["complete"] + p.Counts["gaps"] + p.Counts["error"]
 		text += progressBar(minInt(done, p.Members), p.Members, minInt(m.menuWidth()-2, 28)) + fmt.Sprintf(" %d/%d items processed\n\n", done, p.Members)
 		text += fmt.Sprintf("Available at last check %d · incomplete %d · pending %d · failed %d\n", p.Counts["complete"], p.Counts["gaps"], p.Counts["pending"]+p.Counts["running"], p.Counts["error"])
-		text += mutedText(fmt.Sprintf("%s · %s · update reuse within %g hours", singleLine(p.Scope), singleLine(p.Profile), float64(p.MaxAge)/3600)) + "\n"
 		if p.UpdatedAt != "" {
 			text += mutedText("Last checkpoint: "+singleLine(p.UpdatedAt)) + "\n"
 		}
-		label, requests, budget := "Next run", 0, datasetRequestBudget
-		if p.LastRun != nil {
-			label, requests, budget = "Last run", p.LastRun.Requests, p.LastRun.Budget
-		}
-		if c.busy && c.action == "run" {
-			label = "This run"
-			if p.LastRun == nil || p.LastRun.StartedAt == c.previousRun {
-				requests, budget = 0, datasetRequestBudget
-			}
-		}
-		text += "\n" + heading.Render(label+" · request allowance") + "\n\n"
-		text += progressBar(minInt(maxInt(requests, 0), budget), budget, minInt(m.menuWidth()-2, 28)) + fmt.Sprintf(" %d/%d requests\n\n", requests, budget)
-		text += mutedText("Saved at item checkpoints, not a live request counter.") + "\n"
 		if p.LastRun != nil && p.LastRun.Reason != "" && !(c.busy && c.action == "run") {
 			text += lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("Stopped: "+singleLine(p.LastRun.Reason)) + "\n"
 		}
@@ -458,7 +480,6 @@ func (m model) datasetText() string {
 		}
 	}
 	if c.progress != nil {
-		text += mutedText("Updates at saved item checkpoints; processed includes gaps and failures.") + "\n"
 		if c.inventoryNotice != "" {
 			text += singleLine(c.inventoryNotice) + "\n"
 		}
@@ -466,29 +487,17 @@ func (m model) datasetText() string {
 	if c.progressProblem != "" {
 		text += c.progressProblem + "\n"
 	}
-	text += "\n\n" + heading.Render("Analyze with an agent") + "\n"
-	text += "Copy the agent prompt, then paste it into a session with access to this checkout.\n"
-	text += "\n\n"
-	text += heading.Render("Download limits") + "\n\n"
-	text += fmt.Sprintf("Listing  %d GitHub requests\n", inventoryRequestBudget) + mutedText("Fixed ceiling to discover open items.") + "\n\n"
-	text += fmt.Sprintf("Item data  %d requests per run\n", datasetRequestBudget) + mutedText("The shared allowance covers batched API reads and Git transfers.") + "\n\n"
-	text += mutedText("A request limit saves progress; ON continues from its checkpoint.") + "\n"
-	text += "Reuse eligible data within one day · storage ceiling 5 GB\n"
-	if c.usage != nil {
-		text += fmt.Sprintf("Local storage: %.2f / %.2f GB (%d files)\n", float64(c.usage.Total)/1e9, float64(c.usage.Limit)/1e9, c.usage.Files)
-	}
-	text += mutedText("Updates include newly opened items. Full downloads start with PRs; resume tries pending items before gaps.") + "\n"
-	text += mutedText("Local data: "+filepath.Join(m.installRoot, "data", m.repo, "cache")) + "\n"
-	return text
+	return strings.TrimRight(text, "\n")
 }
 
 func datasetAutoToggle(automatic bool, width int) string {
-	selected := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Background)).Background(lipgloss.Color(currentTheme.Accent)).Bold(true)
-	on, off := "ON", "OFF"
+	selected := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Background)).Background(lipgloss.Color(currentTheme.Accent)).Bold(true).Padding(1, 1)
+	plain := lipgloss.NewStyle().Padding(1, 1)
+	on, off := plain.Render("ON"), plain.Render("OFF")
 	if automatic {
-		on = selected.Render(on)
+		on = selected.Render("ON")
 	} else {
-		off = selected.Render(off)
+		off = selected.Render("OFF")
 	}
-	return lipgloss.PlaceHorizontal(maxInt(width, 1), lipgloss.Center, on+" "+off)
+	return lipgloss.PlaceHorizontal(maxInt(width, 1), lipgloss.Center, lipgloss.JoinHorizontal(lipgloss.Top, on, " ", off))
 }

@@ -1044,7 +1044,13 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		if i > 0 {
 			fmt.Fprintln(&b)
 		}
-		fmt.Fprintf(&b, "%s\n", inset(target.Render(fmt.Sprintf("PR #%d · %s", row.Number, sanitize(row.Title)))))
+		itemHeading := fmt.Sprintf("PR #%d · %s", row.Number, sanitize(row.Title))
+		if styled, ok := styledItemHeading(itemHeading, lipgloss.Color(currentTheme.Info), nil); ok {
+			itemHeading = styled
+		} else {
+			itemHeading = target.Render(itemHeading)
+		}
+		fmt.Fprintf(&b, "%s\n", inset(itemHeading))
 		if len(n.review.Plan.Proposals) > 1 {
 			fmt.Fprintf(&b, "%s\n", inset(muted.Render(fmt.Sprintf("%d of %d", i+1, len(n.review.Plan.Proposals)))))
 		}
@@ -1113,24 +1119,48 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 			fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(row.Rejection.By)+" · At: "+sanitize(row.Rejection.At), textWidth)))
 			fmt.Fprintf(&b, "%s\n", inset(wrapText(orPlaceholder(sanitize(row.Rejection.Reason), "(no reason given)"), textWidth)))
 		}
-		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Observed PR revision")))
-		fmt.Fprintf(&b, "%s\n", inset(muted.Render("Head: "+sanitize(row.HeadSHA))))
-		fmt.Fprintf(&b, "%s\n", inset(muted.Render("Updated: "+sanitize(row.UpdatedAt))))
 		if row.Outcome != nil {
 			fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Previous attempt")))
 			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Comment: "+sanitize(row.Outcome.Comment.Status))))
 			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Close: "+sanitize(row.Outcome.StateChange.Status))))
 			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Write request: "+sanitize(row.Outcome.RequestID))))
 		}
+		if len(n.review.Plan.Proposals) > 1 {
+			fmt.Fprintf(&b, "\n%s\n", inset(muted.Render(proposalRevisionFooter(row, textWidth))))
+		}
 	}
-	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(m.mainHeight()))
+	height := m.mainHeight()
+	if len(n.review.Plan.Proposals) == 1 {
+		height = maxInt(height-1, 1)
+	}
+	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(height))
 	vp.SetContent(b.String())
 	vp.SetYOffset(n.reviewScroll)
 	return vp
 }
 
+func proposalRevisionFooter(row autoCloseRow, width int) string {
+	updated := sanitize(row.UpdatedAt)
+	if len(updated) >= 20 && updated[10] == 'T' {
+		updated = updated[:10] + " " + updated[11:16] + " UTC"
+	}
+	left := "Updated: " + orPlaceholder(updated, "unknown")
+	right := "Head: " + orPlaceholder(sanitize(row.HeadSHA), "unknown")
+	if width <= ansi.StringWidth(left)+ansi.StringWidth("Head: ")+1 {
+		left = ansi.Truncate(left, maxInt(width/2, 1), "…")
+	}
+	right = ansi.Truncate(right, maxInt(width-ansi.StringWidth(left)-1, 1), "…")
+	return left + strings.Repeat(" ", maxInt(width-ansi.StringWidth(left)-ansi.StringWidth(right), 1)) + right
+}
+
 func (m model) autoCloseReviewView() string {
-	return m.autoCloseReviewViewport().View()
+	view := m.autoCloseReviewViewport().View()
+	if m.notifications.review == nil || len(m.notifications.review.Plan.Proposals) != 1 {
+		return view
+	}
+	row := m.notifications.review.Plan.Proposals[0]
+	footer := proposalRevisionFooter(row, maxInt(m.cardWidth()-1, 1))
+	return view + "\n" + inset(mutedText(footer))
 }
 
 func renderNotificationChoice(n notificationsUI, choice notificationChoice, card func(string, string, cardMark)) {

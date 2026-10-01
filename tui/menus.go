@@ -8,6 +8,45 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+func itemHeadingParts(value string) (lead, number, title string, ok bool) {
+	if strings.HasPrefix(value, "✓ ") {
+		lead, value = "✓ ", strings.TrimPrefix(value, "✓ ")
+	}
+
+	for _, prefix := range []string{"PR #", "Issue #", "ISSUE #", "pr #", "issue #", "#"} {
+		if !strings.HasPrefix(value, prefix) {
+			continue
+		}
+		end := len(prefix)
+		for end < len(value) && value[end] >= '0' && value[end] <= '9' {
+			end++
+		}
+		if end == len(prefix) || end < len(value) && value[end] != ' ' && value[end] != ':' {
+			return "", "", "", false
+		}
+		return lead, value[:end], value[end:], true
+	}
+
+	return "", "", "", false
+}
+
+func styledItemHeading(value string, foreground, background color.Color) (string, bool) {
+	lead, number, title, ok := itemHeadingParts(value)
+	if !ok {
+		return "", false
+	}
+
+	style := lipgloss.NewStyle().Foreground(foreground)
+	if background != nil {
+		style = style.Background(background)
+	}
+	start := ""
+	if lead != "" {
+		start = style.Render(lead)
+	}
+	return start + style.Bold(true).Render(number) + style.Bold(false).Render(title), true
+}
+
 // Shared building blocks for the menu screens (Batches, Duplicates, Switch Repo): a title bar like the lists', and two-line "cards" where the selected one gets a soft-accent border and the selection background.
 
 // titleBar is the screen title in the list title's pill style, then a muted subtitle.
@@ -55,7 +94,23 @@ func markedCard(first, second string, mark cardMark, selected bool, width int) s
 		secondLine = lead + secondStyle.Width(rest).PaddingLeft(1).Render(ansi.Truncate(second, rest-3, "…"))
 	}
 
-	return top + "\n" + firstStyle.Render(ansi.Truncate(first, inner, "…")) + "\n" + secondLine + "\n" + bottom
+	if _, _, _, item := itemHeadingParts(ansi.Strip(first)); item {
+		first = ansi.Truncate(sanitize(first), inner, "…")
+		foreground := color.Color(lipgloss.Color(currentTheme.Foreground))
+		var background color.Color
+		if selected {
+			foreground = focusedBorderColor
+			background = themeOpacity(currentTheme.Selection, opacityMedium)
+		}
+		if styled, ok := styledItemHeading(first, foreground, background); ok {
+			firstStyle = firstStyle.Bold(false)
+			first = styled
+		}
+	} else {
+		first = ansi.Truncate(first, inner, "…")
+	}
+
+	return top + "\n" + firstStyle.Render(first) + "\n" + secondLine + "\n" + bottom
 }
 
 // continueStyleAfterReset keeps nested styled spans, such as a progress bar, from dropping the selected card's foreground and background for the text that follows them.

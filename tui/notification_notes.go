@@ -48,12 +48,12 @@ func proposalNotes(context *autoCloseContext) []proposalNote {
 			add(row.ID, row.Fields, "reviewer_notes", "Reviewer notes")
 			add(row.ID, row.Fields, "agent_notes", "Agent notes")
 		case "group":
-			add(row.ID, row.Fields, "description", "Group: "+contextField(row.Fields, "title"))
+			add(row.ID, row.Fields, "description", "Group guidance · "+contextField(row.Fields, "title"))
 		case "member":
 			if row.Selected {
-				label := "Member notes"
+				label := "Member note"
 				if by := contextField(row.Fields, "updated_by"); by != "" {
-					label += " · " + by
+					label += " · By: " + by
 				}
 				add(row.ID, row.Fields, "notes", label)
 			}
@@ -136,7 +136,7 @@ func autoCloseNotesCmd(root, repo string, generation, request uint64, number int
 			if output.Len() > 0 {
 				output.WriteString("\n\n")
 			}
-			fmt.Fprintf(&output, "%s\n%s", note.label, content)
+			fmt.Fprintf(&output, "## %s\n\n%s", note.label, content)
 		}
 		if output.Len() == 0 {
 			output.WriteString("No local notes on this context page.")
@@ -201,7 +201,7 @@ func (m model) proposalNotesViewport() viewport.Model {
 	} else if m.notifications.notesError != "" {
 		content = m.notifications.notesError
 	}
-	vp.SetContent(wrapText(sanitize(content), width))
+	vp.SetContent(renderMarkdownWithLineBreaks(content, width, true))
 	vp.SetYOffset(m.notifications.notesScroll)
 	return vp
 }

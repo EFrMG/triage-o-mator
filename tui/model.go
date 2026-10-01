@@ -592,8 +592,12 @@ func (m model) itemView() string {
 		}
 	}
 
-	header := lipgloss.NewStyle().Bold(true).Render(ansi.Truncate(singleLine(title), w, "…")) + "\n" +
-		ansi.Truncate(strings.Join(meta, mutedText(" · ")), w, "…")
+	itemTitle := ansi.Truncate(singleLine(title), w, "…")
+	heading := lipgloss.NewStyle().Bold(true).Render(itemTitle)
+	if styled, ok := styledItemHeading(itemTitle, lipgloss.Color(currentTheme.Foreground), nil); ok {
+		heading = styled
+	}
+	header := heading + "\n" + ansi.Truncate(strings.Join(meta, mutedText(" · ")), w, "…")
 	tabs := m.detail.TabBar(w, m.form.focused == fieldContent || m.detail.full)
 	content := lipgloss.NewStyle().Width(m.detail.width).Height(m.detail.height).MaxHeight(m.detail.height).Render(m.detail.View())
 

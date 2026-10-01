@@ -940,7 +940,7 @@ else:
 	if len(choices) != 1 || choices[0].kind != "item" || choices[0].key != (Key{Kind: "pr", Number: 3}) || !m.notifications.choiceNeeds(choices[0]) {
 		t.Fatalf("notification sources were not grouped: %+v", choices)
 	}
-	if strings.Count(m.notificationsView(), "PR #3: Fixture") != 1 {
+	if strings.Count(ansi.Strip(m.notificationsView()), "PR #3: Fixture") != 1 {
 		t.Fatal("PR appears more than once in Notifications")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Text: "1"})
@@ -1445,6 +1445,8 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	if err := json.Unmarshal([]byte(`{"number":3,"title":"Fixture PR","target":"https://github.com/owner/repo/pull/3","rationale":"Superseded","comment":"Exact closure comment","checkpoint":"proposal-1","status":"pending","active":true,"inputs":{"context_checkpoint":"ctx-1","evidence":[{"kind":"pr","number":3,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}},{"kind":"issue","number":4,"snapshot_id":"snapshot-2","components":{"summary":{"status":"complete"},"comments":{"status":"partial"}}}],"evidence_gaps":["Gap one","Gap two","Gap three","Gap four","Gap five"]}}`), &row); err != nil {
 		t.Fatal(err)
 	}
+	row.HeadSHA = strings.Repeat("a", 40)
+	row.UpdatedAt = "2026-09-30T12:34:56Z"
 
 	m := baselineModel(t, root)
 	m.drafts[Key{Kind: "issue", Number: 1}] = decisionSnapshot{}
@@ -1473,6 +1475,14 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	}
 	if strings.Contains(view, "snapshot-1") || strings.Contains(view, "summary: complete") {
 		t.Fatal("proposal reader displayed technical evidence identifiers or component states")
+	}
+	viewLines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	footer := strings.TrimSpace(viewLines[len(viewLines)-1])
+	if strings.Contains(view, "Observed PR revision") || !strings.Contains(footer, "Updated: 2026-09-30 12:34 UTC") || !strings.HasSuffix(footer, "Head: "+row.HeadSHA) {
+		t.Fatalf("proposal revision was not shown as a bottom footer: %q", footer)
+	}
+	if narrow := proposalRevisionFooter(row, 45); ansi.StringWidth(narrow) != 45 || !strings.Contains(narrow, "…") {
+		t.Fatalf("narrow proposal footer did not preserve both aligned fields: %q", narrow)
 	}
 	copyText, _ := m.yankNotificationProposal(row)
 	for _, expected := range []string{"snapshot-1", "snapshot-2", "--number 3 --checkpoint proposal-1", "Not found: Issue #4 · comments", "Gap one", "Current guidance and feedback:"} {
@@ -1541,7 +1551,8 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 		t.Fatal("longer local guidance was not available from the proposal")
 	}
 	m = baselineSend(m, notesCmd().(autoCloseNotesMsg))
-	if !strings.Contains(ansi.Strip(m.proposalNotesViewport().View()), "across all supported versions") || m.autoCloseReviewView() != underlying {
+	notesView := ansi.Strip(m.proposalNotesViewport().View())
+	if !strings.Contains(notesView, "across all supported versions") || !strings.Contains(notesView, "Group guidance") || !strings.Contains(notesView, "Member note") || m.autoCloseReviewView() != underlying {
 		t.Fatal("floating notes failed to show full text without reflowing the proposal")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Text: "m"})

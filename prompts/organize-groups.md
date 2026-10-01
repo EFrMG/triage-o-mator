@@ -17,6 +17,8 @@ One group, one question. Typical shapes:
 
 Keep each group focused on one substantive question and base context. A coherent set can exceed 15 members; read large sets in bounded chunks. Split by question, not display size, and do not create a group for a single item.
 
+Descriptions and member notes appear directly in the human review UI. Write short paragraphs or lists with the decision, recommendation, material evidence and real gaps. Keep snapshot IDs, checksums, component inventories and zero-count audits in the agent handoff or evidence export; they make the human notes hard to read and are available through the selected evidence tools. Do not omit a gap that could change the decision.
+
 ## 1. Look before creating
 
 1. Name the topic, repository, question and candidate limit with the person who asked. Search only that scope; ask before expanding it or acquiring more evidence than the agreed read budget allows.

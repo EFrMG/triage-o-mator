@@ -110,6 +110,10 @@ class ItemContextTests(Workspace):
                               "--checkpoint", first["checkpoint"], "--max-bytes", "5")
         self.assertEqual(source["text"], "éé")
         self.assertEqual(source["continuation"]["byte_offset"], 4)
+        full_note = self.context("source", "--kind", "pr", "--number", "1", "--row", member["id"], "--field", "notes",
+                                 "--checkpoint", first["checkpoint"], "--max-bytes", "65536")
+        self.assertEqual(full_note["text"], notes)
+        self.assertIsNone(full_note["continuation"])
 
         row["last_synced_at"] = "2026-09-29T03:00:00Z"
         ledger.write_text(json.dumps(row) + "\n")
@@ -158,8 +162,20 @@ class ProposalFeedbackTests(Workspace):
         self.assertEqual(inputs["evidence"][0]["snapshot_id"], snapshot)
         self.assertIn("summary", inputs["evidence"][0]["components"])
         self.assertEqual(inputs["evidence_gaps"], ["Issue #2 has no selected evidence"])
-        self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["inputs"], inputs)
+        approved = self.auto_close("review", "--number", "1")
+        self.assertEqual(approved["plan"]["proposals"][0]["inputs"], inputs)
         self.assertEqual(len(self.calls()), before)
+
+        object_path = next(path for path in (self.root / "data/owner/repo/cache/objects").iterdir() if path.is_file())
+        original_object = object_path.read_bytes()
+        object_path.write_text("{}\n")
+        unavailable = self.auto_close("context", "--number", "1", "--checkpoint", selected["checkpoint"])
+        self.assertFalse(unavailable["current"])
+        self.assertIn("selected evidence", unavailable["reason"])
+        self.auto_close("review", "--number", "1", ok=False)
+        self.auto_close("execute", "--number", "1", "--publish", "--approve", approved["approval"], ok=False)
+        self.assertEqual(len(self.calls()), before)
+        object_path.write_bytes(original_object)
 
         edited_comment = self.root / "edited-comment.md"
         edited_comment.write_text("The maintainer refined this closure comment.\n")

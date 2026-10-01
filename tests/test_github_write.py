@@ -239,6 +239,25 @@ class AutoCloseWriteTests(Workspace):
         second = self.propose(2, "--replace-checkpoint", rows[2]["checkpoint"])
         self.assertNotEqual(second["checkpoint"], rows[2]["checkpoint"])
 
+    def test_successful_group_batch_keeps_remaining_approved_context(self):
+        group = self.json_cli("group", "create", "--title", "Compare fixes", "--by", "maintainer")
+        for number in (1, 2):
+            self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", str(number), "--by", "maintainer")
+
+        packet = self.json_cli("group", "export", group["id"], "--format", "json")
+        handoff = ("--group-id", group["id"], *[part for member in packet["items"] for part in
+                                               ("--member-context", f"{member['kind']}:{member['number']}:{member['local_context']['checkpoint']}")])
+        self.propose(1, *handoff)
+        self.propose(2, *handoff)
+        approved = self.auto_close("review", "--number", "1", "--number", "2")
+        result = self.auto_close("execute", "--number", "1", "--number", "2", "--publish", "--approve", approved["approval"])
+
+        self.assertEqual([row["status"] for row in result["results"]], ["executed", "executed"])
+        self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"] * 2)
+        self.assertEqual({row["number"]: row["status"] for row in self.auto_close("list")["rows"]}, {1: "executed", 2: "executed"})
+        context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
+        self.assertEqual(next(row for row in context["rows"] if row["kind"] == "feedback")["fields"]["kind"]["preview"], "write_outcome")
+
     def test_stale_context_does_not_block_uncertain_write_reconciliation(self):
         proposal = self.propose(1)
         reviewed = self.auto_close("review", "--number", "1")

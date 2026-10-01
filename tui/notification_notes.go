@@ -82,54 +82,42 @@ func autoCloseNotesCmd(root, repo string, generation, request uint64, number int
 		for _, note := range notes {
 			content := note.preview
 			if note.omitted > 0 {
-				var full strings.Builder
-				offset := 0
-				for offset < 65536 {
-					args := []string{"--expected-repo", repo, "source", "--kind", "pr", "--number", strconv.Itoa(number),
-						"--row", note.row, "--field", note.field, "--checkpoint", contextCheckpoint,
-						"--byte-offset", strconv.Itoa(offset), "--max-bytes", "16384"}
-					out, err := runScript(root, "item-context", args...)
-					if err != nil {
-						msg.err = err
-						return msg
-					}
-					var source struct {
-						Repository string `json:"repository"`
-						Item       struct {
-							Kind   string `json:"kind"`
-							Number int    `json:"number"`
-						} `json:"item"`
-						Checkpoint string `json:"checkpoint"`
-						Row        string `json:"row"`
-						Field      string `json:"field"`
-						Text       string `json:"text"`
-						Bytes      struct {
-							Offset   int `json:"offset"`
-							Returned int `json:"returned"`
-						} `json:"bytes"`
-						Continuation *struct {
-							ByteOffset int `json:"byte_offset"`
-						} `json:"continuation"`
-						Requests int `json:"requests"`
-					}
-					if json.Unmarshal([]byte(out), &source) != nil || source.Repository != repo || source.Item.Kind != "pr" || source.Item.Number != number ||
-						source.Checkpoint != contextCheckpoint || source.Row != note.row || source.Field != note.field || source.Requests != 0 ||
-						source.Bytes.Offset != offset || source.Bytes.Returned != len([]byte(source.Text)) {
-						msg.err = fmt.Errorf("local note source changed during read")
-						return msg
-					}
-					full.WriteString(source.Text)
-					if source.Continuation == nil {
-						break
-					}
-					if source.Continuation.ByteOffset <= offset {
-						msg.err = fmt.Errorf("local note source did not advance")
-						return msg
-					}
-					offset = source.Continuation.ByteOffset
+				args := []string{"--expected-repo", repo, "source", "--kind", "pr", "--number", strconv.Itoa(number),
+					"--row", note.row, "--field", note.field, "--checkpoint", contextCheckpoint,
+					"--max-bytes", "65536"}
+				out, err := runScript(root, "item-context", args...)
+				if err != nil {
+					msg.err = err
+					return msg
 				}
-				content = full.String()
-				if offset >= 65536 {
+				var source struct {
+					Repository string `json:"repository"`
+					Item       struct {
+						Kind   string `json:"kind"`
+						Number int    `json:"number"`
+					} `json:"item"`
+					Checkpoint string `json:"checkpoint"`
+					Row        string `json:"row"`
+					Field      string `json:"field"`
+					Text       string `json:"text"`
+					Bytes      struct {
+						Offset   int `json:"offset"`
+						Returned int `json:"returned"`
+					} `json:"bytes"`
+					Continuation *struct {
+						ByteOffset int `json:"byte_offset"`
+					} `json:"continuation"`
+					Requests int `json:"requests"`
+				}
+				if json.Unmarshal([]byte(out), &source) != nil || source.Repository != repo || source.Item.Kind != "pr" || source.Item.Number != number ||
+					source.Checkpoint != contextCheckpoint || source.Row != note.row || source.Field != note.field || source.Requests != 0 ||
+					source.Bytes.Offset != 0 || source.Bytes.Returned != len([]byte(source.Text)) || source.Bytes.Returned > 65536 ||
+					source.Continuation != nil && source.Continuation.ByteOffset != source.Bytes.Returned {
+					msg.err = fmt.Errorf("local note source changed during read")
+					return msg
+				}
+				content = source.Text
+				if source.Continuation != nil {
 					content += "\n\n[More text exists beyond this bounded reader.]"
 				}
 			}

@@ -83,7 +83,7 @@ def load(path, repo):
     return value
 
 
-def feedback(number, repo):
+def feedback(number, repo, completed_batch=None):
     path = proposal_path(number)
     if path.parent.is_symlink():
         raise ValueError("invalid proposal directory")
@@ -147,6 +147,12 @@ def feedback(number, repo):
                 raise ValueError("invalid write outcome record")
             events.append(dict(kind="unreconciled_attempt", request_id=proposal["request_id"], target=proposal["target"],
                                status="write receipt exists; inspect and reconcile before another action"))
+
+    if completed_batch:
+        # Discount only successful writes made earlier in this approved invocation; every other feedback event still changes the checkpoint.
+        events = [event for event in events if not (event["kind"] == "write_outcome" and event["status"] == "executed" and
+                  event["comment_status"] == "succeeded" and event["state_status"] == "succeeded" and
+                  completed_batch.get(event["request_id"]) == event["target"])]
 
     checkpoint = "v1:" + digest(canonical([FEEDBACK_POLICY, repo, number, events])) if events else None
 

@@ -12,7 +12,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 
-from _evidence import canonical, digest
+from _evidence import canonical, digest, validate_payload
 from _auto_close_records import feedback as proposal_feedback, load, proposal_path
 from _item_context import ContextIndex, read as read_item_context
 from _groups import load_group
@@ -111,30 +111,57 @@ def choose(repo, numbers, all_pending):
     return chosen
 
 
-def check_current_context(proposal):
+def selected_evidence(cache, kind, number, snapshot_id):
+    manifest = cache.load_manifest(snapshot_id)
+    record = next((item for item in manifest["items"] if (item["identity"]["kind"], item["identity"]["number"]) == (kind, number)), None)
+    if record is None:
+        raise ValueError("selected evidence item is absent from its snapshot")
+
+    for name, component in record["components"].items():
+        if component["object"] is not None:
+            payload = cache.read_object(component["object"])
+            validate_payload(name, component, kind, payload)
+
+    return dict(kind=kind, number=number, snapshot_id=snapshot_id, repository=manifest["repository"],
+                identity=record["identity"], revision=record["revision"],
+                components={name: dict(status=component["status"], object=component["object"]) for name, component in record["components"].items()})
+
+
+def check_current_context(proposal, completed_batch=None):
     inputs = proposal["inputs"]
-    index = ContextIndex()
+    index = ContextIndex(completed_batch=completed_batch)
     target = index.collect("pr", proposal["number"], include_rows=False)
     if target["checkpoint"] != inputs["context_checkpoint"]:
         raise ValueError(f"local context changed for PR #{proposal['number']}; prepare a fresh proposal and review")
 
     handoff = inputs["group"]
-    if handoff is None:
-        return
+    if handoff is not None:
+        group = load_group(handoff["id"])
+        if group["status"] == "archived" or group["revision"] != handoff["revision"]:
+            raise ValueError(f"group handoff changed for PR #{proposal['number']}; export it and review again")
 
-    group = load_group(handoff["id"])
-    if group["status"] == "archived" or group["revision"] != handoff["revision"]:
-        raise ValueError(f"group handoff changed for PR #{proposal['number']}; export it and review again")
+        members = [(member["kind"], member["number"]) for member in group["members"]]
+        declared = [(member["kind"], member["number"]) for member in handoff["members"]]
+        if members != declared or ("pr", proposal["number"]) not in members:
+            raise ValueError(f"group handoff members changed for PR #{proposal['number']}; export it and review again")
 
-    members = [(member["kind"], member["number"]) for member in group["members"]]
-    declared = [(member["kind"], member["number"]) for member in handoff["members"]]
-    if members != declared or ("pr", proposal["number"]) not in members:
-        raise ValueError(f"group handoff members changed for PR #{proposal['number']}; export it and review again")
+        for member in handoff["members"]:
+            current = index.collect(member["kind"], member["number"], include_rows=False)
+            if current["checkpoint"] != member["checkpoint"]:
+                raise ValueError(f"group member context changed for {member['kind']} #{member['number']}; prepare a fresh proposal and review")
 
-    for member in handoff["members"]:
-        current = index.collect(member["kind"], member["number"], include_rows=False)
-        if current["checkpoint"] != member["checkpoint"]:
-            raise ValueError(f"group member context changed for {member['kind']} #{member['number']}; prepare a fresh proposal and review")
+    if inputs["evidence"]:
+        from _cache import EvidenceCache
+        from _evidence import repository
+
+        cache = EvidenceCache(repository(proposal["repo"], host=proposal["host"]))
+        for selected in inputs["evidence"]:
+            try:
+                verified = selected_evidence(cache, selected["kind"], selected["number"], selected["snapshot_id"])
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                raise ValueError(f"selected evidence for {selected['kind']} #{selected['number']} is unavailable; restore or replace the proposal") from error
+            if verified != selected:
+                raise ValueError(f"selected evidence for {selected['kind']} #{selected['number']} changed; replace the proposal")
 
 
 def context(repo, number, checkpoint, offset, context_checkpoint):
@@ -224,13 +251,7 @@ def declared_inputs(args, repo):
                 raise ValueError("repeated evidence selection")
             seen.add(key)
 
-            manifest = cache.load(parts[2])
-            record = next((item for item in manifest["items"] if (item["identity"]["kind"], item["identity"]["number"]) == key[:2]), None)
-            if record is None:
-                raise ValueError("selected evidence item is absent from its snapshot")
-            evidence.append(dict(kind=key[0], number=key[1], snapshot_id=key[2], repository=manifest["repository"],
-                                 identity=record["identity"], revision=record["revision"],
-                                 components={name: dict(status=component["status"], object=component["object"]) for name, component in record["components"].items()}))
+            evidence.append(selected_evidence(cache, *key))
 
     if not evidence and not args.evidence_gap:
         raise ValueError("declare selected --evidence or an explicit --evidence-gap")
@@ -410,6 +431,7 @@ def execute(repo, numbers, all_pending, approval):
     if approval != prepared["approval"]:
         raise ValueError("proposals changed or approval does not match the exact review")
     results = []
+    completed_batch = {}
     for selected in prepared["plan"]["proposals"]:
         path = proposal_path(selected["number"])
         with guarded_lock(path):
@@ -417,8 +439,9 @@ def execute(repo, numbers, all_pending, approval):
             if proposal["checksum"] != selected["checkpoint"] or proposal["status"] != "pending":
                 raise ValueError("proposal changed during execution; stop and review remaining proposals")
             receipt = DATA_DIR / "writes" / (proposal["request_id"] + ".json")
-            if not receipt.exists():
-                check_current_context(proposal)
+            new_attempt = not receipt.exists()
+            if new_attempt:
+                check_current_context(proposal, completed_batch)
 
             outcome, ok = call_comment(repo, proposal)
             proposal["outcome"] = dict(request_id=proposal["request_id"], comment=outcome["comment"], state_change=outcome["state_change"])
@@ -428,6 +451,8 @@ def execute(repo, numbers, all_pending, approval):
             if proposal["status"] != "executed":
                 print(canonical(dict(results=results)))
                 raise ValueError("write outcome uncertain; inspect GitHub and the saved record before any new proposal")
+            if new_attempt:
+                completed_batch[proposal["request_id"]] = proposal["target"]
 
     return dict(results=results)
 

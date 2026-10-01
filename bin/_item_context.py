@@ -28,7 +28,7 @@ def selected_ledger(matches):
 
 
 class ContextIndex:
-    def __init__(self, ledger_rows=None, groups=None):
+    def __init__(self, ledger_rows=None, groups=None, completed_batch=None):
         self.ledger = {}
         for row in load_ledger() if ledger_rows is None else ledger_rows:
             self.ledger.setdefault((row.get("kind"), row.get("number")), []).append(row)
@@ -47,6 +47,7 @@ class ContextIndex:
             entries.sort(key=lambda entry: entry[0]["id"])
 
         self.feedback = {}
+        self.completed_batch = completed_batch
 
     def collect(self, kind, number, include_rows=True):
         if kind not in ("issue", "pr") or type(number) is not int or number < 1:
@@ -59,7 +60,7 @@ class ContextIndex:
         revision = "v1:" + digest(canonical([POLICY, projection]))
         checkpoint = "v1:" + digest(canonical([POLICY, revision, [(group["id"], group["revision"]) for group, _ in groups]]))
         if kind == "pr" and number not in self.feedback:
-            self.feedback[number] = proposal_feedback(number, REPO)
+            self.feedback[number] = proposal_feedback(number, REPO, self.completed_batch)
         feedback = self.feedback[number] if kind == "pr" else dict(checkpoint=None, events=[])
         if feedback["checkpoint"] is not None:
             checkpoint = "v2:" + digest(canonical([POLICY, checkpoint, feedback["checkpoint"]]))
@@ -131,7 +132,7 @@ def read(kind, number, offset=0, limit=10, checkpoint=None):
 
 
 def source(kind, number, row_id, field, checkpoint, byte_offset=0, max_bytes=4096):
-    window(byte_offset, max_bytes, 16384)
+    window(byte_offset, max_bytes, 65536)
     context = collect(kind, number)
     if checkpoint != context["checkpoint"]:
         raise ValueError("local context changed; restart at offset zero")

@@ -105,7 +105,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onStatusTick()
 
 	case fetchSyncDoneMsg:
-		if msg.repo != "" && msg.repo != m.repo {
+		if msg.repo != "" && msg.repo != m.repo || msg.root != "" && msg.root != m.installRoot {
 			return m, nil
 		}
 		m.refreshing = false
@@ -133,11 +133,17 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.detail.cache = make(map[Key]EnrichedItem)
 		detailCmd := m.refreshLiveDetail()
+		var autoCmd tea.Cmd
+		if msg.backlog && m.corpus.automatic {
+			var next tea.Model
+			next, autoCmd = m.requestAutomaticCorpus()
+			m = next.(model)
+		}
 		if m.notifications.open {
 			next, notificationCmd := m.openNotifications()
-			return next, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), notificationCmd, detailCmd)
+			return next, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), notificationCmd, detailCmd, autoCmd)
 		}
-		return m, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), detailCmd)
+		return m, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), detailCmd, autoCmd)
 	case trackDoneMsg:
 		return m.finishTracking(msg)
 

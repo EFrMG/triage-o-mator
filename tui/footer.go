@@ -226,9 +226,9 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{notifications, group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
 	case m.corpus.open:
 		if m.corpus.busy {
-			return []footerGroup{group("Download", bind("stop", keys.CorpusStop)), group("Navigation", bind("close", keys.Back, keys.Corpus))}
+			return []footerGroup{group("Download", hint{"o", "automatic ON/OFF"}, bind("stop", keys.CorpusStop)), group("Navigation", bind("close", keys.Back, keys.Corpus))}
 		}
-		return []footerGroup{group("Dataset", hint{"d", "download/update"}, bind("resume", keys.CorpusRun), hint{"y", "copy agent prompt"}, hint{"u", "size"}), group("Limits", bind("items per run", keys.CorpusBudget)), group("Navigation", bind("scroll", keys.Down, keys.Up), bind("close", keys.Back, keys.Corpus))}
+		return []footerGroup{group("Dataset", hint{"o", "automatic ON/OFF"}, hint{"y", "copy agent prompt"}, hint{"u", "size"}), group("Navigation", bind("scroll", keys.Down, keys.Up), bind("close", keys.Back, keys.Corpus))}
 	case m.themePicker.open && m.themePicker.searching:
 		return []footerGroup{group("Search", hint{"type", "theme name"}, hint{"↑/↓", "preview"}, bind("keep", keys.Enter), bind("clear", keys.Cancel)), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.themePicker.open:

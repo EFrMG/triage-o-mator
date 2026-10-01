@@ -107,7 +107,7 @@ class GitHubReader:
         except ValueError as error:
             raise ReadFailure("GitHub returned invalid JSON") from error
 
-    def _request(self, resource, accept="application/vnd.github+json", closing_variables=None, etag=None, graphql_query=None, graphql_variables=None):
+    def _request(self, resource, accept="application/vnd.github+json", closing_variables=None, etag=None, graphql_query=None, graphql_variables=None, empty_graphql_retries=2):
         if self.stopped:
             raise ReadFailure(self.stopped)
 
@@ -182,10 +182,24 @@ class GitHubReader:
             headers["_triage_not_modified"] = True
             return None, headers
 
+        graphql = closing_variables is not None or graphql_query is not None
+        if status == 200 and graphql and not body.strip() and self.stopped:
+            raise ReadFailure(self.stopped)
+        if status == 200 and graphql and not body.strip() and not self.stopped:
+            if empty_graphql_retries > 0 and self.requests < self.budget:
+                return self._request(resource, accept=accept, closing_variables=closing_variables, etag=etag,
+                                     graphql_query=graphql_query, graphql_variables=graphql_variables,
+                                     empty_graphql_retries=empty_graphql_retries - 1)
+            detail = "gh failed" if result.returncode else "GitHub returned no data"
+            raise ReadFailure(f"empty GraphQL response with HTTP 200 ({detail}); retry the saved download later")
+
         # gh exits nonzero for GraphQL errors even with HTTP 200; let the fixed-query reader inspect them and stop on rate limiting.
         graphql_errors = False
-        if result.returncode and status == 200 and (closing_variables is not None or graphql_query is not None):
-            data = self._json(body)
+        if result.returncode and status == 200 and graphql:
+            try:
+                data = self._json(body)
+            except ReadFailure as error:
+                raise ReadFailure("gh failed on a GraphQL read with HTTP 200 and an unusable response") from error
             graphql_errors = isinstance(data, dict) and bool(data.get("errors"))
 
         if (result.returncode and not graphql_errors) or status != 200:

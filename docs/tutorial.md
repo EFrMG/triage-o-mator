@@ -111,7 +111,7 @@ A group collects related items so maintainers can decide on them together ([grou
 ## 10. Build deeper offline context when needed
 
 - Press `f` from the overview, a list, or an item to open **Local dataset**. Opening it makes no GitHub request.
-- `d` freezes the open backlog and begins downloading its supported evidence. `n` chooses an item limit, `r` resumes the current download, `u` measures cache size, and `y` copies the agent prompt.
+- `o` toggles the centered **ON OFF** automatic download choice for this repository. ON starts after startup and backlog refresh, resumes an unfinished selected dataset, and continues across saved checkpoints without an item limit. Hard errors and rate limits pause it; after resolving one, turn OFF and ON to retry. `u` measures cache size, and `y` copies the agent prompt.
 - Saved checkpoint counts refresh while downloading. `x` cancels the operation; `Esc` closes **Local dataset** without stopping it.
 
 Counts describe saved outcomes, not complete or current coverage. Custom corpus scopes and profiles remain available through the cache CLI; see [frozen corpus acquisition](evidence-reference.md#frozen-corpus-acquisition). Dataset work changes no sync, decision, or approval state.

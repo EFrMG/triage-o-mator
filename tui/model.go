@@ -189,6 +189,12 @@ func newModel(installRoot, repo string, taxonomy Taxonomy, reviewer string, item
 		refreshStatus: startingFetch,
 		statusAt:      time.Now(),
 	}
+	var preferenceError error
+	m.corpus.automatic, preferenceError = loadCorpusAuto(installRoot, repo)
+	if preferenceError != nil {
+		m.corpus.preferenceProblem = "Automatic download preference unavailable; defaulting to OFF."
+		m.recordError("Automatic download preference unavailable", preferenceError)
+	}
 	themeTextarea(&m.form.reason)
 	themeInput(&m.repoInput)
 	themeInput(&m.searchInput)
@@ -820,6 +826,12 @@ func (m *model) switchRepo(repo string) tea.Cmd {
 	m.corpusObserverLifecycle.stop()
 	m.corpusEpoch++
 	m.corpus = corpusUI{}
+	automatic, preferenceError := loadCorpusAuto(m.installRoot, repo)
+	m.corpus.automatic = automatic
+	if preferenceError != nil {
+		m.corpus.preferenceProblem = "Automatic download preference unavailable; defaulting to OFF."
+		m.recordError("Automatic download preference unavailable", preferenceError)
+	}
 	items, err := LoadLedger(m.installRoot, repo)
 	if err != nil {
 		m.failErr("Couldn't read the ledger", err)

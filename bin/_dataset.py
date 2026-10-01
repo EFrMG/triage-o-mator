@@ -19,7 +19,7 @@ def handoff(cache, identifier=None):
     if identifier is None:
         target = cache.path("dataset.json")
         if not target.exists():
-            return dict(repository=cache.identity, corpus_id=None, requests=0, message="No current dataset. Download with f then d, or run bin/cache select CORPUS_ID.")
+            return dict(repository=cache.identity, corpus_id=None, requests=0, message="No current dataset. Open f and turn automatic download ON with o, or run bin/cache select CORPUS_ID.")
 
         identifier = read_record(target, "selected-dataset", ("corpus_id",))["corpus_id"]
 

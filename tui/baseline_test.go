@@ -796,6 +796,88 @@ func TestBaselineEmptyInventoryKeepsPriorCorpus(t *testing.T) {
 	}
 }
 
+func TestBaselineAutomaticDatasetPreferenceAndContinuation(t *testing.T) {
+	root := baselineRoot(t)
+	m := baselineModel(t, root)
+	m.corpus.open = true
+	next, cmd := m.handleCorpusKey(tea.KeyPressMsg{Text: "o"})
+	m = next.(model)
+	if cmd == nil || !m.corpus.automatic || !m.corpus.busy || m.corpus.action != "restore" {
+		t.Fatal("turning automatic download on did not start a dataset check")
+	}
+	if enabled, err := loadCorpusAuto(root, m.repo); err != nil || !enabled {
+		t.Fatalf("automatic download preference was not saved: %v", err)
+	}
+	if shown := ansi.Strip(datasetAutoToggle(true, 30)); strings.TrimSpace(shown) != "ON OFF" || strings.Index(shown, "ON OFF") < 10 {
+		t.Fatalf("automatic download choices were not centered: %q", shown)
+	}
+
+	next, cmd = m.finishCorpus(corpusMsg{root: root, epoch: m.corpusEpoch, operation: m.corpus.operation,
+		observation: m.corpus.observation, action: "restore"})
+	m = next.(model)
+	if cmd == nil || m.corpus.action != "capture" || !m.corpus.preparing {
+		t.Fatal("automatic download did not start inventory capture after restore")
+	}
+
+	fresh := baselineModel(t, root)
+	if !fresh.corpus.automatic {
+		t.Fatal("automatic preference was not restored at startup")
+	}
+	next, cmd = fresh.Update(fetchSyncDoneMsg{root: root, repo: fresh.repo, backlog: true})
+	fresh = next.(model)
+	if cmd == nil || fresh.corpus.action != "restore" || !fresh.corpus.busy {
+		t.Fatal("backlog refresh did not start automatic dataset work")
+	}
+
+	selectedID := strings.Repeat("a", 64)
+	limited := corpusProgress{ID: selectedID, Members: 200, Status: "stopped", Counts: map[string]int{"pending": 200},
+		LastRun: &struct {
+			StartedAt string `json:"started_at"`
+			Budget    int    `json:"request_budget"`
+			Requests  int    `json:"requests"`
+			Reason    string `json:"reason"`
+		}{Reason: "request budget exhausted"}}
+	next, cmd = fresh.finishCorpus(corpusMsg{root: root, epoch: fresh.corpusEpoch, operation: fresh.corpus.operation,
+		observation: fresh.corpus.observation, action: "restore", id: selectedID, progress: limited})
+	fresh = next.(model)
+	if cmd == nil || !fresh.corpus.busy || fresh.corpus.action != "run" {
+		t.Fatal("automatic download did not resume the selected dataset")
+	}
+	limited.Counts = map[string]int{"complete": 100}
+	next, cmd = fresh.finishCorpus(corpusMsg{root: root, epoch: fresh.corpusEpoch, operation: fresh.corpus.operation,
+		action: "run", id: selectedID, progress: limited})
+	fresh = next.(model)
+	if cmd == nil || !fresh.corpus.busy || fresh.corpus.action != "run" {
+		t.Fatal("automatic download did not continue after its request budget")
+	}
+	limited.LastRun.Reason = "Git batch fetch failed; PR code remains incomplete"
+	next, cmd = fresh.finishCorpus(corpusMsg{root: root, epoch: fresh.corpusEpoch, operation: fresh.corpus.operation,
+		action: "run", id: selectedID, progress: limited})
+	fresh = next.(model)
+	if cmd != nil || fresh.corpus.busy {
+		t.Fatal("automatic download retried a hard Git failure")
+	}
+	if handoff := fresh.datasetPrompt(); !strings.Contains(handoff, "Saved coverage: 100 complete") || !strings.Contains(handoff, "Last stop: Git batch fetch failed") {
+		t.Fatal("agent handoff omitted the saved incomplete coverage or stop reason")
+	}
+
+	next, _ = fresh.handleCorpusKey(tea.KeyPressMsg{Text: "o"})
+	fresh = next.(model)
+	if fresh.corpus.automatic {
+		t.Fatal("turning automatic download off did not update the menu")
+	}
+	if enabled, err := loadCorpusAuto(root, fresh.repo); err != nil || enabled {
+		t.Fatalf("automatic OFF preference was not saved: %v", err)
+	}
+	for _, oldKey := range []string{"d", "r", "n"} {
+		next, cmd = fresh.handleCorpusKey(tea.KeyPressMsg{Text: oldKey})
+		fresh = next.(model)
+		if cmd != nil || fresh.corpus.busy {
+			t.Fatalf("retired dataset key %q still started work", oldKey)
+		}
+	}
+}
+
 func TestBaselineAttentionDropsForeignReply(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
 	next, cmd := m.readAttention(attentionLocation{section: "history", number: 1})

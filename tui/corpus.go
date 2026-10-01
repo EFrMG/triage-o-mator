@@ -15,25 +15,10 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-var corpusItemLimits = []int{100, 500, 1000, 5000, 10000, 0}
-
 const inventoryRequestBudget = 500
+const datasetRequestBudget = 100
 const datasetScope = "open-items"
 const datasetProfile = "backlog"
-
-func corpusRequestBudget(itemLimit, members int) int {
-	if itemLimit == 0 {
-		itemLimit = members
-	}
-	return 9*((maxInt(itemLimit, 1)+79)/80) + 2
-}
-
-func corpusItemLimitLabel(itemLimit int) string {
-	if itemLimit == 0 {
-		return "full"
-	}
-	return strconv.Itoa(itemLimit)
-}
 
 type corpusProgress struct {
 	ID         string `json:"corpus_id"`
@@ -67,12 +52,16 @@ type corpusUI struct {
 	usage                   *datasetUsage
 	preparing               bool
 	reuseID                 string
+	automatic, autoRestore  bool
+	retryHard               bool
+	autoQueued              bool
+	autoBefore, autoStalls  int
+	preferenceProblem       string
 	action, progressProblem string
 	previousRun             string
 	observing               bool
 	open, busy              bool
 	snapshot, id            string
-	budget                  int
 	inventoryNotice         string
 	offset                  int
 	operation, observation  uint64
@@ -158,11 +147,7 @@ func corpusCommand(root, repo string, epoch uint64, ui corpusUI, action string, 
 		}
 		args := []string{"corpus-progress", msg.id}
 		if action == "run" {
-			limit := corpusItemLimits[ui.budget]
-			args = []string{"corpus-run", msg.id, "--request-budget", strconv.Itoa(corpusRequestBudget(limit, ui.progress.Members)), "--compact", "--bulk"}
-			if limit > 0 {
-				args = append(args, "--item-limit", strconv.Itoa(limit))
-			}
+			args = []string{"corpus-run", msg.id, "--request-budget", strconv.Itoa(datasetRequestBudget), "--compact", "--bulk"}
 			if !ui.preparing {
 				args = append(args, "--keep-complete")
 			}
@@ -183,6 +168,9 @@ func corpusCommand(root, repo string, epoch uint64, ui corpusUI, action string, 
 }
 
 func (m model) startCorpus(action string) (tea.Model, tea.Cmd) {
+	if action == "run" {
+		m.corpus.autoBefore = autoProcessed(m.corpus.progress)
+	}
 	m.corpus.busy = true
 	m.corpus.action, m.corpus.progressProblem, m.corpus.observing = action, "", false
 	m.corpus.previousRun = ""
@@ -213,6 +201,9 @@ func (m model) handleCorpusKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.corpus.open = false
 		return m, nil
 	}
+	if msg.String() == "o" {
+		return m.toggleAutomaticCorpus()
+	}
 	if key.Matches(msg, keys.CorpusStop) && m.corpus.busy {
 		m.corpusLifecycle.stop()
 		m.status = "Cancelling corpus operation; committed checkpoints remain."
@@ -234,23 +225,6 @@ func (m model) handleCorpusKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.startCorpus("usage")
 	case "y":
 		return m.startCorpus("handoff")
-	}
-	if msg.String() == "d" {
-		m.corpus.offset = 0
-		if m.refreshing {
-			m.status = "Wait for the backlog refresh to finish before downloading the dataset."
-			return m, nil
-		}
-		m.corpus.inventoryNotice = ""
-		m.corpus.preparing, m.corpus.reuseID = true, m.corpus.id
-		return m.startCorpus("capture")
-	}
-	switch {
-	case key.Matches(msg, keys.CorpusBudget):
-		m.corpus.budget = (m.corpus.budget + 1) % len(corpusItemLimits)
-	case key.Matches(msg, keys.CorpusRun) && m.corpus.progress != nil && m.corpus.progress.Members > 0:
-		m.corpus.offset = 0
-		return m.startCorpus("run")
 	}
 	m.corpus.offset = 0
 	return m, nil
@@ -289,6 +263,8 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.err != nil {
 		m.corpus.preparing = false
+		m.corpus.autoQueued, m.corpus.autoRestore = false, false
+		m.corpus.retryHard = false
 		if msg.action == "capture" {
 			m.corpus.inventoryNotice = "Capture failed/cancelled; previous selection retained. Raw publication may have completed: inspect the error details; recover with bin/cache import-inventory offline. No automatic retry or sync."
 		}
@@ -303,6 +279,9 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 	if msg.action == "usage" {
 		m.corpus.usage = msg.usage
 		m.status = "Local cache size measured."
+		if m.corpus.autoQueued {
+			return m.requestAutomaticCorpus()
+		}
 		return m, nil
 	}
 	if msg.action == "restore" {
@@ -312,6 +291,21 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 			m.corpus.id, m.corpus.progress = "", nil
 		}
 		m.status = ""
+		if m.corpus.autoRestore && m.corpus.automatic {
+			m.corpus.autoRestore, m.corpus.autoQueued = false, false
+			retryHard := m.corpus.retryHard
+			m.corpus.retryHard = false
+			if m.corpus.progress != nil && m.corpus.progress.Members > 0 && m.corpus.progress.Status != "finished" {
+				if m.corpus.progress.Status == "pending" || m.corpus.progress.Status == "running" ||
+					m.corpus.progress.Status == "stopped" && m.corpus.progress.LastRun != nil && (autoResumeReason(m.corpus.progress.LastRun.Reason) || retryHard) {
+					return m.startCorpus("run")
+				}
+				m.status = "Download paused after the previous error; inspect it, then turn OFF and ON to retry."
+				return m, nil
+			}
+			m.corpus.preparing, m.corpus.reuseID = true, m.corpus.id
+			return m.startCorpus("capture")
+		}
 		return m, nil
 	}
 	if msg.action == "handoff" {
@@ -321,7 +315,12 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 		}
 		m.corpus.id, m.corpus.progress = msg.id, &msg.progress
 		m.status = "Copying agent prompt…"
-		return m, yankCmd(m.installRoot, m.repo, "agent prompt", m.datasetPrompt())
+		copyCmd := yankCmd(m.installRoot, m.repo, "agent prompt", m.datasetPrompt())
+		if m.corpus.autoQueued {
+			next, autoCmd := m.requestAutomaticCorpus()
+			return next, tea.Batch(copyCmd, autoCmd)
+		}
+		return m, copyCmd
 	}
 	if msg.action == "capture" {
 		m.corpus.snapshot = msg.inventory.Snapshot
@@ -342,6 +341,21 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 	}
 	m.corpus.preparing = false
 	m.status = "Dataset: " + msg.progress.Status + "."
+	if msg.action == "run" && m.corpus.automatic && msg.progress.Status == "stopped" && msg.progress.LastRun != nil && autoResumeReason(msg.progress.LastRun.Reason) {
+		if autoProcessed(&msg.progress) <= m.corpus.autoBefore {
+			m.corpus.autoStalls++
+		} else {
+			m.corpus.autoStalls = 0
+		}
+		if m.corpus.autoStalls < 2 {
+			m.corpus.autoQueued = false
+			return m.startCorpus("run")
+		}
+		m.status = "Automatic download paused because two runs made no item progress. Inspect the saved reason."
+	} else if msg.action == "run" && m.corpus.automatic && msg.progress.Status == "stopped" && msg.progress.LastRun != nil {
+		m.warn("Automatic download paused: " + truncateSentence(msg.progress.LastRun.Reason, 110))
+	}
+	m.corpus.autoQueued = false
 	return m, nil
 }
 
@@ -353,6 +367,14 @@ func (m model) datasetPrompt() string {
 	text := ""
 	text += fmt.Sprintf("Work from the triage install at %q, targeting %s on %s. Read AGENTS.md and prompts/prepare-analysis.md there.\n\n", m.installRoot, m.repo, evidenceHost)
 	text += "Use this saved dataset: " + m.corpus.id + ". Start with bin/cache handoff --corpus " + m.corpus.id + ".\n\n"
+	if p := m.corpus.progress; p != nil {
+		text += fmt.Sprintf("Saved coverage: %d complete, %d incomplete, %d failed, %d pending of %d items; pass status %s.\n",
+			p.Counts["complete"], p.Counts["gaps"], p.Counts["error"], p.Counts["pending"]+p.Counts["running"], p.Members, singleLine(p.Status))
+		if p.LastRun != nil && p.LastRun.Reason != "" {
+			text += "Last stop: " + truncateSentence(singleLine(p.LastRun.Reason), 300) + "\n"
+		}
+		text += "A finished pass does not prove complete or current coverage.\n\n"
+	}
 	text += "Assess what this saved dataset can support. Use the full inventory for broad title and body exploration, then inspect focused downloaded detail where useful. Explain coverage, gaps, source references and which questions the available data can answer. Do not fetch, save decisions or act on GitHub."
 	return text
 }
@@ -376,6 +398,12 @@ func (m model) datasetText() string {
 	c := m.corpus
 	heading := lipgloss.NewStyle().Bold(true).Foreground(focusedBorderColor)
 	text := titleBar(singleLine(m.repo), "· Full cache management for local search & comparison", m.menuWidth()) + "\n\n"
+	text += heading.Render("Automatic download") + "\n"
+	text += datasetAutoToggle(c.automatic, m.menuWidth()) + "\n"
+	text += mutedText("Press o to toggle. ON starts at startup and after a backlog refresh.") + "\n\n"
+	if c.preferenceProblem != "" {
+		text += lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render(c.preferenceProblem) + "\n\n"
+	}
 	activity := ""
 	if c.busy {
 		switch c.action {
@@ -401,14 +429,14 @@ func (m model) datasetText() string {
 		if p.UpdatedAt != "" {
 			text += mutedText("Last checkpoint: "+singleLine(p.UpdatedAt)) + "\n"
 		}
-		label, requests, budget := "Next run", 0, corpusRequestBudget(corpusItemLimits[c.budget], p.Members)
+		label, requests, budget := "Next run", 0, datasetRequestBudget
 		if p.LastRun != nil {
 			label, requests, budget = "Last run", p.LastRun.Requests, p.LastRun.Budget
 		}
 		if c.busy && c.action == "run" {
 			label = "This run"
 			if p.LastRun == nil || p.LastRun.StartedAt == c.previousRun {
-				requests, budget = 0, corpusRequestBudget(corpusItemLimits[c.budget], p.Members)
+				requests, budget = 0, datasetRequestBudget
 			}
 		}
 		text += "\n" + heading.Render(label+" · request allowance") + "\n\n"
@@ -423,7 +451,7 @@ func (m model) datasetText() string {
 			text += "Item counts will appear after the open-item list is ready.\n"
 		} else {
 			text += heading.Render("No download selected") + "\n"
-			text += "Download the backlog to begin.\n"
+			text += "Turn automatic download ON to begin.\n"
 		}
 		if c.inventoryNotice != "" {
 			text += singleLine(c.inventoryNotice) + "\n"
@@ -443,8 +471,8 @@ func (m model) datasetText() string {
 	text += "\n\n"
 	text += heading.Render("Download limits") + "\n\n"
 	text += fmt.Sprintf("Listing  %d GitHub requests\n", inventoryRequestBudget) + mutedText("Fixed ceiling to discover open items.") + "\n\n"
-	text += datasetBudget("Item data", c.budget) + "\n" + mutedText("Items per run; shared allowance covers batched API reads and Git transfers.") + "\n\n"
-	text += mutedText("Limits apply per run. A limit stop saves progress; resume to continue.") + "\n"
+	text += fmt.Sprintf("Item data  %d requests per run\n", datasetRequestBudget) + mutedText("The shared allowance covers batched API reads and Git transfers.") + "\n\n"
+	text += mutedText("A request limit saves progress; ON continues from its checkpoint.") + "\n"
 	text += "Reuse eligible data within one day · storage ceiling 5 GB\n"
 	if c.usage != nil {
 		text += fmt.Sprintf("Local storage: %.2f / %.2f GB (%d files)\n", float64(c.usage.Total)/1e9, float64(c.usage.Limit)/1e9, c.usage.Files)
@@ -454,15 +482,13 @@ func (m model) datasetText() string {
 	return text
 }
 
-func datasetBudget(label string, selected int) string {
-	choices := make([]string, len(corpusItemLimits))
-	for i, limit := range corpusItemLimits {
-		choices[i] = corpusItemLimitLabel(limit)
-		if i == selected {
-			choices[i] = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Background)).Background(focusedBorderColor).Bold(true).Render(" " + choices[i] + " ")
-		} else {
-			choices[i] = mutedText(choices[i])
-		}
+func datasetAutoToggle(automatic bool, width int) string {
+	selected := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Background)).Background(lipgloss.Color(currentTheme.Accent)).Bold(true)
+	on, off := "ON", "OFF"
+	if automatic {
+		on = selected.Render(on)
+	} else {
+		off = selected.Render(off)
 	}
-	return label + "  " + strings.Join(choices, " · ")
+	return lipgloss.PlaceHorizontal(maxInt(width, 1), lipgloss.Center, on+" "+off)
 }

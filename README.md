@@ -93,7 +93,7 @@ Mouse controls work alongside the keys: click a sidebar entry or tab, click a ca
 
 ![flow-3](captures/flow-3.webp)
 
-4. **Build deeper offline context.** **Local dataset** freezes and downloads evidence for the open backlog: descriptions, discussions, PR files, diffs and closing links. An agent can search and compare the saved observations without silently falling back to GitHub; missing or partial evidence remains visible too!
+4. **Build deeper offline context.** **Local dataset** freezes and downloads evidence for the open backlog: descriptions, discussions, PR files, diffs and closing links. Turn automatic download ON in its `f` menu; it starts after startup and backlog refresh and continues through saved checkpoints without an item limit. An agent can search and compare the saved observations without silently falling back to GitHub; missing or partial evidence remains visible too!
 
 ![flow-4](captures/flow-4.webp)
 

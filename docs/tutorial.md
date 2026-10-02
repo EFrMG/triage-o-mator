@@ -1,6 +1,6 @@
 # Tutorial: the triage-o-mator TUI
 
-A tour of the TUI and its controls. Follow the sections in order; each takes a minute or two. The [README](../README.md) explains what the project is. The footer and `?` show the keys available on the current screen.
+A tour of the TUI and its controls. Start with the focused review loop below, then use the sections you need. The [README](../README.md) explains what the project is. The footer and `?` show the keys available on the current screen.
 
 Install it into the repository you want to triage ([install.md](install.md)), then launch it from there:
 
@@ -10,6 +10,13 @@ cd /path/to/your/repository
 ```
 
 Saves, approvals and group edits change your repository's git-tracked ledger and groups for real. To practice, work on a throwaway branch (`git switch -c tutorial`) and drop it afterwards.
+
+## A focused review loop
+
+- **Human first:** Record a decision or notes for a named PR ([step 5](#5-record-a-decision)). Ask an agent to assess it with current `item-context` and selected evidence using the [closure prompt](../prompts/recommend-auto-close.md). It reports why the PR should stay open or saves a closure proposal. In **Notifications**, inspect the exact comment and context, edit with `e`, reject with `d`, or review and approve with `a`. The next agent pass reads any rejection.
+- **Agent first:** Ask an agent to prepare a focused draft group. Edit it in **Groups**, then use `y` for ticked or hovered members, or `Y` for all, to copy a handoff. The agent reads a fresh export and assesses the selected members, including already-triaged ones. Review any resulting PR proposals in **Notifications**.
+
+Group `ready`, ledger `reviewed` and approval to publish an exact GitHub action are separate choices. Changed guidance requires a fresh proposal and review. A saved write attempt needs [reconciliation](comment-plus.md#pending-pr-closure-proposals) before another action.
 
 ## 1. Start from the overview
 
@@ -37,10 +44,10 @@ Terminals smaller than 60×24 show a resize prompt.
 - `/` searches an item list by title words or `#number`.
 - `Space` ticks an item and advances the cursor. An item action then applies to everything ticked, or to the item under the cursor when nothing is ticked. Bulk and destructive actions ask for the same key a second time, except dismissing one notification with `d`.
 
-## 4. Read the complete item
+## 4. Read an item
 
 - Open any item with `Enter`.
-- Its tabs—Body, Agent notes when present, Comments, and Diff for PRs—run across the top. `H`/`L` switch between them, `1`–`4` jump to one, and `Enter` shows one full screen.
+- Its tabs, Body, Agent notes when present, Comments, and Diff for PRs, run across the top. `H`/`L` switch between them, `1`–`4` jump to one, and `Enter` shows one full screen.
 - `o` opens the item on GitHub.
 
 The author below the title is blue; open and closed states are green and red. Each comment shows its creation date at the bottom right in UTC when that date is available. Older saved comments without dates remain undated.
@@ -51,6 +58,7 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 
 - In an untriaged item, `l` moves into the form: Category, Action, Confidence, and Reason.
 - On a choice, `j`/`k` change the value and `Enter` moves to the next field. Category, action, and confidence come from `config/taxonomy.json`; reason is free text.
+- Saved values missing from the current taxonomy stay visible and require an explicit supported choice before saving.
 - `Tab`/`Shift-Tab` or `J`/`K` move between fields. On a choice, `l` opens all values; select with `Enter` or `l`, or close the list with `Esc` or `h`. Printable keys remain text while editing.
 - In most forms, `Ctrl-S` submits from any field; `Esc` cancels.
 - `s` saves through `bin/apply`, attributed to your `git config user.name`. An unchanged placeholder decision or an empty reason needs a second `s`. After saving, you return to the list on the next item.
@@ -60,7 +68,7 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 
 ## 6. Let an agent prepare a batch
 
-- On any screen, `y` copies what is in front of you as Markdown: the item you have open, the ones you ticked, or the one under the cursor. `Y` copies the whole screen's worth—the list, batch, or group. If no clipboard tool is available, the status line shows the export file it wrote instead.
+- On any screen, `y` copies what is in front of you as Markdown: the item you have open, the ones you ticked, or the one under the cursor. `Y` copies the whole screen's worth, such as a list, batch, or group. If no clipboard tool is available, the status line shows the export file it wrote instead.
 - Paste that context into your agent's chat and ask it to investigate, or ask it to "triage 10 items but don't apply them, I'll check them in the TUI." The copied block names the repository, install, and commands needed to read more.
 - Open the result under **Batches**. Each item is prefilled with the agent's proposal and notes.
 - `s` saves a proposal for review, including any changes you make. `S` saves and approves a proposal you have checked. An unchanged proposal retains its original author, with you recorded as reviewer; a changed proposal becomes your revised decision. Agent notes are preserved either way.
@@ -95,14 +103,15 @@ A group collects related items so maintainers can decide on them together ([grou
 
 - In **Groups**, `n` creates one.
 - On any item, `b` adds it to a group with a note; `B` adds it to the last group used.
-- `e` edits a group, including its status: `draft`, `ready` for maintainers, or `archived`.
-- In a group, `e` edits the selected member's note, and `d` twice removes selected members. In the group list, `d` twice deletes the group; archiving keeps its history available. `x` exports a Markdown packet, and `X` also fetches bodies, comments and PR diffs.
+- In the group list, `e` opens a floating editor for Title, Description, Status and Assignee. `Tab` / `Shift-Tab` changes the focused field; `←` / `→` changes Status between `draft`, `ready` for maintainers and `archived`. `Ctrl-P` previews the full text, `Ctrl-E` opens the focused text field in `$EDITOR`, `Ctrl-S` saves and `Esc` discards. Long title and description text stays inside the window.
+- In a group, `e` opens the selected member's note in a floating multiline editor. `Ctrl-P` previews it, `Ctrl-E` opens the draft in `$EDITOR`, `Ctrl-S` saves, and `Esc` discards it. A failed save keeps the draft open. `d` twice removes selected members. In the group list, `d` twice deletes the group; archiving keeps its history available. `x` exports a Markdown packet, and `X` also fetches bodies, comments and PR diffs.
+- After reviewing a group, tick the members for the next agent pass with `Space` and press `y` to copy a proposal handoff. With no ticks, `y` selects the hovered member; `Y` selects every member, including already-triaged ones. The handoff reads a fresh offline group export and copies a concise Markdown summary of current decisions, notes, prior feedback and exact member checkpoints, omitting empty fields. It names the selected scope and the command for the full packet. A changed group requires a refresh before copying. This only copies context; it does not launch an agent or approve a proposal.
 - A ready group does not approve its members. Their individual review states remain visible in reports and exports.
 
 ## 10. Build deeper offline context when needed
 
 - Press `f` from the overview, a list, or an item to open **Local dataset**. Opening it makes no GitHub request.
-- `d` freezes the open backlog and begins downloading its supported evidence. `n` chooses an item limit, `r` resumes the current download, `u` measures cache size, and `y` copies the agent prompt.
+- `o` toggles automatic download for this repository. Turning it ON starts or resumes now; while ON, it also starts after startup and backlog refresh and continues across saved checkpoints without an item limit. Transient HTTP 503 and 504 failures retry within the request budget and can resume automatically from a saved stop. Two runs without new saved evidence pause the download. Hard errors and rate limits pause it; after resolving one, turn OFF and ON to retry. That toggle also resumes a runner interrupted by cancellation. `u` measures cache size, and `y` copies the agent prompt.
 - Saved checkpoint counts refresh while downloading. `x` cancels the operation; `Esc` closes **Local dataset** without stopping it.
 
 Counts describe saved outcomes, not complete or current coverage. Custom corpus scopes and profiles remain available through the cache CLI; see [frozen corpus acquisition](evidence-reference.md#frozen-corpus-acquisition). Dataset work changes no sync, decision, or approval state.
@@ -110,10 +119,12 @@ Counts describe saved outcomes, not complete or current coverage. Custom corpus 
 ## 11. Track follow-up activity
 
 - Press `w` on an issue or PR in a list or item view to track its comments. The app checks tracked items at startup and during a normal refresh with `r`.
-- **Notifications** shows one card per issue or PR. It combines comment tracking, closure proposals and retained activity for that item. A card appears under **Needs attention** while any source needs review, then under **Past actions** once those sources are viewed.
-- Select with `j`/`k` or `Tab`. `v` marks the selected item's viewable sources viewed; one `d` dismisses its local sources. Dismissing a tracked item stops its comment checks. Dismissing retained watch or imported-action activity hides the row without deleting its evidence.
+- **Notifications** shows one card per issue or PR. It combines comment tracking, pending or uncertain closure proposals and retained activity for that item. A card appears under **Needs attention** while any source needs review, then under **Past actions** once those sources are viewed. Rejected proposals leave Notifications but remain in shared proposal history and the next agent's local context.
+- Select with `j`/`k` or `Tab`. `v` marks the selected item's viewable sources viewed. On a pending closure proposal, `d` opens rejection; on other notifications, it dismisses local sources. Dismissing a tracked item stops its comment checks. Dismissing retained watch or imported-action activity hides the row without deleting its evidence.
 - `Enter`, `l`, or `→` opens the selected card. When it has several sources, choose a closure proposal, the current item, retained activity or imported actions from the source list with `j`/`k` and `Enter`. A card with one source opens it directly. Opening the current item makes a fresh GitHub read; the other sources use saved records. Retained PR activity first opens cards containing bounded excerpts; the same keys open a card's PR, while `Esc` or `h` returns to the source list or selected card. Previous and More cards page within Notifications.
-- On closure proposals, `a` in the reader approves the displayed exact plan. On the list, tick proposals with `Space` and press `a` to review them, or `A` to review all active proposals, including viewed ones; press the same key again after review to approve the set. An uncertain outcome stops execution. `d` dismisses a proposal locally without deleting its record.
+- The closure proposal reader shows the exact comment directly below the proposed action, followed by the local decision, group guidance, earlier objection, reconsideration explanation and a short selected-evidence summary. Each selected item is marked complete or names missing components; declared gaps remain visible. Press `y` in the proposal reader or on its Notifications card to copy a compact agent handoff with exact proposal commands, selected snapshot IDs and any gaps. `[`/`]` page local context when it spans several pages. When notes are shortened or reformatted, press `m` for their full text; scroll with `j`/`k` or `Ctrl-D`/`Ctrl-U`. A changed context is flagged and cannot be approved until a new proposal is prepared.
+- On closure proposals, `a` in the reader approves the displayed exact plan after local context loads. On the list, tick proposals with `Space` and press `a` to review them, or `A` to review all active proposals, including viewed ones; press the same key again after review to approve the set. An uncertain outcome stops execution. On a pending proposal, `d` opens the Comments floating window for an optional rejection reason, while `D` opens it directly in `$EDITOR`. After editing, press `Ctrl-S` to reject the proposal and dismiss its notification together. `Esc` cancels before submission. Rejection is attributed and shared, leaves the proposal in history, and prevents approval; an empty reason is allowed. On other notifications, `d` only dismisses the local presentation.
+- Press `e` on a single pending closure proposal to edit its exact comment before approval. `Ctrl-E` opens the draft in `$EDITOR`, and `Ctrl-S` saves the replacement. A failed save keeps the draft. Saving returns to the new proposal for review; an older approval or selected-set plan cannot execute it. The selected evidence and human context remain pinned, and a changed context or prior write attempt stops the edit.
 
 Opening the notification list and retained cards makes no GitHub request. Reading does not mark activity viewed, resolve an appeal, or approve a decision. A refreshed PR and its retained card can describe different moments.
 
@@ -125,7 +136,12 @@ For a requested reassessment from imported closure history through explicit enro
 
 - `bin/report` gathers ready groups and individual human-reviewed decisions. An agent following [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) can turn that report into a concise maintainer brief.
 - Exporting or reporting does not act on GitHub. Labeling, approving, and merging remain separate work.
-- On an item, `c` composes a conversation comment inline, while `C` opens `$EDITOR`. `Ctrl-P` toggles a rendered Markdown preview; `Ctrl-S` approves and publishes the exact target and text. In preview, `C` reopens `$EDITOR`; `Esc` returns to editing. From the inline editor, `Esc` discards the draft.
+
+### Publish approved GitHub actions
+
+The following controls publish only after approval of the exact target, text and state change. See [comment-plus](comment-plus.md) for the dry-run CLI and recovery behavior.
+
+- On an item, `c` composes a conversation comment inline, while `C` opens `$EDITOR`. Once any comment or rejection composer is open, `Ctrl-E` opens its current draft in `$EDITOR` from editing or preview. `Ctrl-P` toggles a rendered Markdown preview; `Ctrl-S` approves and publishes the exact target and text. In preview, `C` also reopens `$EDITOR`; one `Esc` closes the floating window and discards the draft.
 - On an open item, `x` composes an explanatory closing comment inline and `X` uses `$EDITOR`. `Ctrl-S` approves the comment and closure together. After confirmation, the TUI updates the visible state and refreshes the item discussion and ledger.
 - On a closed item, `v` composes a reopening comment inline and `V` uses `$EDITOR`. These keys also work in item lists: select closed items with `Space`, then use one shared comment for all selected items; without a selection, they use the hovered item. For multiple items, the first `Ctrl-S` opens a scrollable review of every target and the comment, and the second approves them. The TUI stops if an outcome is uncertain and reports how many were confirmed open.
 

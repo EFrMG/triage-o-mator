@@ -57,7 +57,7 @@ func (m model) footerGroups() []footerGroup {
 }
 
 func (m model) contextFooterGroups() []footerGroup {
-	if m.width < 60 || m.height < 24 && !m.comment.open {
+	if m.width < 60 || m.height < 24 && !m.comment.open && m.groups.editing != "notes" && m.groups.editing != "edit" {
 		return []footerGroup{group("Navigation", bind("back", keys.Cancel), bind("quit", keys.ForceQuit))}
 	}
 
@@ -65,6 +65,18 @@ func (m model) contextFooterGroups() []footerGroup {
 	case m.comment.open:
 		if m.comment.busy {
 			return []footerGroup{group("Comment", hint{"", "working…"})}
+		}
+		if m.comment.proposalEditCheckpoint != "" {
+			if m.comment.previewing {
+				return []footerGroup{group("Proposal edit", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save edit"}, hint{"Esc", "discard"})}
+			}
+			return []footerGroup{group("Proposal edit", hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save edit"}, hint{"Esc", "discard"})}
+		}
+		if m.comment.rejectionCheckpoint != "" {
+			if m.comment.previewing {
+				return []footerGroup{group("Rejection", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("$EDITOR reason", keys.ComposerEditor, keys.RejectEditor), hint{"Ctrl-S", "reject & dismiss"}, hint{"Esc", "cancel"})}
+			}
+			return []footerGroup{group("Rejection", hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "reject & dismiss"}, hint{"Esc", "cancel"})}
 		}
 		action := "publish"
 		if m.comment.close {
@@ -81,15 +93,37 @@ func (m model) contextFooterGroups() []footerGroup {
 			if m.comment.reopen {
 				editor = keys.ReopenEditor
 			}
-			return []footerGroup{group("Comment", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", editor), hint{"Ctrl-S", action}, hint{"Esc", "edit"})}
+			return []footerGroup{group("Comment", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("$EDITOR draft", keys.ComposerEditor, editor), hint{"Ctrl-S", action}, hint{"Esc", "discard"})}
 		}
 		if m.comment.reopen && len(m.comment.targets) > 1 {
 			action = "review targets"
 		}
 		if m.comment.referenceActive {
-			return []footerGroup{group("Comment", hint{"↑/↓ Ctrl-J/N/K/P", "choose reference"}, hint{"Enter/Tab", "insert"}, hint{"Esc", "dismiss"}, hint{"Ctrl-S", action})}
+			return []footerGroup{group("Comment", hint{"↑/↓ Ctrl-J/N/K/P", "choose reference"}, hint{"Enter/Tab", "insert"}, bind("", keys.ComposerEditor), hint{"Esc", "dismiss"}, hint{"Ctrl-S", action})}
 		}
-		return []footerGroup{group("Comment", hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", action}, hint{"Esc", "discard"})}
+		return []footerGroup{group("Comment", hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", action}, hint{"Esc", "discard"})}
+	case m.groups.open && m.groups.editing == "notes":
+		if m.groups.busy {
+			return []footerGroup{group("Member note", hint{"", "working…"})}
+		}
+		if m.groups.note.previewing {
+			return []footerGroup{group("Member note", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
+		}
+		return []footerGroup{group("Member note", hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
+	case m.groups.open && m.groups.editing == "edit":
+		if m.groups.busy {
+			return []footerGroup{group("Edit group", hint{"", "working…"})}
+		}
+		if m.groups.edit.previewing {
+			return []footerGroup{group("Edit group", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
+		}
+		edit := group("Edit group", hint{"Tab/Shift-Tab", "field"}, hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})
+		if m.onGroupStatusField() {
+			edit.hints = append(edit.hints, hint{"←/→", "change status"})
+		} else {
+			edit.hints = append(edit.hints, bind("", keys.ComposerEditor))
+		}
+		return []footerGroup{edit}
 	case m.confirmQuit:
 		return []footerGroup{group("Quit", bind("discard drafts", keys.Quit), hint{"any key", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.lastError.open:
@@ -98,8 +132,6 @@ func (m model) contextFooterGroups() []footerGroup {
 		back := "back to Notifications"
 		if m.notifications.review != nil {
 			back = "back to proposal"
-		} else if m.notifications.sourceOpen {
-			back = "back to sources"
 		}
 		read := group("Item", bind("previous tab", keys.TabPrev), bind("next tab", keys.TabNext), hint{"Tab/Shift-Tab", "tabs"}, hint{"1/2/3/4", "jump to tab"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, bind("", keys.Track))
 		if it, ok := m.notificationActionItem(); ok {
@@ -117,6 +149,9 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{group("Explanations", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
 	case m.notifications.open:
 		if m.notifications.review != nil {
+			if m.notifications.notesOpen {
+				return []footerGroup{group("Local notes", hint{"j/k Ctrl-D/U", "scroll"}, hint{"m or Esc", "close"}), group("Navigation", hint{"q", "quit"})}
+			}
 			if m.notifications.reviewBusy {
 				if m.notifications.review.Approval != "" {
 					return []footerGroup{group("PR closures", hint{"", "publishing approved comments and closures…"})}
@@ -125,7 +160,21 @@ func (m model) contextFooterGroups() []footerGroup {
 			}
 			proposal := group("Proposal", hint{"j/k Ctrl-D/U", "scroll"})
 			if len(m.notifications.review.Plan.Proposals) == 1 {
-				proposal.hints = append(proposal.hints, hint{"Enter/l", "open PR"})
+				proposal.hints = append(proposal.hints, hint{"Enter/l", "View item"}, hint{"y", "copy for agent"})
+				if row := m.notifications.review.Plan.Proposals[0]; !m.notifications.contextBusy && hasExpandableProposalNotes(m.notifications.proposalContext(row)) {
+					proposal.hints = append(proposal.hints, hint{"m", "full notes"})
+				}
+				if m.notifications.review.Plan.Proposals[0].Status == "pending" && m.notifications.review.Plan.Proposals[0].Inputs != nil {
+					proposal.hints = append(proposal.hints, hint{"e", "edit proposal"})
+				}
+				if choice, ok := m.notifications.proposalChoice(m.notifications.review.Plan.Proposals[0].Number); ok && m.notifications.reviewKey == "" {
+					if choice.attention >= 0 {
+						proposal.hints = append(proposal.hints, hint{"t", "saved discussion"})
+					}
+					if choice.closure >= 0 {
+						proposal.hints = append(proposal.hints, hint{"i", "closure history"})
+					}
+				}
 			}
 			if m.notifications.reviewKey != "" {
 				proposal.hints = append(proposal.hints, hint{m.notifications.reviewKey, "approve and execute"})
@@ -141,25 +190,36 @@ func (m model) contextFooterGroups() []footerGroup {
 				}
 			}
 			if len(m.notifications.review.Plan.Proposals) == 1 {
-				proposal.hints = append(proposal.hints, hint{"w", "track comments"}, hint{"d", "dismiss"})
+				dismiss := "dismiss"
+				if m.notifications.review.Plan.Proposals[0].Status == "pending" {
+					dismiss = "reject & dismiss"
+					proposal.hints = append(proposal.hints, bind("", keys.RejectEditor))
+				}
+				proposal.hints = append(proposal.hints, hint{"w", "track comments"}, hint{"d", dismiss})
 			}
-			back := "back to Notifications"
-			if m.notifications.sourceOpen {
-				back = "back to sources"
-			}
-			return []footerGroup{proposal, group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
-		}
-		if m.notifications.sourceOpen {
-			return []footerGroup{group("Source", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open"}), group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
+			return []footerGroup{proposal, group("Navigation", bind("dataset", keys.Corpus), hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
 		}
 		if m.notifications.reviewBusy {
-			return []footerGroup{group("Notifications", hint{"", "preparing exact review…"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+			return []footerGroup{group("Notifications", hint{"", "preparing exact review…"}), group("Navigation", bind("dataset", keys.Corpus), hint{"Esc/h", "back"}, hint{"q", "quit"})}
 		}
 		notifications := group("Notifications", hint{"j/k/Tab", "select"}, hint{"Space", "tick proposal"}, hint{"a/A", "review closures"}, hint{"Enter/l/→", "open"})
 		choices := m.notifications.choices()
 		if len(choices) > 0 && m.notifications.selected < len(choices) {
 			choice := choices[m.notifications.selected]
 			if choice.kind == "item" {
+				if choice.proposal >= 0 {
+					notifications.hints = append(notifications.hints, hint{"y", "copy for agent"})
+					row := m.notifications.proposals.Rows[choice.proposal]
+					if row.Status == "pending" && row.Inputs != nil {
+						notifications.hints = append(notifications.hints, hint{"e", "edit proposal"})
+					}
+				}
+				if choice.attention >= 0 {
+					notifications.hints = append(notifications.hints, hint{"t", "saved discussion"})
+				}
+				if choice.closure >= 0 {
+					notifications.hints = append(notifications.hints, hint{"i", "closure history"})
+				}
 				if choice.tracked < 0 {
 					notifications.hints = append(notifications.hints, hint{"w", "track comments"})
 				}
@@ -168,27 +228,31 @@ func (m model) contextFooterGroups() []footerGroup {
 				}
 			}
 		}
-		notifications.hints = append(notifications.hints, hint{"d", "dismiss"})
-		return []footerGroup{notifications, group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+		dismiss := "dismiss"
+		if len(choices) > 0 && m.notifications.selected < len(choices) {
+			choice := choices[m.notifications.selected]
+			if choice.kind == "item" && choice.proposal >= 0 && m.notifications.proposals.Rows[choice.proposal].Status == "pending" {
+				dismiss = "reject & dismiss"
+				notifications.hints = append(notifications.hints, bind("", keys.RejectEditor))
+			}
+		}
+		notifications.hints = append(notifications.hints, hint{"d", dismiss})
+		return []footerGroup{notifications, group("Navigation", bind("dataset", keys.Corpus), hint{"Esc/h", "back"}, hint{"q", "quit"})}
 	case m.corpus.open:
 		if m.corpus.busy {
-			return []footerGroup{group("Download", bind("stop", keys.CorpusStop)), group("Navigation", bind("close", keys.Back, keys.Corpus))}
+			return []footerGroup{group("Download", hint{"o", "automatic ON/OFF"}, bind("stop", keys.CorpusStop)), group("Navigation", bind("close", keys.Back, keys.Corpus))}
 		}
-		return []footerGroup{group("Dataset", hint{"d", "download/update"}, bind("resume", keys.CorpusRun), hint{"y", "copy agent prompt"}, hint{"u", "size"}), group("Limits", bind("items per run", keys.CorpusBudget)), group("Navigation", bind("scroll", keys.Down, keys.Up), bind("close", keys.Back, keys.Corpus))}
+		return []footerGroup{group("Dataset", hint{"o", "automatic ON/OFF"}, hint{"y", "copy agent prompt"}, hint{"u", "size"}), group("Navigation", bind("scroll", keys.Down, keys.Up), bind("close", keys.Back, keys.Corpus))}
 	case m.themePicker.open && m.themePicker.searching:
 		return []footerGroup{group("Search", hint{"type", "theme name"}, hint{"↑/↓", "preview"}, bind("keep", keys.Enter), bind("clear", keys.Cancel)), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.themePicker.open:
 		return []footerGroup{group("Theme", bind("preview", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("", keys.Search), bind("apply", keys.Enter)), group("Navigation", bind("cancel", keys.Back), bind("", keys.Quit), bind("exit", keys.ForceQuit))}
 	case (m.groups.open && m.groups.busy) || (m.dups.open && m.dups.busy):
 		return []footerGroup{group("Navigation", bind("", keys.ForceQuit))}
-	case (m.groups.open && m.groups.editing != "" && m.groups.pick.open) || (m.batches.open && m.batches.editing && m.batches.pick.open):
+	case m.batches.open && m.batches.editing && m.batches.pick.open:
 		return []footerGroup{group("List", bind("move", keys.ValueNext, keys.ValuePrev), bind("pick", keys.Confirm, keys.OpenList), bind("", keys.CloseList)), group("Navigation", bind("", keys.Quit), bind("exit", keys.ForceQuit))}
 	case m.groups.open && m.groups.editing != "":
 		edit := group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("next/save", keys.Confirm), bind("save", keys.FormSubmit))
-		if m.onGroupStatusField() {
-			edit = group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev, keys.ChoiceNext, keys.ChoicePrev), bind("change", keys.ValueNext, keys.ValuePrev), bind("", keys.OpenList), bind("next/save", keys.Confirm), bind("save", keys.FormSubmit))
-		}
-
 		return []footerGroup{edit, group("Navigation", bind("", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.batches.open && m.batches.editing:
 		edit := group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("next", keys.Confirm), bind("create", keys.FormSubmit))
@@ -285,6 +349,7 @@ func (m model) groupFooter() []footerGroup {
 	if m.groups.detail {
 		if g != nil && len(g.Members) > 0 {
 			groups = append(groups, group("Member", bind("open", keys.Enter), bind("notes", keys.Edit), bind("", keys.Tick), bind("", keys.Reopen, keys.ReopenEditor), bind("remove", keys.Delete)), group("Context", bind("scroll notes", keys.HalfDown, keys.HalfUp)))
+			groups = append(groups, group("Handoff", bind("selected", keys.Yank), bind("all", keys.YankAll)))
 		}
 	}
 

@@ -367,7 +367,7 @@ func (d *detailModel) renderActive() {
 		text = renderMarkdown(s.source, d.width)
 	}
 
-	if evidence := d.enriched.Evidence; evidence != nil {
+	if evidence := d.enriched.Evidence; evidence != nil && !d.notificationOnly {
 		id := evidence.SnapshotID
 		if id == "" {
 			id = "none"
@@ -375,9 +375,6 @@ func (d *detailModel) renderActive() {
 		notice := "Fixed packet snapshot: " + id + ". Coverage recorded at creation, not current GitHub state."
 		if d.enriched.CachedRead {
 			notice = "Cache read (" + evidence.Mode + "), snapshot: " + id + ". Recorded evidence, not guaranteed current GitHub state."
-			if d.notificationOnly {
-				notice = "Item details refreshed when opened. Saved notification records may describe an earlier state."
-			}
 			if c := evidence.Components[component]; c != nil {
 				notice += "\n" + component + ": " + c.Status + "; observed " + c.FetchedAt
 			}

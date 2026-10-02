@@ -109,6 +109,8 @@ def main():
     candidates.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE)
     candidates.add_argument("--title-threshold", type=float, default=0.8)
     candidates.add_argument("--max-frequency", type=int, default=10)
+    candidates.add_argument("--line-threshold", type=float, default=0.3, help="minimum two-sided changed-path coverage for shared original lines")
+    candidates.add_argument("--max-line-frequency", type=int, default=15, help="maximum PRs sharing one positioned original line")
     candidates.add_argument("--compact", action="store_true", help="summarize all-scope diagnostics and bound selected pair previews")
 
     for name in ("list", "chunk"):
@@ -325,7 +327,7 @@ def main():
             from _candidates import compact_report, discover
 
             result = discover(cache, args.snapshot, args.corpus, args.offset, args.limit, args.checkpoint,
-                              args.max_age, args.as_of, args.title_threshold, args.max_frequency)
+                              args.max_age, args.as_of, args.title_threshold, args.max_frequency, args.line_threshold, args.max_line_frequency)
             if args.compact:
                 result = compact_report(result)
         elif args.command == "search":

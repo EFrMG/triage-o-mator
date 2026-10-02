@@ -41,7 +41,7 @@ target-repo/
     data/<owner>/<repo>/groups/, not-duplicates.jsonl  tracked
     data/<owner>/<repo>/auto-close/                  tracked proposals
     data/<owner>/<repo>/raw|batches|exports/           ignored
-    data/<owner>/<repo>/cache|local/                   ignored
+    data/<owner>/<repo>/cache|local/                   ignored (includes the per-repo automatic download preference)
     reports/<owner>/<repo>/<date>.md                   tracked
     .gitignore                               generated tracked
     .triage-install.json                     generated ignored (machine-local: where the tool lives)
@@ -97,6 +97,8 @@ To correct a backlog target later, re-run `bin/install-to` with the intended `--
 
 Installing into a clone of a repository you can't push to would still leave the install in `git status` for everyone who later pulls your branch. `--solo` avoids that: the install is listed in `.git/info/exclude`, which is local to your clone, so **no tracked file of that repository changes** and the `AGENTS.md` block is skipped (`--agents-md` adds it anyway, as a local modification you'll see in `git status`).
 
+In a linked worktree, this exclude file is shared by all worktrees of the clone, so adding or removing the solo exclusion affects them all.
+
 You then triage on your own and hand maintainers `bin/report` output and group packets, rather than commits. If they would rather ignore the directory openly, a `triage-o-mator/` line in the repository's own `.gitignore` does the same thing visibly.
 
 When they want it, `bin/install-to <path> --adopt` turns that into an install the repository keeps: the local exclude goes, the `AGENTS.md` block is written, and everything the install tracks is staged, ready to commit as the pull request that adopts the tool, carrying the backlog work you already did.
@@ -113,7 +115,7 @@ Running `bin/triage-o-mator` where there is no install (in a fresh checkout, say
 
 ## Working as a team through it
 
-Once the install is tracked, triage is ordinary repository work: contributors pull to get each other's decisions, and hand work to maintainers by opening a pull request that changes `triage-o-mator/data/<owner>/<repo>/ledger.jsonl` and `groups/`. The ledger is JSON Lines precisely so that diff is readable line by line. Everyone who clones the repository runs `bin/install-to` against it once to wire up their own symlinks; nothing tracked changes when they do.
+Once the install is tracked, triage is ordinary repository work: contributors pull to get each other's decisions, and hand work to maintainers by opening a pull request that changes `triage-o-mator/data/<owner>/<repo>/ledger.jsonl` and `groups/`. The ledger is JSON Lines so the diff is readable line by line. Everyone who clones the repository runs `bin/install-to` against it once to wire up their own symlinks; preview the plan if the installer also proposes a tracked update.
 
 See the [triage playbook](../prompts/PLAYBOOK.md#working-as-a-team) for how batches, proposals and reviews divide between people and their agents.
 
@@ -130,7 +132,7 @@ Re-running `bin/install-to` on an existing install is always safe, and is how yo
 
 Upgrades also maintain a separate cache/local ignore block, preserving rules outside the managed markers. This may change the tracked install `.gitignore`; inspect its diff. Malformed markers and unsupported future install versions are refused before changes. Stop older writers before upgrading, and see [evidence-cache compatibility and backups](evidence-reference.md#upgrade-and-backup).
 
-Moving an install's data somewhere else is a plain directory move: `data/<owner>/<repo>/` and `reports/<owner>/<repo>/` are the whole record, and an install picks them up wherever it finds them.
+To move or back up an install, preserve its `config/`, `data/` and `reports/`; `config/` includes the repository target and the team's taxonomy. For a Git-based handoff, back up the ignored cache separately when retained evidence, watches or imported closure records depend on it. Re-run `bin/install-to` at the new location to repair machine-specific links.
 
 ## Making it yours
 

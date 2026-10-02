@@ -20,8 +20,11 @@ func runScript(installRoot, name string, args ...string) (string, error) {
 
 // runScriptLines is runScript, calling onLine (when set) with each line the script writes to stderr as it goes, e.g. bin/group export's "fetching 3/12: pr #123".
 func runScriptLines(installRoot, name string, onLine func(string), args ...string) (string, error) {
-	cmd := exec.Command(filepath.Join(installRoot, "bin", name), args...)
-	cmd.Dir = installRoot
+	cmd, err := scriptCommand(installRoot, name, args...)
+	if err != nil {
+		return "", err
+	}
+
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if onLine != nil {
@@ -35,6 +38,19 @@ func runScriptLines(installRoot, name string, onLine func(string), args ...strin
 	}
 
 	return string(out), nil
+}
+
+// scriptCommand binds both the executable and its Python install override to the selected install. Abs preserves symlinked install paths and prevents a relative root from being resolved again under cmd.Dir.
+func scriptCommand(installRoot, name string, args ...string) (*exec.Cmd, error) {
+	root, err := filepath.Abs(installRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(filepath.Join(root, "bin", name), args...)
+	cmd.Dir = root
+	cmd.Env = append(cmd.Environ(), "TRIAGE_ROOT="+root)
+	return cmd, nil
 }
 
 // lineWriter keeps everything written to it, and calls onLine with each complete line as it arrives.
@@ -63,7 +79,8 @@ type fetchSyncDoneMsg struct {
 	err, trackingErr, proposalErr error
 	summary                       string
 	unreadTotal                   int
-	repo                          string
+	root, repo                    string
+	backlog                       bool
 }
 
 func fetchSyncCmd(installRoot, repo string, full bool, items ...Key) tea.Cmd {
@@ -72,6 +89,7 @@ func fetchSyncCmd(installRoot, repo string, full bool, items ...Key) tea.Cmd {
 
 func fetchSyncCmdAtHost(installRoot, repo string, full bool, host string, items ...Key) tea.Cmd {
 	return func() tea.Msg {
+		message := fetchSyncDoneMsg{root: installRoot, repo: repo, backlog: len(items) == 0}
 		args := []string{"--expected-repo", repo}
 		if full {
 			args = append(args, "--full")
@@ -84,12 +102,14 @@ func fetchSyncCmdAtHost(installRoot, repo string, full bool, host string, items 
 		}
 
 		if _, err := runScript(installRoot, "fetch", args...); err != nil {
-			return fetchSyncDoneMsg{repo: repo, err: err}
+			message.err = err
+			return message
 		}
 
 		out, err := runScript(installRoot, "sync")
 		if err != nil {
-			return fetchSyncDoneMsg{repo: repo, err: err}
+			message.err = err
+			return message
 		}
 
 		tracked, trackingErr := runScript(installRoot, "cache", "--expected-repo", repo, "track-check", "--request-budget", "100")
@@ -114,12 +134,15 @@ func fetchSyncCmdAtHost(installRoot, repo string, full bool, host string, items 
 		if proposalErr == nil && (listed.Repository != repo || listed.Requests != 0) {
 			proposalErr = fmt.Errorf("proposal count response identity mismatch")
 		}
-		return fetchSyncDoneMsg{repo: repo, summary: out, trackingErr: trackingErr, proposalErr: proposalErr, unreadTotal: notificationCount(unreadKeys, listed)}
+		message.summary, message.trackingErr, message.proposalErr = out, trackingErr, proposalErr
+		message.unreadTotal = notificationCount(unreadKeys, listed)
+		return message
 	}
 }
 
 // ledgerReloadedMsg carries a freshly re-read ledger after fetch / sync or an apply.
 type ledgerReloadedMsg struct {
+	root  string
 	repo  string // which repo's ledger this is, so a reload that finishes after Switch Repo is dropped
 	items []Item
 	err   error
@@ -128,7 +151,7 @@ type ledgerReloadedMsg struct {
 func reloadLedgerCmd(installRoot, repo string) tea.Cmd {
 	return func() tea.Msg {
 		items, err := LoadLedger(installRoot, repo)
-		return ledgerReloadedMsg{repo: repo, items: items, err: err}
+		return ledgerReloadedMsg{root: installRoot, repo: repo, items: items, err: err}
 	}
 }
 
@@ -204,9 +227,10 @@ func enrichItemCmd(installRoot, repo string, key Key, generation uint64, withDif
 
 // applyDoneMsg reports the result of an apply (decision save or approve).
 type applyDoneMsg struct {
-	snapshot *decisionSnapshot
-	approval bool
-	key      Key
+	root, repo string
+	snapshot   *decisionSnapshot
+	approval   bool
+	key        Key
 	// count is set for a bulk approval of ticked items (key is then unset); approved holds the approved items either way.
 	count    int
 	approved []Key
@@ -216,9 +240,10 @@ type applyDoneMsg struct {
 // applyDecisionCmd saves one decision; batchID, when set, stamps it with the batch it was made in (bin/apply defaults to "tui").
 // agentNotes, when non-empty, carries a batch proposal's notes into the ledger along with the decision saved from it; empty leaves the item's existing notes alone.
 // reviewedBy records an explicit human confirmation with the save; by remains the decision author, which can be the author of an unchanged batch proposal.
-func applyDecisionCmd(installRoot string, key Key, category, action, confidence, reason, agentNotes, by, batchID, reviewedBy string) tea.Cmd {
+func applyDecisionCmd(installRoot, repo string, key Key, category, action, confidence, reason, agentNotes, by, batchID, reviewedBy string) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{
+			"--expected-repo", repo,
 			"--number", strconv.Itoa(key.Number), "--kind", key.Kind,
 			"--category", category, "--action", action,
 			"--reason", reason, "--by", by,
@@ -242,15 +267,15 @@ func applyDecisionCmd(installRoot string, key Key, category, action, confidence,
 
 		_, err := runScript(installRoot, "apply", args...)
 
-		return applyDoneMsg{key: key, err: err, approval: reviewedBy != "", approved: []Key{key}}
+		return applyDoneMsg{root: installRoot, repo: repo, key: key, err: err, approval: reviewedBy != "", approved: []Key{key}}
 	}
 }
 
-func approveCmd(installRoot string, key Key, by string) tea.Cmd {
+func approveCmd(installRoot, repo string, key Key, by string) tea.Cmd {
 	return func() tea.Msg {
-		_, err := runScript(installRoot, "apply", "--number", strconv.Itoa(key.Number), "--kind", key.Kind, "--approve", "--by", by)
+		_, err := runScript(installRoot, "apply", "--expected-repo", repo, "--number", strconv.Itoa(key.Number), "--kind", key.Kind, "--approve", "--by", by)
 
-		return applyDoneMsg{key: key, err: err, approval: true, approved: []Key{key}}
+		return applyDoneMsg{root: installRoot, repo: repo, key: key, err: err, approval: true, approved: []Key{key}}
 	}
 }
 

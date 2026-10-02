@@ -1,8 +1,9 @@
-"""Fixed, bounded GraphQL pages and one Git transfer per corpus batch."""
+"""Fixed, bounded GraphQL pages and budgeted Git transfers per corpus batch."""
 
 import os
 import re
 import subprocess
+import time
 
 from _acquire import ReadFailure, attach, descriptor, now, summary_identity
 from _evidence import artifact_ref, natural, object_name, repository, same_item, same_repository, seal_snapshot
@@ -113,26 +114,73 @@ def comment_rows(node):
     return rows, complete
 
 
-def git_heads(reader, cache, members):
+def git_heads(reader, cache, members, initial):
     if reader.requests >= reader.budget or reader.stopped:
         raise ReadFailure(reader.stopped or "request budget exhausted before Git fetch")
 
     target = WORK_ROOT.parent
-    probe = subprocess.run(["git", "-C", str(target), "rev-parse", "--show-toplevel"], capture_output=True, timeout=10)
-    if probe.returncode or probe.stdout.decode().strip() != str(target):
+    try:
+        probe = subprocess.run(["git", "-C", str(target), "rev-parse", "--show-toplevel"], capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ReadFailure(f"Git checkout check failed ({type(error).__name__}); PR code remains incomplete") from error
+
+    try:
+        checkout_matches = not probe.returncode and os.path.samefile(probe.stdout.decode().strip(), target)
+    except (OSError, UnicodeError):
+        checkout_matches = False
+    if not checkout_matches:
         raise ReadFailure("install parent is not its Git checkout; local PR diffs unavailable")
 
     refs = [f"refs/pull/{member['number']}/head" for member in members]
-    url = f"https://{cache.identity['host']}/{cache.identity['full_name']}.git"
-    reader.requests += 1
-    try:
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
-        result = subprocess.run(["git", "-C", str(target), "fetch", "--no-tags", "--no-write-fetch-head", url, *refs], capture_output=True, timeout=180, env=env)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise ReadFailure(f"Git batch fetch failed ({type(error).__name__})") from error
+    base_refs = set()
+    for member in members:
+        node = initial[member["number"]]
+        name = node.get("baseRefName")
+        if not isinstance(name, str) or not name:
+            raise ReadFailure("PR base branch is unavailable; local diffs remain incomplete")
+        base_refs.add("refs/heads/" + name)
+    for ref in sorted(base_refs):
+        try:
+            checked = subprocess.run(["git", "-C", str(target), "check-ref-format", ref], capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ReadFailure(f"Git ref check failed ({type(error).__name__}); PR code remains incomplete") from error
 
-    if result.returncode:
-        raise ReadFailure("Git batch fetch failed; PR code remains incomplete")
+        if checked.returncode:
+            raise ReadFailure("PR base branch has an invalid Git ref; local diffs remain incomplete")
+    refs.extend(sorted(base_refs))
+    url = f"https://{cache.identity['host']}/{cache.identity['full_name']}.git"
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    env.pop("GH_DEBUG", None)
+    credential_helper = ["-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"]
+    for attempt in range(3):
+        if reader.requests >= reader.budget or reader.stopped:
+            raise ReadFailure(reader.stopped or "request budget exhausted during Git fetch retries")
+
+        reader.requests += 1
+        try:
+            result = subprocess.run(["git", *credential_helper, "-C", str(target), "fetch", "--no-tags", "--no-write-fetch-head", url, *refs], capture_output=True, timeout=180, env=env)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ReadFailure(f"Git batch fetch failed ({type(error).__name__})") from error
+
+        if result.returncode == 0:
+            return
+
+        stderr = result.stderr.decode("utf-8", errors="ignore").lower()
+        access_failure = any(marker in stderr for marker in ("401", "403", "repository not found", "authentication failed", "permission denied", "could not read username", "not logged into", "gh auth login"))
+        rate_failure = "429" in stderr or "rate limit" in stderr
+        missing_ref = "couldn't find remote ref" in stderr
+        hard_failure = access_failure or rate_failure or missing_ref
+        if hard_failure or attempt == 2:
+            if access_failure:
+                reason = "Git repository access failed; check gh authentication and repository permissions"
+            elif rate_failure:
+                reason = "Git transfer was rate limited; wait before retrying"
+            elif missing_ref:
+                reason = "Git PR or base branch ref is unavailable"
+            else:
+                reason = f"Git transfer failed after {attempt + 1} attempts; check the connection"
+            raise ReadFailure(f"{reason}; PR code remains incomplete")
+        time.sleep(0.25 * (attempt + 1))
 
 
 def local_diff(node):
@@ -242,7 +290,7 @@ def acquire_batch(cache, reader, kind, members):
         git_error = None
         if kind == "pr":
             try:
-                git_heads(reader, cache, members)
+                git_heads(reader, cache, members, initial)
             except ReadFailure as error:
                 git_error = str(error)
 
@@ -257,6 +305,7 @@ def acquire_batch(cache, reader, kind, members):
             first, last = initial[number], final[number]
             original = mapped_summary(first, kind, observed)
             identity, revision = summary_identity(original, kind, number, observed)
+            published = dict(original, state="merged" if kind == "pr" and original["merged"] else original["state"])
             latest = cache.latest(kind, number)
             if latest:
                 same_item(latest[1]["identity"], identity)
@@ -264,7 +313,7 @@ def acquire_batch(cache, reader, kind, members):
             stable = all(first.get(key) == last.get(key) for key in ("id", "databaseId", "state", "updatedAt", "baseRefOid", "headRefOid", "changedFiles", "additions", "deletions")) and first["comments"]["totalCount"] == last["comments"]["totalCount"]
             payloads = {}
             resource = f"graphql repository/{cache.identity['full_name']}/{kind}/{number}"
-            summary = component(resource, revision, original, payloads, transport="graphql", complete=stable, error="item changed during batch acquisition")
+            summary = component(resource, revision, published, payloads, transport="graphql", complete=stable, error="item changed during batch acquisition")
             comments, comments_complete = comment_rows(first)
             comment_value = component(resource + "/comments", revision, comments, payloads, transport="graphql", complete=stable and comments_complete,
                                       error="comments changed or require another page", count=len(comments), expected=first["comments"]["totalCount"])

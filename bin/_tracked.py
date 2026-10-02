@@ -161,13 +161,20 @@ def listing(cache, offset=0, limit=20):
 
 def check(cache, budget=100):
     natural(budget, "request budget", 1)
-    value = load(cache)
-    if not value["items"]:
-        return dict(checked=0, failed=0, unread_total=0, requests=0, stopped=None)
+    path = prepare_path(cache)
+    with locked(path):
+        value = load(cache)
+        if not value["items"]:
+            return dict(checked=0, failed=0, unread_total=0, requests=0, stopped=None)
+
+        scheduled = list(value["items"])
+        # Reserve the next starting row before acquisition so partial or failed checks cannot keep it at the front.
+        value["items"].append(value["items"].pop(0))
+        save(path, value)
 
     reader = GitHubReader(cache.identity["host"], budget, Cooldown(cache))
     updated = failed = 0
-    for original in value["items"]:
+    for original in scheduled:
         if reader.requests >= budget or reader.stopped:
             break
 
@@ -181,7 +188,6 @@ def check(cache, budget=100):
         except (ReadFailure, ValueError, OSError, KeyError, TypeError) as problem:
             error = str(problem)
 
-        path = prepare_path(cache)
         with locked(path):
             current = load(cache)
             row = next((item for item in current["items"] if (item["identity"]["kind"], item["identity"]["number"]) == (kind, number)), None)

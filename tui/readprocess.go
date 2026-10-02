@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -34,8 +33,11 @@ func (p *readProcess) stop() {
 }
 
 func runReadScript(p *readProcess, root, name string, args ...string) (string, error) {
-	cmd := exec.Command(filepath.Join(root, "bin", name), args...)
-	cmd.Dir = root
+	cmd, err := scriptCommand(root, name, args...)
+	if err != nil {
+		return "", err
+	}
+
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	var out, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &stderr
@@ -45,7 +47,7 @@ func runReadScript(p *readProcess, root, name string, args ...string) (string, e
 		p.mu.Unlock()
 		return "", context.Canceled
 	}
-	err := cmd.Start()
+	err = cmd.Start()
 	if err == nil {
 		p.cmd = cmd
 	}

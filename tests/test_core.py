@@ -1,7 +1,11 @@
 """The install, ledger, and duplicate workflows that a maintainer uses first."""
 
+import csv
+import fcntl
+import hashlib
 import json
 import os
+import select
 import shutil
 import subprocess
 import tempfile
@@ -9,10 +13,56 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from support import ROOT, Workspace, item
+from support import ROOT, Workspace, item, repository, summary
 
 
 class InstallTests(unittest.TestCase):
+    def test_solo_install_in_linked_worktree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            repository = base / "repository"
+            worktree = base / "worktree"
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.email", "test@example.com"], check=True)
+            (repository / "README.md").write_text("fixture\n")
+            subprocess.run(["git", "-C", str(repository), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(repository), "-c", "commit.gpgsign=false", "commit", "-qm", "Initial"], check=True)
+            subprocess.run(["git", "-C", str(repository), "worktree", "add", "-q", "--detach", str(worktree)], check=True)
+
+            env = dict(os.environ, XDG_CONFIG_HOME=str(base / "config-home"))
+            command = [str(ROOT / "bin/install-to"), str(worktree), "--repo", "owner/repo"]
+            exclude = Path(subprocess.run(["git", "-C", str(worktree), "rev-parse", "--git-path", "info/exclude"], check=True, capture_output=True, text=True).stdout.strip())
+            if not exclude.is_absolute():
+                exclude = worktree / exclude
+
+            before = exclude.read_bytes()
+
+            preview = subprocess.run([*command, "--solo", "--dry-run"], env=env, capture_output=True, text=True)
+            self.assertEqual(preview.returncode, 0, preview.stderr)
+            self.assertEqual(exclude.read_bytes(), before)
+            self.assertFalse((worktree / "triage-o-mator").exists())
+            self.assertFalse((base / "config-home").exists())
+
+            for _ in range(2):
+                result = subprocess.run([*command, "--solo"], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(exclude.read_text().splitlines().count("/triage-o-mator/"), 1)
+                status = subprocess.run(["git", "-C", str(worktree), "status", "--porcelain"], check=True, capture_output=True, text=True)
+                self.assertEqual(status.stdout, "")
+
+            preview = subprocess.run([*command, "--adopt", "--dry-run"], env=env, capture_output=True, text=True)
+            self.assertEqual(preview.returncode, 0, preview.stderr)
+            self.assertEqual(exclude.read_text().splitlines().count("/triage-o-mator/"), 1)
+            staged = subprocess.run(["git", "-C", str(worktree), "diff", "--cached", "--name-only"], check=True, capture_output=True, text=True)
+            self.assertEqual(staged.stdout, "")
+
+            result = subprocess.run([*command, "--adopt"], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("/triage-o-mator/", exclude.read_text().splitlines())
+            staged = subprocess.run(["git", "-C", str(worktree), "diff", "--cached", "--name-only"], check=True, capture_output=True, text=True)
+            self.assertIn("triage-o-mator/config/repo", staged.stdout.splitlines())
+
     def test_install_dry_run_and_work_root(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
@@ -100,6 +150,151 @@ class LedgerTests(Workspace):
         self.assertEqual(self.ledger()[("issue", 1)]["category"], "bug")
         self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
 
+    def test_csv_review_revisions_and_approval(self):
+        self.sync()
+        ledger_path = self.root / "data/owner/repo/ledger.jsonl"
+        self.run_cli("export-csv")
+        csv_path = next((self.root / "data/owner/repo/exports").glob("ledger-*.csv"))
+
+        with csv_path.open(newline="") as source:
+            reader = csv.DictReader(source)
+            fields, rows = reader.fieldnames, list(reader)
+
+        rows[0].update(category="bug", action="label-only", reviewed="true", reviewed_by="human")
+        with csv_path.open("w", newline="") as out:
+            writer = csv.DictWriter(out, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        self.run_cli("import-csv", str(csv_path), "--by", "operator")
+        approved = self.ledger()[("issue", 1)]
+        self.assertTrue(approved["reviewed"])
+        self.assertEqual(approved["triaged_by"], "operator")
+
+        self.run_cli("export-csv")
+        with csv_path.open(newline="") as source:
+            reader = csv.DictReader(source)
+            fields, rows = reader.fieldnames, list(reader)
+        ledger_rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+        ledger_rows[0]["last_synced_at"] = "2026-01-01T00:00:00Z"
+        ledger_path.write_text("".join(json.dumps(row) + "\n" for row in ledger_rows))
+        before = ledger_path.read_bytes()
+        self.run_cli("import-csv", str(csv_path))
+        self.assertEqual(ledger_path.read_bytes(), before)
+
+        rows[0]["reason"] = "New rationale"
+        with csv_path.open("w", newline="") as out:
+            writer = csv.DictWriter(out, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+        self.run_cli("import-csv", str(csv_path), "--by", "operator")
+        changed = self.ledger()[("issue", 1)]
+        self.assertFalse(changed["reviewed"])
+        self.assertEqual((changed["reviewed_by"], changed["reviewed_at"]), ("", ""))
+
+        self.run_cli("export-csv")
+        with csv_path.open(newline="") as source:
+            reader = csv.DictReader(source)
+            fields, rows = reader.fieldnames, list(reader)
+        rows[0]["reviewer_notes"] = "Must not publish"
+        rows[1]["reviewer_notes"] = "Keep this"
+        with csv_path.open("w", newline="") as out:
+            writer = csv.DictWriter(out, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(rows)
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--category", "bug", "--action", "label-only", "--by", "agent:triage")
+        before = ledger_path.read_bytes()
+        self.run_cli("import-csv", str(csv_path), ok=False)
+        self.assertEqual(ledger_path.read_bytes(), before)
+
+    def test_ledger_writers_serialize_complete_transactions(self):
+        self.responses["repos/owner/repo/issues?state=open&per_page=100"]["data"].append(item(3, "Another issue"))
+        self.sync()
+        self.run_cli("export-csv")
+        calls_before = self.calls()
+        data = self.root / "data/owner/repo"
+        ledger_path = data / "ledger.jsonl"
+        lock_path = data / "local/ledger.jsonl.lock"
+
+        storage = self.root / "bin/_storage.py"
+        source = storage.read_text()
+        self.assertIn("        fcntl.flock(lock, fcntl.LOCK_EX)", source)
+        source = source.replace(
+            "        fcntl.flock(lock, fcntl.LOCK_EX)",
+            "        if path.name == 'ledger.jsonl':\n            os.write(int(os.environ['LEDGER_TEST_NOTIFY_FD']), b'L')\n        fcntl.flock(lock, fcntl.LOCK_EX)",
+        )
+        storage.write_text(source)
+        triage = self.root / "bin/_triage.py"
+        source = triage.read_text()
+        self.assertIn("def load_ledger():\n    return load_jsonl(LEDGER_PATH)", source)
+        source = source.replace(
+            "def load_ledger():\n    return load_jsonl(LEDGER_PATH)",
+            "def load_ledger():\n    os.write(int(os.environ['LEDGER_TEST_NOTIFY_FD']), b'R')\n    return load_jsonl(LEDGER_PATH)",
+        )
+        triage.write_text(source)
+
+        raw_path = data / "raw/issues_and_prs.jsonl"
+        rows = [json.loads(line) for line in raw_path.read_text().splitlines()]
+        rows[0]["title"] = "Fresh title"
+        raw_path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        meta_path = data / "raw/fetch_meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta["raw_sha256"] = hashlib.sha256(raw_path.read_bytes()).hexdigest()
+        meta_path.write_text(json.dumps(meta))
+        exported = next((data / "exports").glob("ledger-*.csv"))
+        csv_path = self.root / "notes.csv"
+        with exported.open(newline="") as source, csv_path.open("w", newline="") as out:
+            reader = csv.DictReader(source)
+            writer = csv.DictWriter(out, fieldnames=reader.fieldnames)
+            writer.writeheader()
+            row = next(row for row in reader if row["kind"] == "issue" and row["number"] == "3")
+            row["reviewer_notes"] = "Separate note"
+            writer.writerow(row)
+
+        read_fd, write_fd = os.pipe()
+        commands = [
+            ["apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "label-only"],
+            ["apply", "--number", "2", "--kind", "issue", "--category", "bug", "--action", "label-only"],
+            ["sync"],
+            ["import-csv", str(csv_path)],
+        ]
+        processes = []
+        try:
+            with lock_path.open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                for args in commands:
+                    env = dict(self.env, TRIAGE_ROOT=str(self.root), LEDGER_TEST_NOTIFY_FD=str(write_fd))
+                    processes.append(subprocess.Popen([str(self.root / "bin" / args[0]), *args[1:]], cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, pass_fds=(write_fd,)))
+
+                reached = bytearray()
+                while len(reached) < len(commands):
+                    ready, _, _ = select.select([read_fd], [], [], 10)
+                    self.assertTrue(ready, "ledger writer did not reach the lock")
+                    reached.extend(os.read(read_fd, len(commands) - len(reached)))
+
+                self.assertEqual(reached, b"L" * len(commands))
+                ready, _, _ = select.select([read_fd], [], [], 0)
+                self.assertFalse(ready, "a ledger read occurred while the lock was held")
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=10)
+                self.assertEqual(process.returncode, 0, stdout + stderr)
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                process.communicate()
+            os.close(read_fd)
+            os.close(write_fd)
+
+        ledger = self.ledger()
+        self.assertEqual(ledger[("issue", 1)]["category"], "bug")
+        self.assertEqual(ledger[("issue", 2)]["category"], "bug")
+        self.assertEqual(ledger[("issue", 3)]["reviewer_notes"], "Separate note")
+        self.assertEqual(ledger[("issue", 1)]["title"], "Fresh title")
+        self.assertEqual(self.calls(), calls_before)
+
     def test_direct_item_read_overrides_lagging_issue_list_after_close(self):
         self.sync()
         meta = json.loads((self.root / "data/owner/repo/raw/fetch_meta.json").read_text())
@@ -146,6 +341,43 @@ class LedgerTests(Workspace):
 
 
 class TrackingTests(Workspace):
+    def test_budgeted_checks_rotate_starting_subscription(self):
+        self.responses["repos/owner/repo"] = dict(data=repository())
+        for number in (1, 2):
+            self.responses[f"repos/owner/repo/issues/{number}"] = dict(data=summary("issue", number))
+            self.responses[f"repos/owner/repo/issues/{number}/comments?per_page=100&page=1"] = dict(data=[])
+
+        arguments = ("--expected-repo", "owner/repo")
+        for number in (1, 2):
+            self.json_cli("cache", *arguments, "track-add", "--kind", "issue", "--number", str(number), "--request-budget", "10")
+            self.responses[f"repos/owner/repo/issues/{number}"]["data"]["comments"] = 1
+            self.responses[f"repos/owner/repo/issues/{number}/comments?per_page=100&page=1"]["data"] = [dict(id=number, body="new", user=dict(login="author"), created_at="2026-09-23T00:00:00Z", updated_at="2026-09-23T00:00:00Z")]
+
+        def check(budget):
+            before = len(self.calls())
+            result = self.json_cli("cache", *arguments, "track-check", "--request-budget", str(budget))
+            calls = self.calls()[before:]
+            summaries = [call[-1] for call in calls if call[-1].startswith("repos/owner/repo/issues/") and "?" not in call[-1]]
+            return result, summaries
+
+        first, summaries = check(4)
+        self.assertEqual(summaries[0], "repos/owner/repo/issues/1")
+        self.assertEqual(first["checked"], 1)
+
+        second, summaries = check(5)
+        self.assertEqual(summaries[0], "repos/owner/repo/issues/2")
+        self.assertEqual(second["checked"], 1)
+        self.assertEqual(second["unread_total"], 2)
+
+        third, summaries = check(3)
+        self.assertEqual(summaries[0], "repos/owner/repo/issues/1")
+        self.assertEqual(third["checked"], 0)
+
+        fourth, summaries = check(4)
+        self.assertEqual(summaries[0], "repos/owner/repo/issues/2")
+        self.assertEqual(fourth["unread_total"], 2)
+        self.assertEqual([row["new_count"] for row in self.json_cli("cache", *arguments, "track-list")["rows"]], [1, 1])
+
     def test_repeated_enrollment_keeps_the_comment_baseline(self):
         self.seed_pr()
         arguments = ("--expected-repo", "owner/repo", "track-add", "--kind", "pr", "--number", "1", "--request-budget", "20")

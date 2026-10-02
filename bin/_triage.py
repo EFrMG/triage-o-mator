@@ -152,6 +152,7 @@ def load_ledger():
 
 
 def save_ledger(records):
+    """Atomically publish records; callers must hold locked(LEDGER_PATH) across the preceding read and update too."""
     records = sorted(records, key=lambda r: (r.get("kind", ""), r.get("number", 0)))
     save_jsonl(LEDGER_PATH, records)
 

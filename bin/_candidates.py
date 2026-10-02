@@ -1,6 +1,9 @@
 """Pinned offline PR discovery: direct signals propose review sets, never redundancy."""
 
 import json
+import math
+import re
+import shlex
 from collections import Counter, defaultdict
 from itertools import combinations
 from datetime import datetime, timezone
@@ -9,13 +12,21 @@ from _chunks import corpus_listing, page, window
 from _evidence import DEFAULT_MAX_AGE, canonical, component_problems, digest, fields, natural, repository, same_repository, text, timestamp, validate_payload, validate_item, validate_repository
 from _similar import TitleIndex
 
-POLICY = "pr-candidate-sets-v1"
-COMPONENTS = ("summary", "files", "closing_issues")
+POLICY = "pr-candidate-sets-v2"
+POLICIES = ("pr-candidate-sets-v1", POLICY)
+COMPONENTS = ("summary", "files", "closing_issues", "diff")
 MAX_MEMBERS = 5000
 MAX_BYTES = 256 * 1024 * 1024
 MAX_FEATURES = 1000
 SIGNAL_PREVIEW = 10
 BROAD_PATHS = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock", "go.sum", "poetry.lock", "uv.lock", "Gemfile.lock", "composer.lock"}
+MAX_DIFF_LINES = 3000
+MIN_LINE_CHARS = 12
+SINGLE_LINE_MAX_DIFF_LINES = 20
+SECONDARY_WEIGHT = 0.2
+SECONDARY_PARTS = {"test", "tests", "spec", "specs", "__tests__", "doc", "docs", "manual"}
+SECONDARY_NAME = re.compile(r"(?i)(readme|changelog)[^/]*|.*\.md|test_.*|.*[_.](test|spec)\.\w+")
+DIFF_HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@")
 
 
 def scope(cache, snapshot, corpus):
@@ -65,7 +76,7 @@ def observe(cache, member, repo, as_of, max_age):
     record = member.get("record")
     result = dict(item=member["identity"], snapshot_id=member["snapshot_id"], revision=record["revision"] if record else None,
                   components={}, exclusions=[], holds=["semantic-comparison-required"], title=None, base_branch=None)
-    features = dict(files=set(), closing_issues=set())
+    features = dict(files=set(), closing_issues=set(), changed_lines=set(), diff_changed_counts={})
     if member["identity"]["kind"] != "pr":
         result["exclusions"].append("issue-policy-unsupported")
         return result, features
@@ -89,7 +100,7 @@ def observe(cache, member, repo, as_of, max_age):
             else:
                 validate_payload(name, descriptor, "pr", payload)
                 result["components"][name]["payload_verified"] = True
-                payloads[name] = json.loads(payload)
+                payloads[name] = payload if name == "diff" else json.loads(payload)
 
         if problems:
             result["holds"].append(f"discovery-evidence-gap:{name}")
@@ -158,6 +169,16 @@ def observe(cache, member, repo, as_of, max_age):
 
                 features[name].add(canonical(dict(repository=linked_repo, identity=linked)))
 
+    if "diff" in payloads and not result["components"]["diff"]["problems"]:
+        lines, changed_counts, parsed = removed_lines(payloads["diff"])
+        if not parsed:
+            result["holds"].append("discovery-diff-unparsed")
+        elif sum(changed_counts.values()) > MAX_DIFF_LINES:
+            result["holds"].append("discovery-feature-limit:diff")
+        else:
+            features["changed_lines"] = lines
+            features["diff_changed_counts"] = changed_counts
+
     return result, features
 
 
@@ -165,13 +186,111 @@ def broad_path(path):
     return path.rsplit("/", 1)[-1] in BROAD_PATHS or any(part in ("vendor", "generated", "node_modules", "dist") for part in path.split("/"))
 
 
+def removed_lines(diff):
+    """Return original path, line number and text keys, changed-line counts by path, and whether all diff headers parsed."""
+    removed, changed = set(), Counter()
+    path, old_line, parsed = None, None, True
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            try:
+                parts = shlex.split(line)
+            except ValueError:
+                parts = []
+
+            if len(parts) != 4 or parts[:2] != ["diff", "--git"] or not parts[2].startswith("a/") or not parts[3].startswith("b/"):
+                parsed = False
+                path = None
+            else:
+                path = parts[2][2:]
+
+            old_line = None
+        elif path is None:
+            continue
+        elif line.startswith("@@"):
+            match = DIFF_HUNK.match(line)
+            if match is None:
+                parsed = False
+                old_line = None
+            else:
+                old_line = int(match[1])
+        elif old_line is not None:
+            if line.startswith("-"):
+                changed[path] += 1
+                original = " ".join(line[1:].split())
+                if len(original) >= MIN_LINE_CHARS:
+                    removed.add(canonical([path, old_line, original]))
+
+                old_line += 1
+            elif line.startswith("+"):
+                changed[path] += 1
+            elif line.startswith(" "):
+                old_line += 1
+
+    return removed, changed, parsed
+
+
+def secondary_path(path):
+    parts = path.split("/")
+    return any(part in SECONDARY_PARTS for part in parts[:-1]) or bool(SECONDARY_NAME.fullmatch(parts[-1]))
+
+
+def broad_signal(name, value):
+    path = value if name == "files" else json.loads(value)[0] if name == "changed_lines" else None
+    return bool(path) and broad_path(path)
+
+
+def line_signals(features, max_frequency, threshold):
+    """Link pairs whose shared original lines cover enough changed paths on both sides; large PRs need more than one matching line."""
+    frequency = Counter(value for item in features.values() for value in item["changed_lines"])
+    postings = defaultdict(list)
+    for number, item in features.items():
+        for value in item["changed_lines"]:
+            if frequency[value] <= max_frequency and not broad_path(json.loads(value)[0]):
+                postings[value].append(number)
+
+    shared = defaultdict(list)
+    for value, numbers in postings.items():
+        for pair in combinations(sorted(numbers), 2):
+            shared[pair].append(json.loads(value))
+
+    path_counts = Counter(path for item in features.values() for path in item["diff_changed_counts"])
+    diffs = sum(bool(item["diff_changed_counts"]) for item in features.values())
+    weights = {path: math.log1p(diffs / count) * (SECONDARY_WEIGHT if secondary_path(path) else 1.0) for path, count in path_counts.items()}
+    path_totals = {number: sum(weights[path] for path in item["diff_changed_counts"]) for number, item in features.items()}
+    line_totals = {number: sum(weights[path] * count for path, count in item["diff_changed_counts"].items()) for number, item in features.items()}
+
+    signals = {}
+    for pair, lines in shared.items():
+        if len(lines) == 1 and max(sum(features[number]["diff_changed_counts"].values()) for number in pair) > SINGLE_LINE_MAX_DIFF_LINES:
+            continue
+
+        by_path = defaultdict(list)
+        for path, _, line in lines:
+            by_path[path].append(line)
+
+        overlap = sum(weights[path] for path in by_path)
+        coverage = math.sqrt(overlap / path_totals[pair[0]] * overlap / path_totals[pair[1]])
+        if coverage < threshold:
+            continue
+
+        line_overlap = sum(weights[path] * len(values) for path, values in by_path.items())
+        line_coverage = math.sqrt(line_overlap / line_totals[pair[0]] * line_overlap / line_totals[pair[1]])
+        paths = [dict(path=path, lines=len(values), sample=min(values, key=lambda value: (len(value), value))[:160]) for path, values in sorted(by_path.items())]
+        signals[pair] = dict(signal="changed_lines", coverage=round(coverage, 3), line_coverage=round(line_coverage, 3), shared_lines=len(lines),
+                             paths=paths[:SIGNAL_PREVIEW], omitted_paths=max(0, len(paths) - SIGNAL_PREVIEW))
+
+    return signals, frequency
+
+
 def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=None, max_age=DEFAULT_MAX_AGE, as_of=None,
-             title_threshold=0.8, max_frequency=10):
+             title_threshold=0.8, max_frequency=10, line_threshold=0.3, max_line_frequency=15):
     window(offset, limit, 100)
     natural(max_age, "maximum age")
     natural(max_frequency, "maximum signal frequency", 2)
-    if type(title_threshold) not in (int, float) or not 0 < title_threshold <= 1:
-        raise ValueError("title threshold must be greater than zero and at most one")
+    natural(max_line_frequency, "maximum line frequency", 2)
+    for name, value in (("title", title_threshold), ("line", line_threshold)):
+        if type(value) not in (int, float) or not 0 < value <= 1:
+            raise ValueError(f"{name} threshold must be greater than zero and at most one")
     if offset and (checkpoint is None or as_of is None):
         raise ValueError("candidate continuation requires checkpoint and as-of")
 
@@ -241,6 +360,10 @@ def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=N
                 pair_signals[left, right].append(dict(signal=name, value=json.loads(value) if name == "closing_issues" else value,
                                                       frequency=frequencies[name][value]))
 
+    lines, frequencies["changed_lines"] = line_signals(features, max_line_frequency, line_threshold)
+    for pair, signal in lines.items():
+        pair_signals[pair].insert(0, signal)
+
     edges, rejected, suppressed = {}, [], []
     for (left, right), reasons in sorted(pair_signals.items()):
 
@@ -255,10 +378,11 @@ def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=N
             edges[left, right] = pair
 
     for name, counts in frequencies.items():
-        values = [dict(value=json.loads(value) if name == "closing_issues" else value, frequency=count,
-                       reasons=(["frequent-in-selected-scope"] if count > max_frequency else []) +
-                               (["known-broad-path"] if name == "files" and broad_path(value) else []))
-                  for value, count in sorted(counts.items()) if count > max_frequency or (name == "files" and broad_path(value))]
+        maximum = max_line_frequency if name == "changed_lines" else max_frequency
+        values = [dict(value=json.loads(value) if name != "files" else value, frequency=count,
+                       reasons=(["frequent-in-selected-scope"] if count > maximum else []) +
+                               (["known-broad-path"] if broad_signal(name, value) else []))
+                  for value, count in sorted(counts.items()) if count > maximum or broad_signal(name, value)]
         suppressed.append(dict(signal=name, total=len(values), preview=values[:SIGNAL_PREVIEW], omitted=max(0, len(values) - SIGNAL_PREVIEW)))
 
     if omitted_title_terms:
@@ -287,7 +411,7 @@ def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=N
         suggestions.append(dict(suggestion, id=digest(canonical(suggestion))))
 
     options = dict(snapshot=snapshot, corpus=corpus, max_age=max_age, as_of=as_of,
-                   title_threshold=title_threshold, max_frequency=max_frequency)
+                   title_threshold=title_threshold, max_frequency=max_frequency, line_threshold=line_threshold, max_line_frequency=max_line_frequency)
     evaluated = dict(policy=POLICY, source=source, options=options, observations=observations, negative_verdicts=negatives,
                      suppressed_signals=suppressed, results=suggestions + rejected)
     token = digest(canonical(evaluated))
@@ -304,7 +428,8 @@ def discover(cache, snapshot=None, corpus=None, offset=0, limit=20, checkpoint=N
     return dict(schema_version=1, **evaluated, checkpoint=token, results=selected, pagination=pagination,
                 candidate_sets=len(suggestions), excluded_pairs=len(rejected),
                 continuation=dict(options, offset=pagination["next_offset"], limit=limit, checkpoint=token) if pagination["next_offset"] is not None else None,
-                requests=0, mode="offline", limits=dict(members=MAX_MEMBERS, payload_bytes=MAX_BYTES, features_per_component=MAX_FEATURES, signal_preview=SIGNAL_PREVIEW),
+                requests=0, mode="offline", limits=dict(members=MAX_MEMBERS, payload_bytes=MAX_BYTES, features_per_component=MAX_FEATURES,
+                                                        diff_lines=MAX_DIFF_LINES, single_line_max_diff_lines=SINGLE_LINE_MAX_DIFF_LINES, signal_preview=SIGNAL_PREVIEW),
                 meaning="Discovery proposals only. Every pair has a direct signal, never proven redundancy. No survivor, approval or closure authority.",
                 coverage="All members of this bounded frozen scope examined; gaps and suppressed signals prevent any exhaustive backlog or negative verdict claim.")
 
@@ -368,7 +493,7 @@ def create_from_packet(packet, identifier, by):
 def validate_origin(group):
     origin = group["candidate_origin"]
     fields(origin, ("schema_version", "policy", "source", "options", "checkpoint", "suggestion", "by", "at", "digest"))
-    if type(origin["schema_version"]) is not int or origin["schema_version"] != 1 or origin["policy"] != POLICY:
+    if type(origin["schema_version"]) is not int or origin["schema_version"] != 1 or origin["policy"] not in POLICIES:
         raise ValueError("unsupported candidate origin")
     if origin["digest"] != digest(canonical({key: value for key, value in origin.items() if key != "digest"})):
         raise ValueError("candidate origin checksum mismatch")

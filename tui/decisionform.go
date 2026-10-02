@@ -30,10 +30,11 @@ type decisionForm struct {
 	kind     string
 	focused  formField
 
+	// A negative index preserves a blank field in an existing decision or proposal.
 	categoryIdx   int
 	actionIdx     int
 	confidenceIdx int
-	// reason wraps and grows with its text, up to reasonMaxLines; Enter never reaches it (it saves), so it stays one paragraph.
+	// The reason editor grows up to reasonMaxLines visible rows; Enter saves rather than inserting a newline.
 	reason textarea.Model
 
 	dirty bool
@@ -46,8 +47,8 @@ type decisionForm struct {
 	proposalNotes    string
 	proposalBy       string
 	proposalSnapshot decisionSnapshot
-	// badCategory / badAction hold a proposal's value that isn't in config/taxonomy.json. The field shows it, flagged, until you pick a real value, and saving is refused meanwhile, instead of silently showing (and saving) the first option.
-	badCategory, badAction string
+	// Unlisted values from the ledger or a proposal stay visible and block saving until the reviewer picks supported values.
+	badCategory, badAction, badConfidence string
 	// pick is the list a choice field opens on Enter.
 	pick dropdown
 }
@@ -63,7 +64,7 @@ func newDecisionForm(tax Taxonomy) decisionForm {
 	ta.Placeholder = "one sentence a human can skim"
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
-	ta.CharLimit = 600
+	ta.CharLimit = 0
 	ta.MaxHeight = reasonMaxLines
 	ta.SetHeight(1)
 	themeTextarea(&ta)
@@ -94,6 +95,9 @@ type decisionSnapshot struct {
 	actionIdx     int
 	confidenceIdx int
 	reason        string
+	badCategory   string
+	badAction     string
+	badConfidence string
 }
 
 func (f decisionForm) Snapshot() decisionSnapshot {
@@ -102,6 +106,9 @@ func (f decisionForm) Snapshot() decisionSnapshot {
 		actionIdx:     f.actionIdx,
 		confidenceIdx: f.confidenceIdx,
 		reason:        f.reason.Value(),
+		badCategory:   f.badCategory,
+		badAction:     f.badAction,
+		badConfidence: f.badConfidence,
 	}
 }
 
@@ -111,6 +118,7 @@ func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 	f.actionIdx = s.actionIdx
 	f.confidenceIdx = s.confidenceIdx
 	f.reason.SetValue(s.reason)
+	f.badCategory, f.badAction, f.badConfidence = s.badCategory, s.badAction, s.badConfidence
 	f.dirty = true
 	f.saved = false
 	f.touched = true
@@ -121,9 +129,22 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 	f.categoryIdx = indexOrZero(f.categories(), p.Category)
 	f.actionIdx = indexOrZero(f.taxonomy.Actions, p.Action)
 	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, p.Confidence)
+	if p.Category == "" {
+		f.categoryIdx = -1
+	}
+
+	if p.Action == "" {
+		f.actionIdx = -1
+	}
+
+	if p.Confidence == "" {
+		f.confidenceIdx = -1
+	}
+
 	f.reason.SetValue(p.Reason)
 	f.proposalNotes = p.AgentNotes
 	f.badCategory, f.badAction = unlisted(f.categories(), p.Category), unlisted(f.taxonomy.Actions, p.Action)
+	f.badConfidence = unlisted(f.taxonomy.Confidence, p.Confidence)
 	f.touched = true
 	f.proposed = true
 	f.proposalBy = p.ProposedBy
@@ -155,6 +176,7 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 	}
 
 	f.categoryIdx, f.actionIdx = cat, act
+	f.badCategory, f.badAction = "", ""
 	f.reason.SetValue(fmt.Sprintf("Duplicate of #%d (%s).", number, title))
 	f.reason.CursorEnd()
 	f.dirty, f.saved, f.touched, f.proposed = true, false, true, false
@@ -170,16 +192,31 @@ func (f *decisionForm) LoadItem(it Item) {
 	f.categoryIdx = indexOrZero(f.categories(), it.Category)
 	f.actionIdx = indexOrZero(f.taxonomy.Actions, it.Action)
 	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, it.Confidence)
+	hasDecision := it.Category != "" || it.Action != "" || it.Confidence != "" || it.Reason != "" || it.Reviewed
+	if hasDecision {
+		if it.Category == "" {
+			f.categoryIdx = -1
+		}
+
+		if it.Action == "" {
+			f.actionIdx = -1
+		}
+
+		if it.Confidence == "" {
+			f.confidenceIdx = -1
+		}
+	}
+
+	f.badCategory, f.badAction, f.badConfidence = unlisted(f.categories(), it.Category), unlisted(f.taxonomy.Actions, it.Action), unlisted(f.taxonomy.Confidence, it.Confidence)
 	f.reason.SetValue(it.Reason)
 	f.focused = fieldContent
 	f.dirty = false
 	f.saved = false
-	f.touched = it.Category != ""
+	f.touched = hasDecision
 	f.proposed = false
 	f.proposalNotes = ""
 	f.proposalBy = ""
 	f.proposalSnapshot = decisionSnapshot{}
-	f.badCategory, f.badAction = "", ""
 	f.pick.open = false
 	f.reason.Blur()
 }
@@ -199,7 +236,7 @@ func unlisted(options []string, value string) string {
 	return value
 }
 
-// InvalidValues describes proposal values the taxonomy doesn't have, or "" if there are none.
+// InvalidValues describes ledger or proposal values the taxonomy doesn't have, or "" if there are none.
 func (f decisionForm) InvalidValues() string {
 	var bad []string
 	if f.badCategory != "" {
@@ -208,6 +245,10 @@ func (f decisionForm) InvalidValues() string {
 
 	if f.badAction != "" {
 		bad = append(bad, fmt.Sprintf("action %q", f.badAction))
+	}
+
+	if f.badConfidence != "" {
+		bad = append(bad, fmt.Sprintf("confidence %q", f.badConfidence))
 	}
 
 	return strings.Join(bad, " and ")
@@ -226,6 +267,14 @@ func indexOrZero(options []string, value string) int {
 func (f *decisionForm) categories() []string { return f.taxonomy.CategoriesFor(f.kind) }
 
 func (f decisionForm) Category() string {
+	if f.badCategory != "" {
+		return f.badCategory
+	}
+
+	if f.categoryIdx < 0 {
+		return ""
+	}
+
 	if opts := f.categories(); len(opts) > 0 {
 		return opts[f.categoryIdx%len(opts)]
 	}
@@ -234,6 +283,14 @@ func (f decisionForm) Category() string {
 }
 
 func (f decisionForm) Action() string {
+	if f.badAction != "" {
+		return f.badAction
+	}
+
+	if f.actionIdx < 0 {
+		return ""
+	}
+
 	if opts := f.taxonomy.Actions; len(opts) > 0 {
 		return opts[f.actionIdx%len(opts)]
 	}
@@ -242,6 +299,14 @@ func (f decisionForm) Action() string {
 }
 
 func (f decisionForm) Confidence() string {
+	if f.badConfidence != "" {
+		return f.badConfidence
+	}
+
+	if f.confidenceIdx < 0 {
+		return ""
+	}
+
 	if opts := f.taxonomy.Confidence; len(opts) > 0 {
 		return opts[f.confidenceIdx%len(opts)]
 	}
@@ -321,6 +386,11 @@ func (f *decisionForm) PickKey(msg tea.KeyPressMsg) {
 
 // CycleValue moves the focused enum field by delta (wrapping). No-op on reason.
 func (f *decisionForm) CycleValue(delta int) {
+	options, _ := f.options()
+	if len(options) == 0 {
+		return
+	}
+
 	f.dirty = true
 	f.saved = false
 	f.touched = true
@@ -334,12 +404,13 @@ func (f *decisionForm) CycleValue(delta int) {
 		n := len(f.taxonomy.Actions)
 		f.actionIdx = ((f.actionIdx+delta)%n + n) % n
 	case fieldConfidence:
+		f.badConfidence = ""
 		n := len(f.taxonomy.Confidence)
 		f.confidenceIdx = ((f.confidenceIdx+delta)%n + n) % n
 	}
 }
 
-// View renders the form to width: the three choices, the reason (wrapping over up to reasonMaxLines), and one line of state.
+// View renders the form to width: the three choices, the reason (wrapping over up to reasonMaxLines), and its state.
 func (f decisionForm) View(width int) string {
 	accent := lipgloss.NewStyle().Foreground(focusedBorderColor).Bold(true)
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
@@ -354,7 +425,7 @@ func (f decisionForm) View(width int) string {
 
 	value := func(field formField, bad, v string) string {
 		if bad != "" {
-			v = bad + lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Error)).Render(" (not in taxonomy: ↑/↓ to pick one)")
+			v = bad + lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Error)).Render(" (not in taxonomy)")
 		}
 
 		if field == f.focused {
@@ -372,7 +443,7 @@ func (f decisionForm) View(width int) string {
 	}{
 		{fieldCategory, "category", f.badCategory, f.Category()},
 		{fieldAction, "action", f.badAction, f.Action()},
-		{fieldConfidence, "confidence", "", f.Confidence()},
+		{fieldConfidence, "confidence", f.badConfidence, f.Confidence()},
 	} {
 		rows = append(rows, label(field.id, field.name)+value(field.id, field.bad, field.value))
 		if f.pick.open && f.focused == field.id {
@@ -393,17 +464,23 @@ func (f decisionForm) View(width int) string {
 
 	// "Saved." itself goes to the status line only, not here as well.
 	state := ""
+	stateStyle := muted
 	switch {
 	case f.dirty:
-		state = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("unsaved changes")
+		state = "unsaved changes"
+		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
 	case f.proposed:
-		state = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("proposed in the batch file, not saved yet")
+		state = "proposed in the batch file, not saved yet"
+		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
 	case !f.touched:
-		state = muted.Render("untriaged: fields show defaults until you change them")
+		state = "untriaged: fields show defaults until you change them"
 	}
 
 	if state != "" {
-		rows = append(rows, "", state)
+		rows = append(rows, "")
+		for _, line := range strings.Split(ansi.Wrap(state, maxInt(width, 1), ""), "\n") {
+			rows = append(rows, stateStyle.Render(line))
+		}
 	}
 
 	for i := range rows {

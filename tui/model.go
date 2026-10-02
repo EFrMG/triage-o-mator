@@ -45,6 +45,9 @@ type model struct {
 	taxonomy                Taxonomy
 	reviewer                string
 
+	// pendingApply counts concurrent decision writes and undo commands; batch applies use batches.busy.
+	pendingApply int
+
 	items   []Item
 	groups  groupUI
 	batches batchUI
@@ -185,6 +188,12 @@ func newModel(installRoot, repo string, taxonomy Taxonomy, reviewer string, item
 		refreshing:    startingFetch != "",
 		refreshStatus: startingFetch,
 		statusAt:      time.Now(),
+	}
+	var preferenceError error
+	m.corpus.automatic, preferenceError = loadCorpusAuto(installRoot, repo)
+	if preferenceError != nil {
+		m.corpus.preferenceProblem = "Automatic download preference unavailable; defaulting to OFF."
+		m.recordError("Automatic download preference unavailable", preferenceError)
 	}
 	themeTextarea(&m.form.reason)
 	themeInput(&m.repoInput)
@@ -484,6 +493,8 @@ func (m model) formPanelWidth() int {
 
 func (m *model) layout() {
 	m.layoutComment()
+	m.layoutGroupNote()
+	m.layoutGroupEdit()
 	listW, _ := m.panelWidths()
 	if m.listReady {
 		m.list.SetSize(listW, maxInt(m.mainHeight()-listHeaderHeight, 1))
@@ -508,6 +519,11 @@ func (m *model) layout() {
 func (m model) formPanel(width int) string {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
 	lines := append(strings.Split(m.form.View(width), "\n"), "")
+	appendMuted := func(text string) {
+		for _, line := range strings.Split(ansi.Wrap(text, maxInt(width, 1), ""), "\n") {
+			lines = append(lines, muted.Render(line))
+		}
+	}
 	if it, ok := m.findItem(m.detail.key); ok && !it.Untriaged() {
 		triaged := "triaged by " + orPlaceholder(it.TriagedBy, "?") + " · " + shortDate(it.TriagedAt)
 		if it.BatchID != "" && it.BatchID != "tui" {
@@ -519,10 +535,11 @@ func (m model) formPanel(width int) string {
 			reviewed = "reviewed by " + orPlaceholder(it.ReviewedBy, "?") + " · " + shortDate(it.ReviewedAt)
 		}
 
-		lines = append(lines, muted.Render(triaged), muted.Render(reviewed))
+		appendMuted(triaged)
+		appendMuted(reviewed)
 	}
 
-	lines = append(lines, muted.Render("you: "+m.reviewer))
+	appendMuted("you: " + m.reviewer)
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], width, "…")
 	}
@@ -546,7 +563,7 @@ func (m model) itemView() string {
 	if m.notificationPR.open {
 		it := m.detail.item
 		if it.Title != "" {
-			title += " · " + it.Title
+			title += " " + it.Title
 		}
 		if it.State != "" {
 			stateColor := currentTheme.Muted
@@ -582,8 +599,12 @@ func (m model) itemView() string {
 		}
 	}
 
-	header := lipgloss.NewStyle().Bold(true).Render(ansi.Truncate(singleLine(title), w, "…")) + "\n" +
-		ansi.Truncate(strings.Join(meta, mutedText(" · ")), w, "…")
+	itemTitle := ansi.Truncate(singleLine(title), w, "…")
+	heading := lipgloss.NewStyle().Bold(true).Render(itemTitle)
+	if styled, ok := styledItemHeading(itemTitle, lipgloss.Color(currentTheme.Foreground), nil); ok {
+		heading = styled
+	}
+	header := heading + "\n" + ansi.Truncate(strings.Join(meta, mutedText(" · ")), w, "…")
 	tabs := m.detail.TabBar(w, m.form.focused == fieldContent || m.detail.full)
 	content := lipgloss.NewStyle().Width(m.detail.width).Height(m.detail.height).MaxHeight(m.detail.height).Render(m.detail.View())
 
@@ -660,6 +681,15 @@ func (m model) viewContent() string {
 	}
 
 	body := m.bodyView()
+	if m.notifications.open && m.notifications.review != nil && m.notifications.notesOpen {
+		body = m.proposalNotesOverlay(body)
+	}
+	if m.groups.open && m.groups.editing == "notes" {
+		body = m.groupNoteOverlay(body)
+	}
+	if m.groups.open && m.groups.editing == "edit" {
+		body = m.groupEditOverlay(body)
+	}
 	if m.comment.open {
 		body = m.commentOverlay(body)
 	}
@@ -749,7 +779,7 @@ func (m model) needsResize() bool {
 }
 
 func (m model) minimumHeight() int {
-	if m.comment.open {
+	if m.comment.open || m.groups.editing == "notes" || m.groups.editing == "edit" {
 		return maxInt(24, lipgloss.Height(m.footerView())+17)
 	}
 
@@ -758,7 +788,7 @@ func (m model) minimumHeight() int {
 
 // switchBusy gates legacy work without cancellation/reply identities. Explicit evidence/corpus processes are stopped on switch and their stale replies are rejected. Unsaved drafts still require discard confirmation.
 func (m model) switchBusy() string {
-	if m.refreshing || m.groups.busy || m.batches.busy || m.dups.busy || m.detail.loading {
+	if m.refreshing || m.groups.busy || m.batches.busy || m.dups.busy || m.detail.loading || m.pendingApply > 0 {
 		return "wait for the current fetch or save to finish."
 	}
 
@@ -800,6 +830,12 @@ func (m *model) switchRepo(repo string) tea.Cmd {
 	m.corpusObserverLifecycle.stop()
 	m.corpusEpoch++
 	m.corpus = corpusUI{}
+	automatic, preferenceError := loadCorpusAuto(m.installRoot, repo)
+	m.corpus.automatic = automatic
+	if preferenceError != nil {
+		m.corpus.preferenceProblem = "Automatic download preference unavailable; defaulting to OFF."
+		m.recordError("Automatic download preference unavailable", preferenceError)
+	}
 	items, err := LoadLedger(m.installRoot, repo)
 	if err != nil {
 		m.failErr("Couldn't read the ledger", err)

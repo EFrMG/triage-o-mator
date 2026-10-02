@@ -10,11 +10,33 @@ Tooling to work through a GitHub issue / PR backlog too large for one person to 
 
 The backlog gets a first pass of categorization done in batches, by you or by an AI Agent, and whoever's triaging gets a fast, git-tracked way to check and correct that first pass before anyone acts on it.
 
-It reads issues and PRs via `gh` and writes categorization decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI or `bin/comment-plus`; publishing defaults to dry-run and never follows automatically from a triage decision.
+It reads issues and PRs via `gh` and writes categorization decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI; publishing defaults to dry-run and never follows automatically from a triage decision.
 
 > Developed with the [omacom/omarchy](https://github.com/omacom/omarchy) backlog in mind, while supporting other GitHub repositories. Adoption by Omarchy is a goal, not an existing deployment.
 
-One installs it **into the repository you triage**: this checkout is the program, and each target repository gets its own `triage-o-mator/` directory holding its ledger, groups, reports and taxonomy. That directory is meant to be committed to that repository, so triage is shared the way everything else in it is, through pull requests its maintainers can read the pending items and batches in progress of triage, groups of related items, and even Markdown briefs of such after careful review. One could also use it solo.
+One installs it **into the repository you triage**: this checkout provides the program, while each target repository own `triage-o-mator/`, directory with its ledger, groups, automated proposals, reports and taxonomy. Reviewed decisions and group guidance can travel through ordinary Git pull requests. Batches and evidence caches are local working data. Using it solo is also possible.
+
+## How it works
+
+The ledger records local decisions and human review. Groups hold tangentially related items together; the cache keeps versioned GitHub data for offline analysis. An agent can start from different standpoints, while reading current guidance and evidence, then explains your concerns or proposes actions to be confirmed of execution.
+
+```mermaid
+flowchart LR
+    HUMAN["Human decision<br/>and notes"] --> CONTEXT["Current guidance<br/>+ selected evidence"]
+    GROUP["Agent draft group"] --> EDIT["Human edits<br/>and selects members"] --> CONTEXT
+    CONTEXT --> AGENT{"Agent assessment"}
+    AGENT -->|"keep open"| OPEN["Reason and gaps<br/>for the maintainer"]
+    AGENT -->|"propose closure"| NOTICE["Notifications:<br/>exact comment and context"]
+    NOTICE -->|"edit"| REVIEW["Revised proposal<br/>needs fresh review"] --> NOTICE
+    NOTICE -->|"reject"| FEEDBACK["Attributed feedback<br/>for the next pass"] --> CONTEXT
+    NOTICE -->|"approve exact action"| WRITE["comment-plus<br/>publishes on GitHub"]
+```
+
+**Notifications** shows the target, comment, human guidance and evidence gaps before approval. A reviewer can edit, reject with an optional attributed reason, or approve the upstream write action. Rejection stays available to the next agent pass; changed guidance requires a fresh proposal and review.
+
+Group `ready`, ledger `reviewed`, and approval to publish on GitHub while being the three main pillars in the flow: **similar items, human review, and agentic actionable proposals**.
+
+An item first enters the ledger when observed open. Later syncs retain its row after closure and preserve its decision history.
 
 ## Install
 
@@ -23,156 +45,107 @@ You need an authenticated [`gh`](https://cli.github.com/), [mise](https://mise.j
 ```sh
 gh repo clone efrmg/triage-o-mator && cd triage-o-mator
 ./install.sh /path/to/your/repository # mise install, make build, bin/install-to
-```
 
-Then run it from the repository:
-
-```sh
 cd /path/to/your/repository
 triage-o-mator/bin/triage-o-mator # And she's ON!
 ```
 
-Every script finds its install from its own path, so this works from the repository's root, from anywhere under it, or from inside `triage-o-mator/`, and the commands each one suggests come back in the form you can paste from where you are.
+Every script finds its install from its own path, so commands work from the repository root or inside `triage-o-mator/`.
 
-Installing into a repository you don't control, adopting an install later, installing the tool into its own repository to triage its backlog, upgrading, repairing symlinks and making the prompts and taxonomy custom are all in [docs/install.md](docs/install.md).
+The [installation guide](docs/install.md) covers solo installs, adoption, upgrades and custom prompts and taxonomy.
 
-The install can live in a fork while reading the upstream backlog too. For example, from this built tool checkout:
+## Walkthrough
+
+The [tutorial](docs/tutorial.md) walks through these tasks and their controls. [Group review](docs/groups.md) and [cache evidence](docs/evidence.md) have some extra details.
+
+Mouse controls work alongside the keyboard keys.
+
+0. **Get oriented and refresh.** The overview shows the current repository, triage and review progress, and suggestions from `bin/next`. Refresh changed issues and PRs, or run a full refresh when needed. This does not overwrite local decisions.
+
+![Overview and backlog refresh](captures/flow-0.webp)
+
+1. **Choose and read the work.** Open **Untriaged** or a prepared **Batch**; filter issues and PRs, change the age order, search, or select several items for one action. Open an item to read its body, agent notes, comments and PR diff. You are able to copy short handoffs for Agents throughout most menus.
+
+![Selecting and reading backlog items](captures/flow-1.webp)
+
+2. **Make a first pass, then review it.** Choose a category, action and confidence, with a short reason. Save a decision for later review or confirm one you have checked yourself. An agent can prepare a batch from copied item or list context; inspect its suggestions in **Batches**, then save them individually or apply the rest as unreviewed decisions. **Pending Review** is where a person verifies and revises those decisions. Reviewed items stay in **All Items** and groups; editing one removes its old confirmation. A reviewed ledger decision does not execute its recommended action.
+
+![Saving and reviewing triage decisions](captures/flow-2.webp)
+
+3. **Compare, group and hand work back to an agent.** **Possible Duplicates** offers pairs to inspect; compare both sides before recording a duplicate or ruling out a false match. An agent can prepare a focused draft **Group** of related items. Edit its description and member notes, then use `y` for selected members or `Y` for all to copy a current handoff. The agent prepares recommendations only for those members, including ones already triaged. A person can mark a checked group `ready` for maintainers; that does not approve its members' decisions or later actions.
+
+![Comparing candidates and organizing a group](captures/flow-3.webp)
+
+4. **Local dataset** freezes the open backlog and downloads descriptions, discussions, PR files, diffs and closing links. Press `f`, then turn automatic download **ON**, running then and after startup or backlog refreshes. An Agent therefore can search without having to fetch GH and bloat its context with irrelevant data (while taking longer), while also taking from past saved observations. Missing, partial or old evidence remains visible.
+
+![Downloading a local evidence dataset](captures/flow-4.webp)
+
+5. **Review proposals and follow-up in Notifications.** A PR closure proposal shows its explanatory comment, relevant human guidance, earlier objections and selected evidence gaps. Approve, edit, or reject it with an optional reason. Edits need fresh review; a rejection remains in shared history for the next agent pass. You can also track issue and PR comments in this menu; it separates items needing attention from past activity; `viewing` and `dismissing` rows does not confirm appeals, nor approve decisions.
+
+![Reviewing notifications and follow-up activity](captures/flow-5.webp)
+
+6. **Publish an approved GitHub action.** Compose a comment, or close or reopen an item with one as well. Bulk actions show every target before publication; an uncertain result stops the remaining actions for inspection.
+
+> GitHub PR approval, labeling and merging are not supported (yet).
+
+![Approving a GitHub comment or state change](captures/flow-6.webp)
+
+7. **Hand reviewed work to maintainers.** Export a group or batch for a review packet, then gather ready groups and human-reviewed decisions into a dated Markdown report. An agent can turn it into a concise maintainer brief!
+
+![Agent wrote a maintainer brief](captures/agent-writing-maintainer-brief.png)
+
+8. **Switch repositories when needed.** Each have its own taxonomy, ledger, batches, groups, exports and reports. The TUI asks about unsaved drafts before switching and rejects late read replies.
+
+![Switching between repository installs](captures/flow-8.webp)
+
+## Working from a fork
+
+An install can live in a fork while reading the upstream backlog. From this built tool checkout, for example:
 
 ```sh
 bin/install-to /path/to/your/omarchy --repo omacom/omarchy
 ```
 
-Here the local clone can be `efrmg/omarchy`; `--repo` explicitly chooses whose issues and PRs to read. The [fork walkthrough](docs/install.md#working-from-a-fork) covers an existing install, tracked versus solo work, and sharing the results. No upstream write access is required.
+The local clone could be your fork; `--repo` chooses whose issues and PRs to read. Browsing and preparing proposals needs no upstream write access; publishing there does. See the [fork walkthrough](docs/install.md#working-from-a-fork) for tracked and solo work.
 
-Everything below is written from inside an install: paths like `data/<owner>/<repo>/ledger.jsonl` are relative to it.
+## Reference
 
-## How it works
+The paths below are relative to an install: `data/<owner>/<repo>/ledger.jsonl`, for example.
 
-<details>
+### Local records
 
-<summary>Open the screencaptures (stale, new GIFs comming soon!)</summary>
-
-![flow-0](captures/flow-0.png)
-
-![flow-1-a](captures/flow-1-a.png)
-![flow-1-b](captures/flow-1-b.png)
-
-![flow-2](captures/flow-2.png)
-
-![flow-3](captures/flow-3.png)
-
-![flow-4-a](captures/flow-4-a.png)
-![flow-4-b](captures/flow-4-b.png)
-
-![flow-5](captures/flow-5.png)
-
-![flow-6](captures/flow-6.png)
-
-![flow-7](captures/flow-7.png)
-
-![flow-8](captures/flow-8.png)
-
-![flow-9](captures/flow-9.png)
-
-![flow-10](captures/flow-10.png)
-
-![agent-writing-maintainer-brief](captures/agent-writing-maintainer-brief.png)
-
-</details>
-
-The ledger tracks item facts and local triage decisions. The cache keeps larger, versioned observations for offline analysis. Groups and reports turn reviewed work into a handoff for maintainers.
-
-```mermaid
-flowchart LR
-    GH["GitHub backlog<br/>(read only)"]
-    LOCAL["Local working data<br/>ledger + evidence cache"]
-    TRIAGE["Triage in the TUI<br/>or an agent batch"]
-    PROPOSAL["Unreviewed proposal<br/>saved in the ledger"]
-    REVIEWED["Human-reviewed decision<br/>saved in the ledger"]
-    HANDOFF["Groups and reports<br/>for maintainers"]
-
-    GH -->|"read-only scripts"| LOCAL
-    LOCAL --> TRIAGE
-    TRIAGE -->|"save for review"| PROPOSAL
-    TRIAGE -->|"human saves + approves"| REVIEWED
-    PROPOSAL -->|"human confirms or revises"| REVIEWED
-    REVIEWED --> HANDOFF
-```
-
-An item first enters the ledger when observed open. Later syncs retain its row after closure, along with its triage and review history. `bin/sync` does not import every item that closed before that first observation. GitHub reads run through scripts; approved comments and closures run through `bin/comment-plus`. The TUI invokes the owning scripts for managed data, and agent proposals stay unreviewed until a human confirms them.
-
-### Using the TUI
-
-The [tutorial](docs/tutorial.md) walks through these tasks and their controls. [Group review](docs/groups.md) and [cache evidence](docs/evidence.md) have some extra details.
-
-Mouse controls work alongside the keys: click a sidebar entry or tab, click a card to select it and click it again to open it, right-click a card to select it for a bulk action, and scroll with the wheel. Footer shortcuts are clickable too. A choice field opens on a second click; click an option to select it.
-
-1. **Get oriented and refresh.** The overview shows the current repository, triage and review progress, and suggestions from `bin/next`. Refresh changed issues and PRs, or run a full refresh when needed; both update the local ledger without writing to GitHub or erasing decisions and review history.
-
-2. **Choose and read the work.** Open **Untriaged** or a prepared **Batch**; show issues, PRs or both, change the age order, search, or select several items for one action. Open an item to read its body, agent notes, comments and PR diff, and follow it to GitHub web whenever you need more context.
-
-3. **Make a first pass, then review it.** Take an item and choose a category, action and confidence, with a short reason. You can save a proposal for later review or save and approve a decision you have checked yourself. Give an agent copied item or list context to prepare a batch; inspect its proposals in **Batches**, then save them individually or apply the rest as unreviewed decisions. In **Pending Review**, verify and revise saved decisions before confirming them. Reviewed items leave that queue but remain in **All Items** and groups; changing one removes its previous confirmation. None of these steps performs the recommended GitHub action.
-
-4. **Compare and organize related items.** **Possible Duplicates** and each item's candidates offer pairs to inspect (not verdicts): compare both sides, record a duplicate or rule out a false match. Put items that need a shared decision into a **Group** with evidence, member notes and an assignee. A contributor can mark a checked group `ready` for maintainers; that does not approve its members' decisions.
-
-5. **Build deeper offline context.** **Local dataset** freezes and downloads evidence for the open backlog: descriptions, discussions, PR files, diffs and closing links. An agent can search and compare the saved observations without silently falling back to GitHub; missing or partial evidence remains visible too!
-
-6. **Watch follow-up activity.** Track an issue or PR for new comments. For an externally closed PR, `bin/cache closure-capture --number N --by NAME` records an observed closure with unknown attribution. **Notifications** separates items needing attention from past activity; viewing or dismissing a row does not confirm an appeal or approve a decision. Dismissing an ordinarily tracked item stops its comment checks.
-
-7. **Communicate on GitHub.** You can compose a conversation comment, close an item with an explanation, or reopen selected closed items with a shared comment. Each publication requires separate approval of the exact target, text and state change; bulk reopening shows every target before publication. Labeling, approving and merging remain separate GitHub work.
-
-8. **Generate the maintainer report.** Export a group for a full review packet, then run `bin/report` to gather ready groups and human-reviewed decisions into a dated Markdown handoff.
-
-9. **Switch repositories when needed.** **Switch Repo** opens another install or repository, each with its own taxonomy, ledger, batches, groups, exports and reports.
-
-### Ledger rows
-
-| field                                      | meaning                                                           |
-| ------------------------------------------ | ----------------------------------------------------------------- |
-| `category`                                 | what kind of item this is: see `config/taxonomy.md`               |
-| `action`                                   | recommended next step                                             |
-| `confidence`                               | how sure the triager is: `low`, `medium` or `high`                |
-| `reason`                                   | one sentence of justification, written for a **human** to skim    |
-| `triaged_by` / `triaged_at` / `batch_id`   | who made the first-pass call, when, and in which batch            |
-| `agent_notes`                              | an agent's longer evidence: a code review, a duplicate comparison |
-| `reviewed` / `reviewed_by` / `reviewed_at` | whether a human has confirmed it                                  |
-| `reviewer_notes`                           | free-text notes from the reviewer                                 |
-
-Categorization and review are deliberately two separate stages; [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md#two-stage-review) explains why.
+Each ledger row has a category, recommended action, confidence and reason, plus triage attribution and optional agent notes. Separate review fields record whether a person confirmed it and any reviewer notes; [the playbook](prompts/PLAYBOOK.md#two-stage-review) explains the distinction. Teams own their [taxonomy](config/taxonomy.md), with a [machine-readable copy](config/taxonomy.json) used by the TUI and scripts.
 
 The ledger and other transactional records use atomic replacement; reports and CSV exports do not. See [local storage and recovery](docs/storage.md).
 
-Categories and actions are defined in [`config/taxonomy.md`](config/taxonomy.md) (human-readable, with rationale) and [`config/taxonomy.json`](config/taxonomy.json) (the machine-checked list `bin/apply` and the TUI read). It is expected to evolve; see the note at the top of `taxonomy.md` before changing it.
+### Scripts
 
-## Scripts
+These run from an install in the repository being triaged.
 
-Run scripts from an install in the repository being triaged. A first `bin/fetch && bin/sync` creates the ledger from open items. Later syncs update those rows and **keep closed items in the ledger**. This gives an initial backlog baseline; it does not import every closure that predates the first fetch.
+Here are examples:
 
 ```sh
 bin/fetch && bin/sync
 bin/stats
 bin/batch 25
-# Fill the batch's decisions.jsonl, then review the proposals:
-bin/apply data/<owner>/<repo>/batches/<id>.decisions.jsonl --only-untriaged --dry-run
 bin/apply data/<owner>/<repo>/batches/<id>.decisions.jsonl --only-untriaged
 bin/report
 ```
 
-| Command                                    | Purpose                                                                                                                                                                                                                                                                                    |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `bin/install-to`                           | Install into a target repository, including a fork; see the [fork walkthrough](docs/install.md#working-from-a-fork).                                                                                                                                                                       |
-| `bin/fetch`, `bin/sync`                    | Read the backlog and update the git-tracked ledger without erasing local decisions.                                                                                                                                                                                                        |
-| `bin/batch`, `bin/read-batch`, `bin/apply` | Prepare fixed review batches, inspect them and save decisions or human approval.                                                                                                                                                                                                           |
-| `bin/similar`, `bin/not-duplicate`         | Find title-based duplicate leads and retain attributed negative verdicts.                                                                                                                                                                                                                  |
-| `bin/group`                                | Collect items and notes, assign a maintainer, and export a review packet.                                                                                                                                                                                                                  |
-| `bin/cache`                                | Acquire selected or frozen backlog evidence, search and read it offline, and capture observed external PR closures with unknown attribution. See the [cache reference](docs/evidence-reference.md), [external closures](docs/external-closures.md) and [appeals](docs/appeal-evidence.md). |
-| `bin/enrich-one`                           | Read one issue or PR, with optional explicit cache mode.                                                                                                                                                                                                                                   |
-| `bin/export-csv`, `bin/import-csv`         | Review ledger decisions in a spreadsheet with revision checks.                                                                                                                                                                                                                             |
-| `bin/comment-plus`                         | Preview and explicitly approve a conversation comment, explained closure or reopening on an issue or PR; record comment and state outcomes separately.                                                                                                                                     |
-| `bin/auto-close`                           | Save PR closure proposals offline, review exact comments and targets, and execute approved proposals through `bin/comment-plus`.                                                                                                                                                           |
-| `bin/stats`, `bin/next`, `bin/report`      | Inspect progress, next tasks and the maintainer report.                                                                                                                                                                                                                                    |
+| Task                         | Commands                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| Install and refresh          | `bin/install-to`, `bin/fetch`, `bin/sync`                                      |
+| Prepare and review decisions | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv` |
+| Compare and group            | `bin/similar`, `bin/not-duplicate`, `bin/group`                                |
+| Read guidance and evidence   | `bin/item-context`, `bin/cache`, `bin/enrich-one`                              |
+| Propose and publish actions  | `bin/auto-close`, `bin/comment-plus`                                           |
+| See progress and handoffs    | `bin/stats`, `bin/next`, `bin/report`                                          |
 
-The standard Local dataset downloads descriptions and discussion for open issues and PRs, plus PR file lists, diffs, and closing-issue links. Saved snapshots and their gaps are available to agents through [bounded offline readers](docs/evidence-reference.md#bounded-offline-snapshot-readers); a candidate match still needs source review. Selected PR reads can obtain further components when needed. The [agent preparation prompt](prompts/prepare-analysis.md) starts from the saved dataset rather than refetching each candidate.
+The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md) and [comment publishing guide](docs/comment-plus.md) cover the commands and their limits.
+
+Closed-PR [watches](docs/appeal-evidence.md) and [external closure records](docs/external-closures.md) have separate guides.
+
+[Bounded evidence readers](docs/evidence-reference.md#bounded-offline-snapshot-readers) expose selected snapshots and gaps without filling missing data from GitHub. The [agent preparation prompt](prompts/prepare-analysis.md) starts with saved evidence and asks for focused source review before any recommendation.
 
 ## Prompts
 
@@ -183,23 +156,25 @@ decisions and approved actions.
 
 [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) is linked into each install as its agent instructions. Ask in plain words; the matching task prompt explains what to read and what may be saved.
 
-| Ask                        | Prompt                                                   | Result                                       |
-| -------------------------- | -------------------------------------------------------- | -------------------------------------------- |
-| “triage 25 issues”         | [Auto triage](prompts/auto-triage.md)                    | Unreviewed batch proposals                   |
-| “prepare offline analysis” | [Prepare analysis](prompts/prepare-analysis.md)          | A scoped cache handoff with gaps             |
-| “is #N a duplicate?”       | [Find duplicates](prompts/find-duplicates.md)            | A sourced comparison or proposal             |
-| “review PR #N”             | [Review PR](prompts/review-pr.md)                        | Code review notes and an unreviewed decision |
-| “recommend PR closures”    | [Recommend PR closures](prompts/recommend-auto-close.md) | Pending, unapproved PR closure proposals     |
-| “organize these items”     | [Organize groups](prompts/organize-groups.md)            | Draft maintainer groups                      |
-| “review an appeal”         | [Review appeal](prompts/review-appeal.md)                | An attributed local reassessment             |
-| “brief the maintainers”    | [Maintainer brief](prompts/maintainer-brief.md)          | A short review brief                         |
-| “polish the report”        | [Polish report](prompts/polish-report.md)                | An evidence-backed report                    |
+| Ask                        | Prompt                                                                                            | Result                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| “triage 25 issues”         | [Auto triage](prompts/auto-triage.md)                                                             | Unreviewed batch proposals                   |
+| “prepare offline analysis” | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps             |
+| “is #N a duplicate?”       | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal             |
+| “review PR #N”             | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and an unreviewed decision |
+| “recommend PR closures”    | [Recommend PR closures](prompts/recommend-auto-close.md)                                          | Pending, unapproved PR closure proposals     |
+| “organize these items”     | [Organize groups](prompts/organize-groups.md)                                                     | Draft maintainer groups                      |
+| “assess this edited group” | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons        |
+| “review an appeal”         | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment             |
+| “brief the maintainers”    | [Maintainer brief](prompts/maintainer-brief.md)                                                   | A short review brief                         |
+| “polish the report”        | [Polish report](prompts/polish-report.md)                                                         | An evidence-backed report                    |
 
-Agents propose; a human reviews. Fetched GitHub text is untrusted input, so review agent conclusions and the local diff before sharing them.
+> [!IMPORTANT]
+> Agents propose; humans review.
 
 ### Working as a team
 
-Agents propose decisions and draft groups; contributors review them and mark groups ready; lead maintainers read `bin/report` and the brief. The ledger and groups travel through the repository's normal Git workflow. See the [team conventions](prompts/PLAYBOOK.md#working-as-a-team) and [installation guide](docs/install.md#working-as-a-team-through-it) for setup and coordination.
+Agents propose decisions and draft groups; contributors review them and mark groups ready; lead maintainers read the brief. The ledger and groups travel through the repository's normal Git workflow. See the [team conventions](prompts/PLAYBOOK.md#working-as-a-team) and [installation guide](docs/install.md#working-as-a-team-through-it) for setup and coordination.
 
 ### Notes on security
 
@@ -220,6 +195,6 @@ Use `mise exec -- make check` for Go and Python checks, and `mise exec -- make b
 
 ## Not Built (yet)
 
-- **GitHub write actions**: only explicitly approved conversation comments, explained closures and reopenings are supported; the tool does not label or merge items. See [comment publishing](docs/comment-plus.md).
+- **GitHub write actions**: the tool does not label or merge items. See [comment publishing](docs/comment-plus.md).
 - **Automatic appeal monitoring**: closed-PR watches require explicit enrollment and polling after the ledger baseline; closed issues have no watch yet.
 - **Verified identification of an external auto-closure operator**: imported explanations are attributed claims, not authenticated runner records.

@@ -1,19 +1,21 @@
 # _triage-o-mator_: a first pass through the backlog, without losing the human
 
-**A terminal tool for maintainers and the contributors they trust, facing thousands of open Issues and Pull Requests.** It installs into the repository you triage, organizes a first pass in small batches **—** by a person or an AI agent **—** and keeps every decision reviewable, in git, before anyone acts on it.
+**A terminal tool for maintainers and the contributors they trust, facing thousands of open Issues and Pull Requests.** It installs into the repository you triage, organizes a first pass in small batches **—** by a person or an AI agent **—** and keeps local decisions reviewable in git. Agent proposals, human review and GitHub actions each have their own step.
 
 > [!IMPORTANT]
 > Machines propose while humans decide.
 
 This is how a less technical README I dislike reading would read, which given that I make myself no favors by excluding such I had to write.
 
-![flow-1-b](captures/flow-1-b.png)
+![Selecting and reading backlog items](captures/flow-1.webp)
 
-![flow-2](captures/flow-2.png)
+![Saving and reviewing triage decisions](captures/flow-2.webp)
 
-![flow-4-a](captures/flow-4-a.png)
+![Downloading a local evidence dataset](captures/flow-4.webp)
 
-![flow-8](captures/flow-8.png)
+![Reviewing notifications and follow-up activity](captures/flow-5.webp)
+
+![Approving a GitHub comment or state change](captures/flow-6.webp)
 
 ![agent-writing-maintainer-brief](captures/agent-writing-maintainer-brief.png)
 
@@ -33,17 +35,17 @@ The usual fixes fall short:
 
 You clone and build _triage-o-mator_ once, then install it into each repository you triage in a single command.
 
-That creates one `triage-o-mator/` directory inside that repository, and it's as simple as it sounds: its ledger, its review groups, its reports and its taxonomy, with the program itself symlinked back to your checkout of its very own repo. The triage is committed to the repository it belongs to, so a pass of work reaches everyone else as an ordinary pull request that a maintainer reads line by line; with no new place to look, no separate service, no database.
+That creates one `triage-o-mator/` directory inside that repository, and it's as simple as it sounds: its ledger, its review groups, its closure proposals, its reports and its taxonomy, with the program itself symlinked back to your checkout of its very own repo. Reviewed local work can travel through an ordinary pull request that a maintainer reads line by line; with no new place to look, no separate service, no database. Batches and evidence caches stay local.
 
 A repository you don't control can carry the install locally instead using `--solo` (one line in `.git/info/exclude`), not a single tracked file touched, and adopt it later with `--adopt` once they recognize your triage-ability, which stages everything ready for the pull request that says **"we use this now."**
 
 ## Design principles
 
-1. **Separate reading from writing.** Backlog acquisition reads GitHub. Publishing a comment, closing or reopening an item needs explicit approval of the exact target and text; triage decisions never trigger these writes. The tool does not label or merge.
+1. **Separate reading from writing.** Backlog acquisition reads GitHub. Publishing a comment, closing or reopening an item needs explicit approval of the exact target, text and state change; triage decisions never trigger these writes. The tool does not label or merge.
 2. **Proposals and reviews are separate states.** A decision is first _triaged_ (by an agent or a person) and then _reviewed_ (only by a person). Nothing crosses that line by itself.
 3. **One ledger per repo, tracked in git.** `triage-o-mator/data/<owner>/<repo>/ledger.jsonl`, one JSON line per item, inside the repository it describes, so every decision and every correction shows up as a normal diff.
-4. **Scripts underneath, a TUI on top.** Everything the TUI does goes through small, testable `bin/` scripts that agents, cron jobs and people can call directly.
-5. **Fixed categories.** Categories, actions and confidence levels come from a small, documented taxonomy that each team owns and edits. Neither human nor clanky model invents one on the fly.
+4. **Scripts underneath, a TUI on top.** Scripts own the ledger, groups, proposals, evidence and GitHub writes. The TUI calls those same scripts, which agents and people can also use directly.
+5. **Team-owned categories.** Categories, actions and confidence levels come from a small, documented taxonomy that each team owns and edits. Neither human nor clanky model invents one on the fly.
 
 ## Main features
 
@@ -51,10 +53,10 @@ A repository you don't control can carry the install locally instead using `--so
 
 _triage-o-mator_ is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) app over the ledger:
 
-- **Queues in the sidebar:** Untriaged—with kind and age-order controls—Pending Review, Merge-Ready PRs, Close Candidates, All Items, then Batches, **Groups** and Possible Duplicates.
+- **Queues in the sidebar:** Untriaged—with kind and age-order controls—Pending Review, Merge-Ready PRs, Close Candidates, All Items, then Batches, **Groups**, Possible Duplicates and Notifications.
 - **A full-screen reader** with Body, Agent notes, Comments and Diff tabs.
 - **A decision form** whose category, action and confidence cycle through the taxonomy's exact values; with a one-sentence reason for free text.
-- **Unsaved drafts per item** for the session, so you can compare several reports before deciding.
+- **Unsaved drafts per item** for the session, so you can compare several reports before deciding; switching repositories warns about those drafts.
 - A footer showing available controls, a breadcrumb showing location, full command output for failures, and bundled or custom themes.
 
 What more could you even expect these days?
@@ -71,7 +73,7 @@ The core loop is a **batch**: a manageable number of untriaged items (25 is a go
 
 Duplicates are the most common and the riskiest call to get wrong. _triage-o-mator_ finds likely candidates and leaves the verdict to the reader.
 
-- Our super-performant, **`bin/similar`** ranks items by title similarity, **offline** on the full backlog (in about 0.1 seconds, for a whole 5,000 set of items), weighting rare terms far above common ones.
+- Our super-performant **`bin/similar`** ranks items by title similarity **offline** on the local ledger, weighting rare terms far above common ones.
 - **A Possible Duplicates view** lists every likely pair. You would be surprised with how many of the most common have identical titles!
 - **"Not duplicates" is a durable verdict.** Rule a pair out and it stays out, recorded in git, so nobody re-litigates it next week.
 - **Batches carry the candidates too**, so an Agent can name a duplicate it would otherwise never have seen, and a dedicated, Agentic playbook compares the full bodies and comments of an item and its candidates.
@@ -83,20 +85,31 @@ Overall, scores are presented as leads instead of proof.
 Related issues and PRs often need to be read together: a bug report, its duplicates, and two competing fixes. **Groups** hold them with a description, an assignee, a draft / ready / archived status, per-item notes, and who contributed what.
 
 - Add items from anywhere, browse members, open any for full context.
-- Export **Markdown or JSON review packets** with current decisions and cross-references, optionally with live bodies, comments and diffs, to hand to a co-maintainer.
+- Export **Markdown or JSON review packets** with current decisions and cross-references, optionally enriched with selected bodies, comments and diffs, to hand to a co-maintainer. A reviewed group can hand selected members back to an agent for a focused proposal.
 - Group files are written atomically under a lock and protected by revision checks, so a stale edit is rejected instead of silently overwriting someone else's.
 
 ### Fetching that keeps up with a busy repo
 
-- **Incremental by default:** the difference between a full fetch and an incremental one is by a factor of about 80! It is so fast, I couldn't even finish this sen.
-- **Full fetches** run automagically at least once a day. They catch deleted or transferred items.
+- **Incremental by default:** changed items can be fetched without rereading the whole backlog. It is so fast, I couldn't even finish this sen.
+- **Full fetches** run automagically when the next fetch finds the last full one is over a day old. They catch deleted or transferred items that an incremental fetch cannot see.
+- **A local dataset** can freeze the open backlog and download descriptions, discussions, PR files, diffs and closing links for offline analysis. Automatic download starts only when you turn it on; saved checkpoints let it resume, while missing or old evidence stays visible.
 
 ### Agents as collaborators, not authorities
 
 - **A core playbook ships with the install** becoming that install's `AGENTS.md` for the tool, and without disturbing yours. All Agents are supported.
-- **One playbook per task:** triage a batch, check duplicates, review a PR's code, organize groups, make a report decision-ready, and brief the maintainers. Ask in plain words and the Agent will pick the right one for you.
+- **One playbook per task:** triage a batch, check duplicates, review a PR's code, organize groups, recommend a PR closure, review an appeal, make a report decision-ready, and brief the maintainers. Ask in plain words and the Agent will pick the right one for you.
 - **The code is right there.** Because the install sits inside the repository, an agent reviewing a PR reads the actual files to check broader context and whether a fix already landed.
 - **The TUI hands a screen to an agent.** Item context, ticked items, or a batch with its file paths can be copied as Markdown for a chat.
+
+### A feedback loop before anything reaches GitHub
+
+An agent can read a named PR, current human guidance, earlier objections and selected evidence, then explain why it should stay open or save a proposed closure with the exact comment. The proposal is a reviewable local record, not a GitHub action.
+
+**Notifications** puts that comment beside its target, guidance and evidence gaps. A person can edit it, reject it with an optional attributed reason, or approve the exact comment and close action. An edit needs fresh review; a rejection remains for the next agent pass, where reconsideration must explain what changed. Group readiness and a reviewed ledger decision do not grant publication approval.
+
+People can also compose comments and explained closures or reopenings directly. `bin/comment-plus` defaults to a dry-run plan, checks the live target before publication, and saves separate comment and state-change outcomes so an uncertain result can be inspected before retrying. Nothing labels, approves or merges a PR.
+
+Tracked comments appear in Notifications. Closed-PR watches and external closure explanations can be captured explicitly for a later appeal review; their observations and attributed claims do not decide the appeal, acknowledge activity or authorize a write. The contributor can still bring new evidence to the original PR.
 
 > [!WARNING]
 > Our documentation is open about the risk: fetched text comes from unfiltered users and can contain prompt-injection attempts.
@@ -108,7 +121,7 @@ Related issues and PRs often need to be read together: a bug report, its duplica
 
 "But hey!," you may ask, "Shouldn't each item be re-checked against its current state and the code, then a recommendation with the case **for** and **against** it, and the diff hunk or comment that settles it be added on top?"
 
-Yes, and so reports coupled with our revolutionary `polish-report` prompt, turns a section of one into decisions, giving you the perfect way to brief those pesky lead maintainers that ignore your PR for half a year.
+Yes, and so reports coupled with our revolutionary `polish-report` prompt turn a section of one into a case for a decision, giving you a way to brief those pesky lead maintainers that ignore your PR for half a year. The agent writes the case; the maintainer still decides.
 
 > [!NOTE]
 > The name of the prompt for reports has nothing to do with Vaxry. He is a well-respected and virile member of the developer community.
@@ -134,8 +147,8 @@ Installing into a repository you don't control, adopting an install later, and m
 
 ## What's next
 
-- **Team-scale triage:** handing out non-overlapping batches and resolving conflicting decisions on the same item.
-- **Duplicate detection that reads bodies,** through a local cache or embeddings.
+- **Clearer cache management** for the saved evidence a busy repository accumulates.
+- **More GitHub write actions.**
 
 ## How you can help
 

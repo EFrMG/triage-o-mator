@@ -14,6 +14,7 @@ import (
 type commentEditorMsg struct {
 	root, repo string
 	key        Key
+	field      string
 	body       string
 	err        error
 }
@@ -45,7 +46,7 @@ func prepareCommentEditor(body string) (*exec.Cmd, string, error) {
 	return exec.Command("sh", "-c", "exec "+editor+` "$1"`, "triage-comment-editor", path), path, nil
 }
 
-func readCommentEditor(path string, editorErr error) (string, error) {
+func readCommentEditor(path string, editorErr error, charLimit int) (string, error) {
 	if editorErr != nil {
 		return "", fmt.Errorf("editor failed: %w; draft retained at %s", editorErr, path)
 	}
@@ -57,13 +58,13 @@ func readCommentEditor(path string, editorErr error) (string, error) {
 	defer file.Close()
 
 	// Bound bytes before loading the editor buffer; a Unicode character may occupy four bytes.
-	data, err := io.ReadAll(io.LimitReader(file, 4*65536+1))
+	data, err := io.ReadAll(io.LimitReader(file, int64(4*charLimit+1)))
 	if err != nil {
 		return "", fmt.Errorf("reading editor draft: %w; draft retained at %s", err, path)
 	}
 
 	body := strings.ReplaceAll(strings.ReplaceAll(string(data), "\r\n", "\n"), "\t", "    ")
-	if !utf8.ValidString(body) || utf8.RuneCountInString(body) > 65536 || strings.Count(body, "\n") >= 10000 {
+	if !utf8.ValidString(body) || utf8.RuneCountInString(body) > charLimit || strings.Count(body, "\n") >= 10000 {
 		return "", fmt.Errorf("editor draft exceeds the editor limits or is not UTF-8; draft retained at %s", path)
 	}
 	for _, r := range body {
@@ -110,7 +111,9 @@ func (m model) openExternalReopen(items []Item) (tea.Model, tea.Cmd) {
 }
 
 func (m model) startCommentEditor() (tea.Model, tea.Cmd) {
-	command, path, err := prepareCommentEditor(m.comment.text.Value())
+	field, body := "comment", m.comment.text.Value()
+	charLimit := m.comment.text.CharLimit
+	command, path, err := prepareCommentEditor(body)
 	if err != nil {
 		m.failErr("Couldn't open comment editor", err)
 		return m, nil
@@ -119,10 +122,16 @@ func (m model) startCommentEditor() (tea.Model, tea.Cmd) {
 	root, repo, key := m.installRoot, m.repo, m.comment.key
 	m.comment.busy = true
 	m.status = "Editing comment in $EDITOR…"
+	if m.comment.rejectionCheckpoint != "" {
+		m.status = "Editing rejection reason in $EDITOR…"
+	}
+	if m.comment.proposalEditCheckpoint != "" {
+		m.status = "Editing proposal " + field + " in $EDITOR…"
+	}
 
 	return m, tea.ExecProcess(command, func(err error) tea.Msg {
-		body, readErr := readCommentEditor(path, err)
-		return commentEditorMsg{root: root, repo: repo, key: key, body: body, err: readErr}
+		body, readErr := readCommentEditor(path, err, charLimit)
+		return commentEditorMsg{root: root, repo: repo, key: key, field: field, body: body, err: readErr}
 	})
 }
 
@@ -145,6 +154,12 @@ func (m model) finishCommentEditor(msg commentEditorMsg) (tea.Model, tea.Cmd) {
 	c.setPreview(c.text.Value())
 	c.preview.GotoTop()
 	m.status = "Comment loaded. Review it before publishing."
+	if c.proposalEditCheckpoint != "" {
+		m.status = "Proposal comment loaded. Review it before saving."
+	}
+	if c.rejectionCheckpoint != "" {
+		m.status = "Rejection reason loaded. Review it before dismissing."
+	}
 	if c.close {
 		m.status = "Comment loaded. Review it before closing with a comment."
 	}

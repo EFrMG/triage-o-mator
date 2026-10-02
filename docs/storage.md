@@ -2,7 +2,7 @@
 
 Transactional data such as the ledger, groups, cache metadata, watches and imported closure histories is written by staging a temporary file, flushing it, replacing the destination, then flushing the directory entry. Readers see the previous complete file or the new one, never a partly rewritten one. Reports and CSV exports are not covered by this guarantee. This depends on a filesystem that supports POSIX locks, atomic rename, and `fsync`.
 
-Locks coordinate cooperating processes sharing one filesystem, not separate clones, Git merges, or future GitHub executors. The ledger itself keeps its single-writer workflow: nothing here detects two people editing the same decision, and no GitHub writes are introduced.
+Locks coordinate cooperating processes sharing one filesystem, not separate clones, Git merges or GitHub writes. The ledger writers (`apply`, `import-csv`, and `sync`) serialize their complete read-modify-write transactions under one ledger lock. This preserves unrelated concurrent updates within an install. CSV import also checks each exported row revision against the current ledger and rejects the entire import if any row changed; export again before retrying. The revision includes the configured `owner/repo` name and all original ledger fields except `last_synced_at`, so routine sync timestamps do not invalidate a spreadsheet. Ordinary `apply` does not use a row revision.
 
 ## Interrupted writes and fetches
 
@@ -12,7 +12,7 @@ An interruption before replacement leaves the old complete file; an interruption
 
 `fetch` and `sync` share an inventory lock, which acquisition holds while reading GitHub. Inventory metadata includes a checksum of the raw JSONL. Metadata is published first; a crash between its publication and the raw file's publication leaves a checksum mismatch, which `sync` refuses. Recover with `bin/fetch --full`, then `bin/sync`. Legacy inventories without a checksum remain readable; refetching upgrades them.
 
-With `fetch --cache-inventory`, raw publication is followed by cache import, not a cross-store transaction. A valid raw pair can be imported offline after a cache failure; a torn pair requires a fresh full capture. The lock order is inventory metadata, cache acquisition, then cache metadata; ledger locks are never held during cache acquisition/import. See [inventory recovery](evidence-reference.md#reusing-inventory-bodies-offline).
+With `fetch --cache-inventory`, raw publication is followed by cache import, not a cross-store transaction. A valid raw pair can be imported offline after a cache failure; a torn pair requires a fresh full capture. The lock order is inventory metadata, cache acquisition, then cache metadata; ledger locks are never held during cache acquisition/import. `sync` takes the inventory metadata lock before the ledger lock and releases the ledger lock before advancing the sync checkpoint. See [inventory recovery](evidence-reference.md#reusing-inventory-bodies-offline).
 
 Corpus progress references only published immutable evidence. A killed runner can leave an old cursor or a pending plan, never a committed reference to unfinished evidence. See [corpus recovery](evidence-reference.md#frozen-corpus-acquisition) for retries, locks and validation.
 

@@ -6,27 +6,25 @@ It searches explicit immutable snapshots or frozen corpora and resolves selected
 
 ## Supported versions and installation
 
-This bridge supports Reposition **0.2.0.dev1**, with evidence-cache format **1**. The tested engine source is pinned below. Reposition's adapted MIT evidence validator originates at triage-o-mator commit `dddc487660ffda17ba7e3626c9d9be72e29a6dce`; the current-master compatibility check uses `80cdcdd77d875c4fdcd96f3367f2f8a7d253e63a`. This is commit-level validation, not a claim that every release or future cache format is supported.
+This bridge supports Reposition **0.2.0.dev1**, with evidence-cache format **1**. The checked-in release bundle under `vendor/reposition/0.2.0.dev1/` contains the wheel, the source archive from commit `10bd0641b50d514984dad6dee480f140ab86ee44`, pinned pip and setuptools wheels, an exact-wheel requirements file and a checksummed manifest. Reposition's adapted MIT evidence validator originates at triage-o-mator commit `dddc487660ffda17ba7e3626c9d9be72e29a6dce`; the current-master compatibility check uses `80cdcdd77d875c4fdcd96f3367f2f8a7d253e63a`. This validates the selected build and cache format, not every future Python or Reposition release.
 
-Create one optional virtual environment in the **triage-o-mator code checkout**, not in each repository being triaged. The four ranked-retrieval commands use it automatically through the install's linked `bin/`; shell activation is not needed. The TUI creates it when automatic download is ON. For CLI-only use, `bin/reposition-env enable` performs the same pinned installation; `status` and `disable` inspect or turn off the shared environment without deleting sidecars. Use Python 3.10+ with SQLite FTS5:
+One optional virtual environment lives in the **triage-o-mator code checkout**, not in each repository being triaged. The four ranked-retrieval commands use it automatically through the install's linked `bin/`; shell activation is not needed. The TUI creates it when automatic download is ON. For CLI-only use, `bin/reposition-env enable` installs the approved wheel; `status` and `disable` inspect or turn off the shared environment without deleting sidecars. Setup uses the bundled pip wheel and needs no ensurepip or network connection. Use Python 3.10+ with SQLite FTS5:
 
 ```sh
 cd /path/to/triage-o-mator
-python3 -m venv .reposition-venv
-.reposition-venv/bin/python -m pip install --no-deps \
-  'git+https://github.com/Univeracity/reposition.git@10bd0641b50d514984dad6dee480f140ab86ee44'
-.reposition-venv/bin/python -c 'import reposition, sqlite3; assert reposition.__version__ == "0.2.0.dev1"; sqlite3.connect(":memory:").execute("CREATE VIRTUAL TABLE fts_check USING fts5(text)"); print("Reposition and FTS5 ready")'
+python3 tools/reposition_bundle.py verify
+python3 tools/reposition_bundle.py rebuild # optional independent offline build
 cd /path/to/your/repository/triage-o-mator
 bin/reposition-env enable
+bin/reposition-env status
 bin/cache query --help
 ```
 
-Use this Git source, not the unrelated PyPI package with the same name. Installing requires network access of course; while indexing, query, retrieval and metadata inspection remain offline. There are no runtime models, credentials, servers or third-party Python dependencies. The final command verifies that `bin/cache` reaches the pinned engine; an absent or unsupported version fails before reading a cache. An isolated `pipx` installation is not visible to this bridge. The checkout's `.reposition-venv/` is ignored by Git and shared by its installs; ordinary literal search
-does not need it.
+The bundle verifier checks every retained file against the manifest digest approved in `bin/_reposition.py`, the wheel's `RECORD`, the installation requirement and license files. `rebuild` uses the retained source and setuptools with the recorded build timestamp and requires the new wheel to match byte for byte. The manifest digest is anchored in this checkout's reviewed code; it is an integrity check, not independent signing or a third-party security audit. The source archive is the retained build input, while the exact wheel is the only Reposition artifact installed. No upstream Git or package index access occurs during setup, indexing, query, retrieval or metadata inspection. There are no runtime models, credentials, servers or required third-party Python dependencies. `status` checks the approved wheel, installed files, version and FTS5; an unverified same-version installation is unavailable and `enable` repairs it from the bundle. An isolated `pipx` installation is not visible to this bridge. The checkout's `.reposition-venv/` is ignored by Git and shared by its installs; ordinary literal search does not need it.
 
-To remove the option, run `.reposition-venv/bin/python -m pip uninstall reposition` in the code checkout; existing literal search remains available. For a future supported engine, update the tested commit and version in the bridge and this guide after compatibility checks, then reinstall into `.reposition-venv` with `--force-reinstall`. The bridge rejects untested versions rather than silently adopting them.
+To turn off the option, run `bin/reposition-env disable` from an install; existing literal search remains available. For a future supported engine, audit a new source snapshot and build inputs, regenerate and review the bundle and manifest, update the approved digest in the bridge, then run the compatibility checks. Do not substitute a same-version wheel without a new approved manifest digest. The bridge rejects unapproved code rather than silently adopting it.
 
-Run the synthetic integration check whenever the cache contract, adapter or supported engine version changes. The normal test job verifies the legacy path without the optional package. A separate integration job installs the pinned engine and checks snapshot/corpus publication, bounded query/retrieval, repository guards and unchanged source artifacts. Upgrade the pin and supported version together after compatibility passes.
+Run the synthetic integration check whenever the cache contract, adapter or supported engine version changes. The normal test job verifies the legacy path without the optional package. A separate integration job rebuilds the checked-in wheel offline, installs that exact artifact and checks snapshot/corpus publication, bounded query/retrieval, repository guards and unchanged source artifacts. `tools/reposition_compat.py` runs the retained source trial in a disposable checkout, adapting only its pre-index error expectation because the approved wheel is already installed. Python and SQLite remain host prerequisites; retaining the bundle does not guarantee compatibility with future interpreters or operating systems.
 
 ## Workflow and boundaries
 

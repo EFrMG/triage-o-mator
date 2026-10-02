@@ -1,7 +1,8 @@
 """Optional Reposition bridge; legacy cache commands never import that package."""
 
 import argparse
-import importlib.util
+import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -17,17 +18,98 @@ COMMANDS = {
     "search-info": "cache-info",
 }
 SUPPORTED_REPOSITION = "0.2.0.dev1"
-REPOSITION_SOURCE = "git+https://github.com/Univeracity/reposition.git@10bd0641b50d514984dad6dee480f140ab86ee44"
+BUNDLE = CODE_ROOT / "vendor/reposition/0.2.0.dev1"
+APPROVED_MANIFEST_SHA256 = "8c7d8ed1fc06e03adc4c5ad02d9d4db300b17d6372410a1e51e9d997cc2778c2"
+WHEEL_NAME = "reposition-0.2.0.dev1-py3-none-any.whl"
+PIP_NAME = "pip-25.3-py3-none-any.whl"
 DEFAULT_INDEX_BYTES = 512 * 1024 * 1024
 STATE_DIR = CODE_ROOT / ".reposition-state"
 DISABLED = STATE_DIR / "disabled"
 VENV = CODE_ROOT / ".reposition-venv"
 
 
+def _digest(path):
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"Reposition bundle file is missing or linked: {path.name}")
+
+    checksum = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            checksum.update(block)
+
+    return checksum.hexdigest()
+
+
+def _verified_bundle(all_inputs=False):
+    if BUNDLE.is_symlink() or not BUNDLE.is_dir():
+        raise ValueError("audited Reposition bundle is unavailable")
+
+    manifest_path = BUNDLE / "manifest.json"
+    if _digest(manifest_path) != APPROVED_MANIFEST_SHA256:
+        raise ValueError("audited Reposition manifest checksum differs from the approved build")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema_version") != 1 or manifest.get("version") != SUPPORTED_REPOSITION:
+        raise ValueError("audited Reposition manifest has an unsupported version")
+
+    expected = manifest["files"]
+    names = expected if all_inputs else (WHEEL_NAME,)
+    for name in names:
+        if name != Path(name).name or _digest(BUNDLE / name) != expected[name]:
+            raise ValueError(f"audited Reposition bundle checksum differs: {name}")
+
+    return manifest
+
+
+INSTALLED_CHECK = """
+import hashlib, importlib.metadata, pathlib, sqlite3, sys, zipfile
+wheel = pathlib.Path(sys.argv[1])
+expected = sys.argv[2]
+def require(condition):
+    if not condition:
+        raise ValueError('installed Reposition differs from approved wheel')
+try:
+    require(hashlib.sha256(wheel.read_bytes()).hexdigest() == expected)
+    dist = importlib.metadata.distribution('reposition')
+    require(dist.version == '0.2.0.dev1')
+    with zipfile.ZipFile(wheel) as archive:
+        names = set(archive.namelist())
+        for name in names:
+            if name.endswith('/') or name.endswith('/RECORD'):
+                continue
+            installed = pathlib.Path(dist.locate_file(name))
+            require(installed.is_file() and not installed.is_symlink())
+            require(hashlib.sha256(installed.read_bytes()).digest() == hashlib.sha256(archive.read(name)).digest())
+    package = pathlib.Path(dist.locate_file('reposition'))
+    require(package.is_dir() and not package.is_symlink())
+    for path in package.rglob('*'):
+        if path.is_file() and path.suffix != '.pyc' and '__pycache__' not in path.parts:
+            require(path.relative_to(package.parent).as_posix() in names)
+    import reposition
+    require(reposition.__version__ == dist.version)
+    require(pathlib.Path(reposition.__file__).resolve() == (package / '__init__.py').resolve())
+    sqlite3.connect(':memory:').execute('CREATE VIRTUAL TABLE fts_check USING fts5(text)')
+except Exception:
+    sys.exit(1)
+"""
+PIP_RUN = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module('pip', run_name='__main__')"
+
+
+def _installed_check(python, manifest):
+    try:
+        check = subprocess.run([str(python), "-I", "-c", INSTALLED_CHECK, str(BUNDLE / WHEEL_NAME), manifest["files"][WHEEL_NAME]],
+                               capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+    return check.returncode == 0
+
+
 def environment_status():
+    if DISABLED.is_symlink():
+        return dict(enabled=False, state="off", scope="checkout", fallback=True, reason="Reposition state marker is a symlink")
+
     if DISABLED.exists():
-        if DISABLED.is_symlink():
-            return dict(enabled=False, state="off", scope="checkout", fallback=True, reason="Reposition state marker is a symlink")
 
         try:
             reason = DISABLED.read_text(encoding="utf-8").strip()[:500]
@@ -37,17 +119,16 @@ def environment_status():
         return dict(enabled=False, state="off", scope="checkout", fallback=bool(reason), reason=reason or None)
 
     python = VENV / "bin/python"
-    if not python.is_file() and importlib.util.find_spec("reposition") is None:
+    if not python.is_file():
         return dict(enabled=False, state="off", scope="checkout", fallback=False, reason=None)
 
-    executable = python if python.is_file() else Path(sys.executable)
     try:
-        check = subprocess.run([str(executable), "-c", f"import reposition, sqlite3; assert reposition.__version__ == '{SUPPORTED_REPOSITION}'; sqlite3.connect(':memory:').execute('CREATE VIRTUAL TABLE fts_check USING fts5(text)')"],
-                               capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.TimeoutExpired):
+        manifest = _verified_bundle(all_inputs=True)
+    except (OSError, ValueError, KeyError, TypeError):
         return dict(enabled=False, state="unavailable", scope="checkout", fallback=False, reason=None)
 
-    return dict(enabled=check.returncode == 0, state="on" if check.returncode == 0 else "unavailable", scope="checkout", fallback=False, reason=None)
+    enabled = _installed_check(python, manifest)
+    return dict(enabled=enabled, state="on" if enabled else "unavailable", scope="checkout", fallback=False, reason=None)
 
 
 def set_environment(enabled):
@@ -63,21 +144,19 @@ def set_environment(enabled):
             return environment_status()
 
         DISABLED.write_text("", encoding="utf-8")
+        manifest = _verified_bundle(all_inputs=True)
         python = VENV / "bin/python"
 
         def create_environment():
-            if importlib.util.find_spec("ensurepip") is None:
-                raise ValueError("Python virtualenv setup needs ensurepip and pip; install the python3-venv package")
-
             try:
-                venv.create(VENV, with_pip=True, clear=True)
+                venv.create(VENV, with_pip=False, clear=True)
             except SystemExit as exc:
-                raise ValueError("Python virtualenv setup failed; check that ensurepip and python3-venv are available") from exc
+                raise ValueError("Python virtualenv setup failed; check that python3-venv is available") from exc
 
         recreate = not python.is_file()
         if not recreate:
             try:
-                probe = subprocess.run([str(python), "-c", "import sys, sqlite3"], capture_output=True, text=True, timeout=10)
+                probe = subprocess.run([str(python), "-I", "-c", "import sys, sqlite3"], capture_output=True, text=True, timeout=10)
                 recreate = probe.returncode != 0
             except (OSError, subprocess.TimeoutExpired):
                 recreate = True
@@ -85,19 +164,15 @@ def set_environment(enabled):
         if recreate:
             create_environment()
 
-        check = subprocess.run([str(python), "-c", f"import reposition; assert reposition.__version__ == '{SUPPORTED_REPOSITION}'"],
-                               capture_output=True, text=True, timeout=10)
-        if check.returncode != 0:
-            pip = subprocess.run([str(python), "-m", "pip", "--version"], capture_output=True, text=True, timeout=10)
-            if pip.returncode != 0:
-                create_environment()
-
+        if not _installed_check(python, manifest):
+            environment = dict(os.environ, PIP_NO_INDEX="1", PIP_DISABLE_PIP_VERSION_CHECK="1")
             try:
-                subprocess.run([str(python), "-m", "pip", "install", "--no-deps", "--force-reinstall", REPOSITION_SOURCE], check=True, timeout=120, capture_output=True, text=True)
+                subprocess.run([str(python), "-I", "-c", PIP_RUN, str(BUNDLE / PIP_NAME), "install", "--no-index", "--no-deps", "--force-reinstall", "--require-hashes", "--no-cache-dir", "-r", str(BUNDLE / "requirements.txt")],
+                               check=True, timeout=120, capture_output=True, text=True, cwd=BUNDLE, env=environment)
             except subprocess.CalledProcessError as exc:
-                raise ValueError("pinned Reposition installation failed; environment remains OFF") from exc
+                raise ValueError("audited Reposition wheel installation failed; environment remains OFF") from exc
             except subprocess.TimeoutExpired as exc:
-                raise ValueError("pinned Reposition installation timed out; environment remains OFF") from exc
+                raise ValueError("audited Reposition wheel installation timed out; environment remains OFF") from exc
 
         # Verify the installed package and FTS5 before exposing it to any install.
         DISABLED.unlink()
@@ -214,11 +289,15 @@ def maybe_run(argv):
     if any(option.startswith("--") and len(option) > 2 and "--cache".startswith(option) for option in options):
         parser.error("the cache namespace is owned by this install; --cache cannot override it")
 
+    if not environment_status()["enabled"]:
+        sys.stderr.write(f"error: audited Reposition is unavailable for this checkout; run bin/reposition-env enable to install Reposition {SUPPORTED_REPOSITION} from the approved wheel. Native cache search remains available.\n")
+        return 2
+
     # Installs link bin/ to this checkout. Keep the optional engine in one
     # checkout-local environment without requiring shell activation.
     python = VENV / "bin/python"
-    if python.is_file() and Path(sys.prefix).resolve() != VENV.resolve():
-        os.execv(str(python), [str(python), *sys.argv])
+    if python.is_file() and (Path(sys.prefix).resolve() != VENV.resolve() or not sys.flags.isolated):
+        os.execv(str(python), [str(python), "-I", *sys.argv])
 
     try:
         from reposition import __version__

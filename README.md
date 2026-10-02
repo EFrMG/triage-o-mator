@@ -153,7 +153,7 @@ For optional offline ranked cache queries and verified fragment retrieval, see
 [the Reposition bridge](docs/reposition.md). Existing literal search needs no
 Reposition installation; retrieval leads remain separate from duplicate
 decisions and approved actions.
-Turning automatic download ON prepares the optional pinned engine; setup failure leaves the native cache available.
+Turning automatic download ON installs the optional engine from the checked-in, verified wheel without contacting upstream Reposition; setup failure leaves the native cache available.
 
 [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) is linked into each install as its agent instructions. Ask in plain words; the matching task prompt explains what to read and what may be saved.
 

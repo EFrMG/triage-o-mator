@@ -1,0 +1,21 @@
+{
+  "build_backend": "setuptools.build_meta",
+  "build_python": "3.11.2",
+  "build_tool_origins": {
+    "pip-25.3-py3-none-any.whl": "https://files.pythonhosted.org/packages/44/3c/d717024885424591d5376220b5e836c2d5293ce2011523c9de23ff7bf068/pip-25.3-py3-none-any.whl",
+    "setuptools-84.0.0-py3-none-any.whl": "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl"
+  },
+  "files": {
+    "pip-25.3-py3-none-any.whl": "9655943313a94722b7774661c21049070f6bbb0a1516bf02f7c8d5d9201514cd",
+    "reposition-0.2.0.dev1-py3-none-any.whl": "06330f9be13410f26925ea1b423748de108f94aa4496bad57415761a483df9df",
+    "reposition-source.tar.gz": "15b867d6f26e0ec602b4db5b31ada40dcec9ccc6c38a7e88fb25f4db320dd8cf",
+    "requirements.txt": "e97fb9e0cc1f3852179f14c8edd7339927d5e35f0f748b6aca412fd49bc33ce0",
+    "setuptools-84.0.0-py3-none-any.whl": "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670"
+  },
+  "schema_version": 1,
+  "source_commit": "10bd0641b50d514984dad6dee480f140ab86ee44",
+  "source_date_epoch": 1790541639,
+  "source_repository": "https://github.com/Univeracity/reposition.git",
+  "source_tree": "1aa2a176c8170fe8b497d08561bbe4def7b148c8",
+  "version": "0.2.0.dev1"
+}

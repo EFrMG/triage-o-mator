@@ -86,6 +86,7 @@ class InstallTests(unittest.TestCase):
 
             result = subprocess.run(command, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("/data/*/*/reposition/", (target / "triage-o-mator/.gitignore").read_text())
             install = target / "triage-o-mator"
             self.assertTrue((install / "bin").is_symlink())
             self.assertTrue((install / "AGENTS.md").is_symlink())

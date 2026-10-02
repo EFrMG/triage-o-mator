@@ -802,7 +802,7 @@ func TestBaselineAutomaticDatasetPreferenceAndContinuation(t *testing.T) {
 	m.corpus.open = true
 	next, cmd := m.handleCorpusKey(tea.KeyPressMsg{Text: "o"})
 	m = next.(model)
-	if cmd == nil || !m.corpus.automatic || !m.corpus.busy || m.corpus.action != "restore" {
+	if cmd == nil || !m.corpus.automatic || !m.corpus.busy || m.corpus.action != "restore" || !m.corpus.repositionRetry {
 		t.Fatal("turning automatic download on did not start a dataset check")
 	}
 	if enabled, err := loadCorpusAuto(root, m.repo); err != nil || !enabled {
@@ -812,11 +812,13 @@ func TestBaselineAutomaticDatasetPreferenceAndContinuation(t *testing.T) {
 		t.Fatalf("automatic download choices were not padded and centered: %q", lines)
 	}
 
+	fallback := &datasetUsage{}
+	fallback.Reposition.State, fallback.Reposition.Fallback, fallback.Reposition.Reason = "off", true, "pinned Reposition installation timed out"
 	next, cmd = m.finishCorpus(corpusMsg{root: root, epoch: m.corpusEpoch, operation: m.corpus.operation,
-		observation: m.corpus.observation, action: "restore"})
+		observation: m.corpus.observation, action: "restore", usage: fallback})
 	m = next.(model)
-	if cmd == nil || m.corpus.action != "capture" || !m.corpus.preparing {
-		t.Fatal("automatic download did not start inventory capture after restore")
+	if cmd == nil || m.corpus.action != "capture" || !m.corpus.preparing || m.corpus.repositionRetry || !strings.Contains(ansi.Strip(m.datasetText()), "pinned Reposition installation timed out") || !strings.Contains(m.lastError.text, "pinned Reposition installation timed out") {
+		t.Fatal("Reposition fallback interrupted automatic inventory capture")
 	}
 
 	fresh := baselineModel(t, root)
@@ -955,6 +957,16 @@ func TestBaselineDatasetMenuAndNotificationShortcut(t *testing.T) {
 	if len(menuLines) != m.mainHeight() || !strings.Contains(menuLines[len(menuLines)-1], "Reuse eligible data within one day") || !strings.Contains(menuLines[len(menuLines)-1], "storage ceiling 5 GB") {
 		t.Fatalf("dataset footer was not fixed to the pane bottom: %q", menuLines)
 	}
+	m.corpus.usage = &datasetUsage{Total: 300000000, Limit: 5000000000, Categories: map[string]int64{"reposition": 100000000}}
+	m.corpus.usage.Reposition.State = "on"
+	if !strings.Contains(ansi.Strip(m.datasetText()), "evidence 200.0 MB · indexes 100.0 MB") || strings.Contains(ansi.Strip(m.datasetText()), "Ranked search") || strings.Contains(ansi.Strip(m.datasetText()), "Reposition ON") {
+		t.Fatal("dataset menu did not show combined cache storage")
+	}
+	next, command := m.handleCorpusKey(tea.KeyPressMsg{Text: "p"})
+	m = next.(model)
+	if command != nil || m.corpus.busy {
+		t.Fatal("retired Reposition key started an operation")
+	}
 
 	next, _ = m.openNotifications()
 	m = next.(model)
@@ -965,6 +977,39 @@ func TestBaselineDatasetMenuAndNotificationShortcut(t *testing.T) {
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if m.corpus.open || !m.notifications.open {
 		t.Fatal("closing the dataset did not return to Notifications")
+	}
+}
+
+func TestBaselineAutomaticRepositionSetupErrorKeepsNativeRestore(t *testing.T) {
+	root := baselineRoot(t)
+	setup := "#!/bin/sh\nprintf attempted > '" + filepath.Join(root, "reposition-attempted") + "'\nexit 2\n"
+	cache := `#!/bin/sh
+case "$5" in
+  handoff) printf '{"corpus_id":""}\n' ;;
+  usage) printf '{"allocated_bytes":8192,"limit_bytes":5000000000,"file_count":2,"allocated_categories":{"reposition":4096},"reposition_environment":{"enabled":false,"state":"off","fallback":true}}\n' ;;
+  *) exit 2 ;;
+esac
+`
+	for name, content := range map[string]string{"reposition-env": setup, "cache": cache} {
+		if err := os.WriteFile(filepath.Join(root, "bin", name), []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ui := corpusUI{automatic: true, autoRestore: true, repositionRetry: true}
+	msg := corpusCommand(root, "owner/repo", 0, ui, "restore", &readProcess{})().(corpusMsg)
+	if msg.err != nil || msg.repositionError == nil || msg.usage == nil || !msg.usage.Reposition.Fallback {
+		t.Fatalf("Reposition setup error blocked native restore: %#v", msg)
+	}
+	if _, err := os.Stat(filepath.Join(root, "reposition-attempted")); err != nil {
+		t.Fatalf("automatic restore did not try Reposition setup: %v", err)
+	}
+	m := baselineModel(t, root)
+	m.corpus.automatic, m.corpus.autoRestore, m.corpus.busy = true, true, true
+	next, command := m.finishCorpus(msg)
+	m = next.(model)
+	if command == nil || m.corpus.action != "capture" || m.lastError.text == "" || !strings.Contains(ansi.Strip(m.datasetText()), "Reposition setup unavailable") {
+		t.Fatal("Reposition setup command failure was not visible while native capture continued")
 	}
 }
 

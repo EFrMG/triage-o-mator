@@ -137,7 +137,7 @@ bin/report
 | Install and refresh          | `bin/install-to`, `bin/fetch`, `bin/sync`                                      |
 | Prepare and review decisions | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv` |
 | Compare and group            | `bin/similar`, `bin/not-duplicate`, `bin/group`                                |
-| Read guidance and evidence   | `bin/item-context`, `bin/cache`, `bin/enrich-one`                              |
+| Read guidance and evidence   | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |
 | Propose and publish actions  | `bin/auto-close`, `bin/comment-plus`                                           |
 | See progress and handoffs    | `bin/stats`, `bin/next`, `bin/report`                                          |
 
@@ -153,6 +153,7 @@ For optional offline ranked cache queries and verified fragment retrieval, see
 [the Reposition bridge](docs/reposition.md). Existing literal search needs no
 Reposition installation; retrieval leads remain separate from duplicate
 decisions and approved actions.
+Turning automatic download ON prepares the optional pinned engine; setup failure leaves the native cache available.
 
 [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) is linked into each install as its agent instructions. Ask in plain words; the matching task prompt explains what to read and what may be saved.
 

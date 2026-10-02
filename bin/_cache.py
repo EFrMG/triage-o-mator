@@ -27,20 +27,26 @@ class EvidenceCache:
 
     def usage(self):
         """Count actual regular-file bytes without following symlinks or creating cache files."""
-        totals = dict(objects=0, snapshots=0, other=0)
-        allocated = dict(objects=0, snapshots=0, other=0)
+        totals = dict(objects=0, snapshots=0, other=0, reposition=0)
+        allocated = dict(objects=0, snapshots=0, other=0, reposition=0)
         count = 0
-        if self.root.exists():
-            if self.root.is_symlink():
-                raise ValueError("cache root must not be a symlink")
+        for root, initial_category in ((self.root, "other"), (self.root.parent / "reposition", "reposition")):
+            if root.is_symlink():
+                raise ValueError("managed cache root must be a directory, not a symlink")
 
-            pending = [(self.root, "other")]
+            if not root.exists():
+                continue
+
+            if not root.is_dir():
+                raise ValueError("managed cache root must be a directory, not a symlink")
+
+            pending = [(root, initial_category)]
             while pending:
                 directory, category = pending.pop()
                 with os.scandir(directory) as entries:
                     for entry in entries:
                         if entry.is_symlink():
-                            raise ValueError("cache artifacts must not be symlinks")
+                            raise ValueError("managed cache artifacts must not be symlinks")
 
                         group = entry.name if directory == self.root and entry.name in ("objects", "snapshots") else category
                         if entry.is_dir(follow_symlinks=False):
@@ -64,7 +70,13 @@ class EvidenceCache:
             stat = path.stat()
             return stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns
 
-        return tuple(stamp(name) for name in ("objects", "snapshots"))
+        sidecar = self.root.parent / "reposition"
+        sidecar_stamp = None
+        if sidecar.exists():
+            stat = sidecar.stat()
+            sidecar_stamp = stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns
+
+        return tuple(stamp(name) for name in ("objects", "snapshots")) + (sidecar_stamp,)
 
     def _budget_used(self):
         signature = self._storage_signature()

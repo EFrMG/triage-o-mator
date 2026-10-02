@@ -48,7 +48,7 @@ def main():
     register_commands(commands)
     init = commands.add_parser("init", help="initialize versioned local cache metadata; existing data is not migrated or deleted")
     init.add_argument("--dry-run", action="store_true", help="validate and preview without creating files or locks")
-    commands.add_parser("usage", help="report local cache bytes and acquisition limit offline")
+    commands.add_parser("usage", help="report combined managed cache bytes and acquisition limit offline")
     select = commands.add_parser("select", help="remember the dataset for offline comparison and agent handoff")
     select.add_argument("corpus_id")
     handoff = commands.add_parser("handoff", help="show the selected dataset, scope, gaps and offline commands")
@@ -252,6 +252,9 @@ def main():
         cache = EvidenceCache(repository(REPO, host=args.host))
         if args.command == "usage":
             result = cache.usage()
+            from _reposition import environment_status
+
+            result["reposition_environment"] = environment_status()
         elif args.command.startswith("track-"):
             from _tracked import add, remove, mark_read, listing, check
 

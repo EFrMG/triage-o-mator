@@ -42,9 +42,18 @@ type corpusProgress struct {
 }
 
 type datasetUsage struct {
-	Total int64 `json:"allocated_bytes"`
-	Limit int64 `json:"limit_bytes"`
-	Files int   `json:"file_count"`
+	Total      int64                 `json:"allocated_bytes"`
+	Limit      int64                 `json:"limit_bytes"`
+	Files      int                   `json:"file_count"`
+	Categories map[string]int64      `json:"allocated_categories"`
+	Reposition repositionEnvironment `json:"reposition_environment"`
+}
+
+type repositionEnvironment struct {
+	Enabled  bool   `json:"enabled"`
+	State    string `json:"state"`
+	Fallback bool   `json:"fallback"`
+	Reason   string `json:"reason"`
 }
 
 type corpusUI struct {
@@ -55,6 +64,8 @@ type corpusUI struct {
 	autoQueued              bool
 	autoBefore, autoStalls  int
 	preferenceProblem       string
+	repositionProblem       string
+	repositionRetry         bool
 	action, progressProblem string
 	observing               bool
 	open, busy              bool
@@ -64,10 +75,12 @@ type corpusUI struct {
 	offset                  int
 	operation, observation  uint64
 	progress                *corpusProgress
+	usage                   *datasetUsage
 }
 
 type corpusMsg struct {
 	usage                         *datasetUsage
+	repositionError               error
 	root, action, id              string
 	epoch, operation, observation uint64
 	progress                      corpusProgress
@@ -98,6 +111,13 @@ func corpusCommand(root, repo string, epoch uint64, ui corpusUI, action string, 
 			return runReadScript(process, root, "cache", append(base, args...)...)
 		}
 		if action == "handoff" || action == "restore" {
+			if action == "restore" && ui.autoRestore && ui.automatic {
+				setup := []string{"--expected-repo", repo}
+				if ui.repositionRetry {
+					setup = append(setup, "--retry")
+				}
+				_, msg.repositionError = runReadScript(process, root, "reposition-env", append(setup, "ensure")...)
+			}
 			args := []string{"handoff"}
 			if action == "handoff" && validCorpusID(ui.id) {
 				args = append(args, "--corpus", ui.id)
@@ -109,6 +129,13 @@ func corpusCommand(root, repo string, epoch uint64, ui corpusUI, action string, 
 				msg.id = msg.progress.ID
 				if msg.err == nil && msg.id != "" && (!validCorpusID(msg.id) || msg.progress.Repository.Host != evidenceHost || msg.progress.Repository.Name != repo) {
 					msg.err = fmt.Errorf("selected dataset identity mismatch")
+				}
+			}
+			if msg.err == nil && action == "restore" {
+				out, msg.err = call("usage")
+				if msg.err == nil {
+					msg.usage = &datasetUsage{}
+					msg.err = json.Unmarshal([]byte(out), msg.usage)
 				}
 			}
 			return msg
@@ -296,14 +323,32 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if msg.usage != nil {
+		m.corpus.usage = msg.usage
+		m.corpus.repositionProblem = ""
+		if msg.usage.Reposition.Fallback {
+			m.corpus.repositionProblem = "Reposition setup failed; native offline search remains available."
+			if reason := strings.TrimSpace(msg.usage.Reposition.Reason); reason != "" {
+				m.corpus.repositionProblem = "Reposition setup failed: " + truncateSentence(singleLine(reason), 180) + ". Native offline search remains available."
+			}
+		}
+	}
 	if msg.action == "usage" {
-		m.status = fmt.Sprintf("Local storage: %.2f / %.2f GB (%d files)", float64(msg.usage.Total)/1e9, float64(msg.usage.Limit)/1e9, msg.usage.Files)
+		m.status = fmt.Sprintf("Managed cache: %.2f / %.2f GB (%d files).", float64(msg.usage.Total)/1e9, float64(msg.usage.Limit)/1e9, msg.usage.Files)
 		if m.corpus.autoQueued {
 			return m.requestAutomaticCorpus()
 		}
 		return m, nil
 	}
 	if msg.action == "restore" {
+		m.corpus.repositionRetry = false
+		if msg.usage != nil && msg.usage.Reposition.Fallback && msg.usage.Reposition.Reason != "" {
+			m.recordError("Reposition setup failed", errors.New(msg.usage.Reposition.Reason))
+		}
+		if msg.repositionError != nil {
+			m.corpus.repositionProblem = "Reposition setup unavailable; native offline search remains available."
+			m.recordError("Reposition setup failed", msg.repositionError)
+		}
 		if msg.id != "" {
 			m.corpus.id, m.corpus.progress = msg.id, &msg.progress
 		} else {
@@ -442,6 +487,15 @@ func (m model) datasetText() string {
 	text += lipgloss.PlaceHorizontal(m.menuWidth(), lipgloss.Center, mutedText("Starts after each backlog refresh.")) + "\n\n\n"
 	if c.preferenceProblem != "" {
 		text += lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render(c.preferenceProblem) + "\n\n"
+	}
+	if c.usage == nil {
+		text += "Measuring managed cache storage…\n\n"
+	} else {
+		evidence := c.usage.Total - c.usage.Categories["reposition"]
+		text += fmt.Sprintf("Managed cache %.2f / %.2f GB · evidence %.1f MB · indexes %.1f MB\n\n", float64(c.usage.Total)/1e9, float64(c.usage.Limit)/1e9, float64(evidence)/1e6, float64(c.usage.Categories["reposition"])/1e6)
+	}
+	if c.repositionProblem != "" {
+		text += lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render(c.repositionProblem) + "\n\n"
 	}
 	activity := ""
 	if c.busy {

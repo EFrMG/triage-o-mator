@@ -54,6 +54,73 @@ class RepositionTests(Workspace):
         self.assertEqual(fallback["matched_items"], 1)
         self.assertEqual(self.calls(), calls)
 
+    def test_managed_index_storage_and_automatic_setup_fallback_are_visible_offline(self):
+        calls = self.calls()
+        before = self.json_cli("cache", "usage")
+        sidecars = self.root / "data/owner/repo/reposition"
+        sidecars.mkdir()
+        (sidecars / "unused.sqlite").write_bytes(b"index" * 1000)
+        after = self.json_cli("cache", "usage")
+        self.assertGreater(after["allocated_categories"]["reposition"], 0)
+        self.assertEqual(after["allocated_bytes"] - before["allocated_bytes"], after["allocated_categories"]["reposition"])
+
+        probe = subprocess.run([sys.executable, "-c", """
+import _cache
+from _cache import CacheCapacityError, EvidenceCache
+from _evidence import repository
+from _reposition import bounded_index_arguments
+cache = EvidenceCache(repository('owner/repo'))
+used = cache.usage()['allocated_bytes']
+_cache.DATASET_LIMIT_BYTES = used + _cache.DATASET_RESERVE_BYTES + 2_000_000
+assert bounded_index_arguments(cache, [])[-1] == '2000000'
+_cache.DATASET_LIMIT_BYTES = used + _cache.DATASET_RESERVE_BYTES + 65_535
+try:
+    bounded_index_arguments(cache, [])
+except ValueError as exc:
+    assert 'combined 5 GB' in str(exc)
+else:
+    raise AssertionError('index build exceeded the combined budget')
+try:
+    cache._check_capacity(65_536)
+except CacheCapacityError:
+    pass
+else:
+    raise AssertionError('evidence acquisition ignored managed indexes')
+"""], cwd=self.root, env=dict(self.env, PYTHONPATH=str(self.root / "bin")), capture_output=True, text=True)
+        self.assertEqual(probe.returncode, 0, probe.stderr)
+
+        disabled = self.json_cli("reposition-env", "disable")
+        self.assertEqual(disabled["state"], "off")
+        self.assertEqual(self.json_cli("reposition-env", "status"), disabled)
+        blocked = self.offline("query", "--snapshot", self.snapshot, "--query", "Renderer", expected=2)
+        self.assertIn("Reposition is OFF", blocked.stderr)
+        self.assertFalse(self.json_cli("cache", "usage")["reposition_environment"]["enabled"])
+
+        python = self.root / ".reposition-venv/bin/python"
+        python.parent.mkdir(parents=True)
+        attempts = self.root / "attempts"
+        python.write_text(f"#!/bin/sh\ncase \"$*\" in *'import sys, sqlite3'*|*'-m pip --version'*) exit 0 ;; esac\nprintf x >> '{attempts}'\nexit 1\n")
+        python.chmod(0o755)
+        failed = self.json_cli("reposition-env", "--retry", "ensure")
+        self.assertTrue(failed["fallback"])
+        self.assertEqual(failed["state"], "off")
+        first_attempts = attempts.read_text()
+        self.assertEqual(self.json_cli("reposition-env", "ensure"), failed)
+        self.assertEqual(attempts.read_text(), first_attempts)
+        native = self.json_cli("cache", "search", "--snapshot", self.snapshot, "--query", "Renderer", "--component", "summary")
+        self.assertEqual(native["matched_items"], 1)
+
+        shutil.rmtree(python.parent.parent)
+        venv.create(self.root / ".reposition-venv", with_pip=False)
+        python = self.root / ".reposition-venv/bin/python"
+        site_packages = subprocess.check_output([str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"], text=True).strip()
+        package = Path(site_packages) / "reposition"
+        package.mkdir()
+        (package / "__init__.py").write_text('__version__ = "0.2.0.dev1"\n')
+        self.assertTrue(self.json_cli("reposition-env", "--retry", "ensure")["enabled"])
+        self.assertEqual(self.json_cli("reposition-env", "status")["state"], "on")
+        self.assertEqual(self.calls(), calls)
+
     @unittest.skipUnless(importlib.util.find_spec("reposition"), "optional Reposition integration environment")
     def test_ranked_retrieval_is_identity_bound_and_does_not_change_evidence(self):
         from reposition.models import canonical, sha256
@@ -61,8 +128,12 @@ class RepositionTests(Workspace):
         cache = self.root / "data/owner/repo/cache"
         before = {str(p.relative_to(cache)): p.read_bytes() for p in cache.rglob("*") if p.is_file()}
         calls = self.calls()
-        database = self.root / "search.sqlite"
+        database = self.root / "data/owner/repo/reposition/search.sqlite"
         self.offline("search-index", "--snapshot", self.snapshot, "--db", str(database))
+        self.assertEqual((database.parent / ".gitignore").read_text(), "*\n")
+        self.assertGreater(self.json_cli("cache", "usage")["allocated_categories"]["reposition"], 0)
+        unmanaged = self.offline("search-index", "--snapshot", self.snapshot, "--db", str(self.root / "unmanaged.sqlite"), expected=2)
+        self.assertIn("managed reposition directory", unmanaged.stderr)
         query_text = self.offline("query", "--snapshot", self.snapshot, "--db", str(database), "--query", '"terminal blank after suspend"', "--max-bytes", "6000").stdout
         query = json.loads(query_text)
         self.assertLessEqual(len(query_text.encode()), 6000)

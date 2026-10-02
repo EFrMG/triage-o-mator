@@ -130,7 +130,7 @@ Re-running `bin/install-to` on an existing install is always safe, and is how yo
 
 `--dry-run` prints every change first and writes nothing.
 
-Upgrades also maintain a separate cache/local ignore block, preserving rules outside the managed markers. This may change the tracked install `.gitignore`; inspect its diff. Malformed markers and unsupported future install versions are refused before changes. Stop older writers before upgrading, and see [evidence-cache compatibility and backups](evidence-reference.md#upgrade-and-backup).
+Upgrades also maintain a separate cache/local ignore block, including derived `reposition/` indexes and preserving rules outside the managed markers. This may change the tracked install `.gitignore`; inspect its diff. Malformed markers and unsupported future install versions are refused before changes. Stop older writers before upgrading, and see [evidence-cache compatibility and backups](evidence-reference.md#upgrade-and-backup).
 
 To move or back up an install, preserve its `config/`, `data/` and `reports/`; `config/` includes the repository target and the team's taxonomy. For a Git-based handoff, back up the ignored cache separately when retained evidence, watches or imported closure records depend on it. Re-run `bin/install-to` at the new location to repair machine-specific links.
 

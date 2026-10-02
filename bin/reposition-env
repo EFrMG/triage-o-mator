@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""Inspect or prepare the optional checkout-wide Reposition environment."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _reposition import ensure_environment, environment_status, set_environment
+from _triage import REPO
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-repo", help="refuse a changed install target")
+    parser.add_argument("--retry", action="store_true", help="retry automatic setup after a saved failure")
+    parser.add_argument("action", choices=("status", "ensure", "enable", "disable"))
+    args = parser.parse_args()
+
+    if not REPO or args.expected_repo is not None and args.expected_repo != REPO:
+        parser.error("install repository changed or is unavailable")
+
+    if args.retry and args.action != "ensure":
+        parser.error("--retry is only available with ensure")
+
+    try:
+        result = environment_status() if args.action == "status" else ensure_environment(args.retry) if args.action == "ensure" else set_environment(args.action == "enable")
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+
+    print(json.dumps(result, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

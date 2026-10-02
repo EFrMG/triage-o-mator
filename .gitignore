@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .reposition-venv/
+.reposition-state/
 
 # Compiled binary, negating a global_gitignore for such
 !/bin/

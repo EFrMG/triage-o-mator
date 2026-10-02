@@ -114,6 +114,7 @@ func (m model) toggleAutomaticCorpus() (tea.Model, tea.Cmd) {
 	m.corpus.automatic = enabled
 	m.corpus.preferenceProblem = ""
 	if !enabled {
+		m.corpus.repositionRetry = false
 		m.corpus.autoQueued, m.corpus.autoRestore = false, false
 		m.corpus.retryHard = false
 		if m.corpus.busy && m.corpusLifecycle != nil {
@@ -125,6 +126,7 @@ func (m model) toggleAutomaticCorpus() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.status = "Automatic download ON."
+	m.corpus.repositionRetry = true
 	m.corpus.retryHard = true
 	m.corpus.autoStalls = 0
 	if m.corpus.busy {

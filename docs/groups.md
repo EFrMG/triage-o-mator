@@ -24,7 +24,7 @@ Deleting a group removes its file and membership notes, while item decisions sta
 
 ## Script workflow
 
-All mutations require an explicit contributor identity, except `delete`, which records nothing to attribute. Commands return JSON except Markdown exports. Copy the stable `id` from `create` or `list` for subsequent commands.
+All mutations require an explicit contributor identity, except `delete`, which records nothing to attribute. Commands return JSON except Markdown exports. Copy the stable `id` from `create` or `list` for subsequent commands. Replace `CURRENT_REVISION` below with the number returned by `show`.
 
 ```sh
 bin/group create --title 'Session startup regressions' \
@@ -37,11 +37,9 @@ bin/group add GROUP_ID --kind issue --number 123 \
   --notes 'Primary reproducer; compare with PR #456.' --by 'Contributor name'
 bin/group add GROUP_ID --kind pr --number 456 \
   --notes 'Candidate fix for issue #123.' --by 'Contributor name'
-bin/group update GROUP_ID --status ready --revision 3 --by 'Contributor name'
+bin/group show GROUP_ID # read the current revision before editing
+bin/group update GROUP_ID --status ready --revision CURRENT_REVISION --by 'Contributor name'
 bin/group remove GROUP_ID --kind issue --number 123 --by 'Contributor name'
-
-# Deleting the group itself takes no --by: nothing is left to attribute it to. The deleted group is printed as {"deleted": {...}}, the run's only record of what was there.
-bin/group delete GROUP_ID --revision 4
 
 bin/batch 25 --group GROUP_ID
 bin/report --stdout
@@ -49,6 +47,8 @@ bin/report --stdout
 bin/group export GROUP_ID --output data/<owner>/<repo>/exports/review.md
 bin/group export GROUP_ID --diff --format json --output data/<owner>/<repo>/exports/review.json
 ```
+
+For a mistaken group only, run `bin/group show GROUP_ID` to get its current revision, then `bin/group delete GROUP_ID --revision CURRENT_REVISION`. Deletion needs no `--by` because nothing remains to attribute; the command prints the deleted group as its only record.
 
 `bin/batch --group` selects only that group's untriaged open items, respecting the existing size, kind, and ordering filters. The enriched context includes the group title, description, assignee, status, revision, and membership notes; decision templates and `bin/apply` remain unchanged. `bin/report` includes group summaries.
 

@@ -1,6 +1,6 @@
 # Tutorial: the triage-o-mator TUI
 
-A tour of the TUI and its controls. Follow the sections in order; each takes a minute or two. The [README](../README.md) explains what the project is. The footer and `?` show the keys available on the current screen.
+A tour of the TUI and its controls. Start with the focused review loop below, then use the sections you need. The [README](../README.md) explains what the project is. The footer and `?` show the keys available on the current screen.
 
 Install it into the repository you want to triage ([install.md](install.md)), then launch it from there:
 
@@ -44,7 +44,7 @@ Terminals smaller than 60×24 show a resize prompt.
 - `/` searches an item list by title words or `#number`.
 - `Space` ticks an item and advances the cursor. An item action then applies to everything ticked, or to the item under the cursor when nothing is ticked. Bulk and destructive actions ask for the same key a second time, except dismissing one notification with `d`.
 
-## 4. Read the complete item
+## 4. Read an item
 
 - Open any item with `Enter`.
 - Its tabs, Body, Agent notes when present, Comments, and Diff for PRs, run across the top. `H`/`L` switch between them, `1`–`4` jump to one, and `Enter` shows one full screen.
@@ -111,7 +111,7 @@ A group collects related items so maintainers can decide on them together ([grou
 ## 10. Build deeper offline context when needed
 
 - Press `f` from the overview, a list, or an item to open **Local dataset**. Opening it makes no GitHub request.
-- `o` toggles the centered **ON OFF** automatic download choice for this repository. ON starts after startup and backlog refresh, resumes an unfinished selected dataset, and continues across saved checkpoints without an item limit. Hard errors and rate limits pause it; after resolving one, turn OFF and ON to retry. `u` measures cache size, and `y` copies the agent prompt.
+- `o` toggles automatic download for this repository. Turning it ON starts or resumes now; while ON, it also starts after startup and backlog refresh and continues across saved checkpoints without an item limit. Hard errors and rate limits pause it; after resolving one, turn OFF and ON to retry. `u` measures cache size, and `y` copies the agent prompt.
 - Saved checkpoint counts refresh while downloading. `x` cancels the operation; `Esc` closes **Local dataset** without stopping it.
 
 Counts describe saved outcomes, not complete or current coverage. Custom corpus scopes and profiles remain available through the cache CLI; see [frozen corpus acquisition](evidence-reference.md#frozen-corpus-acquisition). Dataset work changes no sync, decision, or approval state.
@@ -136,6 +136,11 @@ For a requested reassessment from imported closure history through explicit enro
 
 - `bin/report` gathers ready groups and individual human-reviewed decisions. An agent following [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) can turn that report into a concise maintainer brief.
 - Exporting or reporting does not act on GitHub. Labeling, approving, and merging remain separate work.
+
+### Publish approved GitHub actions
+
+The following controls publish only after approval of the exact target, text and state change. See [comment-plus](comment-plus.md) for the dry-run CLI and recovery behavior.
+
 - On an item, `c` composes a conversation comment inline, while `C` opens `$EDITOR`. Once any comment or rejection composer is open, `Ctrl-E` opens its current draft in `$EDITOR` from editing or preview. `Ctrl-P` toggles a rendered Markdown preview; `Ctrl-S` approves and publishes the exact target and text. In preview, `C` also reopens `$EDITOR`; one `Esc` closes the floating window and discards the draft.
 - On an open item, `x` composes an explanatory closing comment inline and `X` uses `$EDITOR`. `Ctrl-S` approves the comment and closure together. After confirmation, the TUI updates the visible state and refreshes the item discussion and ledger.
 - On a closed item, `v` composes a reopening comment inline and `V` uses `$EDITOR`. These keys also work in item lists: select closed items with `Space`, then use one shared comment for all selected items; without a selection, they use the hovered item. For multiple items, the first `Ctrl-S` opens a scrollable review of every target and the comment, and the second approves them. The TUI stops if an outcome is uncertain and reports how many were confirmed open.

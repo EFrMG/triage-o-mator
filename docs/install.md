@@ -115,7 +115,7 @@ Running `bin/triage-o-mator` where there is no install (in a fresh checkout, say
 
 ## Working as a team through it
 
-Once the install is tracked, triage is ordinary repository work: contributors pull to get each other's decisions, and hand work to maintainers by opening a pull request that changes `triage-o-mator/data/<owner>/<repo>/ledger.jsonl` and `groups/`. The ledger is JSON Lines precisely so that diff is readable line by line. Everyone who clones the repository runs `bin/install-to` against it once to wire up their own symlinks; nothing tracked changes when they do.
+Once the install is tracked, triage is ordinary repository work: contributors pull to get each other's decisions, and hand work to maintainers by opening a pull request that changes `triage-o-mator/data/<owner>/<repo>/ledger.jsonl` and `groups/`. The ledger is JSON Lines so the diff is readable line by line. Everyone who clones the repository runs `bin/install-to` against it once to wire up their own symlinks; preview the plan if the installer also proposes a tracked update.
 
 See the [triage playbook](../prompts/PLAYBOOK.md#working-as-a-team) for how batches, proposals and reviews divide between people and their agents.
 
@@ -132,7 +132,7 @@ Re-running `bin/install-to` on an existing install is always safe, and is how yo
 
 Upgrades also maintain a separate cache/local ignore block, preserving rules outside the managed markers. This may change the tracked install `.gitignore`; inspect its diff. Malformed markers and unsupported future install versions are refused before changes. Stop older writers before upgrading, and see [evidence-cache compatibility and backups](evidence-reference.md#upgrade-and-backup).
 
-Moving an install's data somewhere else is a plain directory move: `data/<owner>/<repo>/` and `reports/<owner>/<repo>/` are the whole record, and an install picks them up wherever it finds them.
+To move or back up an install, preserve its `config/`, `data/` and `reports/`; `config/` includes the repository target and the team's taxonomy. For a Git-based handoff, back up the ignored cache separately when retained evidence, watches or imported closure records depend on it. Re-run `bin/install-to` at the new location to repair machine-specific links.
 
 ## Making it yours
 

@@ -53,7 +53,7 @@ Pages contain at most 100 members (default 20), with frozen identity, observed i
 
 ## Basic cache commands
 
-This release provides versioned evidence storage, **read-only acquisition for explicitly selected items and frozen inventory corpora**, and shared readers. `enrich-one`, `batch`, `similar --enrich`, and `group export --enrich` can opt in. Default TUI enrichment still uses its existing path; the TUI can read fixed cached batches without fetching missing evidence. No cache command changes the ledger or authorizes actions. The [tutorial](tutorial.md#10-build-deeper-offline-context-when-needed) covers the TUI controls.
+The cache provides versioned evidence storage, **read-only acquisition for explicitly selected items and frozen inventory corpora**, and shared readers. `enrich-one`, `batch`, `similar --enrich`, and `group export --enrich` can opt in. Default TUI enrichment still uses its existing path; the TUI can read fixed cached batches without fetching missing evidence. No cache command changes the ledger or authorizes actions. The [tutorial](tutorial.md#10-build-deeper-offline-context-when-needed) covers the TUI controls.
 
 From an install:
 
@@ -289,7 +289,7 @@ Closing relationships come from the fixed `ClosingIssues` GraphQL query over [`c
 
 Repository records contain `host`, `full_name` (`owner/repo`), `database_id`, and `node_id`. Item identities contain `kind`, `number`, `database_id`, and `node_id`, within that repository scope. Unknown IDs are `null`, never fabricated.
 
-The cache host defaults explicitly to `github.com`. `bin/cache --host enterprise.example fetch ...` explicitly targets that host, not the active `gh` account. One owner/repo cache directory belongs to one host; a conflicting host is refused. This does **not** add enterprise-host support to legacy inventory/enrichment commands.
+The cache host defaults explicitly to `github.com`. `bin/cache --host enterprise.example fetch ...` explicitly targets that host, not the active `gh` account. One owner/repo cache directory belongs to one host; a conflicting host is refused. Ordinary `fetch` has its own `--host` option; legacy online `enrich-one` is not host-aware, so its `--host` option requires a cache mode.
 
 Acquisition reads repository identity from the intended host and calls `EvidenceCache.bind_repository` before publishing evidence. Binding pins stable IDs and rejects contradictory or missing previously pinned IDs. Changed names, including case aliases, require explicit reconciliation, never silent cache movement. Item acquisition verifies the returned number, URL, kind, stable IDs, and PR base repository; subsequent observations reject conflicting item IDs. Automatic alias reconciliation and legacy-ledger identity migration remain unimplemented.
 

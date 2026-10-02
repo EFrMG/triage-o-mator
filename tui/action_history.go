@@ -9,6 +9,7 @@ import (
 )
 
 const actionHistoryPageSize = 5
+const actionHistoryReaderNote = "Imported explanations are attributed claims; closure operation and actor may be unknown. Each card shows its explanation."
 
 type actionHistoryRow struct {
 	ID                string `json:"id"`
@@ -189,13 +190,13 @@ func (m model) handleActionHistoryKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 		return m.openNotificationItem(Key{Kind: "pr", Number: at.number})
 	}
+	m.actionHistory.scroll = m.notificationReaderScroll("Closure explanations", actionHistoryReaderNote, actionHistoryReaderCards(ui.page), m.actionHistory.selected, m.actionHistory.scroll, ui.page.Pagination)
 	return m, nil
 }
 
 func (m model) actionHistoryView() string {
 	ui := m.actionHistory
 	subtitle := fmt.Sprintf("PR #%d · Closure explanations · %s", ui.location.number, m.repo)
-	note := "Imported explanations are attributed claims; closure operation and actor may be unknown. Each card shows its explanation."
 	if ui.busy {
 		return inset(titleBar("Notifications", subtitle, m.menuWidth())) + "\n\n" + inset("Reading retained action history…")
 	}
@@ -206,6 +207,10 @@ func (m model) actionHistoryView() string {
 		return ""
 	}
 	p := ui.page
+	return m.notificationReaderView("Closure explanations", subtitle, actionHistoryReaderNote, actionHistoryReaderCards(p), ui.selected, ui.scroll, p.Pagination)
+}
+
+func actionHistoryReaderCards(p *actionHistoryPage) []notificationReaderCard {
 	rows := make([]notificationReaderCard, 0, len(p.Rows))
 	if p.Pagination.Offset > 0 {
 		rows = append(rows, notificationReaderCard{label: "Previous explanations", summary: "Show the preceding saved page", mark: cardMark{}})
@@ -216,5 +221,5 @@ func (m model) actionHistoryView() string {
 	if p.Pagination.Next != nil {
 		rows = append(rows, notificationReaderCard{label: "More explanations", summary: "Show the next saved page", mark: cardMark{}})
 	}
-	return m.notificationReaderView("Closure explanations", subtitle, note, rows, ui.selected, ui.scroll, p.Pagination)
+	return rows
 }

@@ -22,14 +22,26 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case commentEditorMsg:
 		return m.finishCommentEditor(msg)
+	case groupNoteEditorMsg:
+		return m.finishGroupNoteEditor(msg)
+	case groupEditEditorMsg:
+		return m.finishGroupEditExternal(msg)
 	case commentMsg:
 		return m.finishComment(msg)
 	case notificationsMsg:
 		return m.finishNotifications(msg)
 	case autoCloseMsg:
 		return m.finishAutoClose(msg)
+	case autoCloseContextMsg:
+		return m.finishAutoCloseContext(msg)
+	case autoCloseNotesMsg:
+		return m.finishAutoCloseNotes(msg)
 	case notificationItemDoneMsg:
 		return m.finishNotificationItem(msg)
+	case notificationRejectionDoneMsg:
+		return m.finishNotificationRejection(msg)
+	case proposalEditDoneMsg:
+		return m.finishProposalEdit(msg)
 	case actionHistoryMsg:
 		return m.finishActionHistory(msg)
 	case attentionMsg:
@@ -50,6 +62,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onExportProgress(msg)
 	case groupsLoadedMsg:
 		return m.onGroupsLoaded(msg)
+	case groupHandoffMsg:
+		return m.finishGroupHandoff(msg)
 	case batchesLoadedMsg:
 		return m.onBatchesLoaded(msg)
 	case similarLoadedMsg:
@@ -93,7 +107,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onStatusTick()
 
 	case fetchSyncDoneMsg:
-		if msg.repo != "" && msg.repo != m.repo {
+		if msg.repo != "" && msg.repo != m.repo || msg.root != "" && msg.root != m.installRoot {
 			return m, nil
 		}
 		m.refreshing = false
@@ -121,11 +135,17 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.detail.cache = make(map[Key]EnrichedItem)
 		detailCmd := m.refreshLiveDetail()
+		var autoCmd tea.Cmd
+		if msg.backlog && m.corpus.automatic {
+			var next tea.Model
+			next, autoCmd = m.requestAutomaticCorpus()
+			m = next.(model)
+		}
 		if m.notifications.open {
 			next, notificationCmd := m.openNotifications()
-			return next, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), notificationCmd, detailCmd)
+			return next, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), notificationCmd, detailCmd, autoCmd)
 		}
-		return m, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), detailCmd)
+		return m, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), detailCmd, autoCmd)
 	case trackDoneMsg:
 		return m.finishTracking(msg)
 
@@ -314,8 +334,19 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	case m.groups.open:
-		if m.groups.busy || m.groups.editing == "" || m.onGroupStatusField() {
+		if m.groups.busy || m.groups.editing == "" {
 			return m, nil
+		}
+		if m.groups.editing == "edit" {
+			return m.pasteGroupEdit(msg)
+		}
+		if m.groups.editing == "notes" {
+			if m.groups.note.previewing {
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.groups.note.text, cmd = m.groups.note.text.Update(msg)
+			return m, cmd
 		}
 		var cmd tea.Cmd
 		m.groups.inputs[m.groups.field], cmd = m.groups.inputs[m.groups.field].Update(msg)
@@ -420,6 +451,12 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if (key.Matches(msg, keys.Yank) || key.Matches(msg, keys.YankAll)) && !m.typingText() && !m.themePicker.open && !m.editingRepo {
+		if m.groups.open && m.groups.detail {
+			if m.groups.busy {
+				return m, nil
+			}
+			return m.startGroupHandoff(key.Matches(msg, keys.YankAll))
+		}
 		text, what := m.yankText(key.Matches(msg, keys.YankAll))
 		m.status = "Taking " + what + "…"
 
@@ -524,20 +561,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Refresh), key.Matches(msg, keys.RefreshFull):
 		return m.startRefresh(key.Matches(msg, keys.RefreshFull))
 	case key.Matches(msg, keys.Corpus):
-		if m.noInstall() {
-			return m, nil
-		}
-		m.corpus.open = true
-		if !m.corpus.busy {
-			m.corpus.operation++
-			if m.corpusObserverLifecycle == nil {
-				m.corpusObserverLifecycle = &readLifecycle{}
-			}
-			m.corpusObserverLifecycle.stop()
-			m.corpusObserverLifecycle.current = &readProcess{}
-			return m, corpusCommand(m.installRoot, m.repo, m.corpusEpoch, m.corpus, "restore", m.corpusObserverLifecycle.current)
-		}
-		return m, nil
+		return m.openCorpus()
 	case key.Matches(msg, keys.Group):
 		return m.openGroups()
 	case key.Matches(msg, keys.Search) && m.focus == FocusList && m.listReady:

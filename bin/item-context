@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Read one item's local ledger and group guidance offline, with bounded text and revision checks."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+
+from _item_context import read, source
+from _triage import read_repo
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-repo", required=True, help="refuse a changed install target")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("read", "source"):
+        command = commands.add_parser(name)
+        command.add_argument("--kind", choices=("issue", "pr"), required=True)
+        command.add_argument("--number", type=int, required=True)
+        if name == "read":
+            command.add_argument("--offset", type=int, default=0)
+            command.add_argument("--limit", type=int, default=10)
+            command.add_argument("--checkpoint")
+        else:
+            command.add_argument("--row", required=True, help="row ID from read")
+            command.add_argument("--field", required=True, help="text field from that row")
+            command.add_argument("--checkpoint", required=True)
+            command.add_argument("--byte-offset", type=int, default=0)
+            command.add_argument("--max-bytes", type=int, default=4096)
+
+    args = parser.parse_args()
+    repo = read_repo()
+    if args.expected_repo != repo:
+        raise ValueError("configured repository changed; reopen item context")
+
+    if args.command == "read":
+        result = read(args.kind, args.number, args.offset, args.limit, args.checkpoint)
+    else:
+        result = source(args.kind, args.number, args.row, args.field, args.checkpoint, args.byte_offset, args.max_bytes)
+
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        sys.exit(f"error: {exc}")

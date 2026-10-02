@@ -298,6 +298,9 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.groups.open && (m.groups.editing == "notes" || m.groups.editing == "edit") {
+		return m, nil
+	}
 	if m.themePicker.open {
 		return m.clickTheme(event, repeat)
 	}
@@ -566,6 +569,7 @@ func (m model) clickGroups(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
 		repeat := m.mouseTargetRepeat("group-member:" + g.ID + ":" + g.Members[index].Kind + ":" + strconv.Itoa(g.Members[index].Number))
 		if m.groups.member != index {
 			m.groups.member = index
+			m.groups.previewOffset = 0
 			if event.Button != tea.MouseRight {
 				return m, nil
 			}
@@ -591,23 +595,10 @@ func (m model) clickGroups(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) clickGroupForm(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
-	if m.groups.pick.open {
-		first := 5 + m.groups.field
-		start := maxInt(minInt(m.groups.pick.cursor-dropdownRows/2, len(m.groups.pick.options)-dropdownRows), 0)
-		index := start + event.Y - first
-		if event.Y >= first && event.Y < first+minInt(dropdownRows, len(m.groups.pick.options)) && index < len(m.groups.pick.options) {
-			m.groups.pick.cursor = index
-			return m.mousePress("enter")
-		}
-		return m, nil
-	}
+func (m model) clickGroupForm(event tea.Mouse, _ bool) (tea.Model, tea.Cmd) {
 	row := event.Y - 3
 	if row < 0 || row >= len(m.groups.inputs) {
 		return m, nil
-	}
-	if m.groups.field == row && repeat && m.onGroupStatusField() {
-		return m.mousePress("l")
 	}
 	m.groups.inputs[m.groups.field].Blur()
 	m.groups.field = row

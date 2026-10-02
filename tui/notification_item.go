@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -20,6 +21,81 @@ type notificationItemDoneMsg struct {
 	key                Key
 	completed, total   int
 	err                error
+}
+
+type notificationRejectionDoneMsg struct {
+	root, repo, checkpoint string
+	generation             uint64
+	key                    Key
+	rejected               bool
+	completed, total       int
+	err                    error
+}
+
+func (m model) rejectNotificationCmd() tea.Cmd {
+	root, repo, generation := m.installRoot, m.repo, m.notificationsGeneration
+	choice, checkpoint := m.comment.rejectionChoice, m.comment.rejectionCheckpoint
+	reason, by := m.comment.text.Value(), m.reviewer
+	operations := m.notifications.itemOperations(repo, choice, "dismiss")
+
+	return func() tea.Msg {
+		msg := notificationRejectionDoneMsg{root: root, repo: repo, generation: generation, key: choice.key, checkpoint: checkpoint, total: len(operations)}
+		out, err := runScript(root, "auto-close", "--expected-repo", repo, "reject", "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--reason", reason)
+		if err != nil {
+			msg.err = err
+			return msg
+		}
+
+		var rejected autoCloseRow
+		if err := json.Unmarshal([]byte(out), &rejected); err != nil {
+			msg.rejected = true
+			msg.err = fmt.Errorf("could not read saved rejection: %w", err)
+			return msg
+		}
+		msg.rejected = true
+		if rejected.Number != choice.key.Number || rejected.Status != "rejected" || rejected.Checkpoint == "" || rejected.Rejection == nil || rejected.Rejection.ProposalCheckpoint != checkpoint || rejected.Rejection.By != by || rejected.Rejection.Reason != reason {
+			msg.err = fmt.Errorf("saved rejection did not match the displayed proposal")
+			return msg
+		}
+
+		for _, operation := range operations {
+			args := operation.args
+			if operation.source == "proposal" {
+				args = append([]string(nil), args...)
+				args[len(args)-1] = rejected.Checkpoint
+			}
+			if _, err := runScript(root, operation.script, args...); err != nil {
+				msg.err = fmt.Errorf("%s dismissal: %w", operation.source, err)
+				return msg
+			}
+			msg.completed++
+		}
+		return msg
+	}
+}
+
+func (m model) finishNotificationRejection(msg notificationRejectionDoneMsg) (tea.Model, tea.Cmd) {
+	if !m.comment.open || m.comment.rejectionCheckpoint != msg.checkpoint || msg.root != m.installRoot || msg.repo != m.repo || msg.generation != m.notificationsGeneration {
+		return m, nil
+	}
+	m.comment.busy = false
+	if !msg.rejected {
+		m.failErr("Couldn't reject proposal; reason retained", msg.err)
+		return m, nil
+	}
+
+	m.comment.open = false
+	m.notifications.review = nil
+	if msg.err != nil {
+		m.recordError("Proposal rejected; notification dismissal was incomplete", msg.err)
+		m.status = fmt.Sprintf("Proposal rejected; dismissed %d of %d notification sources. ! shows details.", msg.completed, msg.total)
+	} else {
+		m.status = fmt.Sprintf("Rejected PR #%d and dismissed its notification.", msg.key.Number)
+	}
+	next, cmd := m.openNotifications()
+	updated := next.(model)
+	updated.notifications.selectItem = msg.key
+	return updated, cmd
 }
 
 func (n notificationsUI) itemOperations(repo string, choice notificationChoice, action string) []notificationItemOperation {
@@ -100,6 +176,11 @@ func (m model) openNotificationSource(choice notificationChoice, source string) 
 			m.notifications.review.Plan.Proposals = []autoCloseRow{row}
 			m.notifications.reviewKey = ""
 			m.notifications.reviewScroll = 0
+			m.notifications.notesOpen = false
+			m.notifications.notesBusy = false
+			m.notifications.notesText = ""
+			m.notifications.notesError = ""
+			return m.beginAutoCloseContext(row.Number, row.Checkpoint, 0, "")
 		}
 	case "item":
 		return m.openNotificationItem(choice.key)

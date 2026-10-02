@@ -410,7 +410,7 @@ func (f *decisionForm) CycleValue(delta int) {
 	}
 }
 
-// View renders the form to width: the three choices, the reason (wrapping over up to reasonMaxLines), and one line of state.
+// View renders the form to width: the three choices, the reason (wrapping over up to reasonMaxLines), and its state.
 func (f decisionForm) View(width int) string {
 	accent := lipgloss.NewStyle().Foreground(focusedBorderColor).Bold(true)
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
@@ -464,17 +464,23 @@ func (f decisionForm) View(width int) string {
 
 	// "Saved." itself goes to the status line only, not here as well.
 	state := ""
+	stateStyle := muted
 	switch {
 	case f.dirty:
-		state = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("unsaved changes")
+		state = "unsaved changes"
+		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
 	case f.proposed:
-		state = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("proposed in the batch file, not saved yet")
+		state = "proposed in the batch file, not saved yet"
+		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
 	case !f.touched:
-		state = muted.Render("untriaged: fields show defaults until you change them")
+		state = "untriaged: fields show defaults until you change them"
 	}
 
 	if state != "" {
-		rows = append(rows, "", state)
+		rows = append(rows, "")
+		for _, line := range strings.Split(ansi.Wrap(state, maxInt(width, 1), ""), "\n") {
+			rows = append(rows, stateStyle.Render(line))
+		}
 	}
 
 	for i := range rows {

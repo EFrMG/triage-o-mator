@@ -9,6 +9,7 @@ import (
 )
 
 const attentionPageSize = 5
+const attentionReaderNote = "Saved closure note and later comments. Excerpts are shown in each card; full sources remain in the offline cache."
 
 type attentionWindow struct {
 	Total    int  `json:"total"`
@@ -212,13 +213,15 @@ func (m model) handleAttentionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.openNotificationItem(Key{Kind: "pr", Number: at.number})
 	}
+	if ui.page != nil {
+		m.attention.scroll = m.notificationReaderScroll("Discussion", attentionReaderNote, attentionReaderCards(ui.page), m.attention.selected, m.attention.scroll, ui.page.Pagination)
+	}
 	return m, nil
 }
 
 func (m model) attentionView() string {
 	ui := m.attention
 	subtitle := fmt.Sprintf("PR #%d · Discussion · %s", ui.location.number, m.repo)
-	note := "Saved closure note and later comments. Excerpts are shown in each card; full sources remain in the offline cache."
 	if ui.busy {
 		return inset(titleBar("Notifications", subtitle, m.menuWidth())) + "\n\n" + inset("Reading retained evidence…")
 	}
@@ -229,6 +232,10 @@ func (m model) attentionView() string {
 		return ""
 	}
 	p := ui.page
+	return m.notificationReaderView("Discussion", subtitle, attentionReaderNote, attentionReaderCards(p), ui.selected, ui.scroll, p.Pagination)
+}
+
+func attentionReaderCards(p *attentionPage) []notificationReaderCard {
 	rows := make([]notificationReaderCard, 0, len(p.Rows))
 	if p.Pagination.Offset > 0 {
 		rows = append(rows, notificationReaderCard{label: "Previous comments", summary: "Show the preceding saved page", mark: cardMark{}})
@@ -243,5 +250,5 @@ func (m model) attentionView() string {
 	if p.Pagination.Next != nil {
 		rows = append(rows, notificationReaderCard{label: "More comments", summary: "Show the next saved page", mark: cardMark{}})
 	}
-	return m.notificationReaderView("Discussion", subtitle, note, rows, ui.selected, ui.scroll, p.Pagination)
+	return rows
 }

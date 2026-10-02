@@ -79,7 +79,8 @@ type fetchSyncDoneMsg struct {
 	err, trackingErr, proposalErr error
 	summary                       string
 	unreadTotal                   int
-	repo                          string
+	root, repo                    string
+	backlog                       bool
 }
 
 func fetchSyncCmd(installRoot, repo string, full bool, items ...Key) tea.Cmd {
@@ -88,6 +89,7 @@ func fetchSyncCmd(installRoot, repo string, full bool, items ...Key) tea.Cmd {
 
 func fetchSyncCmdAtHost(installRoot, repo string, full bool, host string, items ...Key) tea.Cmd {
 	return func() tea.Msg {
+		message := fetchSyncDoneMsg{root: installRoot, repo: repo, backlog: len(items) == 0}
 		args := []string{"--expected-repo", repo}
 		if full {
 			args = append(args, "--full")
@@ -100,12 +102,14 @@ func fetchSyncCmdAtHost(installRoot, repo string, full bool, host string, items 
 		}
 
 		if _, err := runScript(installRoot, "fetch", args...); err != nil {
-			return fetchSyncDoneMsg{repo: repo, err: err}
+			message.err = err
+			return message
 		}
 
 		out, err := runScript(installRoot, "sync")
 		if err != nil {
-			return fetchSyncDoneMsg{repo: repo, err: err}
+			message.err = err
+			return message
 		}
 
 		tracked, trackingErr := runScript(installRoot, "cache", "--expected-repo", repo, "track-check", "--request-budget", "100")
@@ -130,7 +134,9 @@ func fetchSyncCmdAtHost(installRoot, repo string, full bool, host string, items 
 		if proposalErr == nil && (listed.Repository != repo || listed.Requests != 0) {
 			proposalErr = fmt.Errorf("proposal count response identity mismatch")
 		}
-		return fetchSyncDoneMsg{repo: repo, summary: out, trackingErr: trackingErr, proposalErr: proposalErr, unreadTotal: notificationCount(unreadKeys, listed)}
+		message.summary, message.trackingErr, message.proposalErr = out, trackingErr, proposalErr
+		message.unreadTotal = notificationCount(unreadKeys, listed)
+		return message
 	}
 }
 

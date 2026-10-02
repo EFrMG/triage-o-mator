@@ -157,8 +157,18 @@ func (m model) handleErrorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.HalfUp):
 		m.lastError.offset = maxInt(m.lastError.offset-m.mainHeight()/2, 0)
 	}
+	vp := m.errorViewport()
+	m.lastError.offset = vp.YOffset()
 
 	return m, nil
+}
+
+func (m model) errorViewport() viewport.Model {
+	w, h := m.width-4, m.mainHeight()
+	vp := viewport.New(viewport.WithWidth(w), viewport.WithHeight(maxInt(h-2, 1)))
+	vp.SetContent(wrapText(m.lastError.text, w))
+	vp.SetYOffset(m.lastError.offset)
+	return vp
 }
 
 // errorView is the ! screen: the last failure in full, scrollable.
@@ -166,9 +176,7 @@ func (m model) errorView() string {
 	w, h := m.width-4, m.mainHeight()
 	e := m.lastError
 	head := titleBar("Last error", e.what+" · "+e.at.Format("15:04:05"), w)
-	vp := viewport.New(viewport.WithWidth(w), viewport.WithHeight(maxInt(h-2, 1)))
-	vp.SetContent(wrapText(e.text, w))
-	vp.SetYOffset(e.offset)
+	vp := m.errorViewport()
 
 	return m.titled(panelStyle(true).Width(w+4).Height(h+2).Padding(0, 1).Render(lipgloss.JoinVertical(lipgloss.Left, head, "", vp.View())), true)
 }

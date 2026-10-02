@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -19,6 +20,10 @@ import (
 type commentComposer struct {
 	previewText                           string
 	open, busy, previewing, close, reopen bool
+	rejectionCheckpoint                   string
+	rejectionChoice                       notificationChoice
+	proposalEditCheckpoint                string
+	editOriginalComment                   string
 	key                                   Key
 	host, target, requestID, approval     string
 	targets                               []commentTarget
@@ -143,6 +148,60 @@ func (m model) openCommentComposer(target commentTarget, close, reopen bool, tar
 	return m, cmd
 }
 
+func (m model) openRejectionComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
+	if choice.proposal < 0 || strings.TrimSpace(m.reviewer) == "" {
+		m.warn("A reviewer name is required to reject a proposal.")
+		return m, nil
+	}
+
+	row := m.notifications.proposals.Rows[choice.proposal]
+	if row.Status != "pending" {
+		return m.changeNotificationItem(choice, "dismiss")
+	}
+
+	target := commentTarget{key: choice.key, url: row.Target}
+	next, cmd := m.openCommentComposer(target, false, false, nil)
+	m = next.(model)
+	m.comment.rejectionCheckpoint = row.Checkpoint
+	m.comment.rejectionChoice = choice
+	m.comment.text.Placeholder = "Optional reason for rejecting this proposal"
+	m.comment.text.CharLimit = 10000
+	return m, cmd
+}
+
+func (m model) openExternalRejectionComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
+	next, cmd := m.openRejectionComposer(choice)
+	m = next.(model)
+	if !m.comment.open || m.comment.rejectionCheckpoint == "" {
+		return m, cmd
+	}
+
+	return m.startCommentEditor()
+}
+
+func (m model) openProposalEdit(choice notificationChoice) (tea.Model, tea.Cmd) {
+	if choice.kind != "item" || choice.proposal < 0 || strings.TrimSpace(m.reviewer) == "" {
+		m.warn("Select one pending proposal and set a reviewer name before editing.")
+		return m, nil
+	}
+
+	row := m.notifications.proposals.Rows[choice.proposal]
+	if row.Status != "pending" || row.Checkpoint == "" || row.Inputs == nil {
+		m.warn("This proposal cannot be edited; inspect its current context first.")
+		return m, nil
+	}
+
+	target := commentTarget{key: choice.key, url: row.Target}
+	next, cmd := m.openCommentComposer(target, false, false, nil)
+	m = next.(model)
+	m.comment.proposalEditCheckpoint = row.Checkpoint
+	m.comment.editOriginalComment = row.Comment
+	m.comment.text.Placeholder = "Comment to publish"
+	m.comment.text.SetValue(row.Comment)
+	m.layoutComment()
+	return m, cmd
+}
+
 func (m model) commentCmd(publish bool) tea.Cmd {
 	root, repo, c := m.installRoot, m.repo, m.comment
 
@@ -173,13 +232,7 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg.String() == "esc" {
-		if c.previewing {
-			c.previewing = false
-			cmd := c.text.Focus()
-
-			return m, cmd
-		}
-		if c.referenceActive {
+		if c.referenceActive && !c.previewing {
 			c.referenceActive = false
 			m.layoutComment()
 			return m, nil
@@ -187,6 +240,9 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 		c.open = false
 		return m, nil
+	}
+	if key.Matches(msg, keys.ComposerEditor) {
+		return m.startCommentEditor()
 	}
 	if c.referenceActive && !c.previewing {
 		switch msg.String() {
@@ -205,6 +261,9 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if c.previewing {
 		editorKey := "C"
+		if c.rejectionCheckpoint != "" {
+			editorKey = "D"
+		}
 		if c.close {
 			editorKey = "X"
 		}
@@ -226,11 +285,32 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 		c.text.Blur()
+		c.referenceActive = false
+		m.layoutComment()
 		c.setPreview(c.text.Value())
 		c.preview.GotoTop()
 		return m, nil
 
 	case "ctrl+s":
+		if c.proposalEditCheckpoint != "" {
+			if c.text.Value() == c.editOriginalComment {
+				c.open = false
+				m.status = "Proposal comment is unchanged."
+				return m, nil
+			}
+			if strings.TrimSpace(c.text.Value()) == "" {
+				m.warn("Write a comment before saving the proposal.")
+				return m, nil
+			}
+			c.busy = true
+			m.status = "Saving edited proposal…"
+			return m, m.editProposalCmd()
+		}
+		if c.rejectionCheckpoint != "" {
+			c.busy = true
+			m.status = "Rejecting proposal and dismissing notification…"
+			return m, m.rejectNotificationCmd()
+		}
 		if strings.TrimSpace(c.text.Value()) == "" {
 			m.warn("Write a comment before publishing.")
 			return m, nil
@@ -495,31 +575,25 @@ func (m model) stopReopening(target commentTarget, err error, uncertain bool) (t
 }
 
 func (m model) commentHeader(width int) string {
-	heading, color := "Compose comment", currentTheme.Info
+	heading, preview := "Compose comment", "Preview Markdown"
+	if m.comment.proposalEditCheckpoint != "" {
+		heading, preview = "Edit closure proposal", "Review proposal edit"
+	}
+	if m.comment.rejectionCheckpoint != "" {
+		heading, preview = "Reject closure proposal", "Preview rejection reason"
+	}
 	if m.comment.close {
-		heading = "Close with comment"
+		heading, preview = "Close with comment", "Preview closure"
 	}
 	if m.comment.reopen {
-		heading = "Reopen with comment"
-	}
-	if m.comment.previewing {
-		heading, color = "Preview Markdown", currentTheme.Success
-		if m.comment.close {
-			heading = "Preview closure"
-		}
-		if m.comment.reopen {
-			heading = "Preview opening"
-		}
+		heading, preview = "Reopen with comment", "Preview opening"
 	}
 
-	title := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true).Render(heading)
 	linkText := m.comment.target
 	if m.comment.reopen && len(m.comment.targets) > 1 {
 		linkText = pluralize(len(m.comment.targets), "target", "targets")
 	}
-	link := ansi.Truncate(linkText, maxInt(width-ansi.StringWidth(title)-1, 1), "…")
-	gap := strings.Repeat(" ", maxInt(width-ansi.StringWidth(title)-ansi.StringWidth(link), 1))
-	return title + gap + link
+	return composerHeader(heading, preview, linkText, m.comment.previewing, width)
 }
 
 func (m model) commentView() string {
@@ -548,7 +622,7 @@ func (m model) commentView() string {
 		}
 	}
 
-	return panelStyle(true).BorderBackground(lipgloss.Color(currentTheme.Background)).Width(m.commentWidth()).Height(m.commentHeight()).Padding(0, 1).Render(m.commentHeader(m.commentWidth()-4) + "\n\n" + content)
+	return m.composerPanel(m.commentHeader(m.commentWidth()-4), content)
 }
 
 func (m model) commentWidth() int {
@@ -575,9 +649,7 @@ func (m model) commentReferenceRow() int {
 }
 
 func (m model) commentOverlay(background string) string {
-	x, y := m.commentPosition()
-	base := screenStyle().Width(m.width).Height(m.mainHeight() + 2).Render(fitScreen(background, m.width, m.mainHeight()+2))
-	return lipgloss.NewCompositor(lipgloss.NewLayer(base), lipgloss.NewLayer(m.commentView()).X(x).Y(y).Z(1)).Render()
+	return m.composerOverlay(background, m.commentView())
 }
 
 func (c *commentComposer) setPreview(text string) {

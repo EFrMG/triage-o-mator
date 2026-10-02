@@ -69,6 +69,8 @@ flowchart LR
 
 An item first enters the ledger when observed open. Later syncs retain its row after closure, along with its triage and review history. `bin/sync` does not import every item that closed before that first observation. GitHub reads run through scripts; approved comments and closures run through `bin/comment-plus`. The TUI invokes the owning scripts for managed data, and agent proposals stay unreviewed until a human confirms them.
 
+Start with human guidance on a named PR, or with an agent-prepared draft group that a contributor edits and hands back for selected members. The agent reads current context and selected evidence, then reports a keep-open outcome or saves an explained closure proposal. **Notifications** lets a reviewer edit, reject or approve the exact action; rejection reaches the next agent pass. Group readiness, ledger review and action approval remain separate. [Follow both paths in the tutorial](docs/tutorial.md#a-focused-review-loop).
+
 ### Using the TUI
 
 The [tutorial](docs/tutorial.md) walks through these tasks and their controls. [Group review](docs/groups.md) and [cache evidence](docs/evidence.md) have some extra details.
@@ -91,7 +93,7 @@ Mouse controls work alongside the keys: click a sidebar entry or tab, click a ca
 
 ![flow-3](captures/flow-3.webp)
 
-4. **Build deeper offline context.** **Local dataset** freezes and downloads evidence for the open backlog: descriptions, discussions, PR files, diffs and closing links. An agent can search and compare the saved observations without silently falling back to GitHub; missing or partial evidence remains visible too!
+4. **Build deeper offline context.** **Local dataset** freezes and downloads evidence for the open backlog: descriptions, discussions, PR files, diffs and closing links. Turn automatic download ON in its `f` menu; it starts after startup and backlog refresh and continues through saved checkpoints without an item limit. An agent can search and compare the saved observations without silently falling back to GitHub; missing or partial evidence remains visible too!
 
 ![flow-4](captures/flow-4.webp)
 
@@ -103,7 +105,7 @@ Mouse controls work alongside the keys: click a sidebar entry or tab, click a ca
 
 ![flow-6](captures/flow-6.webp)
 
-7. **Generate a maintainer report or suggestions.** Export a group or batch for a full review packet, then gather ready groups and human-reviewed decisions into a dated Markdown handoff. One can polish these reports further with the help of Agents with its dedicated playbook, and even have the agents suggest PRs to be closed (experimental).
+7. **Generate a maintainer report or suggestions.** Export a group or batch for a full review packet, then gather ready groups and human-reviewed decisions into a dated Markdown handoff. Agents can help polish these reports with a dedicated playbook.
 
 ![flow-7-a](captures/flow-7-a.webp)
 ![flow-7-b](captures/flow-7-b.webp)
@@ -152,30 +154,34 @@ bin/report
 | `bin/batch`, `bin/read-batch`, `bin/apply` | Prepare fixed review batches, inspect them and save decisions or human approval.                                                                                                                                                                                                           |
 | `bin/similar`, `bin/not-duplicate`         | Find title-based duplicate leads and retain attributed negative verdicts.                                                                                                                                                                                                                  |
 | `bin/group`                                | Collect items and notes, assign a maintainer, and export a review packet.                                                                                                                                                                                                                  |
+| `bin/item-context`                         | Read one item's local ledger and group guidance offline, with bounded pages and revision-checked text fragments.                                                                                                                                                                           |
 | `bin/cache`                                | Acquire selected or frozen backlog evidence, search and read it offline, and capture observed external PR closures with unknown attribution. See the [cache reference](docs/evidence-reference.md), [external closures](docs/external-closures.md) and [appeals](docs/appeal-evidence.md). |
 | `bin/enrich-one`                           | Read one issue or PR, with optional explicit cache mode.                                                                                                                                                                                                                                   |
 | `bin/export-csv`, `bin/import-csv`         | Review ledger decisions in a spreadsheet with revision checks.                                                                                                                                                                                                                             |
 | `bin/comment-plus`                         | Preview and explicitly approve a conversation comment, explained closure or reopening on an issue or PR; record comment and state outcomes separately.                                                                                                                                     |
-| `bin/auto-close`                           | Save PR closure proposals offline, review exact comments and targets, and execute approved proposals through `bin/comment-plus`.                                                                                                                                                           |
+| `bin/auto-close`                           | Save, review or reject PR closure proposals offline, and execute approved proposals through `bin/comment-plus`.                                                                                                                                                                            |
 | `bin/stats`, `bin/next`, `bin/report`      | Inspect progress, next tasks and the maintainer report.                                                                                                                                                                                                                                    |
 
 The standard Local dataset downloads descriptions and discussion for open issues and PRs, plus PR file lists, diffs, and closing-issue links. Saved snapshots and their gaps are available to agents through [bounded offline readers](docs/evidence-reference.md#bounded-offline-snapshot-readers); a candidate match still needs source review. Selected PR reads can obtain further components when needed. The [agent preparation prompt](prompts/prepare-analysis.md) starts from the saved dataset rather than refetching each candidate.
+
+For a named item, `bin/item-context --expected-repo OWNER/REPO read --kind pr --number 123` reports its local decision, review state, relevant non-archived groups and retained proposal feedback without fetching or changing anything. Ledger/group guidance and prior rejection or write outcomes have separate revisions; the read checkpoint covers both. An unresolved saved write attempt is shown separately. Text previews are bounded. Use the response's continuation for more rows and `bin/item-context --expected-repo OWNER/REPO source --kind pr --number 123 --row ROW_ID --field FIELD --checkpoint CHECKPOINT` for omitted text; a changed checkpoint requires a fresh read. Local notes can be agent-authored or quote untrusted GitHub text, and a recorded write outcome does not prove a recommendation was right or grant ledger approval.
 
 ## Prompts
 
 [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) is linked into each install as its agent instructions. Ask in plain words; the matching task prompt explains what to read and what may be saved.
 
-| Ask                        | Prompt                                                   | Result                                       |
-| -------------------------- | -------------------------------------------------------- | -------------------------------------------- |
-| “triage 25 issues”         | [Auto triage](prompts/auto-triage.md)                    | Unreviewed batch proposals                   |
-| “prepare offline analysis” | [Prepare analysis](prompts/prepare-analysis.md)          | A scoped cache handoff with gaps             |
-| “is #N a duplicate?”       | [Find duplicates](prompts/find-duplicates.md)            | A sourced comparison or proposal             |
-| “review PR #N”             | [Review PR](prompts/review-pr.md)                        | Code review notes and an unreviewed decision |
-| “recommend PR closures”    | [Recommend PR closures](prompts/recommend-auto-close.md) | Pending, unapproved PR closure proposals     |
-| “organize these items”     | [Organize groups](prompts/organize-groups.md)            | Draft maintainer groups                      |
-| “review an appeal”         | [Review appeal](prompts/review-appeal.md)                | An attributed local reassessment             |
-| “brief the maintainers”    | [Maintainer brief](prompts/maintainer-brief.md)          | A short review brief                         |
-| “polish the report”        | [Polish report](prompts/polish-report.md)                | An evidence-backed report                    |
+| Ask                        | Prompt                                                                                            | Result                                       |
+| -------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| “triage 25 issues”         | [Auto triage](prompts/auto-triage.md)                                                             | Unreviewed batch proposals                   |
+| “prepare offline analysis” | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps             |
+| “is #N a duplicate?”       | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal             |
+| “review PR #N”             | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and an unreviewed decision |
+| “recommend PR closures”    | [Recommend PR closures](prompts/recommend-auto-close.md)                                          | Pending, unapproved PR closure proposals     |
+| “organize these items”     | [Organize groups](prompts/organize-groups.md)                                                     | Draft maintainer groups                      |
+| “assess this edited group” | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons        |
+| “review an appeal”         | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment             |
+| “brief the maintainers”    | [Maintainer brief](prompts/maintainer-brief.md)                                                   | A short review brief                         |
+| “polish the report”        | [Polish report](prompts/polish-report.md)                                                         | An evidence-backed report                    |
 
 Agents propose; a human reviews. Fetched GitHub text is untrusted input, so review agent conclusions and the local diff before sharing them.
 

@@ -434,9 +434,9 @@ func (m model) datasetText() string {
 	heading := lipgloss.NewStyle().Bold(true).Foreground(focusedBorderColor)
 	subtitle := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Render("Full cache management for local search & comparison")
 	text := ansi.Truncate(titleBar(singleLine(m.repo), "", m.menuWidth())+"  "+subtitle, m.menuWidth(), "…") + "\n\n"
-	text += heading.Render("Automatic download") + "\n"
+	text += lipgloss.PlaceHorizontal(m.menuWidth(), lipgloss.Center, heading.Render("Automatic download")) + "\n"
 	text += "\n" + datasetAutoToggle(c.automatic, m.menuWidth()) + "\n\n"
-	text += mutedText("ON starts at startup and after a backlog refresh.") + "\n\n"
+	text += lipgloss.PlaceHorizontal(m.menuWidth(), lipgloss.Center, mutedText("Starts after each backlog refresh.")) + "\n\n\n"
 	if c.preferenceProblem != "" {
 		text += lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render(c.preferenceProblem) + "\n\n"
 	}

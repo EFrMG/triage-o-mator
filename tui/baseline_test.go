@@ -890,17 +890,39 @@ func TestBaselineDatasetMenuAndNotificationShortcut(t *testing.T) {
 		t.Fatal("completed download retained its preparation notice")
 	}
 	menuText := ansi.Strip(m.datasetText())
-	if !strings.Contains(menuText, "Automatic download\n\n") || !strings.Contains(menuText, "ON starts at startup and after a backlog refresh.") || strings.Contains(menuText, "Press o to toggle.") || strings.Contains(menuText, "· Full cache management") {
+	if strings.Contains(menuText, "ON starts at startup and after a backlog refresh.") || strings.Contains(menuText, "Press o to toggle.") || strings.Contains(menuText, "· Full cache management") {
 		t.Fatal("dataset toggle spacing, guidance, or title did not match the menu")
+	}
+	menuLines := strings.Split(ansi.Strip(m.datasetView()), "\n")
+	for _, label := range []string{"Automatic download", "Starts after each backlog refresh."} {
+		found := false
+		for i, line := range menuLines {
+			if strings.TrimSpace(line) != label {
+				continue
+			}
+			if strings.Index(line, label) != (m.menuWidth()-ansi.StringWidth(label))/2+1 {
+				t.Fatalf("dataset label %q was not centered: %q", label, line)
+			}
+			if label == "Automatic download" && (i+1 >= len(menuLines) || menuLines[i+1] != "") {
+				t.Fatal("dataset title was not followed by an empty line")
+			}
+			if label == "Starts after each backlog refresh." && (i+2 >= len(menuLines) || menuLines[i+1] != "" || menuLines[i+2] != "") {
+				t.Fatal("dataset guidance was not followed by two empty lines")
+			}
+			found = true
+			break
+		}
+		if !found {
+			t.Fatalf("dataset label %q was missing", label)
+		}
 	}
 	for _, removed := range []string{"update reuse within", "Updates at saved item checkpoints", "Analyze with an agent", "Download limits", "request allowance", "Local data:"} {
 		if strings.Contains(menuText, removed) {
 			t.Fatalf("dataset menu retained removed guidance: %q", removed)
 		}
 	}
-	lines := strings.Split(ansi.Strip(m.datasetView()), "\n")
-	if len(lines) != m.mainHeight() || !strings.Contains(lines[len(lines)-1], "Reuse eligible data within one day") || !strings.Contains(lines[len(lines)-1], "storage ceiling 5 GB") {
-		t.Fatalf("dataset footer was not fixed to the pane bottom: %q", lines)
+	if len(menuLines) != m.mainHeight() || !strings.Contains(menuLines[len(menuLines)-1], "Reuse eligible data within one day") || !strings.Contains(menuLines[len(menuLines)-1], "storage ceiling 5 GB") {
+		t.Fatalf("dataset footer was not fixed to the pane bottom: %q", menuLines)
 	}
 
 	next, _ = m.openNotifications()

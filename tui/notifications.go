@@ -1054,7 +1054,7 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		if i > 0 {
 			fmt.Fprintln(&b)
 		}
-		itemHeading := fmt.Sprintf("PR #%d · %s", row.Number, sanitize(row.Title))
+		itemHeading := fmt.Sprintf("PR #%d %s", row.Number, sanitize(row.Title))
 		if styled, ok := styledItemHeading(itemHeading, lipgloss.Color(currentTheme.Info), nil); ok {
 			itemHeading = styled
 		} else {
@@ -1118,9 +1118,9 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		for _, line := range proposalEvidenceLines(row) {
 			value := sanitize(line.item)
 			if line.complete {
-				value += " · " + success.Render("Complete")
+				value += " " + success.Render("Complete")
 			} else if line.missing != "" {
-				value += " · " + danger.Render("Not found:") + " " + sanitize(line.missing)
+				value += " " + danger.Render("Not found:") + " " + sanitize(line.missing)
 			}
 			fmt.Fprintf(&b, "%s\n", inset(ansi.Wrap(value, textWidth, "")))
 		}
@@ -1211,6 +1211,7 @@ func renderNotificationChoice(n notificationsUI, choice notificationChoice, card
 			row := n.attention.Rows[choice.attention]
 			if title == "" {
 				title = strings.TrimPrefix(row.Label, prefix+": ")
+				title = strings.TrimPrefix(title, prefix+" · ")
 			}
 			if row.Selectable {
 				parts = append(parts, "Retained activity: "+notificationAttentionSummary(row))
@@ -1222,6 +1223,7 @@ func renderNotificationChoice(n notificationsUI, choice notificationChoice, card
 			row := n.closures.Rows[choice.closure]
 			if title == "" {
 				title = strings.TrimPrefix(row.Label, prefix+": ")
+				title = strings.TrimPrefix(title, prefix+" · ")
 			}
 			if row.Selectable {
 				parts = append(parts, "Imported explanation")
@@ -1231,7 +1233,7 @@ func renderNotificationChoice(n notificationsUI, choice notificationChoice, card
 		}
 		label := prefix
 		if title != "" {
-			label += ": " + singleLine(title)
+			label += " " + singleLine(title)
 		}
 		if n.ticked[choice.key.Number] && choice.key.Kind == "pr" && choice.proposal >= 0 {
 			label = "✓ " + label

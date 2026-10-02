@@ -1059,7 +1059,7 @@ else:
 	if len(choices) != 1 || choices[0].kind != "item" || choices[0].key != (Key{Kind: "pr", Number: 3}) || !m.notifications.choiceNeeds(choices[0]) {
 		t.Fatalf("notification sources were not grouped: %+v", choices)
 	}
-	if strings.Count(ansi.Strip(m.notificationsView()), "PR #3: Fixture") != 1 {
+	if strings.Count(ansi.Strip(m.notificationsView()), "PR #3 Fixture") != 1 {
 		t.Fatal("PR appears more than once in Notifications")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Text: "1"})
@@ -1311,6 +1311,76 @@ print(json.dumps(dict(number=3, status='pending', checkpoint='b' * 64, comment=c
 	m = next.(model)
 	if contextCmd == nil || m.notifications.review == nil || m.notifications.review.Plan.Proposals[0].Checkpoint != fresh.Checkpoint {
 		t.Fatal("edited proposal did not return to its new review")
+	}
+}
+
+func TestGroupEditFloatingFieldsStayBoundedAndSave(t *testing.T) {
+	root := baselineRoot(t)
+	script, err := os.ReadFile(filepath.Join("..", "bin", "group"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "group"), script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runScript(root, "group", "create", "--title", "Draft", "--description", "Initial guidance", "--by", "agent:helper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g Group
+	if err := json.Unmarshal([]byte(out), &g); err != nil {
+		t.Fatal(err)
+	}
+
+	m := baselineModel(t, root)
+	m.reviewer = "maintainer"
+	m.groups = groupUI{open: true, records: []Group{g}}
+	m = baselineSend(m, tea.WindowSizeMsg{Width: 80, Height: 28})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "e"})
+	m = next.(model)
+	if cmd == nil || m.groups.editing != "edit" || !strings.Contains(ansi.Strip(m.viewContent()), "Edit group") {
+		t.Fatal("e did not open the floating group editor")
+	}
+
+	title := strings.Repeat("Long group title ", 12)
+	description := strings.Repeat("Long maintainer guidance that should wrap in the editor. ", 12)
+	m.groups.edit.title.SetValue(title)
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	if m.groups.edit.field != 1 {
+		t.Fatal("Tab did not focus Description")
+	}
+	m.groups.edit.description.SetValue(description)
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.groups.edit.field != groupStatusField || m.groups.edit.status != "ready" {
+		t.Fatal("Status did not remain a focused choice")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m.groups.edit.assignee.SetValue("maintainer")
+	editView := ansi.Strip(m.viewContent())
+	for _, label := range []string{"Title", "Description", "Status", "Assignee"} {
+		if !strings.Contains(editView, label) {
+			t.Fatalf("floating editor omitted %s", label)
+		}
+	}
+	for _, line := range strings.Split(editView, "\n") {
+		if ansi.StringWidth(line) > m.width {
+			t.Fatal("floating group editor overflowed the terminal")
+		}
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	if !m.groups.edit.previewing || !strings.Contains(ansi.Strip(m.viewContent()), "Preview group") {
+		t.Fatal("Ctrl-P did not preview the edited group")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.groups.busy {
+		t.Fatal("Ctrl-S did not save through bin/group")
+	}
+	m = baselineSend(m, cmd().(groupsLoadedMsg))
+	g = *m.selectedGroup()
+	if m.groups.editing != "" || g.Title != title || g.Description != description || g.Status != "ready" || g.Assignee != "maintainer" || g.UpdatedBy != "maintainer" {
+		t.Fatal("floating editor did not save all four fields with attribution")
 	}
 }
 
@@ -1587,7 +1657,7 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	m = baselineSend(m, current)
 	m = baselineSend(m, tea.WindowSizeMsg{Width: 120, Height: 100})
 	view := ansi.Strip(m.autoCloseReviewView())
-	for _, expected := range []string{"Check compatibility", "Keep the old API", "Earlier objection · By: maintainer", "PR #3 · Complete", "Issue #4 · Not found: comments", "Gap · Not found: Gap one", "Gap · Not found: Gap five", "Exact closure comment"} {
+	for _, expected := range []string{"Check compatibility", "Keep the old API", "Earlier objection · By: maintainer", "PR #3 Fixture PR", "PR #3 Complete", "Issue #4 Not found: comments", "Gap Not found: Gap one", "Gap Not found: Gap five", "Exact closure comment"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("proposal reader omitted %q: %s", expected, view)
 		}

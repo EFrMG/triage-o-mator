@@ -24,6 +24,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishCommentEditor(msg)
 	case groupNoteEditorMsg:
 		return m.finishGroupNoteEditor(msg)
+	case groupEditEditorMsg:
+		return m.finishGroupEditExternal(msg)
 	case commentMsg:
 		return m.finishComment(msg)
 	case notificationsMsg:
@@ -332,8 +334,11 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	case m.groups.open:
-		if m.groups.busy || m.groups.editing == "" || m.onGroupStatusField() {
+		if m.groups.busy || m.groups.editing == "" {
 			return m, nil
+		}
+		if m.groups.editing == "edit" {
+			return m.pasteGroupEdit(msg)
 		}
 		if m.groups.editing == "notes" {
 			if m.groups.note.previewing {

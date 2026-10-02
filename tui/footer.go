@@ -57,7 +57,7 @@ func (m model) footerGroups() []footerGroup {
 }
 
 func (m model) contextFooterGroups() []footerGroup {
-	if m.width < 60 || m.height < 24 && !m.comment.open && m.groups.editing != "notes" {
+	if m.width < 60 || m.height < 24 && !m.comment.open && m.groups.editing != "notes" && m.groups.editing != "edit" {
 		return []footerGroup{group("Navigation", bind("back", keys.Cancel), bind("quit", keys.ForceQuit))}
 	}
 
@@ -110,6 +110,20 @@ func (m model) contextFooterGroups() []footerGroup {
 			return []footerGroup{group("Member note", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
 		}
 		return []footerGroup{group("Member note", hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
+	case m.groups.open && m.groups.editing == "edit":
+		if m.groups.busy {
+			return []footerGroup{group("Edit group", hint{"", "working…"})}
+		}
+		if m.groups.edit.previewing {
+			return []footerGroup{group("Edit group", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
+		}
+		edit := group("Edit group", hint{"Tab/Shift-Tab", "field"}, hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})
+		if m.onGroupStatusField() {
+			edit.hints = append(edit.hints, hint{"←/→", "change status"})
+		} else {
+			edit.hints = append(edit.hints, bind("", keys.ComposerEditor))
+		}
+		return []footerGroup{edit}
 	case m.confirmQuit:
 		return []footerGroup{group("Quit", bind("discard drafts", keys.Quit), hint{"any key", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.lastError.open:
@@ -235,14 +249,10 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{group("Theme", bind("preview", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("", keys.Search), bind("apply", keys.Enter)), group("Navigation", bind("cancel", keys.Back), bind("", keys.Quit), bind("exit", keys.ForceQuit))}
 	case (m.groups.open && m.groups.busy) || (m.dups.open && m.dups.busy):
 		return []footerGroup{group("Navigation", bind("", keys.ForceQuit))}
-	case (m.groups.open && m.groups.editing != "" && m.groups.pick.open) || (m.batches.open && m.batches.editing && m.batches.pick.open):
+	case m.batches.open && m.batches.editing && m.batches.pick.open:
 		return []footerGroup{group("List", bind("move", keys.ValueNext, keys.ValuePrev), bind("pick", keys.Confirm, keys.OpenList), bind("", keys.CloseList)), group("Navigation", bind("", keys.Quit), bind("exit", keys.ForceQuit))}
 	case m.groups.open && m.groups.editing != "":
 		edit := group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("next/save", keys.Confirm), bind("save", keys.FormSubmit))
-		if m.onGroupStatusField() {
-			edit = group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev, keys.ChoiceNext, keys.ChoicePrev), bind("change", keys.ValueNext, keys.ValuePrev), bind("", keys.OpenList), bind("next/save", keys.Confirm), bind("save", keys.FormSubmit))
-		}
-
 		return []footerGroup{edit, group("Navigation", bind("", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.batches.open && m.batches.editing:
 		edit := group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("next", keys.Confirm), bind("create", keys.FormSubmit))

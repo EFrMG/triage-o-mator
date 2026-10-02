@@ -494,6 +494,7 @@ func (m model) formPanelWidth() int {
 func (m *model) layout() {
 	m.layoutComment()
 	m.layoutGroupNote()
+	m.layoutGroupEdit()
 	listW, _ := m.panelWidths()
 	if m.listReady {
 		m.list.SetSize(listW, maxInt(m.mainHeight()-listHeaderHeight, 1))
@@ -562,7 +563,7 @@ func (m model) itemView() string {
 	if m.notificationPR.open {
 		it := m.detail.item
 		if it.Title != "" {
-			title += " · " + it.Title
+			title += " " + it.Title
 		}
 		if it.State != "" {
 			stateColor := currentTheme.Muted
@@ -686,6 +687,9 @@ func (m model) viewContent() string {
 	if m.groups.open && m.groups.editing == "notes" {
 		body = m.groupNoteOverlay(body)
 	}
+	if m.groups.open && m.groups.editing == "edit" {
+		body = m.groupEditOverlay(body)
+	}
 	if m.comment.open {
 		body = m.commentOverlay(body)
 	}
@@ -775,7 +779,7 @@ func (m model) needsResize() bool {
 }
 
 func (m model) minimumHeight() int {
-	if m.comment.open || m.groups.editing == "notes" {
+	if m.comment.open || m.groups.editing == "notes" || m.groups.editing == "edit" {
 		return maxInt(24, lipgloss.Height(m.footerView())+17)
 	}
 

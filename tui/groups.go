@@ -54,14 +54,14 @@ type groupUI struct {
 	ticked        map[Key]bool
 	editing       string
 	inputs        []textinput.Model
+	edit          groupEditEditor
+	editRequest   uint64
 	note          groupNoteEditor
 	noteRequest   uint64
 	field         int
 	previewOffset int
 	// confirm is the key ("d") whose second press will act; any other key disarms it.
 	confirm string
-	// pick is the Status field's list, opened with l / →.
-	pick dropdown
 	// exporting is what a running export is doing, e.g. "Full export of \"Wifi\"", and progress bin/group's last progress line.
 	exporting, progress string
 	handoffRequest      uint64
@@ -220,6 +220,7 @@ func (m model) onGroupsLoaded(msg groupsLoadedMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.groups.editing = ""
+	m.groups.edit = groupEditEditor{}
 	m.groups.note = groupNoteEditor{}
 	m.status = msg.status
 	return m, nil
@@ -238,11 +239,6 @@ func (m *model) editGroup(mode string) {
 	}
 
 	values := []string{"", "", ""}
-	if group := m.selectedGroup(); mode == "edit" && group != nil {
-		// Status (a choice) sits before Assignee, so the last field is text and Enter there saves.
-		values = []string{group.Title, group.Description, group.Status, group.Assignee}
-	}
-
 	if mode == "add" {
 		values = []string{""}
 		if group := m.selectedGroup(); group != nil {
@@ -269,7 +265,6 @@ func (m *model) editGroup(mode string) {
 
 	m.groups.inputs[0].Focus()
 	m.groups.editing, m.groups.field = mode, 0
-	m.groups.pick.open = false
 }
 
 func (m model) saveGroupForm() (tea.Model, tea.Cmd) {
@@ -277,16 +272,8 @@ func (m model) saveGroupForm() (tea.Model, tea.Cmd) {
 	var args []string
 
 	switch m.groups.editing {
-	case "new", "edit":
+	case "new":
 		args = []string{"create"}
-		if m.groups.editing == "edit" {
-			if g == nil {
-				return m, nil
-			}
-
-			args = []string{"update", g.ID, "--revision", strconv.Itoa(g.Revision), "--status", m.groups.inputs[groupStatusField].Value()}
-		}
-
 		assignee := m.groups.inputs[len(m.groups.inputs)-1].Value()
 		args = append(args, "--title", m.groups.inputs[0].Value(), "--description", m.groups.inputs[1].Value(), "--assignee", assignee)
 
@@ -314,29 +301,20 @@ func (m model) saveGroupForm() (tea.Model, tea.Cmd) {
 // groupStatuses are the values bin/group accepts, in the order the editor's Status field cycles through them.
 var groupStatuses = []string{"draft", "ready", "archived"}
 
-// groupStatusField is the Status field's index in the group editor ("edit" mode only); it's a choice, not free text.
+// groupStatusField is the Status field's index in the floating group editor.
 const groupStatusField = 2
 
 func (m model) onGroupStatusField() bool {
-	return m.groups.editing == "edit" && m.groups.field == groupStatusField
+	return m.groups.editing == "edit" && m.groups.edit.field == groupStatusField
 }
 
-func (m *model) cycleGroupStatus(delta int) {
-	input := &m.groups.inputs[groupStatusField]
-	i := 0
-	for j, status := range groupStatuses {
-		if status == input.Value() {
-			i = j
-		}
-	}
-
-	input.SetValue(groupStatuses[(i+delta+len(groupStatuses))%len(groupStatuses)])
-}
-
-// handleGroupEditorKey routes member notes to the floating editor; group fields and add-to-group notes keep the form's Tab / Enter navigation.
+// handleGroupEditorKey routes floating editors before the new/add form.
 func (m model) handleGroupEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.groups.editing == "notes" {
 		return m.handleGroupNoteKey(msg)
+	}
+	if m.groups.editing == "edit" {
+		return m.handleGroupEditKey(msg)
 	}
 
 	last := len(m.groups.inputs) - 1
@@ -346,49 +324,15 @@ func (m model) handleGroupEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.groups.inputs[m.groups.field].Focus()
 	}
 
-	onStatus := m.onGroupStatusField()
-	// A choice isn't typing, so q quits there as everywhere else, list open or not.
-	if onStatus && key.Matches(msg, keys.Quit) {
-		return m.requestQuit()
-	}
-
-	if onStatus && m.groups.pick.open {
-		if m.groups.pick.Key(msg) {
-			m.groups.inputs[groupStatusField].SetValue(groupStatuses[m.groups.pick.cursor])
-			move(1)
-		}
-
-		return m, nil
-	}
-
 	switch {
 	case key.Matches(msg, keys.Cancel):
 		m.groups.editing = ""
-	case onStatus && key.Matches(msg, keys.OpenList):
-		current := 0
-		for i, s := range groupStatuses {
-			if s == m.groups.inputs[groupStatusField].Value() {
-				current = i
-			}
-		}
-
-		m.groups.pick.Open(groupStatuses, current)
-	case onStatus && key.Matches(msg, keys.ChoiceNext):
-		move(1)
-	case onStatus && key.Matches(msg, keys.ChoicePrev):
-		move(-1)
 	case key.Matches(msg, keys.FormSubmit), key.Matches(msg, keys.Confirm) && m.groups.field == last:
 		return m.saveGroupForm()
 	case key.Matches(msg, keys.FieldNext), key.Matches(msg, keys.Confirm):
 		move(1)
 	case key.Matches(msg, keys.FieldPrev):
 		move(-1)
-	case onStatus && key.Matches(msg, keys.ValueNext):
-		m.cycleGroupStatus(1)
-	case onStatus && key.Matches(msg, keys.ValuePrev):
-		m.cycleGroupStatus(-1)
-	case onStatus:
-		// A choice, not text: typing into it would only produce a status bin/group rejects.
 	default:
 		var cmd tea.Cmd
 		m.groups.inputs[m.groups.field], cmd = m.groups.inputs[m.groups.field].Update(msg)
@@ -449,7 +393,7 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.groups.detail && g != nil && len(g.Members) > 0 {
 			return m.openGroupNote()
 		} else if g != nil {
-			m.editGroup("edit")
+			return m.openGroupEdit()
 		}
 	case key.Matches(msg, keys.Group):
 		// b means "put into a group": here, the item Groups was opened from goes into the selected group.
@@ -633,7 +577,7 @@ func (m model) groupsView() string {
 	switch g := m.selectedGroup(); {
 	case m.groups.editing == "notes" && m.groups.detail && g != nil:
 		return m.withSidebar(m.groupMembersView(*g, w, h), true)
-	case m.groups.editing != "":
+	case m.groups.editing != "" && m.groups.editing != "edit":
 		return m.withSidebar(inset(m.groupEditorView(w)), true)
 	case m.groups.detail && g != nil:
 		return m.withSidebar(m.groupMembersView(*g, w, h), true)
@@ -777,14 +721,11 @@ func (m model) groupMembersView(g Group, w, h int) string {
 	return top + "\n\n" + list
 }
 
-// groupEditorView is the group editor, styled like the new-batch form: muted labels, the focused one marked, the Status list under its field.
+// groupEditorView is the new/add form; editing an existing group uses the floating editor.
 func (m model) groupEditorView(w int) string {
 	labels := []string{"Title", "Description", "Assignee"}
 	title, subtitle := "New group", "a named set of issues and PRs to hand to maintainers together"
 	switch m.groups.editing {
-	case "edit":
-		labels = []string{"Title", "Description", "Status", "Assignee"}
-		title, subtitle = "Edit group", "ready is for maintainers to read first; it never approves the members' decisions"
 	case "add":
 		labels = []string{"Notes"}
 		title, subtitle = "Add to group", "why these items belong here, for whoever reads the group"
@@ -804,19 +745,7 @@ func (m model) groupEditorView(w int) string {
 
 		input.SetWidth(maxInt(w-17, 1))
 		value := input.View()
-		if m.groups.editing == "edit" && i == groupStatusField {
-			value = input.Value()
-			if i == m.groups.field {
-				value = accent.Render(value)
-			}
-		}
-
 		rows = append(rows, label+" "+value)
-		if m.groups.editing == "edit" && i == groupStatusField && m.groups.pick.open {
-			for _, line := range strings.Split(m.groups.pick.View(24), "\n") {
-				rows = append(rows, strings.Repeat(" ", 15)+line)
-			}
-		}
 	}
 
 	return strings.Join(rows, "\n")

@@ -149,6 +149,11 @@ Closed-PR [watches](docs/appeal-evidence.md) and [external closure records](docs
 
 ## Prompts
 
+For optional offline ranked cache queries and verified fragment retrieval, see
+[the Reposition bridge](docs/reposition.md). Existing literal search needs no
+Reposition installation; retrieval leads remain separate from duplicate
+decisions and approved actions.
+
 [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) is linked into each install as its agent instructions. Ask in plain words; the matching task prompt explains what to read and what may be saved.
 
 | Ask                        | Prompt                                                                                            | Result                                       |

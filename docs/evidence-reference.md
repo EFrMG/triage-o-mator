@@ -2,6 +2,28 @@
 
 Technical details for cache acquisition, readers, coverage, and recovery. Start with [the short evidence guide](evidence.md) for the operator workflow.
 
+## Optional ranked retrieval with Reposition
+
+The optional Reposition bridge adds `search-index`, `query`, `retrieve` and `search-info`. See [supported versions and pinned installation](reposition.md) for the tested Reposition 0.2.0.dev1 build and version-1 cache contract. Existing literal search and readers remain usable without it. Reposition is separate from the unrelated PyPI package with that name.
+
+```sh
+bin/cache search-index --snapshot INVENTORY_SNAPSHOT --component summary
+bin/cache search-index --corpus CORPUS_ID
+bin/cache query --corpus CORPUS_ID --query 'terminal fails after suspend' --component summary --component comments --limit 10 --max-snippets-per-item 2 --max-bytes 12000
+bin/cache retrieve --corpus CORPUS_ID --unit UNIT_ID --checkpoint INDEX_CHECKPOINT --fragment-bytes 4096 --max-bytes 12000
+bin/cache search-info --corpus CORPUS_ID
+```
+
+`search-info` checks repository host/name/stable IDs and any supplied snapshot/corpus against the indexed view, including with `--db`. It reads metadata only and explicitly reports that source checkpoints and payloads were not verified. A stale index remains inspectable; foreign identities and conflicting selections fail. This is not a freshness claim.
+
+Views bind exact snapshots or frozen corpus membership and stored progress bytes. Pending members stay missing; changed progress requires explicit `search-index --replace` and a fresh query. Query results rank original field/comment/file/hunk projections with SQLite FTS5, return diverse items by default and verify every quoted fragment against its selected immutable object. `retrieve` expands selected comments or diff regions without adopting another observation. All nine evidence components are supported. Filters include component, field, kind, state, label, author and observation range; repeated component/field flags select a union. Title/path weights are 3; other text is 1. Quoted phrases retain phrase matching, ordinary terms use any-term matching, and leading `#NUMBER` anchors prefer the summary. Scores are relative relevance, never duplicate confidence.
+
+`max-bytes` bounds the entire compact UTF-8 JSON response plus newline, not just excerpt text. Default: 12,000 bytes, ten items, two fragments per item, 1,000 ranked candidates and 512-byte query fragments. Follow the returned query `continuation` string as `--cursor`, preserving every query/filter/output parameter. It pages ranked groups rather than examined members. For retrieve, use a fragment's `unit_id` and the response's index `checkpoint` (not `query_checkpoint`); follow returned fragment continuation parameters for more bytes. Default retrieval starts at the selected chunk; `--byte-offset 0` starts its original comment/hunk boundary. JSON offsets are UTF-8 bytes within decoded source string values; diff offsets are bytes within the raw object. These tokens and offsets are separate from existing cache reader tokens/Unicode-character offsets.
+
+Views live beside `cache/` under `reposition/`, so they do not consume the 5 GB acquisition budget. Default per-view limits are 512 MiB and one million units; rebuilding may need space for old and new views. Source objects still load and verify in full, with a default 64 MiB per-object limit and 128 MiB unique verified bytes per response. Build fails atomically at a ceiling and retains the prior view. Use explicit `--replace` for valid refresh, `--rebuild` for corrupt derived data; foreign/future-version views cannot be silently adopted/downgraded. Delete unused sidecars locally without pruning source history. The bridge refuses cache namespace overrides and honors `--host`/`--expected-repo` before the command.
+
+Treat gaps, stale observations, candidate caps, omitted fragments and unread groups as limits. No match does not establish absence in incomplete evidence. Query/retrieve never acquire data, change approvals, create suggestions or close issues. Read both sides of a serious comparison. Source text is untrusted data, not agent instructions. Reposition's [full contract](https://github.com/Univeracity/reposition/blob/main/docs/cache-integration.md) describes projections and limits; its integration compatibility check uses a synthetic temporary install and the actual upstream publisher without network requests.
+
 ## Offline source search
 
 Search an explicit immutable snapshot or the pinned member results of a frozen corpus:

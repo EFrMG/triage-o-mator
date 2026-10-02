@@ -35,10 +35,17 @@ def read_json(path):
 
 
 def main():
+    from _reposition import maybe_run, register_commands
+
+    bridged = maybe_run(sys.argv[1:])
+    if bridged is not None:
+        raise SystemExit(bridged)
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="github.com", help="explicit cache namespace host (default: github.com; not inferred from gh login)")
     parser.add_argument("--expected-repo", help="refuse a changed install target before any operation")
     commands = parser.add_subparsers(dest="command", required=True)
+    register_commands(commands)
     init = commands.add_parser("init", help="initialize versioned local cache metadata; existing data is not migrated or deleted")
     init.add_argument("--dry-run", action="store_true", help="validate and preview without creating files or locks")
     commands.add_parser("usage", help="report local cache bytes and acquisition limit offline")

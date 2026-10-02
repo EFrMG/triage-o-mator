@@ -4,7 +4,7 @@ Technical details for cache acquisition, readers, coverage, and recovery. Start 
 
 ## Optional ranked retrieval with Reposition
 
-The optional Reposition bridge adds `search-index`, `query`, `retrieve` and `search-info`. See [supported versions and pinned installation](reposition.md) for the tested Reposition 0.2.0.dev1 build and version-1 cache contract. Existing literal search and readers remain usable without it. Reposition is separate from the unrelated PyPI package with that name.
+The optional Reposition bridge adds `search-index`, `query`, `retrieve` and `search-info`. See [supported versions and pinned installation](reposition.md) for the tested Reposition `0.2.0.dev1` build and version-1 cache contract. Existing literal search and readers remain usable without it. Reposition is separate from the unrelated PyPI package with that name.
 
 ```sh
 bin/cache search-index --snapshot INVENTORY_SNAPSHOT --component summary

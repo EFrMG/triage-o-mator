@@ -88,15 +88,16 @@ bin/group create-candidate --file candidates.json --candidate CANDIDATE_ID --by 
 
 Use a `candidate-set` ID from the returned page. `--compact` keeps selected proposal IDs and bounds pair previews while summarizing all-scope diagnostics; omit it when the full observations and negative-verdict records are needed. Saving reconstructs and verifies the complete suggestion from pinned evidence and current negative verdicts under the group transaction; altered result text is not trusted. The new group is a draft with generic membership and a checksummed `candidate_origin`. It has no duplicate verdict, survivor decision or approval. Repeating the explicit creation command creates another group; inspect existing groups before saving it again. Creation needs the cache; later group reads/exports retain provenance even if the cache becomes unavailable. Membership edits leave the original proposal intact as historical provenance, not a claim about the edited set. JSON and Markdown exports include that origin.
 
-`pr-candidate-sets-v1` uses these independent discovery signals:
+`pr-candidate-sets-v2` uses these independent discovery signals:
 
+- Shared original lines at the same path and line number. The text must match after whitespace collapse and contain at least 12 characters. Differing pinned base revisions add a reconciliation hold; line positions on those bases still need a source comparison. The threshold score is the geometric mean of the share of each PR's changed paths containing shared lines, weighted by path rarity; the separate `line_coverage` field shows the share of changed lines. Test and documentation paths count less when mixed with code paths. A pair sharing only one line needs both diffs to change at most 20 lines. `--line-threshold 0.3` and `--max-line-frequency 15` are the defaults. Diffs over 3,000 changed lines get a hold instead of line features. Earlier `pr-candidate-sets-v1` group origins remain valid.
 - Shared exact file paths, excluding known lockfile basenames and paths containing `vendor`, `generated`, `node_modules` or `dist`.
 - Shared closing-issue identities, including their repository identity, from the pinned `closing_issues` component.
 - Title similarity, with `--title-threshold 0.8` by default.
 
-Every pair in a proposed set must share a direct signal; graph connectivity alone is insufficient. `--max-frequency 10` suppresses broad file/link signals. Missing, partial, stale and suppressed evidence remains explicit, and recorded `not-duplicate` verdicts exclude their pairs. These are discovery leads, not duplicate verdicts or survivor choices.
+Every pair in a proposed set must share a direct signal; graph connectivity alone is insufficient. `--max-frequency 10` suppresses broad file and link signals; `--max-line-frequency 15` limits each positioned line separately. Missing, partial, stale, unparseable and suppressed evidence remains explicit, and recorded `not-duplicate` verdicts exclude their pairs. These are discovery leads, not duplicate verdicts or survivor choices.
 
-Discovery reads only the selected snapshot or pinned corpus progress and never fetches replacements. Continuations bind the evidence, verdicts and options. The current scope limit is 5,000 members and 256 MiB of declared summary, file and closing-link payloads; larger scopes fail without partial suggestions. No existing group or decision is rewritten.
+Discovery reads only the selected snapshot or pinned corpus progress and never fetches replacements. Continuations bind the evidence, verdicts and options. The current scope limit is 5,000 members and 256 MiB of declared summary, file, closing-link and diff payloads; larger scopes fail without partial suggestions. No existing group or decision is rewritten.
 
 ## Pairs already ruled out
 

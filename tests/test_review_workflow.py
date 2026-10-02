@@ -3,7 +3,83 @@
 import hashlib
 import json
 
-from support import Workspace, item
+from support import Workspace, item, repository, summary
+
+
+class CandidateTests(Workspace):
+    def test_changed_lines_require_same_position_and_meaningful_coverage(self):
+        self.responses["repos/owner/repo"] = dict(data=repository())
+        rows = []
+        changes = {
+            1: (10, "if [[ -z $adapter ]]; then return; fi", 0),
+            2: (10, "if [[ -z $adapter ]]; then return; fi", 0),
+            3: (500, "if [[ -z $adapter ]]; then return; fi", 0),
+            4: (20, "return stale_widget_state_for_current_view", 20),
+            5: (20, "return stale_widget_state_for_current_view", 20),
+            6: (30, "return consistent_notification_state", 20),
+            7: (30, "return consistent_notification_state", 20),
+            8: (30, "return consistent_notification_state", 20),
+        }
+        titles = {1: "Adapter guard", 2: "Power toggle", 3: "Theme watcher", 4: "Archive checksum", 5: "Socket reconnect",
+                  6: "Notification persistence", 7: "Dismissed activity", 8: "Session restoration"}
+        for number, (position, original, extra) in changes.items():
+            path = "src/core.py"
+            patch = f"@@ -{position},{extra + 1} +{position},{extra + 1} @@\n-{original}\n+replacement for {number}\n"
+            for index in range(extra):
+                previous = "shared original state transition" if number in (6, 7, 8) and index == 0 else f"unrelated original line {number}-{index}"
+                patch += f"-{previous}\n+unrelated replacement line {number}-{index}\n"
+
+            patch = patch.rstrip("\n")
+            base = f"repos/owner/repo/pulls/{number}"
+            base_revision = dict(sha=("c" if number == 2 else "a") * 40, ref="main", repo=repository())
+            self.responses[base] = dict(data=summary(number=number, title=titles[number], base=base_revision, changed_files=1, additions=extra + 1, deletions=extra + 1))
+            self.responses[base + "#diff"] = dict(text=f"diff --git a/{path} b/{path}\nindex 1111111..2222222 100644\n--- a/{path}\n+++ b/{path}\n{patch}")
+            self.responses[base + "/files?per_page=100&page=1"] = dict(data=[dict(filename=path, status="modified", additions=extra + 1, deletions=extra + 1, changes=2 * (extra + 1), patch=patch)])
+            self.responses[f"repos/owner/repo/issues/{number}/comments?per_page=100&page=1"] = dict(data=[])
+            row = summary(number=number, title=titles[number], id=1000 + number, node_id=f"LIST_{number}")
+            row.update(user=dict(login="author"), labels=[], created_at=row["updated_at"], pull_request=dict(url=f"https://api.github.com/{base}"))
+            rows.append(row)
+
+        self.responses["repos/owner/repo/issues?state=open&per_page=100&page=1"] = dict(data=rows)
+        self.run_cli("fetch", "--cache-inventory")
+        snapshot = self.json_cli("cache", "import-inventory")["snapshot_id"]
+        corpus = self.json_cli("cache", "corpus-create", "--snapshot", snapshot, "--scope", "open-prs", "--profile", "pr-code")["corpus_id"]
+        run = self.json_cli("cache", "corpus-run", corpus, "--request-budget", "100")
+        self.assertEqual(run["counts"]["complete"], 8, run["current_problems"])
+
+        before = len(self.calls())
+        result = self.json_cli("cache", "candidates", "--corpus", corpus, "--max-frequency", "2")
+        self.assertEqual(len(self.calls()), before)
+        sets = [row for row in result["results"] if row["type"] == "candidate-set"]
+        self.assertEqual([row["members"] for row in sets], [[1, 2], [6, 7, 8]])
+        self.assertEqual(sets[0]["pairs"][0]["signals"][0]["signal"], "changed_lines")
+        self.assertEqual(sets[0]["pairs"][0]["signals"][0]["coverage"], 1.0)
+        self.assertEqual(sets[0]["pairs"][0]["signals"][0]["line_coverage"], 0.5)
+        self.assertIn("base-revisions-require-reconciliation", sets[0]["holds"])
+        self.assertEqual(sets[0]["pairs"][0]["signals"][0]["shared_lines"], 1)
+        self.assertEqual(sets[1]["pairs"][0]["signals"][0]["shared_lines"], 2)
+        self.assertLess(sets[1]["pairs"][0]["signals"][0]["line_coverage"], 0.1)
+        narrower = self.json_cli("cache", "candidates", "--corpus", corpus, "--max-frequency", "2", "--max-line-frequency", "2")
+        self.assertEqual([row["members"] for row in narrower["results"] if row["type"] == "candidate-set"], [[1, 2]])
+        self.assertEqual(len(self.calls()), before)
+        self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
+
+        packet = self.root / "candidates.json"
+        packet.write_text(json.dumps(result))
+        group = self.json_cli("group", "create-candidate", "--file", str(packet), "--candidate", sets[0]["id"], "--by", "agent:review")
+        self.assertEqual(group["candidate_origin"]["policy"], "pr-candidate-sets-v2")
+        self.assertEqual([member["number"] for member in group["members"]], [1, 2])
+        self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
+
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text("".join(json.dumps(item(number, titles[number], "pr")) + "\n" for number in (1, 2)))
+        self.run_cli("not-duplicate", "--key", "pr:1", "--key", "pr:2", "--by", "reviewer", "--note", "different causes")
+        excluded = self.json_cli("cache", "candidates", "--corpus", corpus, "--max-frequency", "2")
+        self.assertEqual(excluded["candidate_sets"], 1)
+        self.assertEqual(excluded["excluded_pairs"], 1)
+        excluded_pair = next(row for row in excluded["results"] if row["type"] == "excluded-pair")
+        self.assertEqual(excluded_pair["reasons"], ["recorded-negative-verdict"])
+        self.assertEqual(len(self.calls()), before)
 
 
 class GroupTests(Workspace):

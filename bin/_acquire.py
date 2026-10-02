@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from datetime import datetime, timezone
 
 from _evidence import DEFAULT_MAX_AGE
@@ -107,7 +108,7 @@ class GitHubReader:
         except ValueError as error:
             raise ReadFailure("GitHub returned invalid JSON") from error
 
-    def _request(self, resource, accept="application/vnd.github+json", closing_variables=None, etag=None, graphql_query=None, graphql_variables=None, empty_graphql_retries=2):
+    def _request(self, resource, accept="application/vnd.github+json", closing_variables=None, etag=None, graphql_query=None, graphql_variables=None, empty_graphql_retries=2, transient_http_retries=2):
         if self.stopped:
             raise ReadFailure(self.stopped)
 
@@ -176,6 +177,12 @@ class GitHubReader:
             self.stopped = "GitHub rate limit exhausted; check reset time before retrying"
             self.throttle("http-exhausted", headers)
 
+        if status in (503, 504) and transient_http_retries > 0 and self.requests < self.budget and not self.stopped:
+            time.sleep(0.25 * (3 - transient_http_retries))
+            return self._request(resource, accept=accept, closing_variables=closing_variables, etag=etag,
+                                 graphql_query=graphql_query, graphql_variables=graphql_variables,
+                                 empty_graphql_retries=empty_graphql_retries, transient_http_retries=transient_http_retries - 1)
+
         # gh reports >299 as a CLI error, including a valid conditional 304. Only accept a bodyless 304 for our own saved validator.
         headers["_triage_not_modified"] = False
         if status == 304 and etag is not None and not body.strip():
@@ -189,7 +196,8 @@ class GitHubReader:
             if empty_graphql_retries > 0 and self.requests < self.budget:
                 return self._request(resource, accept=accept, closing_variables=closing_variables, etag=etag,
                                      graphql_query=graphql_query, graphql_variables=graphql_variables,
-                                     empty_graphql_retries=empty_graphql_retries - 1)
+                                     empty_graphql_retries=empty_graphql_retries - 1,
+                                     transient_http_retries=transient_http_retries)
             detail = "gh failed" if result.returncode else "GitHub returned no data"
             raise ReadFailure(f"empty GraphQL response with HTTP 200 ({detail}); retry the saved download later")
 

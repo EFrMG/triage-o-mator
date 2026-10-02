@@ -850,6 +850,37 @@ func TestBaselineAutomaticDatasetPreferenceAndContinuation(t *testing.T) {
 	if cmd == nil || !fresh.corpus.busy || fresh.corpus.action != "run" {
 		t.Fatal("automatic download did not continue after its request budget")
 	}
+	limited.Counts = map[string]int{"complete": 100, "error": 80}
+	limited.LastRun.Reason = "GitHub read returned HTTP 504"
+	next, cmd = fresh.finishCorpus(corpusMsg{root: root, epoch: fresh.corpusEpoch, operation: fresh.corpus.operation,
+		action: "run", id: selectedID, progress: limited})
+	fresh = next.(model)
+	if cmd == nil || !fresh.corpus.busy || fresh.corpus.action != "run" {
+		t.Fatal("automatic download did not retry a transient gateway failure")
+	}
+	limited.Counts["error"] = 160
+	next, cmd = fresh.finishCorpus(corpusMsg{root: root, epoch: fresh.corpusEpoch, operation: fresh.corpus.operation,
+		action: "run", id: selectedID, progress: limited})
+	fresh = next.(model)
+	if cmd != nil || fresh.corpus.busy || fresh.corpus.autoStalls != 2 {
+		t.Fatal("failed items counted as acquired evidence or a repeated gateway failure kept retrying")
+	}
+	next, _ = fresh.handleCorpusKey(tea.KeyPressMsg{Text: "o"})
+	fresh = next.(model)
+	next, cmd = fresh.handleCorpusKey(tea.KeyPressMsg{Text: "o"})
+	fresh = next.(model)
+	if cmd == nil || fresh.corpus.action != "restore" || fresh.corpus.autoStalls != 0 {
+		t.Fatal("explicit automatic restart did not check the selected dataset")
+	}
+	limited.Status = "interrupted"
+	limited.LastRun.Reason = "runner exited without a final checkpoint; resume explicitly"
+	next, cmd = fresh.finishCorpus(corpusMsg{root: root, epoch: fresh.corpusEpoch, operation: fresh.corpus.operation,
+		observation: fresh.corpus.observation, action: "restore", id: selectedID, progress: limited})
+	fresh = next.(model)
+	if cmd == nil || !fresh.corpus.busy || fresh.corpus.action != "run" {
+		t.Fatal("explicit automatic restart did not resume an interrupted download")
+	}
+	limited.Status = "stopped"
 	limited.LastRun.Reason = "Git batch fetch failed; PR code remains incomplete"
 	next, cmd = fresh.finishCorpus(corpusMsg{root: root, epoch: fresh.corpusEpoch, operation: fresh.corpus.operation,
 		action: "run", id: selectedID, progress: limited})

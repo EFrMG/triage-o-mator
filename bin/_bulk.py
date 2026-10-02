@@ -119,7 +119,11 @@ def git_heads(reader, cache, members, initial):
         raise ReadFailure(reader.stopped or "request budget exhausted before Git fetch")
 
     target = WORK_ROOT.parent
-    probe = subprocess.run(["git", "-C", str(target), "rev-parse", "--show-toplevel"], capture_output=True, timeout=10)
+    try:
+        probe = subprocess.run(["git", "-C", str(target), "rev-parse", "--show-toplevel"], capture_output=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ReadFailure(f"Git checkout check failed ({type(error).__name__}); PR code remains incomplete") from error
+
     try:
         checkout_matches = not probe.returncode and os.path.samefile(probe.stdout.decode().strip(), target)
     except (OSError, UnicodeError):
@@ -136,7 +140,11 @@ def git_heads(reader, cache, members, initial):
             raise ReadFailure("PR base branch is unavailable; local diffs remain incomplete")
         base_refs.add("refs/heads/" + name)
     for ref in sorted(base_refs):
-        checked = subprocess.run(["git", "-C", str(target), "check-ref-format", ref], capture_output=True, timeout=10)
+        try:
+            checked = subprocess.run(["git", "-C", str(target), "check-ref-format", ref], capture_output=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ReadFailure(f"Git ref check failed ({type(error).__name__}); PR code remains incomplete") from error
+
         if checked.returncode:
             raise ReadFailure("PR base branch has an invalid Git ref; local diffs remain incomplete")
     refs.extend(sorted(base_refs))

@@ -55,6 +55,10 @@ if not payload["query"].startswith("query ClosingIssues"):
 counter = root / "graphql-count"
 count = int(counter.read_text()) + 1 if counter.exists() else 1
 counter.write_text(str(count))
+if (root / "gateway-timeout").exists() and count < 3:
+    print("HTTP/2.0 504")
+    print()
+    sys.exit(1)
 print("HTTP/2.0 200")
 if (root / "rate-limited").exists():
     print("x-ratelimit-remaining: 0")
@@ -86,6 +90,19 @@ except ReadFailure as error:
         self.assertNotIn("invalid JSON", failure["error"])
 
         (self.mock / "graphql-count").unlink()
+        (self.mock / "gateway-timeout").touch()
+        retried = subprocess.run([sys.executable, "-c", code.replace("BUDGET", "5")], cwd=self.root, env=env,
+                                 capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(retried.stdout), dict(requests=3, node=dict(id="PR_1")))
+
+        (self.mock / "graphql-count").unlink()
+        exhausted = subprocess.run([sys.executable, "-c", code.replace("BUDGET", "2")], cwd=self.root, env=env,
+                                   capture_output=True, text=True, check=True)
+        self.assertEqual(json.loads(exhausted.stdout)["requests"], 2)
+        self.assertIn("HTTP 504", json.loads(exhausted.stdout)["error"])
+
+        (self.mock / "graphql-count").unlink()
+        (self.mock / "gateway-timeout").unlink()
         (self.mock / "rate-limited").touch()
         throttled = subprocess.run([sys.executable, "-c", code.replace("BUDGET", "5")], cwd=self.root, env=env,
                                    capture_output=True, text=True, check=True)

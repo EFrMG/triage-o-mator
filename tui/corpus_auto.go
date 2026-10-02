@@ -78,16 +78,17 @@ func saveCorpusAuto(root, repo string, enabled bool) error {
 	return os.Rename(file.Name(), path)
 }
 
-func autoProcessed(progress *corpusProgress) int {
+func autoAcquired(progress *corpusProgress) int {
 	if progress == nil {
 		return 0
 	}
-	return progress.Counts["complete"] + progress.Counts["gaps"] + progress.Counts["error"]
+	return progress.Counts["complete"] + progress.Counts["gaps"]
 }
 
 func autoResumeReason(reason string) bool {
 	// Older selected datasets may still have an item-limit checkpoint from a previous TUI version.
-	return reason == "item limit reached" || strings.HasPrefix(reason, "request budget exhausted")
+	return reason == "item limit reached" || strings.HasPrefix(reason, "request budget exhausted") ||
+		strings.HasPrefix(reason, "GitHub read returned HTTP 503") || strings.HasPrefix(reason, "GitHub read returned HTTP 504")
 }
 
 func (m model) requestAutomaticCorpus() (tea.Model, tea.Cmd) {
@@ -125,6 +126,7 @@ func (m model) toggleAutomaticCorpus() (tea.Model, tea.Cmd) {
 	}
 	m.status = "Automatic download ON."
 	m.corpus.retryHard = true
+	m.corpus.autoStalls = 0
 	if m.corpus.busy {
 		m.corpus.autoQueued = true
 		return m, nil

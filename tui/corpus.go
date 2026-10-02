@@ -167,7 +167,9 @@ func corpusCommand(root, repo string, epoch uint64, ui corpusUI, action string, 
 
 func (m model) startCorpus(action string) (tea.Model, tea.Cmd) {
 	if action == "run" {
-		m.corpus.autoBefore = autoProcessed(m.corpus.progress)
+		m.corpus.autoBefore = autoAcquired(m.corpus.progress)
+	} else if action == "capture" {
+		m.corpus.autoStalls = 0
 	}
 	m.corpus.busy = true
 	m.corpus.action, m.corpus.progressProblem, m.corpus.observing = action, "", false
@@ -314,6 +316,7 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 			m.corpus.retryHard = false
 			if m.corpus.progress != nil && m.corpus.progress.Members > 0 && m.corpus.progress.Status != "finished" {
 				if m.corpus.progress.Status == "pending" || m.corpus.progress.Status == "running" ||
+					m.corpus.progress.Status == "interrupted" && retryHard ||
 					m.corpus.progress.Status == "stopped" && m.corpus.progress.LastRun != nil && (autoResumeReason(m.corpus.progress.LastRun.Reason) || retryHard) {
 					return m.startCorpus("run")
 				}
@@ -362,7 +365,7 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 	}
 	m.status = "Dataset: " + msg.progress.Status + "."
 	if msg.action == "run" && m.corpus.automatic && msg.progress.Status == "stopped" && msg.progress.LastRun != nil && autoResumeReason(msg.progress.LastRun.Reason) {
-		if autoProcessed(&msg.progress) <= m.corpus.autoBefore {
+		if autoAcquired(&msg.progress) <= m.corpus.autoBefore {
 			m.corpus.autoStalls++
 		} else {
 			m.corpus.autoStalls = 0

@@ -1,7 +1,9 @@
 """Optional Reposition bridge; legacy cache commands never import that package."""
 
 import argparse
+import os
 import sys
+from pathlib import Path
 
 COMMANDS = {
     "search-index": "cache-index",
@@ -37,16 +39,31 @@ def maybe_run(argv):
     parser.add_argument("--expected-repo")
     common = parser.parse_args(argv[:position])
     arguments = argv[position + 1 :]
-    if any(value == "--cache" or value.startswith("--cache=") for value in arguments):
+    options = (value.partition("=")[0] for value in arguments)
+    if any(option.startswith("--") and len(option) > 2 and "--cache".startswith(option) for option in options):
         parser.error("the cache namespace is owned by this install; --cache cannot override it")
+
+    # Installs link bin/ to this checkout. Keep the optional engine in one
+    # checkout-local environment without requiring shell activation.
+    venv = Path(__file__).resolve().parent.parent / ".reposition-venv"
+    python = venv / "bin/python"
+    if python.is_file() and Path(sys.prefix).resolve() != venv.resolve():
+        os.execv(str(python), [str(python), *sys.argv])
 
     try:
         from reposition import __version__
         from reposition.cli import main
-    except ImportError:
+    except ModuleNotFoundError as exc:
+        if exc.name != "reposition":
+            sys.stderr.write(f"error: Reposition cannot load because Python module {exc.name!r} is unavailable; check the Python runtime or reinstall Reposition.\n")
+            return 2
+
         sys.stderr.write(
             f"error: install Reposition {SUPPORTED_REPOSITION} in this Python environment; see docs/reposition.md. Existing cache search remains available.\n"
         )
+        return 2
+    except ImportError as exc:
+        sys.stderr.write(f"error: Reposition is present but cannot load ({exc}); check the Python runtime or reinstall Reposition.\n")
         return 2
 
     if __version__ != SUPPORTED_REPOSITION:

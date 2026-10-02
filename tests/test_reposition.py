@@ -7,15 +7,15 @@ import sqlite3
 import subprocess
 import sys
 import unittest
-import venv
 from pathlib import Path
 
-from support import Workspace, summary
+from support import ROOT, Workspace, summary
 
 
 class RepositionTests(Workspace):
     def setUp(self):
         super().setUp()
+        shutil.copytree(ROOT / "vendor/reposition", self.root / "vendor/reposition")
         self.seed_pr()
         self.responses["repos/owner/repo/pulls/1"] = dict(data=summary(body="Terminal blank after suspend. Renderer reset, not a disconnected session socket."))
         self.snapshot = self.json_cli("cache", "fetch", "--kind", "pr", "--number", "1", "--profile", "discussion")["snapshot_id"]
@@ -32,7 +32,7 @@ class RepositionTests(Workspace):
         result = json.loads(self.offline("search", "--snapshot", self.snapshot, "--query", "Renderer", "--component", "summary", no_site=True).stdout)
         self.assertEqual(result["matched_items"], 1)
         missing = self.offline("query", "--snapshot", self.snapshot, "--query", "Renderer", no_site=True, expected=2)
-        self.assertIn("install Reposition 0.2.0.dev1", missing.stderr)
+        self.assertIn("audited Reposition is unavailable", missing.stderr)
         abbreviated_cache = self.offline("query", "--snapshot", self.snapshot, "--cach", str(self.root / "other-cache"), "--query", "Renderer", no_site=True, expected=2)
         self.assertIn("cache namespace is owned by this install", abbreviated_cache.stderr)
 
@@ -42,14 +42,14 @@ class RepositionTests(Workspace):
         (unsupported / "cli.py").write_text('def main(*args):\n    raise AssertionError("untested engine must not run")\n')
         environment = dict(self.env, PYTHONPATH=str(unsupported.parent))
         rejected = self.offline("query", "--snapshot", self.snapshot, "--query", "Renderer", no_site=True, expected=2, environment=environment)
-        self.assertIn("installed version is 999.0", rejected.stderr)
+        self.assertIn("audited Reposition is unavailable", rejected.stderr)
 
         broken = self.root / "broken/reposition"
         broken.mkdir(parents=True)
         (broken / "__init__.py").write_text("import missing_reposition_runtime_capability\n")
         environment = dict(self.env, PYTHONPATH=str(broken.parent))
         failed = self.offline("query", "--snapshot", self.snapshot, "--query", "Renderer", no_site=True, expected=2, environment=environment)
-        self.assertIn("Reposition cannot load because Python module 'missing_reposition_runtime_capability' is unavailable", failed.stderr)
+        self.assertIn("audited Reposition is unavailable", failed.stderr)
         fallback = json.loads(self.offline("search", "--snapshot", self.snapshot, "--query", "Renderer", "--component", "summary", no_site=True, environment=environment).stdout)
         self.assertEqual(fallback["matched_items"], 1)
         self.assertEqual(self.calls(), calls)
@@ -111,20 +111,24 @@ else:
         self.assertEqual(native["matched_items"], 1)
 
         shutil.rmtree(python.parent.parent)
-        venv.create(self.root / ".reposition-venv", with_pip=False)
-        python = self.root / ".reposition-venv/bin/python"
-        site_packages = subprocess.check_output([str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"], text=True).strip()
-        package = Path(site_packages) / "reposition"
-        package.mkdir()
-        (package / "__init__.py").write_text('__version__ = "0.2.0.dev1"\n')
         self.assertTrue(self.json_cli("reposition-env", "--retry", "ensure")["enabled"])
         self.assertEqual(self.json_cli("reposition-env", "status")["state"], "on")
+        source = self.root / "vendor/reposition/0.2.0.dev1/reposition-source.tar.gz"
+        original_source = source.read_bytes()
+        source.write_bytes(original_source + b"tampered")
+        self.assertEqual(self.json_cli("reposition-env", "status")["state"], "unavailable")
+        source.write_bytes(original_source)
+        wheel = next((self.root / "vendor/reposition").rglob("reposition-*.whl"))
+        wheel.write_bytes(wheel.read_bytes() + b"tampered")
+        self.assertEqual(self.json_cli("reposition-env", "status")["state"], "unavailable")
+        self.assertEqual(self.json_cli("reposition-env", "--retry", "ensure")["state"], "off")
         self.assertEqual(self.calls(), calls)
 
     @unittest.skipUnless(importlib.util.find_spec("reposition"), "optional Reposition integration environment")
     def test_ranked_retrieval_is_identity_bound_and_does_not_change_evidence(self):
         from reposition.models import canonical, sha256
 
+        self.assertTrue(self.json_cli("reposition-env", "enable")["enabled"])
         cache = self.root / "data/owner/repo/cache"
         before = {str(p.relative_to(cache)): p.read_bytes() for p in cache.rglob("*") if p.is_file()}
         calls = self.calls()
@@ -166,13 +170,18 @@ else:
         self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
 
     def test_checkout_virtual_environment_is_used_without_activation(self):
-        venv.create(self.root / ".reposition-venv", with_pip=False)
+        self.assertTrue(self.json_cli("reposition-env", "enable")["enabled"])
         python = self.root / ".reposition-venv/bin/python"
         site_packages = subprocess.check_output([str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"], text=True).strip()
         package = Path(site_packages) / "reposition"
-        package.mkdir()
-        (package / "__init__.py").write_text('__version__ = "999.0"\n')
-        (package / "cli.py").write_text("def main(argv):\n    raise AssertionError('untested engine must not run')\n")
+        self.assertEqual(self.offline("query", "--help").returncode, 0)
+        shadow = self.root / "shadow/reposition"
+        shadow.mkdir(parents=True)
+        (shadow / "__init__.py").write_text('raise AssertionError("shadow package ran")\n')
+        environment = dict(self.env, PYTHONPATH=str(shadow.parent))
+        self.assertIn("usage:", self.offline("query", "--help", environment=environment).stdout)
+        (package / "__init__.py").write_text('__version__ = "0.2.0.dev1"\n')
 
         result = self.offline("query", "--help", expected=2)
-        self.assertIn("installed version is 999.0", result.stderr)
+        self.assertIn("audited Reposition is unavailable", result.stderr)
+        self.assertTrue(self.json_cli("reposition-env", "enable")["enabled"])

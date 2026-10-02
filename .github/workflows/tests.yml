@@ -34,12 +34,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: Univeracity/reposition
-          ref: 10bd0641b50d514984dad6dee480f140ab86ee44
-          path: .reposition-check
-          persist-credentials: false
-      - run: python3 -m pip install --no-deps ./.reposition-check
+      - run: python3 tools/reposition_bundle.py rebuild
+      - run: cd vendor/reposition/0.2.0.dev1 && python3 -m pip install --no-index --no-deps --require-hashes -r requirements.txt
       - run: python3 -m unittest discover -s tests -p test_reposition.py -v
-      - run: python3 .reposition-check/scripts/check_triage_compat.py --checkout .
+      - run: python3 tools/reposition_compat.py

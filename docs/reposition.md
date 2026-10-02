@@ -8,10 +8,7 @@ It searches explicit immutable snapshots or frozen corpora and resolves selected
 
 This bridge supports Reposition **0.2.0.dev1**, with evidence-cache format **1**. The tested engine source is pinned below. Reposition's adapted MIT evidence validator originates at triage-o-mator commit `dddc487660ffda17ba7e3626c9d9be72e29a6dce`; the current-master compatibility check uses `80cdcdd77d875c4fdcd96f3367f2f8a7d253e63a`. This is commit-level validation, not a claim that every release or future cache format is supported.
 
-Create one optional virtual environment in the **triage-o-mator code checkout**,
-not in each repository being triaged. The four ranked-retrieval commands use it
-automatically through the install's linked `bin/`; shell activation is not needed.
-Use Python 3.10+ with SQLite FTS5:
+Create one optional virtual environment in the **triage-o-mator code checkout**, not in each repository being triaged. The four ranked-retrieval commands use it automatically through the install's linked `bin/`; shell activation is not needed. Use Python 3.10+ with SQLite FTS5:
 
 ```sh
 cd /path/to/triage-o-mator
@@ -23,20 +20,10 @@ cd /path/to/your/repository/triage-o-mator
 bin/cache query --help
 ```
 
-Use this Git source, not the unrelated PyPI package with the same name. Installing
-may require network access; indexing, query, retrieval and metadata inspection
-remain offline. There are no runtime models, credentials, servers or third-party
-Python dependencies. The final command verifies that `bin/cache` reaches the
-pinned engine; an absent or unsupported version fails before reading a cache.
-An isolated `pipx` installation is not visible to this bridge. The checkout's
-`.reposition-venv/` is ignored by Git and shared by its installs; ordinary literal search
+Use this Git source, not the unrelated PyPI package with the same name. Installing requires network access of course; while indexing, query, retrieval and metadata inspection remain offline. There are no runtime models, credentials, servers or third-party Python dependencies. The final command verifies that `bin/cache` reaches the pinned engine; an absent or unsupported version fails before reading a cache. An isolated `pipx` installation is not visible to this bridge. The checkout's `.reposition-venv/` is ignored by Git and shared by its installs; ordinary literal search
 does not need it.
 
-To remove the option, run `.reposition-venv/bin/python -m pip uninstall reposition` in the
-code checkout; existing literal search remains available. For a future supported
-engine, update the tested commit and version in the bridge and this guide after
-compatibility checks, then reinstall into `.reposition-venv` with `--force-reinstall`.
-The bridge rejects untested versions rather than silently adopting them.
+To remove the option, run `.reposition-venv/bin/python -m pip uninstall reposition` in the code checkout; existing literal search remains available. For a future supported engine, update the tested commit and version in the bridge and this guide after compatibility checks, then reinstall into `.reposition-venv` with `--force-reinstall`. The bridge rejects untested versions rather than silently adopting them.
 
 Run the synthetic integration check whenever the cache contract, adapter or supported engine version changes. The normal test job verifies the legacy path without the optional package. A separate integration job installs the pinned engine and checks snapshot/corpus publication, bounded query/retrieval, repository guards and unchanged source artifacts. Upgrade the pin and supported version together after compatibility passes.
 

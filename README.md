@@ -12,7 +12,7 @@ The backlog gets a first pass of categorization done in batches, by you or by an
 
 It reads issues and PRs via `gh` and writes categorization decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI; publishing defaults to dry-run and never follows automatically from a triage decision.
 
-> Developed with the [omacom/omarchy](https://github.com/omacom/omarchy) backlog in mind, while supporting other GitHub repositories. Adoption by Omarchy is a goal, not an existing deployment.
+> Developed with the [omacom/omarchy](https://github.com/omacom/omarchy) backlog in mind, while supporting other GitHub repositories. Omarchy is a public proof-of-concept target, not an existing deployment.
 
 One installs it **into the repository you triage**: this checkout provides the program, while each target repository own `triage-o-mator/`, directory with its ledger, groups, automated proposals, reports and taxonomy. Reviewed decisions and group guidance can travel through ordinary Git pull requests. Batches and evidence caches are local working data. Using it solo is also possible.
 

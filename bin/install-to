@@ -21,13 +21,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _install import CODE_ROOT, INSTALL_DIR_NAME, MARKER_NAME, REPO_RE, now_iso, read_marker
+from _install import CODE_ROOT, INSTALL_DIR_NAME, MARKER_NAME, REPO_RE, now_iso, pending_label_catalog, read_github_labels, read_marker, reconcile_label_catalog
 
 # The version of the install layout this script writes, for when a later one has to recognize an older install.
 LAYOUT_VERSION = 1
 
-# Copied into the install and then owned by the target repository: its team edits its taxonomy, and that has to be reviewable in its diffs.
-COPIED = ["config/taxonomy.json", "config/taxonomy.md"]
+# Copied into the install and then owned by the target repository. The JSON copy is also reconciled with the selected repository's GitHub labels below.
+COPIED = ["config/taxonomy.md"]
 
 # Symlinked as whole directories: the program, and the palettes it reads.
 LINKED_DIRS = ["bin", "themes", "docs"]
@@ -328,6 +328,7 @@ def main():
     parser.add_argument("--agents-md", dest="agents_md", action="store_true", default=None, help="write the triage block into the target's AGENTS.md even in solo mode")
     parser.add_argument("--no-agents-md", dest="agents_md", action="store_false", help="don't touch the target's AGENTS.md")
     parser.add_argument("--dry-run", action="store_true", help="print every change instead of making it")
+    parser.add_argument("--offline", action="store_true", help="skip the GitHub label read; leave a new catalog pending")
     parser.add_argument("--yes", action="store_true", help="don't ask before editing the target repository's own files")
     args = parser.parse_args()
 
@@ -354,6 +355,25 @@ def main():
     repo = args.repo or marker.get("repo") or installed_repo(install) or repo_from_remotes(target)
     if not repo or not REPO_RE.match(repo):
         sys.exit(f"error: couldn't tell which repository to triage from {target}'s upstream or origin remote. Pass --repo owner/repo.")
+
+    taxonomy_path = install / "config" / "taxonomy.json"
+    try:
+        taxonomy = json.loads(taxonomy_path.read_text()) if taxonomy_path.exists() else json.loads((CODE_ROOT / "config/taxonomy.json").read_text())
+        if not isinstance(taxonomy, dict):
+            raise ValueError("expected a JSON object")
+    except (OSError, ValueError) as error:
+        sys.exit(f"error: could not read {taxonomy_path}: {error}; no changes made")
+
+    pending_label_catalog(taxonomy, repo)
+    labels = None
+    if not args.offline:
+        try:
+            labels = read_github_labels(repo)
+        except ValueError as error:
+            print(f"warning: {error}; label catalog remains pending or at its previous observation. Run bin/label-catalog sync when online.", file=sys.stderr)
+
+    if labels is not None:
+        reconcile_label_catalog(taxonomy, repo, labels, now_iso())
 
     solo = args.solo or (marker.get("mode") == "solo" and not args.adopt)
     plan = Plan(args.dry_run)
@@ -383,6 +403,8 @@ def main():
 
     for name in COPIED:
         plan.copy(CODE_ROOT / name, install / name, target)
+
+    plan.write(taxonomy_path, json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n", target, "GitHub label catalog and local taxonomy")
 
     plan.write(install / "config" / "repo", repo + "\n", target)
     plan.write(install / "CLAUDE.md", CLAUDE_SHIM, target, "points Claude Code at AGENTS.md")

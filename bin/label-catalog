@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Read and reconcile the selected repository's GitHub label definitions; never write to GitHub."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _install import now_iso, read_github_labels, reconcile_label_catalog
+from _storage import atomic_writer, locked
+from _triage import REPO, TAXONOMY_PATH
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=["show", "sync"])
+    parser.add_argument("--expected-repo", help="refuse if the selected repository changed")
+    parser.add_argument("--dry-run", action="store_true", help="preview a sync without saving it")
+    args = parser.parse_args()
+    if args.expected_repo is not None and args.expected_repo != REPO:
+        parser.error("configured repository does not match --expected-repo")
+    if args.command == "show" and args.dry_run:
+        parser.error("--dry-run requires sync")
+
+    labels = None
+    if args.command == "sync":
+        try:
+            labels = read_github_labels(REPO)
+        except ValueError as error:
+            parser.exit(1, f"error: {error}\n")
+
+    def read_taxonomy():
+        try:
+            value = json.loads(TAXONOMY_PATH.read_text())
+        except (OSError, ValueError) as error:
+            parser.exit(1, f"error: could not read {TAXONOMY_PATH}: {error}\n")
+
+        if not isinstance(value, dict):
+            parser.exit(1, "error: taxonomy must be a JSON object\n")
+
+        return value
+
+    if labels is None or args.dry_run:
+        taxonomy = read_taxonomy()
+        if labels is not None:
+            reconcile_label_catalog(taxonomy, REPO, labels, now_iso())
+    else:
+        with locked(TAXONOMY_PATH):
+            taxonomy = read_taxonomy()
+            reconcile_label_catalog(taxonomy, REPO, labels, now_iso())
+            with atomic_writer(TAXONOMY_PATH) as out:
+                out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
+
+    print(json.dumps(taxonomy.get("label_catalog", {"repository": REPO, "status": "pending", "observed_at": None, "labels": [], "retired": []}), indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

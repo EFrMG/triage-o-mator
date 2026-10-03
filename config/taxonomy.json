@@ -1,4 +1,11 @@
 {
+  "label_catalog": {
+    "repository": null,
+    "status": "pending",
+    "observed_at": null,
+    "labels": [],
+    "retired": []
+  },
   "issue_categories": [
     "bug",
     "hardware-specific",

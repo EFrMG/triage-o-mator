@@ -8,6 +8,7 @@ Unlike bin/_triage.py, importing this module never requires an install to exist,
 import json
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,93 @@ REPO_RE = re.compile(r"^(?!\.\.?/)[A-Za-z0-9_.-]+/(?!\.\.?$)[A-Za-z0-9_.-]+$")
 
 # The triage-o-mator checkout this script belongs to. Path.resolve follows the bin/ symlink an install is wired through, which is what we want here: this is where the program and the defaults bin/install-to copies live, never where a repo's data goes.
 CODE_ROOT = Path(__file__).resolve().parent.parent
+
+
+def read_github_labels(repo):
+    """Read all label definitions for the selected repository without changing GitHub state."""
+    endpoint = f"repos/{repo}/labels?per_page=100"
+    command = ["gh", "api", "--method", "GET", "--paginate", endpoint, "--jq", ".[]"]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(f"could not read GitHub labels: {error}") from error
+
+    if result.returncode:
+        raise ValueError(f"could not read GitHub labels: {result.stderr.strip() or 'gh api failed'}")
+
+    labels = []
+    seen_ids = set()
+    seen_names = set()
+    try:
+        for line in result.stdout.splitlines():
+            row = json.loads(line)
+            label_id, name = row["id"], row["name"]
+            if type(label_id) is not int or label_id <= 0 or not isinstance(name, str) or not name:
+                raise ValueError("invalid label identity")
+            if label_id in seen_ids or name.casefold() in seen_names:
+                raise ValueError("duplicate label identity")
+
+            color, description = row.get("color"), row.get("description")
+            if not isinstance(color, str) or not re.fullmatch(r"[0-9a-fA-F]{6}", color) or description is not None and not isinstance(description, str):
+                raise ValueError("invalid label definition")
+
+            labels.append({"id": label_id, "name": name, "color": color.lower(), "description": description or ""})
+            seen_ids.add(label_id)
+            seen_names.add(name.casefold())
+    except (KeyError, TypeError, json.JSONDecodeError, ValueError) as error:
+        raise ValueError(f"invalid GitHub label response: {error}") from error
+
+    return sorted(labels, key=lambda label: (label["name"].casefold(), label["id"]))
+
+
+def reconcile_label_catalog(taxonomy, repo, labels, observed_at):
+    """Keep local guidance and historical names by GitHub label ID, including removed labels."""
+    pending_label_catalog(taxonomy, repo)
+    catalog = taxonomy.get("label_catalog")
+
+    previous = {row["id"]: row for row in catalog.get("labels", []) + catalog.get("retired", []) if isinstance(row, dict) and type(row.get("id")) is int}
+    active = []
+    for label in labels:
+        old = previous.get(label["id"], {})
+        names = list(old.get("previous_names", []))
+        if old.get("name") and old["name"] != label["name"] and old["name"] not in names:
+            names.append(old["name"])
+
+        entry = {**label, "guidance": old.get("guidance", "")}
+        if names:
+            entry["previous_names"] = names
+
+        active.append(entry)
+
+    current_ids = {row["id"] for row in labels}
+    retired = []
+    for label_id, old in previous.items():
+        if label_id not in current_ids:
+            retired.append({**old, "retired_at": old.get("retired_at") or observed_at})
+
+    taxonomy["label_catalog"] = {"repository": repo, "status": "observed", "observed_at": observed_at, "labels": active, "retired": sorted(retired, key=lambda label: (label["name"].casefold(), label["id"]))}
+
+    return taxonomy
+
+
+def pending_label_catalog(taxonomy, repo):
+    """Never use another repository's label definitions as the selected repository's vocabulary."""
+    catalog = taxonomy.get("label_catalog")
+    if not isinstance(catalog, dict) or catalog.get("repository") != repo:
+        archive = taxonomy.get("label_catalog_archive", {})
+        if not isinstance(archive, dict):
+            raise ValueError("label_catalog_archive must be a JSON object")
+
+        if isinstance(catalog, dict) and isinstance(catalog.get("repository"), str):
+            archive[catalog["repository"]] = catalog
+
+        taxonomy["label_catalog"] = archive.pop(repo, {"repository": repo, "status": "pending", "observed_at": None, "labels": [], "retired": []})
+        if archive:
+            taxonomy["label_catalog_archive"] = archive
+        else:
+            taxonomy.pop("label_catalog_archive", None)
+
+    return taxonomy
 
 
 def now_iso():

@@ -134,7 +134,7 @@ bin/report
 
 | Task                         | Commands                                                                       |
 | ---------------------------- | ------------------------------------------------------------------------------ |
-| Install and refresh          | `bin/install-to`, `bin/fetch`, `bin/sync`                                      |
+| Install and refresh          | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                 |
 | Prepare and review decisions | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv` |
 | Compare and group            | `bin/similar`, `bin/not-duplicate`, `bin/group`                                |
 | Read guidance and evidence   | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |

@@ -13,7 +13,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from support import ROOT, Workspace, item, repository, summary
+from support import FAKE_GH, ROOT, Workspace, item, repository, summary
 
 
 class InstallTests(unittest.TestCase):
@@ -31,7 +31,7 @@ class InstallTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(repository), "worktree", "add", "-q", "--detach", str(worktree)], check=True)
 
             env = dict(os.environ, XDG_CONFIG_HOME=str(base / "config-home"))
-            command = [str(ROOT / "bin/install-to"), str(worktree), "--repo", "owner/repo"]
+            command = [str(ROOT / "bin/install-to"), str(worktree), "--repo", "owner/repo", "--offline"]
             exclude = Path(subprocess.run(["git", "-C", str(worktree), "rev-parse", "--git-path", "info/exclude"], check=True, capture_output=True, text=True).stdout.strip())
             if not exclude.is_absolute():
                 exclude = worktree / exclude
@@ -78,7 +78,7 @@ class InstallTests(unittest.TestCase):
             subprocess.run(["git", "init", "-q", str(target)], check=True)
             subprocess.run(["git", "-C", str(target), "remote", "add", "origin", "https://github.com/owner/repo.git"], check=True)
             env = dict(os.environ, XDG_CONFIG_HOME=str(base / "config-home"))
-            command = [str(checkout / "bin/install-to"), str(target)]
+            command = [str(checkout / "bin/install-to"), str(target), "--offline"]
             preview = subprocess.run([*command, "--dry-run"], env=env, capture_output=True, text=True)
             self.assertEqual(preview.returncode, 0, preview.stderr)
             self.assertFalse((target / "triage-o-mator").exists())
@@ -92,6 +92,7 @@ class InstallTests(unittest.TestCase):
             self.assertTrue((install / "AGENTS.md").is_symlink())
             self.assertIn("<!-- triage-o-mator:begin -->", (target / "AGENTS.md").read_text())
             self.assertEqual((install / "config/repo").read_text().strip(), "owner/repo")
+            self.assertEqual(json.loads((install / "config/taxonomy.json").read_text())["label_catalog"]["status"], "pending")
             self.assertFalse((checkout / "data").exists())
 
             script = subprocess.run([str(install / "bin/group"), "create", "--title", "Review", "--description", "Related reports", "--by", "operator"], cwd=install, env=env, capture_output=True, text=True)
@@ -112,10 +113,80 @@ class InstallTests(unittest.TestCase):
             subprocess.run(["git", "init", "-q", str(claude_target)], check=True)
             subprocess.run(["git", "-C", str(claude_target), "remote", "add", "origin", "https://github.com/owner/repo.git"], check=True)
             (claude_target / "CLAUDE.md").write_text("# Existing Claude instructions\n")
-            result = subprocess.run([str(checkout / "bin/install-to"), str(claude_target)], env=env, capture_output=True, text=True)
+            result = subprocess.run([str(checkout / "bin/install-to"), str(claude_target), "--offline"], env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("<!-- triage-o-mator:begin -->", (claude_target / "AGENTS.md").read_text())
             self.assertEqual((claude_target / "CLAUDE.md").read_text(), "# Existing Claude instructions\n")
+
+    def test_github_label_catalog_install_and_reconcile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            target = base / "target"
+            mock = base / "mock"
+            target.mkdir()
+            mock.mkdir()
+            subprocess.run(["git", "init", "-q", str(target)], check=True)
+            (mock / "gh").write_text(FAKE_GH)
+            (mock / "gh").chmod(0o755)
+            endpoint = "repos/owner/repo/labels?per_page=100"
+            responses = {endpoint: {"data": [{"id": 1, "name": "bug", "color": "FF0000", "description": "A defect"}, {"id": 2, "name": "old", "color": "00ff00", "description": None}]}}
+            (mock / "responses.json").write_text(json.dumps(responses))
+            env = dict(os.environ, PATH=str(mock) + os.pathsep + os.environ["PATH"], FAKE_GH_DIR=str(mock), XDG_CONFIG_HOME=str(base / "config-home"))
+            command = [str(ROOT / "bin/install-to"), str(target), "--repo", "owner/repo", "--solo"]
+
+            preview = subprocess.run([*command, "--dry-run"], env=env, capture_output=True, text=True)
+            self.assertEqual(preview.returncode, 0, preview.stderr)
+            self.assertFalse((target / "triage-o-mator").exists())
+
+            installed = subprocess.run(command, env=env, capture_output=True, text=True)
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            taxonomy_path = target / "triage-o-mator/config/taxonomy.json"
+            taxonomy = json.loads(taxonomy_path.read_text())
+            catalog = taxonomy["label_catalog"]
+            self.assertEqual(catalog["repository"], "owner/repo")
+            self.assertEqual(catalog["status"], "observed")
+            self.assertEqual([row["name"] for row in catalog["labels"]], ["bug", "old"])
+            self.assertTrue(catalog["observed_at"])
+
+            calls_before_show = (mock / "calls.jsonl").read_bytes()
+            shown = subprocess.run([str(target / "triage-o-mator/bin/label-catalog"), "show"], env=env, capture_output=True, text=True)
+            self.assertEqual(shown.returncode, 0, shown.stderr)
+            self.assertEqual(json.loads(shown.stdout), catalog)
+            self.assertEqual((mock / "calls.jsonl").read_bytes(), calls_before_show)
+
+            catalog["labels"][1]["guidance"] = "Keep this history"
+            taxonomy_path.write_text(json.dumps(taxonomy))
+            responses[endpoint]["data"] = [{"id": 2, "name": "new", "color": "112233", "description": "Renamed"}, {"id": 3, "name": "added", "color": "abcdef", "description": "New"}]
+            (mock / "responses.json").write_text(json.dumps(responses))
+            sync = [str(target / "triage-o-mator/bin/label-catalog"), "sync", "--expected-repo", "owner/repo"]
+            before = taxonomy_path.read_bytes()
+            dry_run = subprocess.run([*sync, "--dry-run"], env=env, capture_output=True, text=True)
+            self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
+            self.assertEqual(taxonomy_path.read_bytes(), before)
+
+            result = subprocess.run(sync, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            catalog = json.loads(taxonomy_path.read_text())["label_catalog"]
+            self.assertEqual([(row["id"], row["name"]) for row in catalog["labels"]], [(3, "added"), (2, "new")])
+            self.assertEqual(catalog["labels"][1]["guidance"], "Keep this history")
+            self.assertEqual(catalog["labels"][1]["previous_names"], ["old"])
+            self.assertEqual([row["name"] for row in catalog["retired"]], ["bug"])
+            self.assertTrue(catalog["retired"][0]["retired_at"])
+
+            responses[endpoint] = {"data": [{"name": "broken"}]}
+            (mock / "responses.json").write_text(json.dumps(responses))
+            before = taxonomy_path.read_bytes()
+            failed = subprocess.run(sync, env=env, capture_output=True, text=True)
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertEqual(taxonomy_path.read_bytes(), before)
+            self.assertTrue(all("POST" not in call and "PATCH" not in call and "DELETE" not in call for call in map(json.loads, (mock / "calls.jsonl").read_text().splitlines())))
+
+            switched = subprocess.run([*command, "--repo", "other/repo", "--offline"], env=env, capture_output=True, text=True)
+            self.assertEqual(switched.returncode, 0, switched.stderr)
+            self.assertEqual(json.loads(taxonomy_path.read_text())["label_catalog"]["status"], "pending")
+            restored = subprocess.run([*command, "--offline"], env=env, capture_output=True, text=True)
+            self.assertEqual(restored.returncode, 0, restored.stderr)
+            self.assertEqual(json.loads(taxonomy_path.read_text())["label_catalog"]["labels"][1]["guidance"], "Keep this history")
 
 
 class LedgerTests(Workspace):

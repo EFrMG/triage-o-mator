@@ -1,5 +1,7 @@
 # Triage taxonomy
 
+`taxonomy.json` also holds `label_catalog`, the GitHub label definitions observed for the selected repository. Its `observed_at` time identifies the last successful online read; `pending` means no label definitions have been read for that repository. `guidance` is optional local advice, preserved by GitHub label ID when a label is renamed. Removed labels move to `retired` with their history intact. `label_catalog_archive` keeps prior repositories' catalogs if this install is pointed elsewhere and back. Running `bin/label-catalog sync` reads GitHub labels and updates this catalog without changing labels on GitHub. The issue/PR categories and actions below remain the current decision vocabulary until the multi-selection migration.
+
 This is the categorization scheme every batch is judged against.
 
 It is a living document. If a category or action stops being useful, or a new one is clearly needed, propose the change to a human maintainer of this project rather than silently drifting from `taxonomy.json` (which is what the scripts actually validate against; make sure to keep the two in sync if you edit either).

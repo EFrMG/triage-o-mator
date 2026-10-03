@@ -54,6 +54,8 @@ A tracked install creates the target repository's `AGENTS.md` when it is missing
 
 `config/repo` defaults to what the repository's `upstream` remote points at when it has one, falling back to `origin`. This makes a clone of your fork triage the original repository's backlog. Pass `--repo owner/repo` to triage something else from here. An existing install keeps its recorded repo; if it was created from a fork before upstream detection was added, re-run `bin/install-to /path/to/repository --repo owner/repo` once to correct it.
 
+Installation reads that repository's GitHub label definitions into `config/taxonomy.json` through a read-only GET. `label_catalog.observed_at` records the successful observation time. `--offline` skips the read; a new catalog stays `pending`, while an existing catalog keeps its dated observation. A failed GitHub read also leaves the install usable with a pending or previously observed catalog. Run `triage-o-mator/bin/label-catalog sync` for an explicit online refresh, or `show` to inspect the saved catalog offline. `sync --dry-run` previews the result without saving it. The sync retains local `guidance` by label ID, records prior names, and moves removed labels into `retired`; it never changes label definitions on GitHub or rewrites saved decisions.
+
 ## Working from a fork
 
 The local checkout, the backlog being read, and the destination for triage commits can be different. For example, you can keep the install and its commits in `efrmg/omarchy` while reading issues and PRs from `omacom/omarchy`. Upstream item numbers always remain upstream item numbers; the tool does not copy those items into your fork.
@@ -136,7 +138,7 @@ To move or back up an install, preserve its `config/`, `data/` and `reports/`; `
 
 ## Making it yours
 
-`config/taxonomy.json` and `config/taxonomy.md` are copies, committed with your repository: edit them freely. A re-run never overwrites them; when the checkout's version has changed it leaves `taxonomy.json.dist` beside yours to diff against.
+`config/taxonomy.json` and `config/taxonomy.md` are committed with your repository. The installer reconciles the JSON label catalog from GitHub on each online run while preserving local label guidance and the existing category/action lists. The Markdown guidance remains your own copy. Local label guidance can be edited in JSON until Settings provides an editor for it.
 
 Prompts are symlinked one file at a time, so you can make them yours without touching the checkout. A directory symlink would put edits into the shared tool checkout and affect every install. The installer regenerates the ignored-symlink list between managed markers while leaving your own files visible to Git:
 

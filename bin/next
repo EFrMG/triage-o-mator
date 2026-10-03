@@ -120,10 +120,11 @@ def suggestions(ledger):
             add("human", f"Review the {len(unsettled)} unreviewed members of ready group \"{g['title']}\"",
                 "TUI: b -> group -> Enter -> open each member", "a ready group reads best when its decisions are confirmed")
 
-    polished = REPORTS_DIR / f"{date.today().isoformat()}-polished.md"
-    if ready and not polished.exists():
+    group_brief = REPORTS_DIR / f"{date.today().isoformat()}-ready-groups-brief.md"
+    legacy_polished = REPORTS_DIR / f"{date.today().isoformat()}-polished.md"
+    if ready and not group_brief.exists() and not legacy_polished.exists():
         titles = ", ".join(f'"{g["title"]}"' for g in ready[:2])
-        add("agent", f"Make the case for {len(ready)} ready group{'' if len(ready) == 1 else 's'}: {titles}", "prompts/polish-report.md",
+        add("agent", f"Make the case for {len(ready)} ready group{'' if len(ready) == 1 else 's'}: {titles}", "prompts/maintainer-brief.md (focused brief for ready groups)",
             "the report lists ready groups; it doesn't argue them, and a maintainer has to decide")
 
     if pairs and not groups:

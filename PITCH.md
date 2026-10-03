@@ -121,10 +121,7 @@ Tracked comments appear in Notifications. Closed-PR watches and external closure
 
 "But hey!," you may ask, "Shouldn't each item be re-checked against its current state and the code, then a recommendation with the case **for** and **against** it, and the diff hunk or comment that settles it be added on top?"
 
-Yes, and so reports coupled with our revolutionary `polish-report` prompt turn a section of one into a case for a decision, giving you a way to brief those pesky lead maintainers that ignore your PR for half a year. The agent writes the case; the maintainer still decides.
-
-> [!NOTE]
-> The name of the prompt for reports has nothing to do with Vaxry. He is a well-respected and virile member of the developer community.
+Yes. The [maintainer brief playbook](prompts/maintainer-brief.md) can turn the report into a short overview or check one decision in depth, with the case for and against it. The agent writes the case; the maintainer still decides.
 
 Spreadsheet work with CSV files is also supported!
 

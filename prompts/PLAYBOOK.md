@@ -14,19 +14,18 @@ Its paths are relative to an install's root, which is where it is read: `bin/ins
 
 When someone asks for one of these in plain words, open the matching playbook in [`prompts/`](prompts/) and follow it. Each playbook says which commands to run, how to judge, what to write, and what to report back.
 
-| request (in any wording)                                                                 | playbook                                                                                                       |
-| ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| "what's next?", "what can I do?", "where are we with..."                                 | run `bin/next`, report its top suggestions, and wait for the person to choose one                              |
-| "triage 25 issues", "run a triage pass", "fill in batch..."                              | [`prompts/auto-triage.md`](prompts/auto-triage.md)                                                             |
-| "prepare offline analysis", "reuse cached evidence", "download evidence for this review" | [`prompts/prepare-analysis.md`](prompts/prepare-analysis.md)                                                   |
-| "is #N a duplicate?", "go through the possible duplicates"                               | [`prompts/find-duplicates.md`](prompts/find-duplicates.md)                                                     |
-| "review PR #N", "which PRs are safe to merge?"                                           | [`prompts/review-pr.md`](prompts/review-pr.md)                                                                 |
-| "which PRs should close?", "recommend PR closures"                                       | [`prompts/recommend-auto-close.md`](prompts/recommend-auto-close.md)                                           |
-| "review an appeal", "reassess the closure of PR #N"                                      | [`prompts/review-appeal.md`](prompts/review-appeal.md)                                                         |
-| "organize groups", "collect everything about X", "prepare this for maintainers"          | [`prompts/organize-groups.md`](prompts/organize-groups.md)                                                     |
-| "prepare proposals from this edited group", "assess these selected members"              | [`prompts/organize-groups.md`](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) |
-| "write the report", "brief the maintainers"                                              | [`prompts/maintainer-brief.md`](prompts/maintainer-brief.md)                                                   |
-| "polish the report", "make the case for this group", "what do we do with X?"             | [`prompts/polish-report.md`](prompts/polish-report.md)                                                         |
+| request (in any wording)                                                                                                  | playbook                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| "what's next?", "what can I do?", "where are we with..."                                                                  | run `bin/next`, report its top suggestions, and wait for the person to choose one                              |
+| "triage 25 issues", "run a triage pass", "fill in batch..."                                                               | [`prompts/auto-triage.md`](prompts/auto-triage.md)                                                             |
+| "prepare offline analysis", "reuse cached evidence", "download evidence for this review"                                  | [`prompts/prepare-analysis.md`](prompts/prepare-analysis.md)                                                   |
+| "is #N a duplicate?", "go through the possible duplicates"                                                                | [`prompts/find-duplicates.md`](prompts/find-duplicates.md)                                                     |
+| "review PR #N", "which PRs are safe to merge?"                                                                            | [`prompts/review-pr.md`](prompts/review-pr.md)                                                                 |
+| "which PRs should close?", "recommend PR closures"                                                                        | [`prompts/recommend-auto-close.md`](prompts/recommend-auto-close.md)                                           |
+| "review an appeal", "reassess the closure of PR #N"                                                                       | [`prompts/review-appeal.md`](prompts/review-appeal.md)                                                         |
+| "organize groups", "collect everything about X", "prepare this for maintainers"                                           | [`prompts/organize-groups.md`](prompts/organize-groups.md)                                                     |
+| "prepare proposals from this edited group", "assess these selected members"                                               | [`prompts/organize-groups.md`](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) |
+| "write the report", "brief the maintainers", "polish the report", "make the case for this group", "what do we do with X?" | [`prompts/maintainer-brief.md`](prompts/maintainer-brief.md)                                                   |
 
 `bin/next` marks each suggestion `[agent]` (evidence preparation or proposals, never approval) or `[human]` (reviewing, marking groups ready, anything that changes GitHub). Offer to do `[agent]` steps within their stated scope; a suggestion is not authorization for an unbounded download. Hand `[human]` ones back with the exact TUI screen or command.
 
@@ -122,7 +121,7 @@ bin/report # writes reports/<owner>/<repo>/<date>.md, also prints it
 bin/report --stdout # print it only
 ```
 
-The report is written for lead maintainers first: groups contributors marked ready (with each member's decision and review state), then human-reviewed decisions ready to act on by action, then the review queue, high-confidence merge-ready PRs, close candidates, the oldest untriaged items, other groups, and who contributed. `[notes]` marks items with `agent_notes` worth reading. [`prompts/maintainer-brief.md`](prompts/maintainer-brief.md) turns it into a two-minute brief.
+The report is written for lead maintainers first: groups contributors marked ready (with each member's decision and review state), then human-reviewed decisions ready to act on by action, then the review queue, high-confidence merge-ready PRs, close candidates, the oldest untriaged items, other groups, and who contributed. `[notes]` marks items with `agent_notes` worth reading. [`prompts/maintainer-brief.md`](prompts/maintainer-brief.md) turns this source report into either a short overview or a focused decision case.
 
 Commit the generated report file so there is a dated history of backlog state over time.
 

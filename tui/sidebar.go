@@ -10,8 +10,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// rowCount is len(tabs) real tabs plus Batches, Groups, Possible Duplicates, Notifications, and Switch Repo.
-func rowCount() int { return len(tabs) + 5 }
+// rowCount is len(tabs) real tabs plus Batches, Groups, Possible Duplicates, Notifications, Settings, and Switch Repo.
+func rowCount() int { return len(tabs) + 6 }
 
 type sidebarModel struct {
 	selected int
@@ -60,6 +60,7 @@ func (s sidebarModel) View(focused bool) string {
 	renderRow(pairsIndex, withCount("≈ Possible Duplicates", s.pairCount))
 	renderRow(notificationsIndex, withCount("! Notifications", s.notificationCount))
 	b.WriteString("\n")
+	renderRow(settingsIndex, "⚙ Settings")
 	renderRow(switchRepoIndex, "⇄ Switch Repo")
 
 	return strings.TrimSuffix(b.String(), "\n")

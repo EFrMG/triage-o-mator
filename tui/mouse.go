@@ -217,7 +217,7 @@ func (m model) mouseMainX() int {
 }
 
 func (m model) mouseHasSidebar() bool {
-	return m.width >= 100 && !m.noInstall() && !m.comment.open && !m.lastError.open && !m.themePicker.open && !m.notificationPR.open && !m.dups.open && (m.groups.open || m.batches.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.focus != FocusDetail)
+	return m.width >= 100 && !m.noInstall() && !m.comment.open && !m.lastError.open && !m.themePicker.open && !m.notificationPR.open && !m.dups.open && (m.groups.open || m.batches.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.settings.open || m.focus != FocusDetail)
 }
 
 func (m model) mouseSidebarRow(y int) int {
@@ -233,6 +233,8 @@ func (m model) mouseSidebarRow(y int) int {
 	case row >= len(tabs)+1 && row < len(tabs)+5:
 		return row - 1
 	case row == len(tabs)+6:
+		return settingsIndex
+	case row == len(tabs)+7:
 		return switchRepoIndex
 	}
 
@@ -304,6 +306,9 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 	if m.themePicker.open {
 		return m.clickTheme(event, repeat)
 	}
+	if m.settings.open && m.settings.editor != nil {
+		return m, nil
+	}
 	if m.notificationPR.open || m.focus == FocusDetail && !m.groups.open && !m.batches.open && !m.dups.open && !m.notifications.open && !m.attention.open && !m.actionHistory.open && !m.corpus.open {
 		return m.clickDetail(event, repeat)
 	}
@@ -317,11 +322,11 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 			if m.groups.editing != "" || m.batches.editing {
 				return m, nil
 			}
-			for i := 0; i < 4 && (m.groups.open || m.batches.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.editingRepo); i++ {
+			for i := 0; i < 4 && (m.groups.open || m.batches.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.settings.open || m.editingRepo); i++ {
 				next, _ := m.mousePress("esc")
 				m = next.(model)
 			}
-			if m.groups.open || m.batches.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.editingRepo {
+			if m.groups.open || m.batches.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.settings.open || m.editingRepo {
 				return m, nil
 			}
 			m.sidebar.selected = row
@@ -338,6 +343,15 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 	}
 
 	switch {
+	case m.settings.open:
+		row := m.settings.offset + (event.Y-4)/cardHeight
+		if event.Y >= 4 && row >= 0 && row < len(m.settingsRows()) {
+			m.settings.selected = row
+			if repeat {
+				return m.handleSettingsKey(mouseKey("enter"))
+			}
+		}
+		return m, nil
 	case m.groups.open:
 		return m.clickGroups(event, repeat)
 	case m.batches.open:
@@ -796,6 +810,19 @@ func (m model) handleMouseWheel(event tea.Mouse) (tea.Model, tea.Cmd) {
 			m.comment.text.PageDown()
 		} else {
 			m.comment.text.PageUp()
+		}
+		return m, nil
+	}
+	if m.settings.open {
+		if m.settings.editor != nil {
+			return m, nil
+		}
+		for i := 0; i < 3; i++ {
+			if name == "down" {
+				m.settingsMove(1)
+			} else {
+				m.settingsMove(-1)
+			}
 		}
 		return m, nil
 	}

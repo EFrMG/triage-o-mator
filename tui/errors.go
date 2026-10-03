@@ -135,7 +135,7 @@ func errorText(err error) string {
 
 // typingText reports whether keys are going into a text field, where ! is just a character.
 func (m model) typingText() bool {
-	return m.typingReason() || m.editingRepo || m.searching || m.themePicker.searching || m.groups.editing != "" || m.batches.editing
+	return m.typingReason() || m.editingRepo || m.searching || m.themePicker.searching || m.groups.editing != "" || m.batches.editing || m.settings.editor != nil
 }
 
 func (m model) canOpenErrorDetails() bool {

@@ -57,6 +57,7 @@ type model struct {
 	// notDuplicates are the pairs a human ruled out with bin/not-duplicate, re-read whenever one is added.
 	notDuplicates map[dupPairKey]bool
 	themePicker   themePicker
+	settings      settingsUI
 	lastGroupID   string
 
 	sidebar   sidebarModel
@@ -256,6 +257,9 @@ func (m *model) enterSidebarSelection() tea.Cmd {
 		next, cmd := m.openNotifications()
 		*m = next.(model)
 		return cmd
+	case settingsIndex:
+		m.openSettings()
+		return nil
 	case pairsIndex:
 		return m.openPairs()
 	case batchesIndex:
@@ -728,6 +732,8 @@ func (m model) bodyView() string {
 		body = m.errorView()
 	case m.themePicker.open:
 		body = m.themePickerView()
+	case m.settings.open:
+		body = m.withSidebar(m.settingsView(), true)
 	case m.notificationPR.open:
 		body = m.titled(panelStyle(true).Width(m.width).Height(m.mainHeight()+2).Padding(0, 1).Render(m.itemView()), true)
 	case m.attention.open:
@@ -788,6 +794,9 @@ func (m model) minimumHeight() int {
 
 // switchBusy gates legacy work without cancellation/reply identities. Explicit evidence/corpus processes are stopped on switch and their stale replies are rejected. Unsaved drafts still require discard confirmation.
 func (m model) switchBusy() string {
+	if m.settings.busy || m.settings.editor != nil && m.settings.editor.text.Value() != m.settings.editor.original {
+		return "save or discard the Settings guidance draft first."
+	}
 	if m.refreshing || m.groups.busy || m.batches.busy || m.dups.busy || m.detail.loading || m.pendingApply > 0 {
 		return "wait for the current fetch or save to finish."
 	}
@@ -848,6 +857,7 @@ func (m *model) switchRepo(repo string) tea.Cmd {
 	m.similar = make(map[Key][]dupCandidate)
 	m.notDuplicates = nil
 	m.detail = newDetailModel()
+	m.settings = settingsUI{}
 	m.trackingBusy = false
 	m.evidenceRequest++
 	m.groups, m.batches, m.dups = groupUI{}, batchUI{}, dupUI{}

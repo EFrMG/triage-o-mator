@@ -42,6 +42,7 @@
     "escalate-maintainer",
     "no-action-needed"
   ],
+  "action_guidance": {},
   "confidence": [
     "low",
     "medium",

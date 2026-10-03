@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""Edit local taxonomy guidance for the selected repository; never write to GitHub."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _storage import atomic_writer, locked
+from _triage import REPO, TAXONOMY_PATH
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=["set-guidance"])
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--label-id", type=int)
+    target.add_argument("--action")
+    parser.add_argument("--value", required=True)
+    parser.add_argument("--expected", required=True, help="the guidance shown when editing began")
+    parser.add_argument("--expected-name", help="the GitHub label name shown when editing began")
+    parser.add_argument("--expected-repo", required=True)
+    args = parser.parse_args()
+    if args.expected_repo != REPO:
+        parser.error("configured repository changed; reopen Settings")
+    if len(args.value) > 4000 or "\x00" in args.value:
+        parser.error("guidance must be at most 4000 characters and contain no NUL")
+
+    with locked(TAXONOMY_PATH):
+        try:
+            taxonomy = json.loads(TAXONOMY_PATH.read_text())
+        except (OSError, ValueError) as error:
+            parser.exit(1, f"error: could not read {TAXONOMY_PATH}: {error}\n")
+
+        if not isinstance(taxonomy, dict):
+            parser.exit(1, "error: taxonomy must be a JSON object\n")
+
+        if args.label_id is not None:
+            if args.expected_name is None:
+                parser.error("--expected-name is required with --label-id")
+            catalog = taxonomy.get("label_catalog", {})
+            if not isinstance(catalog, dict) or not isinstance(catalog.get("labels"), list):
+                parser.exit(1, "error: label catalog is malformed; repair taxonomy.json before editing\n")
+            if catalog.get("repository") != REPO or catalog.get("status") != "observed":
+                parser.exit(1, "error: label catalog is pending or belongs to another repository; sync it first\n")
+
+            rows = [row for row in catalog["labels"] if isinstance(row, dict) and row.get("id") == args.label_id]
+            if len(rows) != 1:
+                parser.exit(1, "error: label was renamed, removed, or is absent; reopen Settings\n")
+
+            row = rows[0]
+            if row.get("name") != args.expected_name:
+                parser.exit(1, "error: label name changed since editing began; reopen Settings\n")
+            current = row.get("guidance", "")
+        else:
+            if args.action not in taxonomy.get("actions", []):
+                parser.exit(1, "error: action is absent; reopen Settings\n")
+
+            guidance = taxonomy.setdefault("action_guidance", {})
+            if not isinstance(guidance, dict):
+                parser.exit(1, "error: action guidance is malformed; repair taxonomy.json before editing\n")
+            current = guidance.get(args.action, "")
+
+        if current != args.expected:
+            parser.exit(1, "error: guidance changed since editing began; reopen Settings\n")
+
+        if args.value != current:
+            if args.label_id is not None:
+                row["guidance"] = args.value
+            else:
+                guidance[args.action] = args.value
+
+            with atomic_writer(TAXONOMY_PATH) as out:
+                out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
+
+    print(json.dumps({"updated": args.value != current}))
+
+
+if __name__ == "__main__":
+    main()

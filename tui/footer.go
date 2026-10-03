@@ -128,6 +128,16 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{group("Quit", bind("discard drafts", keys.Quit), hint{"any key", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.lastError.open:
 		return []footerGroup{group("Error", bind("scroll", keys.Down, keys.Up), bind("page", keys.HalfDown, keys.HalfUp)), group("Navigation", bind("close", keys.Back), bind("exit", keys.ForceQuit))}
+	case m.settings.open && m.settings.editor != nil:
+		if m.settings.busy {
+			return []footerGroup{group("Settings", hint{"", "saving guidance…"})}
+		}
+		return []footerGroup{group("Guidance", hint{"Ctrl-S", "save"}, hint{"Esc", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
+	case m.settings.open:
+		if m.settings.busy {
+			return []footerGroup{group("Settings", hint{"", "reading labels…"})}
+		}
+		return []footerGroup{group("Settings", hint{"j/k", "select"}, hint{"Enter/e", "edit guidance"}, hint{"r", "sync labels"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 	case m.notificationPR.open:
 		back := "back to Notifications"
 		if m.notifications.review != nil {

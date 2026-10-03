@@ -49,7 +49,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "taxonomy-settings"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -156,6 +156,41 @@ func TestBaselineInstallRootAndRepoBoundary(t *testing.T) {
 	}
 	if validRepo("../escape") || DataDir(root, "owner/repo") != filepath.Join(root, "data", "owner", "repo") {
 		t.Fatal("repository path escaped its install")
+	}
+}
+
+func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
+	root := baselineRoot(t)
+	m := baselineModel(t, root)
+	m.sidebar.selected = settingsIndex
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.settings.open || !strings.Contains(ansi.Strip(m.settingsView()), "Labels pending") {
+		t.Fatal("Settings did not show the pending label catalog")
+	}
+
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.settings.editor == nil || m.settings.editor.row.kind != "action" {
+		t.Fatal("Settings did not open action guidance")
+	}
+	m.settings.editor.text.SetValue("Suggest only the needed labels")
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.settings.busy || m.switchBusy() == "" {
+		t.Fatal("Settings save did not protect the draft and repository")
+	}
+	message, ok := cmd().(settingsDoneMsg)
+	if !ok || message.err != nil {
+		t.Fatalf("Settings script failed: %+v", message)
+	}
+	m = baselineSend(m, message)
+	if m.settings.editor != nil || m.taxonomy.ActionGuidance["label-only"] != "Suggest only the needed labels" {
+		t.Fatal("Settings did not reload saved guidance")
+	}
+
+	stale := settingsDoneMsg{root: root, repo: "other/repo", request: m.settings.request, operation: "save", taxonomy: Taxonomy{}}
+	m = baselineSend(m, stale)
+	if m.taxonomy.ActionGuidance["label-only"] != "Suggest only the needed labels" {
+		t.Fatal("stale Settings reply replaced the selected repository's guidance")
 	}
 }
 

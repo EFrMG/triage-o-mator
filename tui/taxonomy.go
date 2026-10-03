@@ -9,10 +9,28 @@ import (
 
 // Taxonomy mirrors config/taxonomy.json exactly.
 type Taxonomy struct {
-	IssueCategories []string `json:"issue_categories"`
-	PRCategories    []string `json:"pr_categories"`
-	Actions         []string `json:"actions"`
-	Confidence      []string `json:"confidence"`
+	IssueCategories []string          `json:"issue_categories"`
+	PRCategories    []string          `json:"pr_categories"`
+	Actions         []string          `json:"actions"`
+	ActionGuidance  map[string]string `json:"action_guidance"`
+	LabelCatalog    LabelCatalog      `json:"label_catalog"`
+	Confidence      []string          `json:"confidence"`
+}
+
+type LabelCatalog struct {
+	Repository string        `json:"repository"`
+	Status     string        `json:"status"`
+	ObservedAt string        `json:"observed_at"`
+	Labels     []GitHubLabel `json:"labels"`
+}
+
+type GitHubLabel struct {
+	ID          int      `json:"id"`
+	Name        string   `json:"name"`
+	Color       string   `json:"color"`
+	Description string   `json:"description"`
+	Guidance    string   `json:"guidance"`
+	Previous    []string `json:"previous_names"`
 }
 
 // CategoriesFor returns the valid category list for the given item kind.

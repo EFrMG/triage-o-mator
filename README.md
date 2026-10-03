@@ -138,6 +138,7 @@ bin/report
 | Prepare and review decisions | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv` |
 | Compare and group            | `bin/similar`, `bin/not-duplicate`, `bin/group`                                |
 | Read guidance and evidence   | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |
+| Edit local guidance          | `bin/taxonomy-settings`                                                        |
 | Propose and publish actions  | `bin/auto-close`, `bin/comment-plus`                                           |
 | See progress and handoffs    | `bin/stats`, `bin/next`, `bin/report`                                          |
 

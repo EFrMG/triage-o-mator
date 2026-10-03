@@ -154,8 +154,14 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(json.loads(shown.stdout), catalog)
             self.assertEqual((mock / "calls.jsonl").read_bytes(), calls_before_show)
 
-            catalog["labels"][1]["guidance"] = "Keep this history"
-            taxonomy_path.write_text(json.dumps(taxonomy))
+            settings = [str(target / "triage-o-mator/bin/taxonomy-settings"), "set-guidance", "--expected-repo", "owner/repo"]
+            guidance = subprocess.run([*settings, "--label-id", "2", "--expected-name", "old", "--expected", "", "--value", "Keep this history"], env=env, capture_output=True, text=True)
+            self.assertEqual(guidance.returncode, 0, guidance.stderr)
+            action_guidance = subprocess.run([*settings, "--action", "label-only", "--expected", "", "--value", "Suggest labels only"], env=env, capture_output=True, text=True)
+            self.assertEqual(action_guidance.returncode, 0, action_guidance.stderr)
+            stale = subprocess.run([*settings, "--label-id", "2", "--expected-name", "old", "--expected", "", "--value", "Overwrite"], env=env, capture_output=True, text=True)
+            self.assertNotEqual(stale.returncode, 0)
+            self.assertEqual(json.loads(taxonomy_path.read_text())["label_catalog"]["labels"][1]["guidance"], "Keep this history")
             responses[endpoint]["data"] = [{"id": 2, "name": "new", "color": "112233", "description": "Renamed"}, {"id": 3, "name": "added", "color": "abcdef", "description": "New"}]
             (mock / "responses.json").write_text(json.dumps(responses))
             sync = [str(target / "triage-o-mator/bin/label-catalog"), "sync", "--expected-repo", "owner/repo"]
@@ -172,6 +178,7 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(catalog["labels"][1]["previous_names"], ["old"])
             self.assertEqual([row["name"] for row in catalog["retired"]], ["bug"])
             self.assertTrue(catalog["retired"][0]["retired_at"])
+            self.assertEqual(json.loads(taxonomy_path.read_text())["action_guidance"]["label-only"], "Suggest labels only")
 
             responses[endpoint] = {"data": [{"name": "broken"}]}
             (mock / "responses.json").write_text(json.dumps(responses))

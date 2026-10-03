@@ -48,6 +48,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishAttention(msg)
 	case corpusMsg:
 		return m.finishCorpus(msg)
+	case settingsDoneMsg:
+		return m.finishSettings(msg)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true
@@ -321,6 +323,13 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case m.confirmQuit || m.lastError.open || m.notificationPR.open || m.attention.open || m.actionHistory.open || m.notifications.open || m.corpus.open:
 		return m, nil
+	case m.settings.open:
+		if m.settings.editor == nil || m.settings.busy {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.settings.editor.text, cmd = m.settings.editor.text.Update(msg)
+		return m, cmd
 	case m.themePicker.open:
 		if !m.themePicker.searching {
 			return m, nil
@@ -445,6 +454,9 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.notifications.open {
 		return m.handleNotificationsKey(msg)
+	}
+	if m.settings.open {
+		return m.handleSettingsKey(msg)
 	}
 	if m.corpus.open {
 		return m.handleCorpusKey(msg)

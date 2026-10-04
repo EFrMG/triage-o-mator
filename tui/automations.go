@@ -115,7 +115,7 @@ func automationToggleCmd(root, repo string, request uint64, before, after bool) 
 	}
 }
 
-func automationActionCmd(root, repo string, request uint64, action, before, after string) tea.Cmd {
+func automationActionCmd(root, repo string, request uint64, action, operation, definition, before, after string) tea.Cmd {
 	return func() tea.Msg {
 		msg := automationMsg{root: root, repo: repo, request: request, operation: "action"}
 		out, err := runScript(root, "action-policy", "set", "--expected-repo", repo, "--action", action, "--mode", after)
@@ -128,7 +128,7 @@ func automationActionCmd(root, repo string, request uint64, action, before, afte
 			msg.err = err
 			return msg
 		}
-		if plan.Repository != repo || plan.Action != action || plan.Before != before || plan.After != after || plan.PreviewSHA256 == "" {
+		if plan.Repository != repo || plan.Action != action || plan.Operation != operation || plan.DefinitionSHA256 != definition || plan.Before != before || plan.After != after || plan.PreviewSHA256 == "" {
 			msg.err = fmt.Errorf("action policy changed; refresh Automations")
 			return msg
 		}
@@ -229,7 +229,7 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if action.Mode == "execute" {
 				after = "stage"
 			}
-			return m, automationActionCmd(m.installRoot, m.repo, m.settings.request, action.Name, action.Mode, after)
+			return m, automationActionCmd(m.installRoot, m.repo, m.settings.request, action.Name, action.Operation, action.DefinitionSHA256, action.Mode, after)
 		}
 		before := m.settings.automations.labelingEnabled
 		return m, automationToggleCmd(m.installRoot, m.repo, m.settings.request, before, !before)

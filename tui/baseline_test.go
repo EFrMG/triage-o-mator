@@ -366,7 +366,7 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	if m.settings.automations.actions[0].Mode != "execute" {
 		t.Fatal("action mode did not update for the selected repository")
 	}
-	m = baselineSend(m, automationMsg{root: root, repo: "other/repo", request: m.settings.request, status: automationStatus{Repository: "other/repo"}})
+	m = baselineSend(m, automationMsg{root: root, repo: "other/repo", request: m.settings.request, status: automationStatus{Repository: "other/repo"}, actions: actionPolicyStatus{Repository: "other/repo"}})
 	if !m.settings.automations.labelingEnabled || m.settings.automations.actions[0].Mode != "execute" {
 		t.Fatal("stale Automations response changed the selected repository's setting")
 	}

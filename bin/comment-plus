@@ -52,8 +52,8 @@ def main():
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--publish", action="store_true")
     parser.add_argument("--approve", help="SHA-256 from the reviewed dry-run plan")
-    parser.add_argument("--expected-head", help="PR head SHA observed when a closing proposal was prepared")
-    parser.add_argument("--expected-updated-at", help="item update time observed when a closing proposal was prepared")
+    parser.add_argument("--expected-head", help="PR head SHA observed when the proposal was prepared")
+    parser.add_argument("--expected-updated-at", help="item update time observed when the proposal was prepared")
     args = parser.parse_args()
 
     # Older argparse versions strip a literal '--' even from '--body=--', returning an empty list for this single-value option.
@@ -67,10 +67,12 @@ def main():
         raise ValueError("host must be a lowercase hostname")
     if args.number <= 0:
         raise ValueError("number must be positive")
-    if (args.expected_head or args.expected_updated_at) and (args.kind != "pr" or not args.close):
-        raise ValueError("revision checks require closing a pull request")
+    if args.expected_head and args.kind != "pr":
+        raise ValueError("head revision checks require a pull request")
     if args.expected_head and not re.fullmatch(r"[0-9a-f]{40}", args.expected_head):
         raise ValueError("expected head must be a 40-character lowercase SHA")
+    if args.expected_updated_at and not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", args.expected_updated_at):
+        raise ValueError("expected update time must be a UTC GitHub timestamp")
 
     text = args.body if args.body is not None else args.body_file.read_text(encoding="utf-8")
     if not text.strip() or len(text) > 65536 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in text):
@@ -120,7 +122,7 @@ def main():
             if item.get("state") != required_state:
                 raise ValueError(f"item is no longer {required_state}; preview again after inspecting GitHub")
         if args.expected_updated_at and item.get("updated_at") != args.expected_updated_at:
-            raise ValueError("pull request activity changed since the approved proposal; review it again")
+            raise ValueError("item activity changed since the approved proposal; review it again")
         if args.expected_head:
             pull = api(args.host, "GET", f"repos/{repo}/pulls/{args.number}")
             if not isinstance(pull, dict) or pull.get("html_url") != target or pull.get("number") != args.number or (pull.get("head") or {}).get("sha") != args.expected_head:

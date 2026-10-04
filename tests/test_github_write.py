@@ -102,6 +102,20 @@ class WriteTests(Workspace):
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "POST"])
         self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
 
+    def test_issue_activity_change_stops_comment_before_write(self):
+        selected = "2026-10-04T01:00:00Z"
+        item_path = self.mock / "item.json"
+        value = json.loads(item_path.read_text())
+        value["updated_at"] = selected
+        item_path.write_text(json.dumps(value))
+        preview = self.call("--expected-updated-at", selected)
+
+        value["updated_at"] = "2026-10-04T02:00:00Z"
+        item_path.write_text(json.dumps(value))
+        self.call(*self.publish(preview), "--expected-updated-at", selected, ok=False)
+        self.assertEqual([call["method"] for call in self.write_calls()], ["GET"])
+        self.assertFalse((self.root / "data/owner/repo/writes" / f"{preview['plan']['request_id']}.json").exists())
+
     def test_comment_and_state_outcomes_are_separate(self):
         preview = self.call("--close")
         (self.mock / "fail-patch").touch()

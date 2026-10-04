@@ -701,7 +701,7 @@ func (m model) countProposals(b batchRecord) (pending, invalid int) {
 	for key, p := range b.Proposals {
 		if it, ok := m.findItem(key); ok && it.Untriaged() {
 			pending++
-			if unlisted(m.taxonomy.Actions, p.Action) != "" {
+			if unlisted(m.taxonomy.SelectableActions(), p.Action) != "" {
 				invalid++
 			} else {
 				for _, label := range p.ProposedLabels {

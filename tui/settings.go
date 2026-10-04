@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -16,14 +17,15 @@ import (
 )
 
 type settingsRow struct {
-	kind, name, description, color string
-	id                             int
+	kind, name, description, color, operation string
+	id                                        int
 }
 
 type settingsEditor struct {
 	row            settingsRow
 	creating       bool
 	field          int
+	operation      string
 	title          textinput.Model
 	description    textarea.Model
 	preview        viewport.Model
@@ -75,6 +77,15 @@ type labelDefinitionPlan struct {
 	PreviewSHA256 string       `json:"preview_sha256"`
 }
 
+func nextActionOperation(current string, delta int) string {
+	for i, operation := range actionOperations {
+		if operation == current {
+			return actionOperations[(i+delta+len(actionOperations))%len(actionOperations)]
+		}
+	}
+	return actionOperations[0]
+}
+
 func (m model) settingsRows() []settingsRow {
 	var rows []settingsRow
 	if catalog := m.taxonomy.LabelCatalog; m.settings.section == "label" && catalog.Repository == m.repo && catalog.Status == "observed" {
@@ -84,7 +95,7 @@ func (m model) settingsRows() []settingsRow {
 	}
 	if m.settings.section == "action" {
 		for _, action := range m.taxonomy.Actions {
-			rows = append(rows, settingsRow{kind: "action", name: action, description: m.taxonomy.ActionGuidance[action]})
+			rows = append(rows, settingsRow{kind: "action", name: action, description: m.taxonomy.ActionGuidance[action], operation: m.taxonomy.ActionOperations[action]})
 		}
 	}
 	return rows
@@ -126,7 +137,7 @@ func (m model) settingsView() string {
 	if m.settings.section == "" {
 		cards := [][2]string{
 			{"Labels", "Create and edit GitHub label names and descriptions"},
-			{"Actions", "Create and edit local action titles and descriptions"},
+			{"Actions", "Create and edit local actions tied to GitHub operations"},
 			{"Item labeling", "Preview and apply reviewed label decisions for this repository"},
 		}
 		return inset(titleBar("Settings", "", m.menuWidth())) + "\n\n" + cardList(cards, m.settings.menuSelected, w, h-2)
@@ -165,6 +176,18 @@ func (m model) settingsView() string {
 		if summary == "" {
 			summary = "No description"
 		}
+		if row.kind == "action" {
+			operation := row.operation
+			if operation == "" {
+				operation = m.taxonomy.OperationFor(row.name)
+				if operation == "" {
+					operation = "unmapped"
+				} else {
+					operation = "legacy " + operation
+				}
+			}
+			summary = operation + " · " + summary
+		}
 		view += markedCard(sanitize(row.name), singleLine(sanitize(summary)), cardMark{}, i == m.settings.selected, w) + "\n"
 	}
 	footer := fmt.Sprintf("%d of %d", m.settings.selected+1, len(rows))
@@ -184,6 +207,9 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "ctrl+s":
 			return m.saveSettingsEditor()
 		case "ctrl+e":
+			if editor.row.kind == "action" && editor.field == 2 {
+				return m, nil
+			}
 			return m.startSettingsExternal()
 		case "ctrl+p":
 			if editor.previewing {
@@ -201,8 +227,21 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				delta = -1
 			}
 			editor.previewing = false
-			editor.field = (editor.field + delta + 2) % 2
+			fields := 2
+			if editor.row.kind == "action" {
+				fields = 3
+			}
+			editor.field = (editor.field + delta + fields) % fields
 			return m, m.focusSettingsEditor()
+		case "left", "right", "space":
+			if editor.row.kind == "action" && editor.field == 2 && !editor.previewing {
+				delta := 1
+				if msg.String() == "left" {
+					delta = -1
+				}
+				editor.operation = nextActionOperation(editor.operation, delta)
+				return m, nil
+			}
 		case "esc":
 			if m.settingsEditorChanged() && !editor.confirmDiscard {
 				editor.confirmDiscard = true
@@ -222,7 +261,7 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			editor.preview, cmd = editor.preview.Update(msg)
 		} else if editor.field == 0 {
 			editor.title, cmd = editor.title.Update(msg)
-		} else {
+		} else if editor.field == 1 {
 			editor.description, cmd = editor.description.Update(msg)
 		}
 		if editor.title.Value() != beforeTitle || editor.description.Value() != beforeDescription {
@@ -324,7 +363,11 @@ func (m model) openSettingsEditor(row settingsRow, creating bool) (tea.Model, te
 	description.SetValue(row.description)
 	themeTextarea(&description)
 
-	m.settings.editor = &settingsEditor{row: row, creating: creating, title: title, description: description, preview: viewport.New()}
+	operation := row.operation
+	if creating && row.kind == "action" {
+		operation = actionOperations[0]
+	}
+	m.settings.editor = &settingsEditor{row: row, creating: creating, title: title, description: description, operation: operation, preview: viewport.New()}
 	m.status = ""
 	m.layoutSettingsEditor()
 	return m, m.settings.editor.title.Focus()
@@ -345,7 +388,14 @@ func (m *model) focusSettingsEditor() tea.Cmd {
 
 func (m model) settingsEditorChanged() bool {
 	e := m.settings.editor
-	return e != nil && (e.creating && (e.title.Value() != "" || e.description.Value() != "") || e.title.Value() != e.row.name || e.description.Value() != e.row.description)
+	if e == nil {
+		return false
+	}
+	if e.creating {
+		return e.title.Value() != "" || e.description.Value() != ""
+	}
+
+	return e.title.Value() != e.row.name || e.description.Value() != e.row.description || e.operation != e.row.operation
 }
 
 func (m *model) layoutSettingsEditor() {
@@ -356,7 +406,11 @@ func (m *model) layoutSettingsEditor() {
 	width := maxInt(m.commentWidth()-4, 1)
 	e.title.SetWidth(width)
 	e.description.SetWidth(width)
-	e.description.SetHeight(maxInt(m.commentHeight()-8, 3))
+	padding := 8
+	if e.row.kind == "action" {
+		padding += 3
+	}
+	e.description.SetHeight(maxInt(m.commentHeight()-padding, 3))
 	resized := e.preview.Width() != width
 	e.preview.SetWidth(width)
 	e.preview.SetHeight(maxInt(m.commentHeight()-4, 3))
@@ -384,6 +438,13 @@ func (m model) settingsDraftPreview(width int) string {
 	} else {
 		lines = append(lines, field.Render("Title"), wrapText(currentName, bodyWidth), "",
 			field.Render("Description"), wrapText(settingsDescription(currentDescription), bodyWidth))
+		if e.row.kind == "action" {
+			currentOperation := e.row.operation
+			if currentOperation == "" {
+				currentOperation = "Unmapped"
+			}
+			lines = append(lines, "", field.Render("GitHub operation"), currentOperation)
+		}
 	}
 	lines = append(lines, "", heading.Render("After save"), field.Render("Title"), wrapText(e.title.Value(), bodyWidth), "",
 		field.Render("Description"), wrapText(settingsDescription(e.description.Value()), bodyWidth))
@@ -391,6 +452,7 @@ func (m model) settingsDraftPreview(width int) string {
 		lines = append(lines, "", field.Render("Color"), e.plan.Proposed.Color)
 		return heading.Render("GitHub repository") + "\n" + wrapText(e.plan.Repository, width) + "\n\n" + inset(inset(strings.Join(lines, "\n")))
 	}
+	lines = append(lines, "", field.Render("GitHub operation"), e.operation)
 
 	return inset(inset(strings.Join(lines, "\n")))
 }
@@ -432,7 +494,15 @@ func (m model) settingsOverlay(background string) string {
 		}
 		return mutedText("  " + name)
 	}
-	content := strings.Join([]string{label(0, "Title"), e.title.View(), label(1, "Description"), e.description.View()}, "\n")
+	parts := []string{label(0, "Title"), e.title.View(), label(1, "Description"), e.description.View()}
+	if e.row.kind == "action" {
+		operation := e.operation
+		if operation == "" {
+			operation = "Choose with ← / →"
+		}
+		parts = append(parts, label(2, "GitHub operation"), "  "+operation+"  ← / → to change")
+	}
+	content := strings.Join(parts, "\n")
 	return m.composerOverlay(background, m.composerPanel(header, content))
 }
 
@@ -472,6 +542,9 @@ func (m model) settingsEditorProblem() string {
 	if e.row.kind == "label" && (utf8.RuneCountInString(description) > 100 || strings.ContainsAny(description, "\n\x00")) {
 		return "GitHub label descriptions must be one line and at most 100 characters."
 	}
+	if e.row.kind == "action" && !slices.Contains(actionOperations, e.operation) {
+		return "Choose a GitHub operation for this action."
+	}
 	return ""
 }
 
@@ -490,9 +563,9 @@ func (m model) startSettingsLabelPreview() (tea.Model, tea.Cmd) {
 func settingsActionSaveCmd(root, repo string, request uint64, e settingsEditor) tea.Cmd {
 	return func() tea.Msg {
 		name := e.title.Value()
-		args := []string{"create-action", "--expected-repo", repo, "--name", name, "--description", e.description.Value()}
+		args := []string{"create-action", "--expected-repo", repo, "--name", name, "--description", e.description.Value(), "--operation", e.operation}
 		if !e.creating {
-			args = append(args, "--action", e.row.name, "--expected", e.row.description)
+			args = append(args, "--action", e.row.name, "--expected", e.row.description, "--expected-operation", e.row.operation)
 			args[0] = "update-action"
 		}
 		_, err := runScript(root, "taxonomy-settings", args...)

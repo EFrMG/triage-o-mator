@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _groups import list_groups
-from _triage import REPO, REPORTS_DIR, decision_text, has_decision, here, load_ledger
+from _triage import REPO, REPORTS_DIR, action_operation, decision_text, has_decision, here, load_ledger, load_taxonomy
 
 
 ACT_LIMIT = 20
@@ -71,6 +71,7 @@ def ready_groups_section(groups, by_key):
 
 
 def render(ledger):
+    taxonomy = load_taxonomy()
     open_items = [r for r in ledger if r["state"] == "open"]
     issues = [r for r in open_items if r["kind"] == "issue"]
     prs = [r for r in open_items if r["kind"] == "pr"]
@@ -103,7 +104,7 @@ def render(ledger):
     by_key = {(r["kind"], r["number"]): r for r in ledger}
     lines += ready_groups_section(groups, by_key)
 
-    actionable = [r for r in reviewed if r["action"] not in ("", "no-action-needed")]
+    actionable = [r for r in reviewed if action_operation(taxonomy, r["action"]) not in ("", "none")]
     if actionable:
         lines.append(f"## Human-reviewed, ready to act ({len(actionable)})")
         lines.append("")
@@ -123,6 +124,18 @@ def render(ledger):
                 lines.append(f"- ...and {len(items) - ACT_LIMIT} more")
 
             lines.append("")
+
+    unmapped = [r for r in reviewed if r["action"] and not action_operation(taxonomy, r["action"])]
+    if unmapped:
+        lines.append(f"## Reviewed legacy actions without a GitHub operation ({len(unmapped)})")
+        lines.append("")
+        lines.append("These saved decisions remain readable. Map their action titles in Settings before treating them as GitHub write recommendations.")
+        lines.append("")
+        for r in unmapped[:ACT_LIMIT]:
+            lines.append(item_line(r, f" — `{r['action']}`: {r['reason']}"))
+        if len(unmapped) > ACT_LIMIT:
+            lines.append(f"- ...and {len(unmapped) - ACT_LIMIT} more")
+        lines.append("")
 
     for kind, items in (("Issue", issues), ("PR", prs)):
         labels = Counter(name for r in items for name in (r.get("proposed_labels") or []))
@@ -181,7 +194,7 @@ def render(ledger):
     close_candidates = [
         r
         for r in open_items
-        if r["action"] in ("close-duplicate", "close-stale", "close-out-of-scope", "close-resolved")
+        if action_operation(taxonomy, r["action"]) == "close"
         and not r["reviewed"]
     ]
     if close_candidates:

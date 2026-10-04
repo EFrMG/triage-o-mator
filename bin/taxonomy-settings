@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--expected-name", help="the GitHub label name shown when editing began")
     parser.add_argument("--name", help="new action title")
     parser.add_argument("--description", help="new action description")
+    parser.add_argument("--operation", choices=["label", "comment", "close", "reopen", "none"], help="GitHub operation for this action")
+    parser.add_argument("--expected-operation", help="the operation shown when editing began")
     parser.add_argument("--expected-repo", required=True)
     args = parser.parse_args()
     if args.expected_repo != REPO:
@@ -32,10 +34,10 @@ def main():
         if len(args.value) > 4000 or "\x00" in args.value:
             parser.error("guidance must be at most 4000 characters and contain no NUL")
     else:
-        if args.label_id is not None or args.name is None or args.description is None:
-            parser.error("action changes require --name and --description, without --label-id")
-        if args.command == "update-action" and (args.action is None or args.expected is None):
-            parser.error("update-action requires --action and --expected")
+        if args.label_id is not None or args.name is None or args.description is None or args.operation is None:
+            parser.error("action changes require --name, --description and --operation, without --label-id")
+        if args.command == "update-action" and (args.action is None or args.expected is None or args.expected_operation is None):
+            parser.error("update-action requires --action, --expected and --expected-operation")
         if args.command == "create-action" and args.action is not None:
             parser.error("create-action does not accept --action")
         if not args.name.strip() or args.name != args.name.strip() or "\n" in args.name or "\x00" in args.name:
@@ -55,8 +57,9 @@ def main():
         if args.command != "set-guidance":
             actions = taxonomy.get("actions", [])
             guidance = taxonomy.setdefault("action_guidance", {})
-            if not isinstance(actions, list) or not all(isinstance(name, str) for name in actions) or not isinstance(guidance, dict):
-                parser.exit(1, "error: actions or descriptions are malformed; repair taxonomy.json before editing\n")
+            operations = taxonomy.setdefault("action_operations", {})
+            if not isinstance(actions, list) or not all(isinstance(name, str) for name in actions) or not isinstance(guidance, dict) or not isinstance(operations, dict):
+                parser.exit(1, "error: actions, descriptions or operations are malformed; repair taxonomy.json before editing\n")
             if any(name.casefold() == args.name.casefold() and name != args.action for name in actions):
                 parser.exit(1, "error: an action with this title already exists\n")
             if args.command == "create-action":
@@ -64,16 +67,19 @@ def main():
                     parser.exit(1, "error: action already exists\n")
                 actions.append(args.name)
                 guidance[args.name] = args.description
+                operations[args.name] = args.operation
                 updated = True
             else:
-                if args.action not in actions or guidance.get(args.action, "") != args.expected:
+                if args.action not in actions or guidance.get(args.action, "") != args.expected or operations.get(args.action, "") != args.expected_operation:
                     parser.exit(1, "error: action changed since editing began; reopen Settings\n")
-                updated = args.name != args.action or args.description != args.expected
+                updated = args.name != args.action or args.description != args.expected or args.operation != args.expected_operation
                 if updated:
                     actions[actions.index(args.action)] = args.name
                     if args.name != args.action:
                         guidance.pop(args.action, None)
+                        operations.pop(args.action, None)
                     guidance[args.name] = args.description
+                    operations[args.name] = args.operation
             if updated:
                 with atomic_writer(TAXONOMY_PATH) as out:
                     out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")

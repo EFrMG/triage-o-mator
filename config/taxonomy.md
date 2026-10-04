@@ -2,9 +2,9 @@
 
 `taxonomy.json` holds `label_catalog`, the GitHub label definitions observed for the selected repository. Its `observed_at` time identifies the last successful online read; `pending` means no label definitions have been read for that repository. `guidance` is optional local advice, preserved by GitHub label ID when a label is renamed. Removed labels move to `retired` with their history intact. `label_catalog_archive` keeps prior repositories' catalogs if this install is pointed elsewhere and back. Running `bin/label-catalog sync` reads GitHub labels and updates this catalog without changing labels on GitHub. New decisions propose zero or more names from the observed catalog in `proposed_labels`; the existing `labels` field remains GitHub's observed item state. Proposed labels do not change GitHub by themselves.
 
-`action_guidance` in the JSON holds descriptions for the current action names. The TUI's Settings → Actions menu creates and edits action titles and descriptions through `bin/taxonomy-settings`; it does not apply an action to an item. Settings → Labels previews and explicitly changes GitHub label names and descriptions through `bin/label-definitions`, then refreshes the saved catalog. The older per-label local `guidance` is retained by label ID but is not edited in this menu.
+`action_guidance` in the JSON holds descriptions for the current action names. `action_operations` maps each title to `label`, `comment`, `close`, `reopen`, or the explicit `none` choice. The TUI's Settings → Actions menu creates and edits action titles, descriptions, and operations through `bin/taxonomy-settings`; it does not apply an action to an item. Settings → Labels previews and explicitly changes GitHub label names and descriptions through `bin/label-definitions`, then refreshes the saved catalog. The older per-label local `guidance` is retained by label ID but is not edited in this menu.
 
-`issue_categories` and `pr_categories` are retained for existing ledger rows and older batch files. The decision form uses proposed labels and actions; it does not assign a legacy category to new decisions. Actions remain the recommended next step, independent of labels.
+`issue_categories` and `pr_categories` are retained for existing ledger rows and older batch files. The decision form uses proposed labels and actions; it does not assign a legacy category to new decisions. An action names a concrete GitHub operation, independent of proposed labels. The `none` choice records a triaged item that needs no write; a blank action still means no decision was made.
 
 Item labeling is a separate pass under Settings. It is disabled until a person enables it for this repository, then acts only on reviewed decisions after a bounded preview and live revalidation. It records outcomes outside the ledger, removes only labels it previously added, and pauses items after human corrections or uncertain writes. A proposed label or a reviewed decision alone does not perform a GitHub write.
 
@@ -41,23 +41,22 @@ It is a living document. If a label or action stops being useful, or a new one i
 
 ## Actions
 
-The action is the _recommended next step_; independent of proposed labels, since items with the same labels can warrant different actions.
+The action is the _recommended GitHub operation_; independent of proposed labels, since items with the same labels can warrant different actions. A title can give a specific reason, while `action_operations` identifies the write. These are recommendations only: selecting or reviewing one never performs the write. `label` uses the separate item labeling pass; `comment`, `close`, and `reopen` currently need an exact `comment-plus` preview and approval. Close and reopen always publish an explanatory comment first.
 
-- `label-only`: apply/confirm a label, no other action needed yet.
-- `comment-request-info`: ask the reporter for repro/logs/version.
-- `comment-explain-close`: explain the reasoning and close.
-- `close-duplicate`: close, pointing at the original.
-- `close-stale`: close as inactive.
-- `close-out-of-scope`: close, explaining why it's out of scope.
-- `close-resolved`: close, pointing at the fix or answer that settled it.
-- `approve-merge-candidate`: flag for a maintainer to merge.
-- `request-changes`: leave review feedback on a PR.
-- `escalate-maintainer`: needs a human judgment call before anything else happens (design decisions, ambiguous scope, anything sensitive).
-- `no-action-needed`: already in the right state (e.g. already labeled and waiting).
+- `label-only` (`label`): apply proposed labels; no conversation or state change is recommended.
+- `comment-request-info` (`comment`): ask the reporter for repro, logs, or version details.
+- `comment-feedback` (`comment`): leave a conversation comment with concrete feedback.
+- `close-duplicate` (`close`): explain the duplicate and name the original.
+- `close-stale` (`close`): explain why the item is inactive.
+- `close-out-of-scope` (`close`): explain why the request is outside this repository's scope.
+- `close-resolved` (`close`): point to the verified fix or answer that settled it.
+- `close-with-explanation` (`close`): explain another specific reason for closure.
+- `reopen-with-explanation` (`reopen`): explain why a closed item needs further work.
+- `no-action-needed` (`none`): no supported GitHub write is justified now, including when a separate maintainer decision is pending.
 
 ## Confidence
 
-`low` / `medium` / `high`: how sure the triager is about the proposed labels and action. **Use `low` liberally.** A wrong `high`-confidence call that a human rubber-stamps is worse than an honest `low` that gets a second look. When no observed label fits, leave the proposal empty, explain the gap in `reason`, or use `escalate-maintainer` when a specific human judgment is needed.
+`low` / `medium` / `high`: how sure the triager is about the proposed labels and action. **Use `low` liberally.** A wrong `high`-confidence call that a human rubber-stamps is worse than an honest `low` that gets a second look. When no observed label fits, leave the proposal empty and explain the gap in `reason`. When human judgment is needed, state the specific question in `agent_notes` and choose the concrete operation that would follow that judgment, or `no-action-needed` if no write is justified yet.
 
 ## What good triage looks like
 

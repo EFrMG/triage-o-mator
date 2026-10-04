@@ -40,7 +40,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import LEDGER_PATH, REPO, TRIAGE_DEFAULTS, has_decision, here, load_jsonl, load_ledger, load_taxonomy, now_iso, save_ledger
+from _triage import LEDGER_PATH, REPO, TRIAGE_DEFAULTS, action_operation, has_decision, here, load_jsonl, load_ledger, load_taxonomy, now_iso, save_ledger
 from _storage import locked
 
 REQUIRED = {"number", "kind", "action"}
@@ -286,6 +286,8 @@ def main():
 
             if d["action"] not in valid_actions:
                 warnings.append(f"#{d['number']}: unrecognized action {d['action']!r}")
+            elif not action_operation(taxonomy, d["action"]):
+                warnings.append(f"#{d['number']}: action {d['action']!r} has no GitHub operation in taxonomy.json")
 
             desired_labels = rec.get("proposed_labels", [])
             if "proposed_labels" in d:

@@ -339,7 +339,7 @@ func (m *model) refreshActiveList() {
 
 func (m model) tabItems(idx int) []Item {
 	if idx != untriagedTab {
-		return tabs[idx].Filter(m.items)
+		return tabs[idx].Filter(m.items, m.taxonomy)
 	}
 
 	items := m.items

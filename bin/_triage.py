@@ -116,6 +116,25 @@ def load_taxonomy():
     return json.loads(TAXONOMY_PATH.read_text())
 
 
+def action_operation(taxonomy, action):
+    """Resolve a local action title to a GitHub write type, including older install defaults."""
+    operations = taxonomy.get("action_operations", {})
+    if action in operations:
+        operation = operations[action]
+        return operation if operation in ("label", "comment", "close", "reopen", "none") else ""
+
+    if action == "label-only":
+        return "label"
+    if action == "comment-request-info":
+        return "comment"
+    if action in ("comment-explain-close", "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved"):
+        return "close"
+    if action == "no-action-needed":
+        return "none"
+
+    return ""
+
+
 def load_jsonl(path):
     if not path.exists():
         return []

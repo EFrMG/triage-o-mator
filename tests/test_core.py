@@ -256,13 +256,15 @@ print(json.dumps(label))
         self.assertEqual(len(json.loads(taxonomy_path.read_text())["label_catalog"]["labels"]), 2)
 
         before = len(self.calls())
-        self.json_cli("taxonomy-settings", "create-action", "--expected-repo", "owner/repo", "--name", "ask-review", "--description", "Ask a maintainer")
-        self.json_cli("taxonomy-settings", "update-action", "--expected-repo", "owner/repo", "--action", "ask-review", "--expected", "Ask a maintainer", "--name", "request-review", "--description", "Ask a maintainer to review")
+        self.json_cli("taxonomy-settings", "create-action", "--expected-repo", "owner/repo", "--name", "ask-review", "--description", "Ask a maintainer", "--operation", "comment")
+        self.run_cli("taxonomy-settings", "update-action", "--expected-repo", "owner/repo", "--action", "ask-review", "--expected", "Ask a maintainer", "--expected-operation", "close", "--name", "request-review", "--description", "Ask a maintainer to review", "--operation", "comment", ok=False)
+        self.json_cli("taxonomy-settings", "update-action", "--expected-repo", "owner/repo", "--action", "ask-review", "--expected", "Ask a maintainer", "--expected-operation", "comment", "--name", "request-review", "--description", "Ask a maintainer to review", "--operation", "comment")
         self.assertEqual(len(self.calls()), before)
         saved = json.loads(taxonomy_path.read_text())
         self.assertIn("request-review", saved["actions"])
         self.assertNotIn("ask-review", saved["actions"])
         self.assertEqual(saved["action_guidance"]["request-review"], "Ask a maintainer to review")
+        self.assertEqual(saved["action_operations"]["request-review"], "comment")
 
 
 class LabelApplicationTests(Workspace):

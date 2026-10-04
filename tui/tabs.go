@@ -6,7 +6,7 @@ import "sort"
 // It filters mirror bin/report's sections exactly so the TUI's counts and the markdown report always agree.
 type Tab struct {
 	Name   string
-	Filter func([]Item) []Item
+	Filter func([]Item, Taxonomy) []Item
 }
 
 func byCreatedAtAsc(items []Item) []Item {
@@ -65,8 +65,8 @@ const (
 )
 
 var tabs = []Tab{
-	{Name: "Untriaged", Filter: untriagedOpen},
-	{Name: "Pending Review", Filter: func(items []Item) []Item {
+	{Name: "Untriaged", Filter: func(items []Item, _ Taxonomy) []Item { return untriagedOpen(items) }},
+	{Name: "Pending Review", Filter: func(items []Item, _ Taxonomy) []Item {
 		var out []Item
 		for _, it := range openOnly(items) {
 			if it.PendingReview() {
@@ -76,7 +76,7 @@ var tabs = []Tab{
 
 		return byCreatedAtAsc(out)
 	}},
-	{Name: "Merge-Ready PRs", Filter: func(items []Item) []Item {
+	{Name: "Merge-Ready PRs", Filter: func(items []Item, _ Taxonomy) []Item {
 		var out []Item
 		for _, it := range openOnly(items) {
 			if it.MergeReadyHighConfidence() {
@@ -86,17 +86,17 @@ var tabs = []Tab{
 
 		return byCreatedAtAsc(out)
 	}},
-	{Name: "Close Candidates", Filter: func(items []Item) []Item {
+	{Name: "Close Candidates", Filter: func(items []Item, taxonomy Taxonomy) []Item {
 		var out []Item
 		for _, it := range openOnly(items) {
-			if it.CloseCandidate() {
+			if it.CloseCandidate(taxonomy) {
 				out = append(out, it)
 			}
 		}
 
 		return byCreatedAtAsc(out)
 	}},
-	{Name: "All Items", Filter: func(items []Item) []Item {
+	{Name: "All Items", Filter: func(items []Item, _ Taxonomy) []Item {
 		return byCreatedAtAsc(items)
 	}},
 }

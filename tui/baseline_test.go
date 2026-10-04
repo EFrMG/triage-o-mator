@@ -164,6 +164,18 @@ func TestBaselineInstallRootAndRepoBoundary(t *testing.T) {
 func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	root := baselineRoot(t)
 	m := baselineModel(t, root)
+	for _, action := range m.taxonomy.Actions {
+		if !slices.Contains(actionOperations, m.taxonomy.OperationFor(action)) {
+			t.Fatalf("default action %q has no supported GitHub operation", action)
+		}
+	}
+	if slices.Contains(m.taxonomy.Actions, "escalate-maintainer") || slices.Contains(m.taxonomy.Actions, "approve-merge-candidate") {
+		t.Fatal("default action list still contains advice rather than a GitHub operation")
+	}
+	custom := Taxonomy{Actions: []string{"request logs", "archive", "escalate-maintainer"}, ActionOperations: map[string]string{"request logs": "comment", "archive": "close"}}
+	if !slices.Equal(custom.SelectableActions(), custom.Actions[:2]) || !(Item{Action: "archive"}).CloseCandidate(custom) || (Item{Action: "request logs"}).CloseCandidate(custom) {
+		t.Fatal("custom titles did not retain their concrete GitHub operations")
+	}
 	m.sidebar.selected = settingsIndex
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	menu := ansi.Strip(m.settingsView())
@@ -271,13 +283,19 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	}
 	m.settings.editor.title.SetValue("request-review")
 	m.settings.editor.description.SetValue("Ask a maintainer to review")
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.settings.editor.operation != "comment" {
+		t.Fatal("action editor did not select a GitHub operation")
+	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd == nil || !m.settings.busy {
 		t.Fatal("new action was not sent to the settings script")
 	}
 	m = baselineSend(m, cmd().(settingsDoneMsg))
-	if m.settings.editor != nil || m.taxonomy.ActionGuidance["request-review"] != "Ask a maintainer to review" {
+	if m.settings.editor != nil || m.taxonomy.ActionGuidance["request-review"] != "Ask a maintainer to review" || m.taxonomy.ActionOperations["request-review"] != "comment" {
 		t.Fatal("new action was not saved and reloaded")
 	}
 

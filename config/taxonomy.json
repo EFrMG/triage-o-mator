@@ -32,16 +32,27 @@
   "actions": [
     "label-only",
     "comment-request-info",
-    "comment-explain-close",
+    "comment-feedback",
     "close-duplicate",
     "close-stale",
     "close-out-of-scope",
     "close-resolved",
-    "approve-merge-candidate",
-    "request-changes",
-    "escalate-maintainer",
+    "close-with-explanation",
+    "reopen-with-explanation",
     "no-action-needed"
   ],
+  "action_operations": {
+    "label-only": "label",
+    "comment-request-info": "comment",
+    "comment-feedback": "comment",
+    "close-duplicate": "close",
+    "close-stale": "close",
+    "close-out-of-scope": "close",
+    "close-resolved": "close",
+    "close-with-explanation": "close",
+    "reopen-with-explanation": "reopen",
+    "no-action-needed": "none"
+  },
   "action_guidance": {},
   "confidence": [
     "low",

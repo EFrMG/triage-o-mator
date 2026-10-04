@@ -72,10 +72,10 @@ Only ever GET requests, as the rest of this tooling does.
 
 Use only labels actually present in this repository's observed `label_catalog`, and actions in `config/taxonomy.json`. The following names are examples when the repository has them:
 
-- `merge-ready` + `approve-merge-candidate`: you read the whole diff, found nothing blocking, the scope is focused and the checks above pass. Use `high` only for small diffs with no safety-sensitive changes.
-- `trivial` + `approve-merge-candidate`: typo-, formatting- or lint-only.
-- `needs-revision` + `request-changes`: good direction, but it has blocking findings. The notes list them.
-- `needs-maintainer-call` + `escalate-maintainer`: the code may be fine, but it makes a design or scope decision (new default, new dependency, new user-facing behaviour). State the decision as one question.
+- `merge-ready` + `label-only` when that label is missing, or `no-action-needed` when it is already present: you read the whole diff, found nothing blocking, the scope is focused and the checks above pass. Put the merge recommendation in `agent_notes`; the TUI does not merge PRs. Use `high` only for small diffs with no safety-sensitive changes.
+- `trivial` + `label-only` when that label is missing, or `no-action-needed` when it is already present: typo-, formatting- or lint-only.
+- `needs-revision` + `comment-feedback`: good direction, but it has blocking findings that can be stated in a conversation comment. The notes list them. This is not a formal GitHub review.
+- `needs-maintainer-call` + `no-action-needed`: the code may be fine, but it makes a design or scope decision (new default, new dependency, new user-facing behaviour). State the decision as one question in `agent_notes` before proposing any write.
 - `duplicate-pr`, `stale`, `out-of-scope`, `invalid`: as the taxonomy defines them.
 
 ## 6. Write the review into `agent_notes`

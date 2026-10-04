@@ -73,13 +73,8 @@ func (i Item) MergeReadyHighConfidence() bool {
 	return (i.Category == "merge-ready" || slices.Contains(i.ProposedLabels, "merge-ready")) && i.Confidence == "high" && !i.Reviewed
 }
 
-func (i Item) CloseCandidate() bool {
-	switch i.Action {
-	case "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved":
-		return !i.Reviewed
-	}
-
-	return false
+func (i Item) CloseCandidate(taxonomy Taxonomy) bool {
+	return !i.Reviewed && taxonomy.OperationFor(i.Action) == "close"
 }
 
 // LoadLedger reads repo's ledger, data/<owner>/<repo>/ledger.jsonl.

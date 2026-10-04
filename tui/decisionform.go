@@ -79,7 +79,7 @@ func newDecisionForm(tax Taxonomy, repo string) decisionForm {
 func (f *decisionForm) SetTaxonomy(tax Taxonomy) {
 	action, confidence := f.Action(), f.Confidence()
 	f.taxonomy = tax
-	f.actionIdx = indexOrZero(tax.Actions, action)
+	f.actionIdx = indexOrZero(tax.SelectableActions(), action)
 	f.confidenceIdx = indexOrZero(tax.Confidence, confidence)
 	if action == "" {
 		f.actionIdx = -1
@@ -87,7 +87,7 @@ func (f *decisionForm) SetTaxonomy(tax Taxonomy) {
 	if confidence == "" {
 		f.confidenceIdx = -1
 	}
-	f.badAction = unlisted(tax.Actions, action)
+	f.badAction = unlisted(tax.SelectableActions(), action)
 	f.badConfidence = unlisted(tax.Confidence, confidence)
 	f.badLabels = f.unlistedLabels()
 }
@@ -157,7 +157,7 @@ func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 func (f *decisionForm) ApplyProposal(p proposal) {
 	f.legacyCategory = p.Category
 	f.proposedLabels = slices.Clone(p.ProposedLabels)
-	f.actionIdx = indexOrZero(f.taxonomy.Actions, p.Action)
+	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), p.Action)
 	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, p.Confidence)
 
 	if p.Action == "" {
@@ -170,7 +170,7 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 
 	f.reason.SetValue(p.Reason)
 	f.proposalNotes = p.AgentNotes
-	f.badLabels, f.badAction = f.unlistedLabels(), unlisted(f.taxonomy.Actions, p.Action)
+	f.badLabels, f.badAction = f.unlistedLabels(), unlisted(f.taxonomy.SelectableActions(), p.Action)
 	f.badConfidence = unlisted(f.taxonomy.Confidence, p.Confidence)
 	f.touched = true
 	f.proposed = true
@@ -178,7 +178,7 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 	f.proposalSnapshot = f.Snapshot()
 }
 
-// MarkDuplicate prefills a matching GitHub label when available and the close-duplicate action, leaving confidence for the reviewer to set.
+// MarkDuplicate prefills a matching GitHub label and a close operation, leaving confidence for the reviewer to set.
 func (f *decisionForm) MarkDuplicate(number int, title string) error {
 	label := "duplicate"
 	if f.kind == "pr" {
@@ -186,14 +186,22 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 	}
 
 	act := -1
-	for i, a := range f.taxonomy.Actions {
-		if a == "close-duplicate" {
+	for i, a := range f.taxonomy.SelectableActions() {
+		if a == "close-duplicate" && f.taxonomy.OperationFor(a) == "close" {
 			act = i
+		}
+	}
+	if act < 0 {
+		for i, a := range f.taxonomy.SelectableActions() {
+			if f.taxonomy.OperationFor(a) == "close" {
+				act = i
+				break
+			}
 		}
 	}
 
 	if act < 0 {
-		return fmt.Errorf("config/taxonomy.json has no \"close-duplicate\" action")
+		return fmt.Errorf("config/taxonomy.json has no close action")
 	}
 
 	if slices.Contains(f.labelOptions(), label) && !slices.Contains(f.proposedLabels, label) {
@@ -215,7 +223,7 @@ func (f *decisionForm) LoadItem(it Item) {
 	f.kind = it.Kind
 	f.legacyCategory = it.Category
 	f.proposedLabels = slices.Clone(it.ProposedLabels)
-	f.actionIdx = indexOrZero(f.taxonomy.Actions, it.Action)
+	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), it.Action)
 	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, it.Confidence)
 	hasDecision := !it.Untriaged() || it.Confidence != "" || it.Reason != "" || it.Reviewed
 	if hasDecision {
@@ -228,7 +236,7 @@ func (f *decisionForm) LoadItem(it Item) {
 		}
 	}
 
-	f.badLabels, f.badAction, f.badConfidence = f.unlistedLabels(), unlisted(f.taxonomy.Actions, it.Action), unlisted(f.taxonomy.Confidence, it.Confidence)
+	f.badLabels, f.badAction, f.badConfidence = f.unlistedLabels(), unlisted(f.taxonomy.SelectableActions(), it.Action), unlisted(f.taxonomy.Confidence, it.Confidence)
 	f.reason.SetValue(it.Reason)
 	f.focused = fieldContent
 	f.dirty = false
@@ -326,7 +334,7 @@ func (f decisionForm) Action() string {
 		return ""
 	}
 
-	if opts := f.taxonomy.Actions; len(opts) > 0 {
+	if opts := f.taxonomy.SelectableActions(); len(opts) > 0 {
 		return opts[f.actionIdx%len(opts)]
 	}
 
@@ -385,7 +393,7 @@ func (f decisionForm) options() ([]string, int) {
 	case fieldLabels:
 		return f.labelOptions(), 0
 	case fieldAction:
-		return f.taxonomy.Actions, f.actionIdx
+		return f.taxonomy.SelectableActions(), f.actionIdx
 	case fieldConfidence:
 		return f.taxonomy.Confidence, f.confidenceIdx
 	}
@@ -464,7 +472,7 @@ func (f *decisionForm) CycleValue(delta int) {
 	switch f.focused {
 	case fieldAction:
 		f.badAction = ""
-		n := len(f.taxonomy.Actions)
+		n := len(f.taxonomy.SelectableActions())
 		f.actionIdx = ((f.actionIdx+delta)%n + n) % n
 	case fieldConfidence:
 		f.badConfidence = ""

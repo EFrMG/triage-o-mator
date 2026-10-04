@@ -42,7 +42,11 @@ func (m model) breadcrumb() []string {
 			crumbs = append(crumbs, "Actions")
 		}
 		if m.settings.editor != nil {
-			crumbs = append(crumbs, m.settings.editor.row.name)
+			name := m.settings.editor.row.name
+			if m.settings.editor.creating {
+				name = "New"
+			}
+			crumbs = append(crumbs, name)
 		}
 		return crumbs
 	}

@@ -499,6 +499,7 @@ func (m *model) layout() {
 	m.layoutComment()
 	m.layoutGroupNote()
 	m.layoutGroupEdit()
+	m.layoutSettingsEditor()
 	listW, _ := m.panelWidths()
 	if m.listReady {
 		m.list.SetSize(listW, maxInt(m.mainHeight()-listHeaderHeight, 1))
@@ -691,8 +692,11 @@ func (m model) viewContent() string {
 	if m.groups.open && m.groups.editing == "notes" {
 		body = m.groupNoteOverlay(body)
 	}
-	if m.groups.open && m.groups.editing == "edit" {
+	if m.groups.open && (m.groups.editing == "edit" || m.groups.editing == "new") {
 		body = m.groupEditOverlay(body)
+	}
+	if m.settings.open && m.settings.editor != nil {
+		body = m.settingsOverlay(body)
 	}
 	if m.comment.open {
 		body = m.commentOverlay(body)
@@ -785,7 +789,7 @@ func (m model) needsResize() bool {
 }
 
 func (m model) minimumHeight() int {
-	if m.comment.open || m.groups.editing == "notes" || m.groups.editing == "edit" {
+	if m.comment.open || m.groups.editing == "notes" || m.groups.editing == "edit" || m.groups.editing == "new" {
 		return maxInt(24, lipgloss.Height(m.footerView())+17)
 	}
 
@@ -794,8 +798,8 @@ func (m model) minimumHeight() int {
 
 // switchBusy gates legacy work without cancellation/reply identities. Explicit evidence/corpus processes are stopped on switch and their stale replies are rejected. Unsaved drafts still require discard confirmation.
 func (m model) switchBusy() string {
-	if m.settings.busy || m.settings.editor != nil && m.settings.editor.text.Value() != m.settings.editor.original {
-		return "save or discard the Settings guidance draft first."
+	if m.settings.busy || m.settingsEditorChanged() {
+		return "save or discard the Settings draft first."
 	}
 	if m.refreshing || m.groups.busy || m.batches.busy || m.dups.busy || m.detail.loading || m.pendingApply > 0 {
 		return "wait for the current fetch or save to finish."

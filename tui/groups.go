@@ -233,19 +233,16 @@ func (m model) selectedGroup() *Group {
 	return &m.groups.records[m.groups.selected]
 }
 
-func (m *model) editGroup(mode string) {
-	if g := m.selectedGroup(); g != nil && mode != "new" {
+func (m *model) editGroup() {
+	if g := m.selectedGroup(); g != nil {
 		m.lastGroupID = g.ID
 	}
 
-	values := []string{"", "", ""}
-	if mode == "add" {
-		values = []string{""}
-		if group := m.selectedGroup(); group != nil {
-			for _, member := range group.Members {
-				if len(m.groups.sources) == 1 && member.Key() == m.groups.sources[0] {
-					values[0] = member.Notes
-				}
+	values := []string{""}
+	if group := m.selectedGroup(); group != nil {
+		for _, member := range group.Members {
+			if len(m.groups.sources) == 1 && member.Key() == m.groups.sources[0] {
+				values[0] = member.Notes
 			}
 		}
 	}
@@ -264,38 +261,23 @@ func (m *model) editGroup(mode string) {
 	}
 
 	m.groups.inputs[0].Focus()
-	m.groups.editing, m.groups.field = mode, 0
+	m.groups.editing, m.groups.field = "add", 0
 }
 
 func (m model) saveGroupForm() (tea.Model, tea.Cmd) {
 	g := m.selectedGroup()
-	var args []string
-
-	switch m.groups.editing {
-	case "new":
-		args = []string{"create"}
-		assignee := m.groups.inputs[len(m.groups.inputs)-1].Value()
-		args = append(args, "--title", m.groups.inputs[0].Value(), "--description", m.groups.inputs[1].Value(), "--assignee", assignee)
-
-	case "add":
-		if g == nil {
-			return m, nil
-		}
-
-		targets := m.groups.sources
-		if len(targets) == 0 {
-			return m, nil
-		}
-
-		m.groups.busy = true
-
-		return m, groupBulkCmd(m.installRoot, *g, "add", targets, m.groups.inputs[0].Value(), m.reviewer)
+	if m.groups.editing != "add" || g == nil {
+		return m, nil
 	}
 
-	args = append(args, "--by", m.reviewer)
+	targets := m.groups.sources
+	if len(targets) == 0 {
+		return m, nil
+	}
+
 	m.groups.busy = true
 
-	return m, groupsCmd(m.installRoot, args...)
+	return m, groupBulkCmd(m.installRoot, *g, "add", targets, m.groups.inputs[0].Value(), m.reviewer)
 }
 
 // groupStatuses are the values bin/group accepts, in the order the editor's Status field cycles through them.
@@ -313,7 +295,7 @@ func (m model) handleGroupEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.groups.editing == "notes" {
 		return m.handleGroupNoteKey(msg)
 	}
-	if m.groups.editing == "edit" {
+	if m.groups.editing == "edit" || m.groups.editing == "new" {
 		return m.handleGroupEditKey(msg)
 	}
 
@@ -387,7 +369,7 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Refresh), key.Matches(msg, keys.RefreshFull):
 		return m.startRefresh(key.Matches(msg, keys.RefreshFull))
 	case key.Matches(msg, keys.New):
-		m.editGroup("new")
+		return m.openGroupCreate()
 	case key.Matches(msg, keys.Edit):
 		// e edits the selection: a member's notes inside a group, the group itself in the list.
 		if m.groups.detail && g != nil && len(g.Members) > 0 {
@@ -398,7 +380,7 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Group):
 		// b means "put into a group": here, the item Groups was opened from goes into the selected group.
 		if g != nil && len(m.groups.sources) > 0 {
-			m.editGroup("add")
+			m.editGroup()
 		} else {
 			m.status = "Open or tick items before adding them to a group."
 		}
@@ -577,7 +559,7 @@ func (m model) groupsView() string {
 	switch g := m.selectedGroup(); {
 	case m.groups.editing == "notes" && m.groups.detail && g != nil:
 		return m.withSidebar(m.groupMembersView(*g, w, h), true)
-	case m.groups.editing != "" && m.groups.editing != "edit":
+	case m.groups.editing == "add":
 		return m.withSidebar(inset(m.groupEditorView(w)), true)
 	case m.groups.detail && g != nil:
 		return m.withSidebar(m.groupMembersView(*g, w, h), true)
@@ -721,17 +703,12 @@ func (m model) groupMembersView(g Group, w, h int) string {
 	return top + "\n\n" + list
 }
 
-// groupEditorView is the new/add form; editing an existing group uses the floating editor.
+// groupEditorView is the add-members form; new and existing groups use the floating editor.
 func (m model) groupEditorView(w int) string {
-	labels := []string{"Title", "Description", "Assignee"}
-	title, subtitle := "New group", "a named set of issues and PRs to hand to maintainers together"
-	switch m.groups.editing {
-	case "add":
-		labels = []string{"Notes"}
-		title, subtitle = "Add to group", "why these items belong here, for whoever reads the group"
-	}
+	labels := []string{"Notes"}
+	title, subtitle := "Add to group", "why these items belong here, for whoever reads the group"
 
-	if g := m.selectedGroup(); g != nil && m.groups.editing != "new" {
+	if g := m.selectedGroup(); g != nil {
 		title += ": " + g.Title
 	}
 

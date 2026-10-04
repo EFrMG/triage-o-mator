@@ -50,6 +50,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishCorpus(msg)
 	case settingsDoneMsg:
 		return m.finishSettings(msg)
+	case settingsPreviewMsg:
+		return m.finishSettingsPreview(msg)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true
@@ -328,7 +330,15 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		var cmd tea.Cmd
-		m.settings.editor.text, cmd = m.settings.editor.text.Update(msg)
+		if m.settings.editor.previewing {
+			return m, nil
+		}
+		if m.settings.editor.field == 0 {
+			m.settings.editor.title, cmd = m.settings.editor.title.Update(msg)
+		} else {
+			m.settings.editor.description, cmd = m.settings.editor.description.Update(msg)
+		}
+		m.settings.editor.previewHash = ""
 		return m, cmd
 	case m.themePicker.open:
 		if !m.themePicker.searching {
@@ -346,7 +356,7 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		if m.groups.busy || m.groups.editing == "" {
 			return m, nil
 		}
-		if m.groups.editing == "edit" {
+		if m.groups.editing == "edit" || m.groups.editing == "new" {
 			return m.pasteGroupEdit(msg)
 		}
 		if m.groups.editing == "notes" {

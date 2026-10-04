@@ -300,7 +300,7 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.groups.open && (m.groups.editing == "notes" || m.groups.editing == "edit") {
+	if m.groups.open && (m.groups.editing == "notes" || m.groups.editing == "edit" || m.groups.editing == "new") {
 		return m, nil
 	}
 	if m.themePicker.open {

@@ -2,7 +2,7 @@
 
 `taxonomy.json` also holds `label_catalog`, the GitHub label definitions observed for the selected repository. Its `observed_at` time identifies the last successful online read; `pending` means no label definitions have been read for that repository. `guidance` is optional local advice, preserved by GitHub label ID when a label is renamed. Removed labels move to `retired` with their history intact. `label_catalog_archive` keeps prior repositories' catalogs if this install is pointed elsewhere and back. Running `bin/label-catalog sync` reads GitHub labels and updates this catalog without changing labels on GitHub. The issue/PR categories and actions below remain the current decision vocabulary until the multi-selection migration.
 
-`action_guidance` in the JSON holds optional local advice for the current action names. The TUI's Settings menu edits both kinds of guidance through `bin/taxonomy-settings` without changing GitHub labels or applying an action to an item.
+`action_guidance` in the JSON holds descriptions for the current action names. The TUI's Settings → Actions menu creates and edits action titles and descriptions through `bin/taxonomy-settings`; it does not apply an action to an item. Settings → Labels previews and explicitly changes GitHub label names and descriptions through `bin/label-definitions`, then refreshes the saved catalog. The older per-label local `guidance` is retained by label ID but is not edited in this menu.
 
 This is the categorization scheme every batch is judged against.
 

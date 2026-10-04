@@ -196,6 +196,75 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(json.loads(taxonomy_path.read_text())["label_catalog"]["labels"][1]["guidance"], "Keep this history")
 
 
+class LabelDefinitionTests(Workspace):
+    def test_exact_github_preview_and_local_action_changes(self):
+        (self.mock / "labels.json").write_text(json.dumps([dict(id=7, name="bug", description="Old", color="ff0000")]))
+        (self.mock / "gh").write_text('''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+root = Path(os.environ["FAKE_GH_DIR"])
+args = sys.argv[1:]
+with (root / "calls.jsonl").open("a") as out:
+    out.write(json.dumps(args) + "\\n")
+labels = json.loads((root / "labels.json").read_text())
+method = args[args.index("--method") + 1]
+if method == "GET" and "--paginate" in args:
+    for label in labels:
+        print(json.dumps(label))
+    sys.exit(0)
+if method not in ("POST", "PATCH") or args[0] != "api" or "--input" not in args:
+    sys.exit("unexpected GitHub operation")
+body = json.load(sys.stdin)
+if method == "POST":
+    label = dict(id=max([row["id"] for row in labels], default=0) + 1, name=body["name"], description=body["description"], color=body["color"])
+    labels.append(label)
+else:
+    old = args[args.index("PATCH") + 1].rsplit("/", 1)[-1]
+    label = next(row for row in labels if row["name"] == old)
+    label.update(name=body["new_name"], description=body["description"])
+(root / "labels.json").write_text(json.dumps(labels))
+print(json.dumps(label))
+''')
+        (self.mock / "gh").chmod(0o755)
+
+        taxonomy_path = self.root / "config/taxonomy.json"
+        taxonomy = json.loads(taxonomy_path.read_text())
+        taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Old", color="ff0000", guidance="Keep the old advice")], retired=[])
+        taxonomy_path.write_text(json.dumps(taxonomy))
+
+        args = ("--expected-repo", "owner/repo", "--label-id", "7", "--expected-name", "bug", "--expected-description", "Old", "--name", "defect", "--description", "New")
+        plan = self.json_cli("label-definitions", *args)
+        self.assertEqual(plan["repository"], "owner/repo")
+        self.assertEqual(plan["current"]["name"], "bug")
+        self.assertEqual(plan["proposed"]["color"], "ff0000")
+        self.assertFalse(any("PATCH" in call or "POST" in call for call in self.calls()))
+
+        (self.mock / "labels.json").write_text(json.dumps([dict(id=7, name="bug", description="Someone changed it", color="ff0000")]))
+        self.run_cli("label-definitions", *args, "--apply", "--preview-sha256", plan["preview_sha256"], ok=False)
+        self.assertFalse(any("PATCH" in call or "POST" in call for call in self.calls()))
+        (self.mock / "labels.json").write_text(json.dumps([dict(id=7, name="bug", description="Old", color="ff0000")]))
+
+        self.json_cli("label-definitions", *args, "--apply", "--preview-sha256", plan["preview_sha256"])
+        catalog = json.loads(taxonomy_path.read_text())["label_catalog"]
+        self.assertEqual(catalog["labels"][0]["name"], "defect")
+        self.assertEqual(catalog["labels"][0]["guidance"], "Keep the old advice")
+
+        create = ("--expected-repo", "owner/repo", "--name", "triage", "--description", "Ready to triage")
+        preview = self.json_cli("label-definitions", *create)
+        self.assertEqual(preview["proposed"]["color"], "ededed")
+        self.json_cli("label-definitions", *create, "--apply", "--preview-sha256", preview["preview_sha256"])
+        self.assertEqual(len(json.loads(taxonomy_path.read_text())["label_catalog"]["labels"]), 2)
+
+        before = len(self.calls())
+        self.json_cli("taxonomy-settings", "create-action", "--expected-repo", "owner/repo", "--name", "ask-review", "--description", "Ask a maintainer")
+        self.json_cli("taxonomy-settings", "update-action", "--expected-repo", "owner/repo", "--action", "ask-review", "--expected", "Ask a maintainer", "--name", "request-review", "--description", "Ask a maintainer to review")
+        self.assertEqual(len(self.calls()), before)
+        saved = json.loads(taxonomy_path.read_text())
+        self.assertIn("request-review", saved["actions"])
+        self.assertNotIn("ask-review", saved["actions"])
+        self.assertEqual(saved["action_guidance"]["request-review"], "Ask a maintainer to review")
+
+
 class LedgerTests(Workspace):
     def setUp(self):
         super().setUp()

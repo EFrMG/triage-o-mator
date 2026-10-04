@@ -110,14 +110,18 @@ func (m model) contextFooterGroups() []footerGroup {
 			return []footerGroup{group("Member note", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
 		}
 		return []footerGroup{group("Member note", hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
-	case m.groups.open && m.groups.editing == "edit":
+	case m.groups.open && (m.groups.editing == "edit" || m.groups.editing == "new"):
 		if m.groups.busy {
 			return []footerGroup{group("Edit group", hint{"", "working…"})}
 		}
 		if m.groups.edit.previewing {
 			return []footerGroup{group("Edit group", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})}
 		}
-		edit := group("Edit group", hint{"Tab/Shift-Tab", "field"}, hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})
+		title := "Edit group"
+		if m.groups.editing == "new" {
+			title = "New group"
+		}
+		edit := group(title, hint{"Tab/Shift-Tab", "field"}, hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})
 		if m.onGroupStatusField() {
 			edit.hints = append(edit.hints, hint{"←/→", "change status"})
 		} else {
@@ -130,9 +134,20 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{group("Error", bind("scroll", keys.Down, keys.Up), bind("page", keys.HalfDown, keys.HalfUp)), group("Navigation", bind("close", keys.Back), bind("exit", keys.ForceQuit))}
 	case m.settings.open && m.settings.editor != nil:
 		if m.settings.busy {
-			return []footerGroup{group("Settings", hint{"", "saving guidance…"})}
+			return []footerGroup{group("Settings", hint{"", "working…"})}
 		}
-		return []footerGroup{group("Guidance", hint{"Ctrl-S", "save"}, hint{"Esc", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
+		label := "Edit setting"
+		if m.settings.editor.creating {
+			label = "New setting"
+		}
+		save := "save"
+		if m.settings.editor.row.kind == "label" {
+			save = "preview GitHub change"
+			if m.settings.editor.previewHash != "" {
+				save = "confirm GitHub change"
+			}
+		}
+		return []footerGroup{group(label, hint{"Tab/Shift-Tab", "field"}, hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", save}, hint{"Esc", "discard"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.settings.open:
 		if m.settings.busy {
 			return []footerGroup{group("Settings", hint{"", "reading labels…"})}
@@ -140,7 +155,7 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.settings.section == "" {
 			return []footerGroup{group("Settings", hint{"j/k", "select"}, hint{"Enter", "open"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}
-		settings := group("Settings", hint{"j/k", "select"}, hint{"Enter/e", "edit guidance"})
+		settings := group("Settings", hint{"j/k", "select"}, hint{"n", "new"}, hint{"Enter/e", "edit"})
 		if m.settings.section == "label" {
 			settings.hints = append(settings.hints, hint{"r", "sync labels"})
 		}

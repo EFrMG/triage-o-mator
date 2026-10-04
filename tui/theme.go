@@ -297,10 +297,14 @@ func (m *model) restyle() {
 	for i := range m.groups.inputs {
 		themeInput(&m.groups.inputs[i])
 	}
-	if m.groups.editing == "edit" {
+	if m.groups.editing == "edit" || m.groups.editing == "new" {
 		themeInput(&m.groups.edit.title)
 		themeTextarea(&m.groups.edit.description)
 		themeInput(&m.groups.edit.assignee)
+	}
+	if m.settings.editor != nil {
+		themeInput(&m.settings.editor.title)
+		themeTextarea(&m.settings.editor.description)
 	}
 
 	if m.listReady {

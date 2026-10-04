@@ -175,22 +175,45 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	}
 	m.taxonomy.LabelCatalog = LabelCatalog{Repository: m.repo, Status: "observed", Labels: []GitHubLabel{{ID: 1, Name: "bug", Description: "Something is broken"}}}
 	labels := strings.Split(ansi.Strip(m.settingsView()), "\n")
-	if len(labels) != m.mainHeight() || !strings.Contains(labels[len(labels)-1], "1 of 1 · Local guidance: None added") {
+	if len(labels) != m.mainHeight() || !strings.Contains(labels[len(labels)-1], "1 of 1") {
 		t.Fatalf("Labels summary at wrong position: lines=%d height=%d last=%q", len(labels), m.mainHeight(), labels[len(labels)-1])
 	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "e"})
+	if m.settings.editor == nil || !strings.Contains(ansi.Strip(m.viewContent()), "Edit label") {
+		t.Fatal("e did not open the floating label editor")
+	}
+	m.settings.editor.title.SetValue("defect")
+	m.settings.editor.description.SetValue("A reproducible defect")
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.settings.busy {
+		t.Fatal("label save did not request a GitHub preview")
+	}
+	plan := labelDefinitionPlan{Repository: m.repo, Operation: "edit", Current: &GitHubLabel{ID: 1, Name: "bug", Description: "Something is broken", Color: "ff0000"}, Proposed: GitHubLabel{Name: "defect", Description: "A reproducible defect", Color: "ff0000"}, PreviewSHA256: "reviewed-preview"}
+	m = baselineSend(m, settingsPreviewMsg{root: root, repo: m.repo, request: m.settings.request, name: "defect", description: "A reproducible defect", plan: plan})
+	if !m.settings.editor.previewing || !strings.Contains(ansi.Strip(m.viewContent()), "GitHub repository") {
+		t.Fatal("GitHub preview did not show the exact target in the floating editor")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.settings.busy {
+		t.Fatal("label confirmation did not require a separate save")
+	}
+	m.settings.busy = false
+	m.settings.editor = nil
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.settings.section != "action" || !strings.Contains(ansi.Strip(m.settingsView()), "No local guidance added") {
-		t.Fatal("Actions did not open their own guidance list")
+	if m.settings.section != "action" || !strings.Contains(ansi.Strip(m.settingsView()), "No description") {
+		t.Fatal("Actions did not open their own description list")
 	}
 
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.settings.editor == nil || m.settings.editor.row.kind != "action" {
 		t.Fatal("Settings did not open action guidance")
 	}
-	m.settings.editor.text.SetValue("Suggest only the needed labels")
-	next, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m.settings.editor.description.SetValue("Suggest only the needed labels")
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd == nil || !m.settings.busy || m.switchBusy() == "" {
 		t.Fatal("Settings save did not protect the draft and repository")
@@ -208,6 +231,22 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	m = baselineSend(m, stale)
 	if m.taxonomy.ActionGuidance["label-only"] != "Suggest only the needed labels" {
 		t.Fatal("stale Settings reply replaced the selected repository's guidance")
+	}
+
+	m = baselineSend(m, tea.KeyPressMsg{Text: "n"})
+	if m.settings.editor == nil || !m.settings.editor.creating || !strings.Contains(ansi.Strip(m.viewContent()), "New action") {
+		t.Fatal("n did not open the floating action editor")
+	}
+	m.settings.editor.title.SetValue("request-review")
+	m.settings.editor.description.SetValue("Ask a maintainer to review")
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.settings.busy {
+		t.Fatal("new action was not sent to the settings script")
+	}
+	m = baselineSend(m, cmd().(settingsDoneMsg))
+	if m.settings.editor != nil || m.taxonomy.ActionGuidance["request-review"] != "Ask a maintainer to review" {
+		t.Fatal("new action was not saved and reloaded")
 	}
 }
 
@@ -1531,6 +1570,22 @@ func TestGroupEditFloatingFieldsStayBoundedAndSave(t *testing.T) {
 	g = *m.selectedGroup()
 	if m.groups.editing != "" || g.Title != title || g.Description != description || g.Status != "ready" || g.Assignee != "maintainer" || g.UpdatedBy != "maintainer" {
 		t.Fatal("floating editor did not save all four fields with attribution")
+	}
+
+	m = baselineSend(m, tea.KeyPressMsg{Text: "n"})
+	if m.groups.editing != "new" || !strings.Contains(ansi.Strip(m.viewContent()), "New group") {
+		t.Fatal("n did not open the floating group creator")
+	}
+	m.groups.edit.title.SetValue("Follow-up")
+	m.groups.edit.description.SetValue("Collect related reports")
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.groups.busy {
+		t.Fatal("floating group creator did not call bin/group")
+	}
+	m = baselineSend(m, cmd().(groupsLoadedMsg))
+	if m.groups.editing != "" || len(m.groups.records) != 2 || m.selectedGroup().Title != "Follow-up" {
+		t.Fatal("floating group creator did not save and select the new group")
 	}
 }
 

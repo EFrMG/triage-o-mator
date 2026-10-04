@@ -1,24 +1,35 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
 type settingsRow struct {
-	kind, name, description, guidance string
-	id                                int
+	kind, name, description, color string
+	id                             int
 }
 
 type settingsEditor struct {
 	row            settingsRow
-	original       string
-	text           textarea.Model
+	creating       bool
+	field          int
+	title          textinput.Model
+	description    textarea.Model
+	preview        viewport.Model
+	previewing     bool
+	previewHash    string
+	plan           labelDefinitionPlan
 	confirmDiscard bool
 }
 
@@ -32,23 +43,38 @@ type settingsUI struct {
 }
 
 type settingsDoneMsg struct {
-	root, repo string
-	request    uint64
-	operation  string
-	taxonomy   Taxonomy
-	err        error
+	root, repo      string
+	request         uint64
+	operation, name string
+	taxonomy        Taxonomy
+	err             error
+}
+
+type settingsPreviewMsg struct {
+	root, repo, name, description string
+	request                       uint64
+	plan                          labelDefinitionPlan
+	err                           error
+}
+
+type labelDefinitionPlan struct {
+	Repository    string       `json:"repository"`
+	Operation     string       `json:"operation"`
+	Current       *GitHubLabel `json:"current"`
+	Proposed      GitHubLabel  `json:"proposed"`
+	PreviewSHA256 string       `json:"preview_sha256"`
 }
 
 func (m model) settingsRows() []settingsRow {
 	var rows []settingsRow
 	if catalog := m.taxonomy.LabelCatalog; m.settings.section == "label" && catalog.Repository == m.repo && catalog.Status == "observed" {
 		for _, label := range catalog.Labels {
-			rows = append(rows, settingsRow{kind: "label", id: label.ID, name: label.Name, description: label.Description, guidance: label.Guidance})
+			rows = append(rows, settingsRow{kind: "label", id: label.ID, name: label.Name, description: label.Description, color: label.Color})
 		}
 	}
 	if m.settings.section == "action" {
 		for _, action := range m.taxonomy.Actions {
-			rows = append(rows, settingsRow{kind: "action", name: action, guidance: m.taxonomy.ActionGuidance[action]})
+			rows = append(rows, settingsRow{kind: "action", name: action, description: m.taxonomy.ActionGuidance[action]})
 		}
 	}
 	return rows
@@ -89,8 +115,8 @@ func (m model) settingsView() string {
 	w, h := m.cardWidth(), m.mainHeight()
 	if m.settings.section == "" {
 		cards := [][2]string{
-			{"Labels", "View GitHub labels and edit local guidance"},
-			{"Actions", "View available actions and edit local guidance"},
+			{"Labels", "Create and edit GitHub label names and descriptions"},
+			{"Actions", "Create and edit local action titles and descriptions"},
 		}
 		return inset(titleBar("Settings", "", m.menuWidth())) + "\n\n" + cardList(cards, m.settings.menuSelected, w, h-2)
 	}
@@ -108,21 +134,11 @@ func (m model) settingsView() string {
 	}
 	view := inset(titleBar(title, state, m.menuWidth())) + "\n\n"
 
-	if editor := m.settings.editor; editor != nil {
-		target := sanitize(editor.row.kind + ": " + editor.row.name)
-		view += inset(ansi.Truncate(target, m.menuWidth(), "…")) + "\n"
-		if editor.row.description != "" {
-			view += inset(ansi.Wrap(sanitize(editor.row.description), m.menuWidth(), "")) + "\n"
-		}
-		view += "\n" + inset("Local guidance (optional advice for triage)") + "\n" + editor.text.View()
-		return view
-	}
-
 	rows := m.settingsRows()
 	if len(rows) == 0 {
 		message := "No actions configured."
 		if m.settings.section == "label" {
-			message = "No labels saved. Press r to read this repository's labels from GitHub."
+			message = "No labels saved. Press r to read GitHub labels, or n to create one."
 		}
 		return view + inset(message)
 	}
@@ -132,23 +148,12 @@ func (m model) settingsView() string {
 	for i := start; i < end; i++ {
 		row := rows[i]
 		summary := row.description
-		if row.kind == "action" {
-			summary = "Local guidance: " + row.guidance
-			if row.guidance == "" {
-				summary = "No local guidance added"
-			}
-		} else if summary == "" {
-			summary = "No GitHub description"
+		if summary == "" {
+			summary = "No description"
 		}
 		view += markedCard(sanitize(row.name), singleLine(sanitize(summary)), cardMark{}, i == m.settings.selected, w) + "\n"
 	}
-	selected := rows[m.settings.selected]
-	footer := fmt.Sprintf("%d of %d · Local guidance: ", m.settings.selected+1, len(rows))
-	if selected.guidance == "" {
-		footer += "None added"
-	} else {
-		footer += singleLine(sanitize(selected.guidance))
-	}
+	footer := fmt.Sprintf("%d of %d", m.settings.selected+1, len(rows))
 	footer = inset(mutedText(ansi.Truncate(footer, m.menuWidth(), "…")))
 	view = strings.TrimRight(view, "\n")
 	return view + strings.Repeat("\n", maxInt(h-ansiHeight(view), 1)) + footer
@@ -163,20 +168,30 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if editor := m.settings.editor; editor != nil {
 		switch msg.String() {
 		case "ctrl+s":
-			value := editor.text.Value()
-			if value == editor.original {
-				m.settings.editor = nil
-				m.status = "Guidance unchanged."
+			return m.saveSettingsEditor()
+		case "ctrl+p":
+			editor.previewing = !editor.previewing
+			if editor.previewing {
+				editor.title.Blur()
+				editor.description.Blur()
+				m.layoutSettingsEditor()
+				editor.preview.SetContent(m.settingsDraftPreview(editor.preview.Width()))
+				editor.preview.GotoTop()
 				return m, nil
 			}
-			m.settings.busy = true
-			m.settings.request++
-			m.status = "Saving local guidance…"
-			return m, settingsSaveCmd(m.installRoot, m.repo, m.settings.request, editor.row, editor.original, value)
+			return m, m.focusSettingsEditor()
+		case "tab", "shift+tab":
+			delta := 1
+			if msg.String() == "shift+tab" {
+				delta = -1
+			}
+			editor.previewing = false
+			editor.field = (editor.field + delta + 2) % 2
+			return m, m.focusSettingsEditor()
 		case "esc":
-			if editor.text.Value() != editor.original && !editor.confirmDiscard {
+			if m.settingsEditorChanged() && !editor.confirmDiscard {
 				editor.confirmDiscard = true
-				m.status = "Unsaved guidance. Esc again discards it; Ctrl-S saves."
+				m.status = "Unsaved changes. Esc again discards them; Ctrl-S saves."
 				return m, nil
 			}
 			m.settings.editor = nil
@@ -186,8 +201,18 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		editor.confirmDiscard = false
+		beforeTitle, beforeDescription := editor.title.Value(), editor.description.Value()
 		var cmd tea.Cmd
-		editor.text, cmd = editor.text.Update(msg)
+		if editor.previewing {
+			editor.preview, cmd = editor.preview.Update(msg)
+		} else if editor.field == 0 {
+			editor.title, cmd = editor.title.Update(msg)
+		} else {
+			editor.description, cmd = editor.description.Update(msg)
+		}
+		if editor.title.Value() != beforeTitle || editor.description.Value() != beforeDescription {
+			editor.previewHash = ""
+		}
 		return m, cmd
 	}
 
@@ -229,46 +254,212 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.settings.request++
 		m.status = "Reading GitHub labels…"
 		return m, settingsSyncCmd(m.installRoot, m.repo, m.settings.request)
-	case "enter", "l", "right", "e":
+	case "n":
+		if m.settings.section != "" {
+			return m.openSettingsEditor(settingsRow{kind: m.settings.section}, true)
+		}
+	case "enter", "l", "right":
 		if m.settings.section == "" {
 			m.settings.section = []string{"label", "action"}[m.settings.menuSelected]
 			m.settings.selected, m.settings.offset = 0, 0
 			return m, nil
 		}
-
-		rows := m.settingsRows()
-		if len(rows) == 0 {
+		return m.openSelectedSettingsEditor()
+	case "e":
+		if m.settings.section == "" {
 			return m, nil
 		}
-		row := rows[m.settings.selected]
-		text := textarea.New()
-		text.Placeholder = "Optional local guidance"
-		text.CharLimit = 4000
-		text.ShowLineNumbers = false
-		themeTextarea(&text)
-		text.SetWidth(maxInt(m.cardWidth()-2, 1))
-		text.SetHeight(maxInt(minInt(m.mainHeight()-8, 8), 3))
-		text.SetValue(row.guidance)
-		m.settings.editor = &settingsEditor{row: row, original: row.guidance, text: text}
-		return m, text.Focus()
+		return m.openSelectedSettingsEditor()
 	}
 	return m, nil
 }
 
-func settingsSaveCmd(root, repo string, request uint64, row settingsRow, original, value string) tea.Cmd {
+func (m model) openSelectedSettingsEditor() (tea.Model, tea.Cmd) {
+	rows := m.settingsRows()
+	if len(rows) == 0 {
+		return m, nil
+	}
+	return m.openSettingsEditor(rows[m.settings.selected], false)
+}
+
+func (m model) openSettingsEditor(row settingsRow, creating bool) (tea.Model, tea.Cmd) {
+	title := textinput.New()
+	title.Prompt = ""
+	title.CharLimit = 255
+	title.SetValue(row.name)
+	themeInput(&title)
+
+	description := textarea.New()
+	description.Placeholder = "Short description"
+	description.CharLimit = 4000
+	if row.kind == "label" {
+		description.CharLimit = 100
+	}
+	description.ShowLineNumbers = false
+	description.SetValue(row.description)
+	themeTextarea(&description)
+
+	m.settings.editor = &settingsEditor{row: row, creating: creating, title: title, description: description, preview: viewport.New()}
+	m.status = ""
+	m.layoutSettingsEditor()
+	return m, m.settings.editor.title.Focus()
+}
+
+func (m *model) focusSettingsEditor() tea.Cmd {
+	e := m.settings.editor
+	e.title.Blur()
+	e.description.Blur()
+	if e.previewing {
+		return nil
+	}
+	if e.field == 0 {
+		return e.title.Focus()
+	}
+	return e.description.Focus()
+}
+
+func (m model) settingsEditorChanged() bool {
+	e := m.settings.editor
+	return e != nil && (e.creating && (e.title.Value() != "" || e.description.Value() != "") || e.title.Value() != e.row.name || e.description.Value() != e.row.description)
+}
+
+func (m *model) layoutSettingsEditor() {
+	e := m.settings.editor
+	if e == nil {
+		return
+	}
+	width := maxInt(m.commentWidth()-4, 1)
+	e.title.SetWidth(width)
+	e.description.SetWidth(width)
+	e.description.SetHeight(maxInt(m.commentHeight()-8, 3))
+	resized := e.preview.Width() != width
+	e.preview.SetWidth(width)
+	e.preview.SetHeight(maxInt(m.commentHeight()-4, 3))
+	if resized && e.previewing {
+		offset := e.preview.YOffset()
+		e.preview.SetContent(m.settingsDraftPreview(width))
+		e.preview.SetYOffset(offset)
+	}
+}
+
+func (m model) settingsDraftPreview(width int) string {
+	e := m.settings.editor
+	lines := []string{"Title", wrapText(e.title.Value(), width), "", "Description", wrapText(orPlaceholder(e.description.Value(), "(none)"), width)}
+	if e.row.kind == "label" && e.previewHash != "" {
+		oldName, oldDescription := "(new label)", "(none)"
+		if e.plan.Current != nil {
+			oldName, oldDescription = e.plan.Current.Name, orPlaceholder(e.plan.Current.Description, "(none)")
+		}
+		lines = []string{"GitHub repository", e.plan.Repository, "", "Current title", wrapText(oldName, width),
+			"Current description", wrapText(oldDescription, width), "", "New title", wrapText(e.plan.Proposed.Name, width),
+			"New description", wrapText(orPlaceholder(e.plan.Proposed.Description, "(none)"), width),
+			"Color", e.plan.Proposed.Color, "", "Ctrl-S confirms this GitHub change."}
+	} else if e.row.kind == "label" {
+		lines = append([]string{"GitHub repository", m.repo, ""}, lines...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) settingsOverlay(background string) string {
+	e := m.settings.editor
+	mode := "Edit"
+	if e.creating {
+		mode = "New"
+	}
+	kind := "label"
+	if e.row.kind == "action" {
+		kind = "action"
+	}
+	header := composerHeader(mode+" "+kind, "Preview "+kind, e.row.name, e.previewing, m.commentWidth()-4)
+	if e.previewing {
+		return m.composerOverlay(background, m.composerPanel(header, e.preview.View()))
+	}
+	label := func(field int, name string) string {
+		if e.field == field {
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true).Render("  " + name)
+		}
+		return mutedText("  " + name)
+	}
+	content := strings.Join([]string{label(0, "Title"), e.title.View(), label(1, "Description"), e.description.View()}, "\n")
+	return m.composerOverlay(background, m.composerPanel(header, content))
+}
+
+func (m model) saveSettingsEditor() (tea.Model, tea.Cmd) {
+	e := m.settings.editor
+	name, description := e.title.Value(), e.description.Value()
+	if strings.TrimSpace(name) == "" || name != strings.TrimSpace(name) || strings.ContainsAny(name, "\n\x00") {
+		m.fail("Title must be a nonempty single line without leading or trailing spaces.")
+		return m, nil
+	}
+	if e.row.kind == "label" && (utf8.RuneCountInString(description) > 100 || strings.ContainsAny(description, "\n\x00")) {
+		m.fail("GitHub label descriptions must be one line and at most 100 characters.")
+		return m, nil
+	}
+	if !e.creating && !m.settingsEditorChanged() {
+		m.settings.editor = nil
+		m.status = "No changes to save."
+		return m, nil
+	}
+
+	m.settings.busy = true
+	m.settings.request++
+	if e.row.kind == "label" {
+		args := settingsLabelArgs(m.repo, *e)
+		if e.previewHash == "" {
+			m.status = "Checking GitHub label change…"
+			return m, settingsLabelPreviewCmd(m.installRoot, m.repo, m.settings.request, name, description, args)
+		}
+		m.status = "Saving GitHub label…"
+		return m, settingsLabelApplyCmd(m.installRoot, m.repo, m.settings.request, name, args, e.previewHash)
+	}
+	m.status = "Saving action…"
+	return m, settingsActionSaveCmd(m.installRoot, m.repo, m.settings.request, *e)
+}
+
+func settingsActionSaveCmd(root, repo string, request uint64, e settingsEditor) tea.Cmd {
 	return func() tea.Msg {
-		args := []string{"set-guidance", "--expected-repo", repo, "--expected", original, "--value", value}
-		if row.kind == "label" {
-			args = append(args, "--label-id", strconv.Itoa(row.id), "--expected-name", row.name)
-		} else {
-			args = append(args, "--action", row.name)
+		name := e.title.Value()
+		args := []string{"create-action", "--expected-repo", repo, "--name", name, "--description", e.description.Value()}
+		if !e.creating {
+			args = append(args, "--action", e.row.name, "--expected", e.row.description)
+			args[0] = "update-action"
 		}
 		_, err := runScript(root, "taxonomy-settings", args...)
 		if err != nil {
 			return settingsDoneMsg{root: root, repo: repo, request: request, operation: "save", err: err}
 		}
 		taxonomy, err := LoadTaxonomy(root)
-		return settingsDoneMsg{root: root, repo: repo, request: request, operation: "save", taxonomy: taxonomy, err: err}
+		return settingsDoneMsg{root: root, repo: repo, request: request, operation: "save", name: name, taxonomy: taxonomy, err: err}
+	}
+}
+
+func settingsLabelArgs(repo string, e settingsEditor) []string {
+	args := []string{"--expected-repo", repo, "--name", e.title.Value(), "--description", e.description.Value()}
+	if !e.creating {
+		args = append(args, "--label-id", strconv.Itoa(e.row.id), "--expected-name", e.row.name, "--expected-description", e.row.description)
+	}
+	return args
+}
+
+func settingsLabelPreviewCmd(root, repo string, request uint64, name, description string, args []string) tea.Cmd {
+	return func() tea.Msg {
+		out, err := runScript(root, "label-definitions", args...)
+		var plan labelDefinitionPlan
+		if err == nil {
+			err = json.Unmarshal([]byte(out), &plan)
+		}
+		return settingsPreviewMsg{root: root, repo: repo, request: request, name: name, description: description, plan: plan, err: err}
+	}
+}
+
+func settingsLabelApplyCmd(root, repo string, request uint64, name string, args []string, hash string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := runScript(root, "label-definitions", append(args, "--apply", "--preview-sha256", hash)...)
+		if err != nil {
+			return settingsDoneMsg{root: root, repo: repo, request: request, operation: "save", err: err}
+		}
+		taxonomy, err := LoadTaxonomy(root)
+		return settingsDoneMsg{root: root, repo: repo, request: request, operation: "save", name: name, taxonomy: taxonomy, err: err}
 	}
 }
 
@@ -283,24 +474,65 @@ func settingsSyncCmd(root, repo string, request uint64) tea.Cmd {
 	}
 }
 
+func (m model) finishSettingsPreview(msg settingsPreviewMsg) (tea.Model, tea.Cmd) {
+	e := m.settings.editor
+	if !m.settings.open || e == nil || msg.root != m.installRoot || msg.repo != m.repo || msg.request != m.settings.request ||
+		msg.name != e.title.Value() || msg.description != e.description.Value() {
+		return m, nil
+	}
+	m.settings.busy = false
+	if msg.err != nil {
+		m.failErr("Couldn't preview GitHub label change", msg.err)
+		return m, nil
+	}
+	if msg.plan.Repository != m.repo || msg.plan.PreviewSHA256 == "" || msg.plan.Proposed.Name != msg.name || msg.plan.Proposed.Description != msg.description {
+		m.fail("GitHub label preview did not match this editor; try again.")
+		return m, nil
+	}
+	e.plan = msg.plan
+	e.previewHash = msg.plan.PreviewSHA256
+	e.previewing = true
+	e.title.Blur()
+	e.description.Blur()
+	m.layoutSettingsEditor()
+	e.preview.SetContent(m.settingsDraftPreview(e.preview.Width()))
+	e.preview.GotoTop()
+	m.status = "Review the exact GitHub label change, then Ctrl-S to confirm."
+	return m, nil
+}
+
 func (m model) finishSettings(msg settingsDoneMsg) (tea.Model, tea.Cmd) {
 	if !m.settings.open || msg.root != m.installRoot || msg.repo != m.repo || msg.request != m.settings.request {
 		return m, nil
 	}
 	m.settings.busy = false
 	if msg.err != nil {
+		if m.settings.editor != nil && m.settings.editor.row.kind == "label" {
+			m.settings.editor.previewHash = ""
+			m.settings.editor.previewing = false
+			m.focusSettingsEditor()
+		}
 		m.failErr("Couldn't update Settings", msg.err)
 		return m, nil
 	}
 	m.taxonomy = msg.taxonomy
 	m.form.taxonomy = msg.taxonomy
+	if msg.name != "" {
+		for i, row := range m.settingsRows() {
+			if row.name == msg.name {
+				m.settings.selected, m.settings.offset = i, 0
+				m.settingsMove(0)
+				break
+			}
+		}
+	}
 	if rows := m.settingsRows(); m.settings.selected >= len(rows) {
 		m.settings.selected = maxInt(len(rows)-1, 0)
 		m.settings.offset = 0
 	}
 	if msg.operation == "save" {
 		m.settings.editor = nil
-		m.status = "Local guidance saved."
+		m.status = "Setting saved."
 	} else {
 		m.status = "GitHub labels refreshed."
 	}

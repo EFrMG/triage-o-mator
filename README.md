@@ -132,15 +132,16 @@ bin/apply data/<owner>/<repo>/batches/<id>.decisions.jsonl --only-untriaged
 bin/report
 ```
 
-| Task                         | Commands                                                                       |
-| ---------------------------- | ------------------------------------------------------------------------------ |
-| Install and refresh          | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                 |
-| Prepare and review decisions | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv` |
-| Compare and group            | `bin/similar`, `bin/not-duplicate`, `bin/group`                                |
-| Read guidance and evidence   | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |
-| Edit local guidance          | `bin/taxonomy-settings`                                                        |
-| Propose and publish actions  | `bin/auto-close`, `bin/comment-plus`                                           |
-| See progress and handoffs    | `bin/stats`, `bin/next`, `bin/report`                                          |
+| Task                                      | Commands                                                                       |
+| ----------------------------------------- | ------------------------------------------------------------------------------ |
+| Install and refresh                       | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                 |
+| Prepare and review decisions              | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv` |
+| Compare and group                         | `bin/similar`, `bin/not-duplicate`, `bin/group`                                |
+| Read guidance and evidence                | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |
+| Edit action settings                      | `bin/taxonomy-settings`                                                        |
+| Preview and edit GitHub label definitions | `bin/label-definitions`                                                        |
+| Propose and publish actions               | `bin/auto-close`, `bin/comment-plus`                                           |
+| See progress and handoffs                 | `bin/stats`, `bin/next`, `bin/report`                                          |
 
 The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md) and [comment publishing guide](docs/comment-plus.md) cover the commands and their limits.
 

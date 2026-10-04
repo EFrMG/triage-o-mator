@@ -141,7 +141,7 @@ bin/report
 | Edit action settings                      | `bin/taxonomy-settings`, `bin/action-policy`                                   |
 | Preview and edit GitHub label definitions | `bin/label-definitions`                                                        |
 | Preview and apply proposed labels         | `bin/item-labels`                                                              |
-| Propose and publish actions               | `bin/auto-close`, `bin/comment-plus`                                           |
+| Propose and publish actions               | `bin/auto-close`, `bin/action-pass`, `bin/comment-plus`                        |
 | See progress and handoffs                 | `bin/stats`, `bin/next`, `bin/report`                                          |
 
 The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md) and [comment publishing guide](docs/comment-plus.md) cover the commands and their limits.

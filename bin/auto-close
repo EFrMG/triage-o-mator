@@ -17,7 +17,7 @@ from _auto_close_records import feedback as proposal_feedback, load, proposal_pa
 from _item_context import ContextIndex, read as read_item_context
 from _groups import load_group
 from _storage import atomic_writer, locked
-from _triage import DATA_DIR, now_iso, read_repo
+from _triage import DATA_DIR, load_taxonomy, now_iso, read_repo
 
 
 def state_path():
@@ -80,6 +80,8 @@ def row(proposal, state):
     result = dict(number=proposal["number"], title=proposal["title"], target=proposal["target"], comment=proposal["comment"], reference=proposal["reference"], head_sha=proposal["head_sha"], updated_at=proposal["updated_at"], status=proposal["status"], checkpoint=proposal["checksum"], active=active, needs_attention=needs, dismissed=not visible(proposal, state), outcome=proposal.get("outcome"))
     if "rationale" in proposal:
         result["rationale"] = proposal["rationale"]
+    if "action" in proposal:
+        result["action"] = proposal["action"]
     result["inputs"] = proposal.get("inputs")
     result["legacy_unbound"] = "inputs" not in proposal
     if "reconsideration" in proposal:
@@ -278,10 +280,20 @@ def propose(args, repo):
         raise ValueError("supplied legacy rationale must be valid text of at most 10000 characters")
     reference = dict(kind=args.reference_kind, number=args.reference_number) if args.reference_kind else None
     inputs = declared_inputs(args, repo)
+    if args.action is not None:
+        taxonomy = load_taxonomy()
+        if args.action not in taxonomy.get("actions", []) or taxonomy.get("action_operations", {}).get(args.action) != "close":
+            raise ValueError("selected action is not a configured close type")
+        guidance = ContextIndex().collect("pr", args.number, include_rows=False)["ledger_guidance"]
+        if guidance is None or guidance["action"] != args.action:
+            raise ValueError("selected action differs from the saved PR decision")
+
     value = dict(schema_version=1, artifact="auto-close-proposal", repo=repo, host=args.host, number=args.number,
                  target=f"https://{args.host}/{repo}/pull/{args.number}", title=args.title,
                  comment=comment, reference=reference, head_sha=args.head_sha, updated_at=args.updated_at,
                  proposed_by=args.by, proposed_at=now_iso(), request_id=str(uuid.uuid4()), status="pending", inputs=inputs)
+    if args.action is not None:
+        value["action"] = args.action
     if args.rationale is not None:
         value["rationale"] = args.rationale
     path = proposal_path(args.number)
@@ -335,7 +347,7 @@ def edit(args, repo):
                                      member_context=[f"{member['kind']}:{member['number']}:{member['checkpoint']}" for member in handoff["members"]] if handoff else [],
                                      evidence=[f"{item['kind']}:{item['number']}:{item['snapshot_id']}" for item in inputs["evidence"]],
                                      evidence_gap=inputs["evidence_gaps"], replace_checkpoint=args.checkpoint,
-                                     reconsideration_reason=None)
+                                     reconsideration_reason=None, action=previous.get("action"))
     return propose(replacement, repo)
 
 
@@ -425,7 +437,22 @@ def call_comment(repo, proposal):
     raise ValueError("comment reported success without a saved write outcome")
 
 
-def execute(repo, numbers, all_pending, approval):
+def automation_policy(repo, proposal):
+    action = proposal.get("action")
+    if not action:
+        raise ValueError("older PR closure proposal has no saved action type; stage it for human review")
+    result = subprocess.run([str(Path(__file__).absolute().with_name("action-policy")), "status", "--expected-repo", repo], capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "could not read action automation policy")
+    rows = json.loads(result.stdout)["actions"]
+    selected = next((row for row in rows if row["name"] == action), None)
+    if selected is None or selected["operation"] != "close" or selected["mode"] != "execute" or not selected["configured"]:
+        raise ValueError(f"{action} is not enabled for direct execution in this repository")
+
+    return selected["definition_sha256"]
+
+
+def execute(repo, numbers, all_pending, approval, automation=False):
     # Approval still binds the saved plan when a prior attempt needs reconciliation; fresh context is checked per item below.
     prepared = review(repo, numbers, all_pending, check_context=False)
     if approval != prepared["approval"]:
@@ -442,9 +469,12 @@ def execute(repo, numbers, all_pending, approval):
             new_attempt = not receipt.exists()
             if new_attempt:
                 check_current_context(proposal, completed_batch)
+                definition = automation_policy(repo, proposal) if automation else None
 
             outcome, ok = call_comment(repo, proposal)
             proposal["outcome"] = dict(request_id=proposal["request_id"], comment=outcome["comment"], state_change=outcome["state_change"])
+            if automation and new_attempt:
+                proposal["outcome"]["authorization"] = dict(source="repository-policy", action=proposal["action"], definition_sha256=definition)
             proposal["status"] = "executed" if ok and outcome["comment"]["status"] == "succeeded" and outcome["state_change"]["status"] == "succeeded" else "uncertain"
             save(path, proposal)
             results.append(dict(number=proposal["number"], status=proposal["status"], outcome=proposal["outcome"]))
@@ -472,6 +502,7 @@ def main():
     add.add_argument("--reference-kind", choices=("issue", "pr"))
     add.add_argument("--reference-number", type=int)
     add.add_argument("--by", required=True)
+    add.add_argument("--action", help="saved ledger close type for a repository-enabled action pass")
     add.add_argument("--context-checkpoint", required=True, help="checkpoint from item-context read for this PR")
     add.add_argument("--group-id", help="active group whose exported member context informed this proposal")
     add.add_argument("--member-context", action="append", default=[], help="KIND:NUMBER:CHECKPOINT for every exported group member")
@@ -511,6 +542,7 @@ def main():
         if action == "execute":
             command.add_argument("--publish", action="store_true")
             command.add_argument("--approve")
+            command.add_argument("--automation", action="store_true", help="recheck repository policy for every selected action")
     args = parser.parse_args()
     repo = read_repo()
     if args.expected_repo != repo:
@@ -535,7 +567,7 @@ def main():
     else:
         if not args.approve:
             raise ValueError("publishing requires approval of the exact reviewed proposal set")
-        result = execute(repo, args.number, args.all, args.approve)
+        result = execute(repo, args.number, args.all, args.approve, args.automation)
     print(json.dumps(result, ensure_ascii=False))
 
 

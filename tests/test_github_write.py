@@ -2,7 +2,7 @@
 
 import json
 
-from support import Workspace, item
+from support import FAKE_GH, Workspace, item
 
 
 WRITE_GH = '''#!/usr/bin/env python3
@@ -146,14 +146,50 @@ class AutoCloseWriteTests(Workspace):
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", str(number))
         comment = self.root / f"comment-{number}.md"
         comment.write_text(f"PR #{number} is superseded.\n")
+        gap = () if "--evidence" in extra else ("--evidence-gap", "No selected snapshot")
         return self.auto_close("propose", "--number", str(number), "--title", f"PR {number}", "--head-sha", "b" * 40,
                                "--updated-at", "2026-09-29T00:00:00Z", "--comment-file", str(comment),
                                "--by", "agent:helper", "--context-checkpoint", context["checkpoint"],
-                               "--evidence-gap", "No selected snapshot", *extra)
+                               *gap, *extra)
 
     def write_calls(self):
         path = self.mock / "write-calls.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def test_repository_policy_routes_bound_pr_closure_through_existing_proposal(self):
+        write_gh = (self.mock / "gh").read_text()
+        (self.mock / "gh").write_text(FAKE_GH)
+        self.seed_pr()
+        snapshot = self.json_cli("cache", "fetch", "--kind", "pr", "--number", "1", "--profile", "discussion",
+                                 "--mode", "refresh", "--request-budget", "100")["snapshot_id"]
+        (self.mock / "gh").write_text(write_gh)
+
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        rows[0].update(action="close-duplicate", confidence="high", reason="Superseded by #2")
+        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        self.propose(1, "--action", "close-duplicate", "--evidence", f"pr:1:{snapshot}")
+
+        selected = ("--expected-repo", "owner/repo", "--number", "1")
+        staged = self.json_cli("action-pass", "preview", *selected)
+        self.assertEqual(staged["plan"]["items"][0]["mode"], "stage")
+        self.assertEqual(self.json_cli("action-pass", "run", *selected, "--preview-sha256", staged["preview_sha256"])["results"][0]["status"], "staged")
+        self.assertEqual(self.write_calls(), [])
+
+        setting = ("--expected-repo", "owner/repo", "--action", "close-duplicate", "--mode", "execute")
+        policy = self.json_cli("action-policy", "set", *setting)
+        self.json_cli("action-policy", "set", *setting, "--apply", "--preview-sha256", policy["preview_sha256"])
+        self.run_cli("action-pass", "run", *selected, "--preview-sha256", staged["preview_sha256"], ok=False)
+        self.assertEqual(self.write_calls(), [])
+
+        preview = self.json_cli("action-pass", "preview", *selected)
+        self.assertEqual(preview["plan"]["items"][0]["mode"], "execute")
+        result = self.json_cli("action-pass", "run", *selected, "--preview-sha256", preview["preview_sha256"])
+        self.assertEqual(result["results"][0]["status"], "executed")
+        self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
+        self.assertEqual(len(self.auto_close("list")["rows"]), 1)
+        record = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
+        self.assertEqual(record["outcome"]["authorization"]["source"], "repository-policy")
 
     def test_changed_guidance_requires_fresh_review_and_approval(self):
         self.assertNotIn("rationale", self.propose(1))

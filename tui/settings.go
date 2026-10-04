@@ -356,10 +356,9 @@ func (m *model) layoutSettingsEditor() {
 func (m model) settingsDraftPreview(width int) string {
 	e := m.settings.editor
 	heading := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true)
+	field := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent))
+	bodyWidth := maxInt(width-2, 1)
 	lines := []string{}
-	if e.row.kind == "label" {
-		lines = append(lines, heading.Render("GitHub repository"), wrapText(e.plan.Repository, width), "")
-	}
 
 	currentName, currentDescription := e.row.name, e.row.description
 	if e.row.kind == "label" && e.plan.Current != nil {
@@ -369,16 +368,17 @@ func (m model) settingsDraftPreview(width int) string {
 	if e.creating {
 		lines = append(lines, "No existing "+e.row.kind)
 	} else {
-		lines = append(lines, heading.Render("Title"), wrapText(currentName, width), "",
-			heading.Render("Description"), wrapText(settingsDescription(currentDescription), width))
+		lines = append(lines, field.Render("Title"), wrapText(currentName, bodyWidth), "",
+			field.Render("Description"), wrapText(settingsDescription(currentDescription), bodyWidth))
 	}
-	lines = append(lines, "", heading.Render("After save"), heading.Render("Title"), wrapText(e.title.Value(), width), "",
-		heading.Render("Description"), wrapText(settingsDescription(e.description.Value()), width))
+	lines = append(lines, "", heading.Render("After save"), field.Render("Title"), wrapText(e.title.Value(), bodyWidth), "",
+		field.Render("Description"), wrapText(settingsDescription(e.description.Value()), bodyWidth))
 	if e.row.kind == "label" {
-		lines = append(lines, "", heading.Render("Color"), e.plan.Proposed.Color, "", "Ctrl-S confirms this GitHub change.")
+		lines = append(lines, "", field.Render("Color"), e.plan.Proposed.Color, "", "Ctrl-S confirms this GitHub change.")
+		return heading.Render("GitHub repository") + "\n" + wrapText(e.plan.Repository, width) + "\n\n" + inset(inset(strings.Join(lines, "\n")))
 	}
 
-	return strings.Join(lines, "\n")
+	return inset(inset(strings.Join(lines, "\n")))
 }
 
 func settingsDescription(value string) string {

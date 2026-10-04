@@ -194,12 +194,13 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	m = baselineSend(m, settingsPreviewMsg{root: root, repo: m.repo, request: m.settings.request, name: "defect", description: "A reproducible defect", plan: plan})
 	preview := m.settingsDraftPreview(m.settings.editor.preview.Width())
 	plain := ansi.Strip(preview)
-	if !m.settings.editor.previewing || !strings.Contains(plain, "GitHub repository\nowner/repo") || !strings.Contains(plain, "Current\nTitle\nbug\n\nDescription\nSomething is broken") || !strings.Contains(plain, "After save\nTitle\ndefect") || strings.Contains(plain, "(bug)") {
+	if !m.settings.editor.previewing || !strings.Contains(plain, "GitHub repository\nowner/repo\n\n  Current") || !strings.Contains(plain, "  Current\n  Title\n  bug\n\n  Description\n  Something is broken") || !strings.Contains(plain, "  After save\n  Title\n  defect") || strings.Contains(plain, "(bug)") {
 		t.Fatal("GitHub preview did not show current and next values together")
 	}
-	accentTitle := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true).Render("Title")
-	if !strings.Contains(preview, accentTitle) {
-		t.Fatal("preview titles did not use bold accent styling")
+	accentTitle := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Render("Title")
+	boldTitle := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true).Render("Title")
+	if !strings.Contains(preview, accentTitle) || strings.Contains(preview, boldTitle) {
+		t.Fatal("preview field names did not use normal-weight accent styling")
 	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
@@ -218,7 +219,7 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	}
 	plan = labelDefinitionPlan{Repository: m.repo, Operation: "create", Proposed: GitHubLabel{Name: "triage", Description: "Ready to triage", Color: "ededed"}, PreviewSHA256: "new-preview"}
 	m = baselineSend(m, settingsPreviewMsg{root: root, repo: m.repo, request: m.settings.request, name: "triage", description: "Ready to triage", plan: plan})
-	if plain := ansi.Strip(m.settingsDraftPreview(m.settings.editor.preview.Width())); !strings.Contains(plain, "Current\nNo existing label") || !strings.Contains(plain, "After save\nTitle\ntriage") {
+	if plain := ansi.Strip(m.settingsDraftPreview(m.settings.editor.preview.Width())); !strings.Contains(plain, "  Current\n  No existing label") || !strings.Contains(plain, "  After save\n  Title\n  triage") {
 		t.Fatal("new label preview did not show current and proposed values together")
 	}
 	m.settings.editor = nil

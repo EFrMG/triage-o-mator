@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fetch full body/comments (and, for PRs, diff) for a single issue/PR and print it as one JSON object on stdout. Read-only against GitHub.
+Fetch current state, full body/comments (and, for PRs, diff) for a single issue/PR and print it as one JSON object on stdout. Read-only against GitHub.
 
 Usage:
     bin/enrich-one --kind issue|pr --number N [--diff]

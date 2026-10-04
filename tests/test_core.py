@@ -371,6 +371,10 @@ print(json.dumps(live["labels"]))
         ledger_path.write_text(json.dumps(row) + "\n" + json.dumps(second) + "\n")
         next_item = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(next_item["items"][0]["number"], 2)
+        scoped = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1", "--key", "issue:2")
+        self.assertEqual(scoped["selected_keys"], ["issue:2"])
+        self.run_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--key", "issue:1", "--preview-sha256", scoped["preview_sha256"], ok=False)
+        self.assertEqual(json.loads((self.mock / "live.json").read_text())["labels"], [dict(name="bug")])
 
 
 class LedgerTests(Workspace):
@@ -394,14 +398,15 @@ class LedgerTests(Workspace):
         ledger_path.write_text("".join(json.dumps(row) + "\n" for row in rows))
         (self.mock / "gh").write_text('''#!/usr/bin/env python3
 import json, sys
-if sys.argv[1:4] != ["issue", "view", "2"]:
+if sys.argv[1:3] != ["issue", "view"] or sys.argv[3] not in ("1", "2"):
     sys.exit("unexpected GitHub operation")
-print(json.dumps(dict(title="NVIDIA suspend crash", body="Details", comments=[])))
+print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[], state="CLOSED")))
 ''')
         (self.mock / "gh").chmod(0o755)
         self.run_cli("batch", "1", "--unlabeled-first")
         batch = next((self.root / "data/owner/repo/batches").glob("*.items.jsonl"))
         self.assertEqual(json.loads(batch.read_text().splitlines()[0])["number"], 2)
+        self.assertEqual(self.json_cli("enrich-one", "--kind", "issue", "--number", "2")["state"], "closed")
 
         before = ledger_path.read_bytes()
         args = ("--number", "1", "--kind", "issue", "--category", "bug", "--action", "no-action-needed", "--reason", "Reproduced", "--by", "agent:triage")
@@ -411,10 +416,14 @@ print(json.dumps(dict(title="NVIDIA suspend crash", body="Details", comments=[])
         row = self.ledger()[("issue", 1)]
         self.assertEqual(row["triaged_by"], "agent:triage")
         self.assertFalse(row["reviewed"])
+        before_batches = set((self.root / "data/owner/repo/batches").glob("*.items.jsonl"))
+        self.run_cli("batch", "2", "--include-triaged", "--unlabeled-first")
+        newest = next(iter(set((self.root / "data/owner/repo/batches").glob("*.items.jsonl")) - before_batches))
+        self.assertEqual({json.loads(line)["number"] for line in newest.read_text().splitlines()}, {1, 2})
 
     def test_sync_preserves_proposals(self):
         self.sync()
-        self.run_cli("apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "no-action-needed", "--by", "agent:triage")
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "no-action-needed", "--confidence", "high", "--reason", "Existing call", "--by", "agent:triage")
         taxonomy_path = self.root / "config/taxonomy.json"
         taxonomy = json.loads(taxonomy_path.read_text())
         taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
@@ -438,6 +447,13 @@ print(json.dumps(dict(title="NVIDIA suspend crash", body="Details", comments=[])
         self.run_cli("apply", "--number", "2", "--kind", "issue", "--replace-proposed-labels", "--action", "no-action-needed", "--by", "human")
         self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], [])
         self.assertFalse(self.ledger()[("issue", 2)]["reviewed"])
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--approve", "--by", "human")
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--proposed-label", "bug", "--by", "agent:labels")
+        self.assertEqual(self.ledger()[("issue", 1)]["action"], "no-action-needed")
+        self.assertEqual(self.ledger()[("issue", 1)]["proposed_labels"], ["bug"])
+        self.assertEqual(self.ledger()[("issue", 1)]["confidence"], "high")
+        self.assertEqual(self.ledger()[("issue", 1)]["reason"], "Existing call")
+        self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
 
     def test_csv_review_revisions_and_approval(self):
         self.sync()

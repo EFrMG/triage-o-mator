@@ -657,6 +657,11 @@ func TestBaselineCommentStateComesFromLedgerRefresh(t *testing.T) {
 	if m.detail.item.State != "open" || m.items[0].State != "open" || !m.refreshing {
 		t.Fatal("close response changed state before the direct item fetch")
 	}
+	m = baselineSend(m, enrichedMsg{root: m.installRoot, repo: m.repo, generation: m.detail.generation, key: key, data: EnrichedItem{Kind: key.Kind, Number: key.Number, State: "closed", Body: "Live item"}})
+	header := strings.SplitN(ansi.Strip(m.itemView()), "\n", 3)[1]
+	if !strings.Contains(header, "closed") || m.items[0].State != "open" {
+		t.Fatal("item header did not use the successful live read before ledger sync")
+	}
 
 	items := append([]Item(nil), m.items...)
 	for i := range items {
@@ -667,6 +672,12 @@ func TestBaselineCommentStateComesFromLedgerRefresh(t *testing.T) {
 	m = baselineSend(m, ledgerReloadedMsg{root: m.installRoot, repo: m.repo, items: items})
 	if m.detail.item.State != "closed" {
 		t.Fatal("refreshed ledger state did not reach the open item")
+	}
+	m.detail.enriched.State = "open"
+	m.detail.enriched.Evidence = &batchEvidence{SnapshotID: "fixed"}
+	header = strings.SplitN(ansi.Strip(m.itemView()), "\n", 3)[1]
+	if !strings.Contains(header, "closed") {
+		t.Fatal("fixed packet state displaced the ledger state in the header")
 	}
 }
 

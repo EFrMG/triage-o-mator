@@ -585,15 +585,19 @@ func (m model) itemView() string {
 		}
 
 		author := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Info)).Render(singleLine(orPlaceholder(it.Author, "?")))
+		stateValue := it.State
+		if !m.detail.loading && m.detail.loadErr == nil && !m.detail.blockLegacy && m.detail.enriched.Evidence == nil && m.detail.enriched.State != "" {
+			stateValue = m.detail.enriched.State
+		}
 		stateColor := currentTheme.Muted
-		switch strings.ToLower(it.State) {
+		switch strings.ToLower(stateValue) {
 		case "open":
 			stateColor = currentTheme.Success
 		case "closed":
 			stateColor = currentTheme.Error
 		}
 
-		state := lipgloss.NewStyle().Foreground(lipgloss.Color(stateColor)).Render(singleLine(it.State))
+		state := lipgloss.NewStyle().Foreground(lipgloss.Color(stateColor)).Render(singleLine(stateValue))
 		meta = append(meta, author, state, mutedText(singleLine(labels)), mutedText("updated "+singleLine(shortDate(it.UpdatedAt))))
 	}
 

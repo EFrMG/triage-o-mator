@@ -60,8 +60,8 @@ def main():
     ap.add_argument("--proposed-label", action="append", dest="proposed_labels", help="repeat to propose GitHub labels separately from observed labels")
     ap.add_argument("--replace-proposed-labels", action="store_true", help="replace the proposed label set, including with an empty set")
     ap.add_argument("--action", help="single-item mode: action")
-    ap.add_argument("--confidence", choices=["low", "medium", "high"], default="")
-    ap.add_argument("--reason", default="")
+    ap.add_argument("--confidence", choices=["low", "medium", "high"])
+    ap.add_argument("--reason")
     ap.add_argument(
         "--agent-notes",
         default=None,
@@ -172,9 +172,9 @@ def main():
                     "kind": args.kind,
                     **({"category": args.category} if args.category is not None else {}),
                     **({"proposed_labels": args.proposed_labels or []} if args.proposed_labels is not None or args.replace_proposed_labels else {}),
-                    "action": args.action or "",
-                    "confidence": args.confidence,
-                    "reason": args.reason,
+                    **({"action": args.action} if args.action is not None else {}),
+                    **({"confidence": args.confidence} if args.confidence is not None else {}),
+                    **({"reason": args.reason} if args.reason is not None else {}),
                 }
             ]
         elif args.approve:
@@ -188,9 +188,9 @@ def main():
                     "kind": args.kind,
                     **({"category": args.category} if args.category is not None else {}),
                     **({"proposed_labels": args.proposed_labels or []} if args.proposed_labels is not None or args.replace_proposed_labels else {}),
-                    "action": args.action or "",
-                    "confidence": args.confidence,
-                    "reason": args.reason,
+                    **({"action": args.action} if args.action is not None else {}),
+                    **({"confidence": args.confidence} if args.confidence is not None else {}),
+                    **({"reason": args.reason} if args.reason is not None else {}),
                 }
             ]
         else:
@@ -253,7 +253,7 @@ def main():
                 continue
 
             # --approve without a new decision: review-only, leave the existing decision untouched.
-            if args.approve and not d.get("category") and not d.get("action") and not d.get("proposed_labels"):
+            if args.approve and not d.get("category") and not d.get("action") and "proposed_labels" not in d:
                 if not has_decision(rec):
                     sys.exit(
                         f"error: cannot --approve {key} — it has no decision yet"
@@ -265,6 +265,9 @@ def main():
                 applied += 1
 
                 continue
+
+            if "action" not in d:
+                d = {**d, "action": rec.get("action") or ""}
 
             if not REQUIRED.issubset(d):
                 missing.append(d)
@@ -307,8 +310,8 @@ def main():
             if "proposed_labels" in d:
                 rec["proposed_labels"] = desired_labels
             rec["action"] = d["action"]
-            rec["confidence"] = d.get("confidence", "")
-            rec["reason"] = d.get("reason", "")
+            rec["confidence"] = d.get("confidence", rec.get("confidence", ""))
+            rec["reason"] = d.get("reason", rec.get("reason", ""))
             if changed and rec.get("reviewed") and not (args.reviewed or args.approve):
                 # An approval was of the old call, not this one.
                 for field in REVIEW_FIELDS:

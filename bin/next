@@ -136,10 +136,10 @@ def suggestions(ledger):
         add("agent", "Prepare reusable evidence for a focused analysis", "prompts/prepare-analysis.md",
             "optional: inspect existing references offline first; agree scope and request budget before any download (cache coverage is not assessed here)")
 
-    unlabeled = [r for r in untriaged if not r.get("labels")]
+    unlabeled = [r for r in open_items if not r.get("labels")]
     if unlabeled:
-        add("agent", f"Prepare a bounded labeling pass for {len(unlabeled)} untriaged items with no observed labels",
-            "prompts/label-items.md (start with bin/batch 25 --unlabeled-first)",
+        add("agent", f"Prepare a bounded labeling pass for {len(unlabeled)} open items with no observed labels",
+            "prompts/label-items.md (start with bin/batch 25 --unlabeled-first --include-triaged)",
             "the label pass is separate from the suggested Action; GitHub writes require this repository's Item labeling setting")
 
     if untriaged:

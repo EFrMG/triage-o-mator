@@ -153,7 +153,7 @@ def decision_digest(row):
     return digest({key: row.get(key) for key in ("kind", "number", "state", "proposed_labels")})
 
 
-def candidates(saved, limit):
+def candidates(saved, limit, selected_keys=()):
     def priority(row):
         key = f"{row['kind']}:{row['number']}"
         checked = saved["items"].get(key, {}).get("checked_order", 0)
@@ -163,8 +163,11 @@ def candidates(saved, limit):
     rows = load_ledger()
     rows.sort(key=priority)
     chosen = []
+    selected = set(selected_keys)
     for row in rows:
         key = f"{row['kind']}:{row['number']}"
+        if selected and key not in selected:
+            continue
         prior = saved["items"].get(key, {})
         if row.get("state") != "open" or (not has_decision(row) and not (prior.get("managed") or prior.get("pending"))):
             continue
@@ -172,6 +175,8 @@ def candidates(saved, limit):
             chosen.append((key, row))
         if len(chosen) >= limit:
             break
+    if selected and set(selected_keys) != {key for key, _ in chosen}:
+        raise ValueError(f"selected items have no eligible label proposal: {sorted(selected - {key for key, _ in chosen})}")
     return chosen
 
 
@@ -181,7 +186,7 @@ def mark_checked(saved, key, row):
     save_json(STATE_PATH, saved)
 
 
-def build_plan(saved, limit, transport):
+def build_plan(saved, limit, transport, selected_keys=()):
     taxonomy = load_taxonomy()
     catalog = taxonomy.get("label_catalog", {})
     if not isinstance(catalog, dict) or catalog.get("repository") != REPO or catalog.get("status") != "observed":
@@ -193,7 +198,7 @@ def build_plan(saved, limit, transport):
     if len(names) != len(definitions) or len({row["id"] for row in definitions}) != len(definitions):
         raise ValueError("this repository's label catalog has duplicate label identities")
     rows = []
-    for key, decision in candidates(saved, limit):
+    for key, decision in candidates(saved, limit, selected_keys):
         desired = decision.get("proposed_labels") or []
         prior = saved["items"].get(key, {})
         item = {"kind": decision["kind"], "number": decision["number"], "decision_sha256": decision_digest(decision),
@@ -218,7 +223,8 @@ def build_plan(saved, limit, transport):
                     item["status"] = "no-change"
         rows.append(item)
 
-    plan = {"repository": REPO, "enabled": enabled(), "limit": limit, "request_budget": transport.budget, "requests": transport.used, "items": rows}
+    plan = {"repository": REPO, "enabled": enabled(), "limit": limit, "request_budget": transport.budget, "requests": transport.used,
+            "selected_keys": list(selected_keys), "items": rows}
     plan["preview_sha256"] = digest(plan)
     return plan
 
@@ -235,7 +241,7 @@ def run_pass(parser, args):
     with locked(PASS_LOCK):
         saved = state()
         transport = Transport(args.request_budget)
-        plan = build_plan(saved, args.limit, transport)
+        plan = build_plan(saved, args.limit, transport, args.keys)
         if plan["preview_sha256"] != args.preview_sha256:
             fail(parser, "the selected decisions or GitHub labels changed; preview the pass again")
         if not enabled():
@@ -318,6 +324,7 @@ def main():
     parser.add_argument("--expected-repo", required=True)
     parser.add_argument("--kind", choices=["issue", "pr"])
     parser.add_argument("--number", type=int)
+    parser.add_argument("--key", action="append", default=[], help="with preview/run: restrict the pass to KIND:NUMBER (repeatable)")
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--request-budget", type=int, default=100)
     parser.add_argument("--apply", action="store_true", help="commit a previewed enable/disable change")
@@ -327,6 +334,13 @@ def main():
         parser.error("configured repository changed; reopen Settings")
     if not 1 <= args.limit <= 50 or not 1 <= args.request_budget <= 500:
         parser.error("limit must be 1–50 and request budget 1–500")
+    if args.key and args.command not in ("preview", "run"):
+        parser.error("--key is only for preview and run")
+    if len(set(args.key)) != len(args.key) or any(not re.fullmatch(r"(issue|pr):[1-9][0-9]*", key) for key in args.key):
+        parser.error("--key requires distinct KIND:NUMBER values")
+    if len(args.key) > args.limit:
+        parser.error("selected keys exceed --limit")
+    args.keys = tuple(sorted(args.key))
     if args.command == "reset-item" and (args.kind is None or args.number is None or args.number <= 0):
         parser.error("reset-item requires --kind and a positive --number")
     if args.command != "reset-item" and (args.kind is not None or args.number is not None):
@@ -357,7 +371,7 @@ def main():
             if args.apply or args.preview_sha256:
                 parser.error("preview never writes")
             transport = Transport(args.request_budget)
-            print(json.dumps(build_plan(state(), args.limit, transport), indent=2, ensure_ascii=False))
+            print(json.dumps(build_plan(state(), args.limit, transport, args.keys), indent=2, ensure_ascii=False))
         elif args.command == "reset-item":
             if not args.apply:
                 print(json.dumps(reset_plan(state(), args.kind, args.number, Transport(args.request_budget)), indent=2, ensure_ascii=False))

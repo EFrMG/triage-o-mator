@@ -230,7 +230,7 @@ def new_batch_id():
 
 
 def enrich_item(rec, include_diff=False):
-    """Fetch full body/comments (and, for PRs, diff stats) for one item.
+    """Fetch current state, full body/comments (and, for PRs, diff stats) for one item.
 
     `rec` only needs `number` and `kind` set. Mutates and returns `rec`.
     Shared by `bin/batch` (bulk, no diff) and `bin/enrich-one` (single item,
@@ -247,13 +247,13 @@ def enrich_item(rec, include_diff=False):
                 "--repo",
                 REPO,
                 "--json",
-                "title,body,comments",
+                "title,body,comments,state",
             ]
         )
         data = json.loads(out)
     else:
         fields = (
-            "title,body,comments,additions,deletions,changedFiles,isDraft,mergeable"
+            "title,body,comments,state,additions,deletions,changedFiles,isDraft,mergeable"
         )
         out = run_gh(["pr", "view", str(number), "--repo", REPO, "--json", fields])
         data = json.loads(out)
@@ -264,6 +264,10 @@ def enrich_item(rec, include_diff=False):
         rec["mergeable"] = data.get("mergeable")
         if include_diff:
             rec["diff_text"] = run_gh(["pr", "diff", str(number), "--repo", REPO])
+
+    state = data.get("state")
+    if isinstance(state, str) and state.lower() in ("open", "closed", "merged"):
+        rec["state"] = state.lower()
 
     comments = data.get("comments", [])
     rec["body"] = data.get("body", "")

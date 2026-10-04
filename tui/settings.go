@@ -374,7 +374,7 @@ func (m model) settingsDraftPreview(width int) string {
 	lines = append(lines, "", heading.Render("After save"), field.Render("Title"), wrapText(e.title.Value(), bodyWidth), "",
 		field.Render("Description"), wrapText(settingsDescription(e.description.Value()), bodyWidth))
 	if e.row.kind == "label" {
-		lines = append(lines, "", field.Render("Color"), e.plan.Proposed.Color, "", "Ctrl-S confirms this GitHub change.")
+		lines = append(lines, "", field.Render("Color"), e.plan.Proposed.Color)
 		return heading.Render("GitHub repository") + "\n" + wrapText(e.plan.Repository, width) + "\n\n" + inset(inset(strings.Join(lines, "\n")))
 	}
 

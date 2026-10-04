@@ -76,9 +76,7 @@ func (d dropdown) View(width int) string {
 		}
 		style := lipgloss.NewStyle().Width(inner)
 		if i == d.cursor {
-			if d.checked != nil {
-				row = "› " + row
-			} else {
+			if d.checked == nil {
 				row = "› " + d.options[i]
 			}
 			style = style.Foreground(lipgloss.Color(currentTheme.Accent)).Background(lipgloss.Color(currentTheme.Selection)).Bold(true)

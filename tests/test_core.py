@@ -292,6 +292,9 @@ elif endpoint.startswith("repos/owner/repo/issues/1/labels/") and method == "DEL
 else:
     sys.exit("unexpected GitHub operation")
 (root / "live.json").write_text(json.dumps(live))
+if method == "POST" and (root / "uncertain").exists():
+    print("{invalid response")
+    sys.exit(0)
 print(json.dumps(live["labels"]))
 ''')
         (self.mock / "gh").chmod(0o755)
@@ -346,6 +349,12 @@ print(json.dumps(live["labels"]))
         self.json_cli("item-labels", "reset-item", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--apply", "--preview-sha256", reset["preview_sha256"])
         renewed = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(renewed["items"][0]["add"], ["bug"])
+        (self.mock / "uncertain").write_text("simulate an ambiguous GitHub response")
+        uncertain = self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", renewed["preview_sha256"])
+        self.assertEqual(uncertain["outcomes"][0]["status"], "uncertain")
+        self.assertIn("issue:1", self.json_cli("item-labels", "status", "--expected-repo", "owner/repo")["pending_items"])
+        blocked = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertEqual(blocked["items"][0]["status"], "uncertain-write")
 
 
 class LedgerTests(Workspace):

@@ -141,7 +141,7 @@ func (m model) requestListApprove() (tea.Model, tea.Cmd) {
 		m.listConfirm = "a"
 		what := describeTargets(targets)
 		if len(targets) == 1 {
-			what += " (" + targets[0].Category + "/" + targets[0].Action + ")"
+			what += " (" + targets[0].DecisionLabel() + "/" + targets[0].Action + ")"
 		}
 
 		m.status = fmt.Sprintf("Approve %s? Press a again.", what)

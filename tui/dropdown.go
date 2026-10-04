@@ -17,6 +17,7 @@ type dropdown struct {
 	open    bool
 	options []string
 	cursor  int
+	checked map[string]bool
 }
 
 const dropdownRows = 8
@@ -24,6 +25,15 @@ const dropdownRows = 8
 func (d *dropdown) Open(options []string, current int) {
 	d.open, d.options = true, options
 	d.cursor = maxInt(minInt(current, len(options)-1), 0)
+	d.checked = nil
+}
+
+func (d *dropdown) OpenMulti(options, selected []string) {
+	d.Open(options, 0)
+	d.checked = make(map[string]bool, len(selected))
+	for _, name := range selected {
+		d.checked[name] = true
+	}
 }
 
 // Key handles a key while the list is open. picked reports Enter (or l / →) on an option (d.cursor holds it); the list closes on Enter or Esc.
@@ -57,9 +67,20 @@ func (d dropdown) View(width int) string {
 	rows := make([]string, 0, end-start+1)
 	for i := start; i < end; i++ {
 		row := "  " + d.options[i]
+		if d.checked != nil {
+			mark := "[ ] "
+			if d.checked[d.options[i]] {
+				mark = "[x] "
+			}
+			row = mark + d.options[i]
+		}
 		style := lipgloss.NewStyle().Width(inner)
 		if i == d.cursor {
-			row = "› " + d.options[i]
+			if d.checked != nil {
+				row = "› " + row
+			} else {
+				row = "› " + d.options[i]
+			}
 			style = style.Foreground(lipgloss.Color(currentTheme.Accent)).Background(lipgloss.Color(currentTheme.Selection)).Bold(true)
 		}
 

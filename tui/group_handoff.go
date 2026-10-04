@@ -17,20 +17,21 @@ type groupHandoffPacket struct {
 }
 
 type groupHandoffItem struct {
-	Kind              string `json:"kind"`
-	Number            int    `json:"number"`
-	Title             string `json:"title"`
-	State             string `json:"state"`
-	Category          string `json:"category"`
-	Action            string `json:"action"`
-	Confidence        string `json:"confidence"`
-	Reason            string `json:"reason"`
-	TriagedBy         string `json:"triaged_by"`
-	AgentNotes        string `json:"agent_notes"`
-	Reviewed          bool   `json:"reviewed"`
-	ReviewedBy        string `json:"reviewed_by"`
-	ReviewerNotes     string `json:"reviewer_notes"`
-	MissingFromLedger bool   `json:"missing_from_ledger"`
+	Kind              string   `json:"kind"`
+	Number            int      `json:"number"`
+	Title             string   `json:"title"`
+	State             string   `json:"state"`
+	Category          string   `json:"category"`
+	ProposedLabels    []string `json:"proposed_labels"`
+	Action            string   `json:"action"`
+	Confidence        string   `json:"confidence"`
+	Reason            string   `json:"reason"`
+	TriagedBy         string   `json:"triaged_by"`
+	AgentNotes        string   `json:"agent_notes"`
+	Reviewed          bool     `json:"reviewed"`
+	ReviewedBy        string   `json:"reviewed_by"`
+	ReviewerNotes     string   `json:"reviewer_notes"`
+	MissingFromLedger bool     `json:"missing_from_ledger"`
 	LocalContext      struct {
 		Checkpoint       string   `json:"checkpoint"`
 		RelevantGroupIDs []string `json:"relevant_group_ids"`
@@ -180,6 +181,9 @@ func groupHandoffText(header string, msg groupHandoffMsg) string {
 		} else {
 			handoffValue(&b, "State", item.State)
 			var decision []string
+			if len(item.ProposedLabels) > 0 {
+				decision = append(decision, "labels "+strings.Join(item.ProposedLabels, ", "))
+			}
 			for _, part := range []struct{ label, value string }{{"category", item.Category}, {"action", item.Action}, {"confidence", item.Confidence}} {
 				if part.value != "" {
 					decision = append(decision, part.label+" "+part.value)

@@ -39,10 +39,10 @@ func (li listItem) Description() string {
 	}
 
 	status := "untriaged"
-	if li.Category != "" && li.Reviewed {
-		status = "reviewed: " + li.Category + "/" + li.Action
-	} else if li.Category != "" {
-		status = "triaged: " + li.Category + "/" + li.Action
+	if !li.Untriaged() && li.Reviewed {
+		status = "reviewed: " + li.DecisionLabel() + "/" + li.Action
+	} else if !li.Untriaged() {
+		status = "triaged: " + li.DecisionLabel() + "/" + li.Action
 	} else if li.proposal != "" {
 		status = "untriaged · proposed: " + li.proposal
 	}

@@ -6,7 +6,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import here, load_ledger
+from _triage import has_decision, here, load_ledger
 
 ledger = load_ledger()
 if not ledger:
@@ -14,7 +14,7 @@ if not ledger:
 
 open_items = [r for r in ledger if r["state"] == "open"]
 by_kind = Counter(r["kind"] for r in open_items)
-triaged = sum(1 for r in open_items if r["category"])
+triaged = sum(1 for r in open_items if has_decision(r))
 reviewed = sum(1 for r in open_items if r["reviewed"])
 
 print(

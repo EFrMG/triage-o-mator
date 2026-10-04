@@ -5,6 +5,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -547,9 +548,9 @@ func (m model) dupItemState(it Item) string {
 func dupTriage(it Item) string {
 	switch {
 	case it.Reviewed:
-		return "reviewed: " + it.Category + "/" + it.Action
+		return "reviewed: " + it.DecisionLabel() + "/" + it.Action
 	case !it.Untriaged():
-		return "triaged: " + it.Category + "/" + it.Action
+		return "triaged: " + it.DecisionLabel() + "/" + it.Action
 	}
 
 	return "untriaged"
@@ -696,7 +697,7 @@ func pairStatus(newer, original Item) string {
 			return "untriaged"
 		}
 
-		return it.Category
+		return it.DecisionLabel()
 	}
 
 	return fmt.Sprintf("#%d %s / #%d %s", newer.Number, status(newer), original.Number, status(original))
@@ -706,7 +707,10 @@ func isDuplicateCategory(c string) bool { return c == "duplicate" || c == "dupli
 
 // pairHandled reports a pair that no longer needs a look: either item is closed, or already marked as a duplicate.
 func pairHandled(newer, original Item) bool {
-	return newer.State != "open" || original.State != "open" || isDuplicateCategory(newer.Category) || isDuplicateCategory(original.Category)
+	marked := func(item Item) bool {
+		return isDuplicateCategory(item.Category) || slices.Contains(item.ProposedLabels, "duplicate") || slices.Contains(item.ProposedLabels, "duplicate-pr")
+	}
+	return newer.State != "open" || original.State != "open" || marked(newer) || marked(original)
 }
 
 // pairItems lists the pairs found when the view opened (onPairsLoaded keeps only those needing a look then), marking the ones handled since, so nothing vanishes from under the cursor mid-sitting.

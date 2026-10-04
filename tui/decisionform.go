@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -16,24 +18,25 @@ type formField int
 
 const (
 	fieldContent formField = iota
-	fieldCategory
+	fieldLabels
 	fieldAction
 	fieldConfidence
 	fieldReason
 	fieldCount
 )
 
-// decisionForm is the category / action / confidence / reason editor for the currently-selected item.
-// category / action / confidence are picked from config/taxonomy.json's exact lists (j / k cycles the value).
+// decisionForm edits proposed labels, action, confidence and reason for the selected item. Legacy category values remain visible as saved context.
 type decisionForm struct {
 	taxonomy Taxonomy
+	repo     string
 	kind     string
 	focused  formField
 
 	// A negative index preserves a blank field in an existing decision or proposal.
-	categoryIdx   int
-	actionIdx     int
-	confidenceIdx int
+	actionIdx      int
+	confidenceIdx  int
+	proposedLabels []string
+	legacyCategory string
 	// The reason editor grows up to reasonMaxLines visible rows; Enter saves rather than inserting a newline.
 	reason textarea.Model
 
@@ -48,7 +51,8 @@ type decisionForm struct {
 	proposalBy       string
 	proposalSnapshot decisionSnapshot
 	// Unlisted values from the ledger or a proposal stay visible and block saving until the reviewer picks supported values.
-	badCategory, badAction, badConfidence string
+	badAction, badConfidence string
+	badLabels                []string
 	// pick is the list a choice field opens on Enter.
 	pick dropdown
 }
@@ -59,7 +63,7 @@ const (
 	formLabelWidth = 13
 )
 
-func newDecisionForm(tax Taxonomy) decisionForm {
+func newDecisionForm(tax Taxonomy, repo string) decisionForm {
 	ta := textarea.New()
 	ta.Placeholder = "one sentence a human can skim"
 	ta.ShowLineNumbers = false
@@ -69,7 +73,23 @@ func newDecisionForm(tax Taxonomy) decisionForm {
 	ta.SetHeight(1)
 	themeTextarea(&ta)
 
-	return decisionForm{taxonomy: tax, reason: ta}
+	return decisionForm{taxonomy: tax, repo: repo, reason: ta}
+}
+
+func (f *decisionForm) SetTaxonomy(tax Taxonomy) {
+	action, confidence := f.Action(), f.Confidence()
+	f.taxonomy = tax
+	f.actionIdx = indexOrZero(tax.Actions, action)
+	f.confidenceIdx = indexOrZero(tax.Confidence, confidence)
+	if action == "" {
+		f.actionIdx = -1
+	}
+	if confidence == "" {
+		f.confidenceIdx = -1
+	}
+	f.badAction = unlisted(tax.Actions, action)
+	f.badConfidence = unlisted(tax.Confidence, confidence)
+	f.badLabels = f.unlistedLabels()
 }
 
 // SetWidth sizes the reason to the form panel, growing its height with the wrapped text (plus a line for the cursor while typing) up to reasonMaxLines.
@@ -91,34 +111,43 @@ func (f *decisionForm) SetWidth(width int) {
 
 // decisionSnapshot is an in-memory, unsaved draft of a decision for one item: lets a reviewer jump between items without losing edits made before pressing ctrl+s. See model.drafts.
 type decisionSnapshot struct {
-	categoryIdx   int
-	actionIdx     int
-	confidenceIdx int
-	reason        string
-	badCategory   string
-	badAction     string
-	badConfidence string
+	actionIdx      int
+	confidenceIdx  int
+	proposedLabels []string
+	legacyCategory string
+	reason         string
+	badLabels      []string
+	badAction      string
+	badConfidence  string
+}
+
+func (s decisionSnapshot) Equal(other decisionSnapshot) bool {
+	return s.actionIdx == other.actionIdx && s.confidenceIdx == other.confidenceIdx && s.legacyCategory == other.legacyCategory &&
+		s.reason == other.reason && s.badAction == other.badAction && s.badConfidence == other.badConfidence &&
+		slices.Equal(s.proposedLabels, other.proposedLabels) && slices.Equal(s.badLabels, other.badLabels)
 }
 
 func (f decisionForm) Snapshot() decisionSnapshot {
 	return decisionSnapshot{
-		categoryIdx:   f.categoryIdx,
-		actionIdx:     f.actionIdx,
-		confidenceIdx: f.confidenceIdx,
-		reason:        f.reason.Value(),
-		badCategory:   f.badCategory,
-		badAction:     f.badAction,
-		badConfidence: f.badConfidence,
+		actionIdx:      f.actionIdx,
+		confidenceIdx:  f.confidenceIdx,
+		proposedLabels: slices.Clone(f.proposedLabels),
+		legacyCategory: f.legacyCategory,
+		reason:         f.reason.Value(),
+		badLabels:      slices.Clone(f.badLabels),
+		badAction:      f.badAction,
+		badConfidence:  f.badConfidence,
 	}
 }
 
 // ApplyDraft overrides whatever LoadItem just seeded from the ledger with an unsaved draft, and marks the form dirty so "unsaved changes" shows again.
 func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
-	f.categoryIdx = s.categoryIdx
 	f.actionIdx = s.actionIdx
 	f.confidenceIdx = s.confidenceIdx
+	f.proposedLabels = slices.Clone(s.proposedLabels)
+	f.legacyCategory = s.legacyCategory
 	f.reason.SetValue(s.reason)
-	f.badCategory, f.badAction, f.badConfidence = s.badCategory, s.badAction, s.badConfidence
+	f.badLabels, f.badAction, f.badConfidence = slices.Clone(s.badLabels), s.badAction, s.badConfidence
 	f.dirty = true
 	f.saved = false
 	f.touched = true
@@ -126,12 +155,10 @@ func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 
 // ApplyProposal seeds the form from a batch decisions file's proposal for an untriaged item. It counts as touched (someone chose these values) but not dirty: the proposal stays in the file, so leaving without saving loses nothing.
 func (f *decisionForm) ApplyProposal(p proposal) {
-	f.categoryIdx = indexOrZero(f.categories(), p.Category)
+	f.legacyCategory = p.Category
+	f.proposedLabels = slices.Clone(p.ProposedLabels)
 	f.actionIdx = indexOrZero(f.taxonomy.Actions, p.Action)
 	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, p.Confidence)
-	if p.Category == "" {
-		f.categoryIdx = -1
-	}
 
 	if p.Action == "" {
 		f.actionIdx = -1
@@ -143,7 +170,7 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 
 	f.reason.SetValue(p.Reason)
 	f.proposalNotes = p.AgentNotes
-	f.badCategory, f.badAction = unlisted(f.categories(), p.Category), unlisted(f.taxonomy.Actions, p.Action)
+	f.badLabels, f.badAction = f.unlistedLabels(), unlisted(f.taxonomy.Actions, p.Action)
 	f.badConfidence = unlisted(f.taxonomy.Confidence, p.Confidence)
 	f.touched = true
 	f.proposed = true
@@ -151,32 +178,29 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 	f.proposalSnapshot = f.Snapshot()
 }
 
-// MarkDuplicate prefills the form as a duplicate of #number (duplicate or duplicate-pr, close-duplicate), leaving confidence for the reviewer to set. It errors if the taxonomy has no such values.
+// MarkDuplicate prefills a matching GitHub label when available and the close-duplicate action, leaving confidence for the reviewer to set.
 func (f *decisionForm) MarkDuplicate(number int, title string) error {
-	category := "duplicate"
+	label := "duplicate"
 	if f.kind == "pr" {
-		category = "duplicate-pr"
+		label = "duplicate-pr"
 	}
 
-	cat, act := -1, -1
-	for i, c := range f.categories() {
-		if c == category {
-			cat = i
-		}
-	}
-
+	act := -1
 	for i, a := range f.taxonomy.Actions {
 		if a == "close-duplicate" {
 			act = i
 		}
 	}
 
-	if cat < 0 || act < 0 {
-		return fmt.Errorf("config/taxonomy.json has no %q category or \"close-duplicate\" action", category)
+	if act < 0 {
+		return fmt.Errorf("config/taxonomy.json has no \"close-duplicate\" action")
 	}
 
-	f.categoryIdx, f.actionIdx = cat, act
-	f.badCategory, f.badAction = "", ""
+	if slices.Contains(f.labelOptions(), label) && !slices.Contains(f.proposedLabels, label) {
+		f.proposedLabels = append(f.proposedLabels, label)
+	}
+	f.actionIdx = act
+	f.badLabels, f.badAction = f.unlistedLabels(), ""
 	f.reason.SetValue(fmt.Sprintf("Duplicate of #%d (%s).", number, title))
 	f.reason.CursorEnd()
 	f.dirty, f.saved, f.touched, f.proposed = true, false, true, false
@@ -189,15 +213,12 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 // LoadItem seeds the form from an existing ledger row (empty strings if untriaged).
 func (f *decisionForm) LoadItem(it Item) {
 	f.kind = it.Kind
-	f.categoryIdx = indexOrZero(f.categories(), it.Category)
+	f.legacyCategory = it.Category
+	f.proposedLabels = slices.Clone(it.ProposedLabels)
 	f.actionIdx = indexOrZero(f.taxonomy.Actions, it.Action)
 	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, it.Confidence)
-	hasDecision := it.Category != "" || it.Action != "" || it.Confidence != "" || it.Reason != "" || it.Reviewed
+	hasDecision := !it.Untriaged() || it.Confidence != "" || it.Reason != "" || it.Reviewed
 	if hasDecision {
-		if it.Category == "" {
-			f.categoryIdx = -1
-		}
-
 		if it.Action == "" {
 			f.actionIdx = -1
 		}
@@ -207,7 +228,7 @@ func (f *decisionForm) LoadItem(it Item) {
 		}
 	}
 
-	f.badCategory, f.badAction, f.badConfidence = unlisted(f.categories(), it.Category), unlisted(f.taxonomy.Actions, it.Action), unlisted(f.taxonomy.Confidence, it.Confidence)
+	f.badLabels, f.badAction, f.badConfidence = f.unlistedLabels(), unlisted(f.taxonomy.Actions, it.Action), unlisted(f.taxonomy.Confidence, it.Confidence)
 	f.reason.SetValue(it.Reason)
 	f.focused = fieldContent
 	f.dirty = false
@@ -239,8 +260,8 @@ func unlisted(options []string, value string) string {
 // InvalidValues describes ledger or proposal values the taxonomy doesn't have, or "" if there are none.
 func (f decisionForm) InvalidValues() string {
 	var bad []string
-	if f.badCategory != "" {
-		bad = append(bad, fmt.Sprintf("category %q", f.badCategory))
+	for _, label := range f.badLabels {
+		bad = append(bad, fmt.Sprintf("label %q", label))
 	}
 
 	if f.badAction != "" {
@@ -264,23 +285,37 @@ func indexOrZero(options []string, value string) int {
 	return 0
 }
 
-func (f *decisionForm) categories() []string { return f.taxonomy.CategoriesFor(f.kind) }
-
-func (f decisionForm) Category() string {
-	if f.badCategory != "" {
-		return f.badCategory
+func (f decisionForm) labelOptions() []string {
+	catalog := f.taxonomy.LabelCatalog
+	if catalog.Repository != f.repo || catalog.Status != "observed" {
+		return nil
 	}
-
-	if f.categoryIdx < 0 {
-		return ""
+	options := make([]string, 0, len(catalog.Labels))
+	for _, label := range catalog.Labels {
+		options = append(options, label.Name)
 	}
-
-	if opts := f.categories(); len(opts) > 0 {
-		return opts[f.categoryIdx%len(opts)]
-	}
-
-	return ""
+	return options
 }
+
+func (f decisionForm) unlistedLabels() []string {
+	options := f.labelOptions()
+	if options == nil {
+		return nil
+	}
+	var bad []string
+	for _, name := range f.proposedLabels {
+		if !slices.Contains(options, name) {
+			bad = append(bad, name)
+		}
+	}
+	return bad
+}
+
+func (f decisionForm) Category() string { return f.legacyCategory }
+
+func (f decisionForm) ProposedLabels() []string { return slices.Clone(f.proposedLabels) }
+
+func (f decisionForm) ReplaceProposedLabels() bool { return f.labelOptions() != nil }
 
 func (f decisionForm) Action() string {
 	if f.badAction != "" {
@@ -347,8 +382,8 @@ func (f *decisionForm) PrevField() {
 // options lists the focused choice field's values and the current one's index.
 func (f decisionForm) options() ([]string, int) {
 	switch f.focused {
-	case fieldCategory:
-		return f.categories(), f.categoryIdx
+	case fieldLabels:
+		return f.labelOptions(), 0
 	case fieldAction:
 		return f.taxonomy.Actions, f.actionIdx
 	case fieldConfidence:
@@ -360,6 +395,12 @@ func (f decisionForm) options() ([]string, int) {
 
 // OpenPick opens the focused choice field's list.
 func (f *decisionForm) OpenPick() {
+	if f.focused == fieldLabels {
+		if options := f.labelOptions(); len(options) > 0 {
+			f.pick.OpenMulti(options, f.proposedLabels)
+		}
+		return
+	}
 	if options, current := f.options(); len(options) > 0 {
 		f.pick.Open(options, current)
 	}
@@ -367,14 +408,37 @@ func (f *decisionForm) OpenPick() {
 
 // PickKey handles a key while the list is open; picking sets the value and moves to the next field.
 func (f *decisionForm) PickKey(msg tea.KeyPressMsg) {
+	if f.focused == fieldLabels {
+		switch {
+		case key.Matches(msg, keys.Tick):
+			name := f.pick.options[f.pick.cursor]
+			f.pick.checked[name] = !f.pick.checked[name]
+			return
+		case key.Matches(msg, keys.Confirm), key.Matches(msg, keys.OpenList):
+			var selected []string
+			for _, name := range f.pick.options {
+				if f.pick.checked[name] {
+					selected = append(selected, name)
+				}
+			}
+			if !slices.Equal(selected, f.proposedLabels) {
+				f.proposedLabels = selected
+				f.badLabels = nil
+				f.dirty, f.saved, f.touched = true, false, true
+			}
+			f.pick.open = false
+			f.NextField()
+			return
+		}
+		f.pick.Key(msg)
+		return
+	}
 	if !f.pick.Key(msg) {
 		return
 	}
 
 	f.CycleValue(0)
 	switch f.focused {
-	case fieldCategory:
-		f.categoryIdx = f.pick.cursor
 	case fieldAction:
 		f.actionIdx = f.pick.cursor
 	case fieldConfidence:
@@ -386,6 +450,9 @@ func (f *decisionForm) PickKey(msg tea.KeyPressMsg) {
 
 // CycleValue moves the focused enum field by delta (wrapping). No-op on reason.
 func (f *decisionForm) CycleValue(delta int) {
+	if f.focused == fieldLabels {
+		return
+	}
 	options, _ := f.options()
 	if len(options) == 0 {
 		return
@@ -395,10 +462,6 @@ func (f *decisionForm) CycleValue(delta int) {
 	f.saved = false
 	f.touched = true
 	switch f.focused {
-	case fieldCategory:
-		f.badCategory = ""
-		n := len(f.categories())
-		f.categoryIdx = ((f.categoryIdx+delta)%n + n) % n
 	case fieldAction:
 		f.badAction = ""
 		n := len(f.taxonomy.Actions)
@@ -436,16 +499,26 @@ func (f decisionForm) View(width int) string {
 	}
 
 	var rows []string
+	labels := strings.Join(f.proposedLabels, ", ")
+	if labels == "" {
+		labels = "none"
+		if f.labelOptions() == nil {
+			labels = "catalog pending · sync in Settings"
+		}
+	}
+	if len(f.badLabels) > 0 {
+		labels += " (missing from catalog)"
+	}
 	for _, field := range []struct {
 		id         formField
 		name       string
 		bad, value string
 	}{
-		{fieldCategory, "category", f.badCategory, f.Category()},
+		{fieldLabels, "labels", "", labels},
 		{fieldAction, "action", f.badAction, f.Action()},
 		{fieldConfidence, "confidence", f.badConfidence, f.Confidence()},
 	} {
-		rows = append(rows, label(field.id, field.name)+value(field.id, field.bad, field.value))
+		rows = append(rows, ansi.Truncate(label(field.id, field.name)+value(field.id, field.bad, field.value), width, "…"))
 		if f.pick.open && f.focused == field.id {
 			for _, line := range strings.Split(f.pick.View(maxInt(width-formLabelWidth, 16)), "\n") {
 				rows = append(rows, strings.Repeat(" ", formLabelWidth)+line)
@@ -460,6 +533,9 @@ func (f decisionForm) View(width int) string {
 		}
 
 		rows = append(rows, prefix+line)
+	}
+	if f.legacyCategory != "" {
+		rows = append(rows, muted.Render("  legacy category: "+sanitize(f.legacyCategory)))
 	}
 
 	// "Saved." itself goes to the status line only, not here as well.

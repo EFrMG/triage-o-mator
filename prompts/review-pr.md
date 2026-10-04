@@ -2,12 +2,12 @@
 
 **Use when** someone asks to "review PR #N", "code-review the merge-ready PRs", "which PRs are actually safe to merge?", or `bin/next` suggests code review.
 
-**Produces** a code review in the ledger's `agent_notes`. For an untriaged PR it also adds a decision (category / action / confidence / reason) based on the code. Everything is applied as **unreviewed**. Nothing is posted to GitHub: the review is for the human reviewer and the maintainer who merges.
+**Produces** a code review in the ledger's `agent_notes`. For an untriaged PR it also adds a decision (proposed labels / action / confidence / reason) based on the code. Everything is applied as **unreviewed**. Nothing is posted to GitHub: the review is for the human reviewer and the maintainer who merges.
 
 ## 1. Pick the PRs
 
 - **Named PRs:** review those.
-- **Otherwise:** take what `bin/next` lists: triaged PRs in `merge-ready`, `trivial`, `needs-revision` or `needs-maintainer-call` that have no `agent_notes` yet, starting with `merge-ready`.
+- **Otherwise:** take what `bin/next` lists: triaged PRs with matching legacy categories or proposed labels such as `merge-ready`, `trivial`, `needs-revision` or `needs-maintainer-call` that have no `agent_notes` yet, starting with `merge-ready`.
 - **Several untriaged PRs at once:** `bin/batch 10 --kind pr --diff` and follow this checklist per item, inside `prompts/auto-triage.md`.
 
 Your attribution is `agent:<contributor>` (`git config user.name`). Today's date: `date -u +%F`.
@@ -70,7 +70,7 @@ Only ever GET requests, as the rest of this tooling does.
 
 ## 5. Decide
 
-Use the categories and actions in `config/taxonomy.md`:
+Use only labels actually present in this repository's observed `label_catalog`, and actions in `config/taxonomy.json`. The following names are examples when the repository has them:
 
 - `merge-ready` + `approve-merge-candidate`: you read the whole diff, found nothing blocking, the scope is focused and the checks above pass. Use `high` only for small diffs with no safety-sensitive changes.
 - `trivial` + `approve-merge-candidate`: typo-, formatting- or lint-only.
@@ -85,7 +85,7 @@ Keep it plain text and skimmable, in this shape:
 ```
 Code review by agent:<contributor>, <date>, diff read in full (+A -D, F files), against <repo> <base branch>@<short sha><, local working tree dirty>.
 Summary: what the PR changes, in one or two lines.
-Verdict: why this category; if it differs from the item's current decision, say "Disagrees with current <category>/<action>: ..."
+Verdict: why these proposed labels and action; if they differ from the item's current decision, say "Disagrees with current <labels>/<action>: ..."
 Findings:
 - [blocking] path/to/file.sh:42: unquoted $dir breaks paths with spaces.
 - [minor] path/to/other.sh: duplicates helper X from lib/y.sh.

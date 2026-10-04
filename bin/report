@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _groups import list_groups
-from _triage import REPO, REPORTS_DIR, here, load_ledger
+from _triage import REPO, REPORTS_DIR, decision_text, has_decision, here, load_ledger
 
 
 ACT_LIMIT = 20
@@ -44,8 +44,8 @@ def ready_groups_section(groups, by_key):
     lines = [f"## Ready for maintainers ({len(ready)} group{'' if len(ready) == 1 else 's'})", "", "Marked ready by contributors. Readiness means the group is organized for a decision, not that every member's decision was human-reviewed; unreviewed members are called out.", ""]
     for g in ready:
         members = [(m, by_key.get((m["kind"], m["number"]))) for m in g["members"]]
-        unreviewed = sum(1 for _, r in members if r and r.get("category") and not r.get("reviewed"))
-        untriaged = sum(1 for _, r in members if r and not r.get("category"))
+        unreviewed = sum(1 for _, r in members if r and has_decision(r) and not r.get("reviewed"))
+        untriaged = sum(1 for _, r in members if r and not has_decision(r))
         flags = ", ".join(x for x in (f"{unreviewed} unreviewed" if unreviewed else "", f"{untriaged} untriaged" if untriaged else "") if x)
         lines.append(f"### {g['title']}")
         lines.append("")
@@ -60,7 +60,7 @@ def ready_groups_section(groups, by_key):
 
                 continue
 
-            decision = f"`{r['category']}/{r['action']}` {r['confidence']}".strip() if r.get("category") else "untriaged"
+            decision = f"`{decision_text(r)}` {r['confidence']}".strip() if has_decision(r) else "untriaged"
             review = "reviewed" if r.get("reviewed") else "not reviewed"
             note = f": {m['notes'].strip()}" if m["notes"].strip() else ""
             lines.append(f"- [{r['kind']} #{r['number']}]({r['url']}) {r['title']} ({r['state']}; {decision}; {review}){notes_mark(r)}{note}")
@@ -74,8 +74,8 @@ def render(ledger):
     open_items = [r for r in ledger if r["state"] == "open"]
     issues = [r for r in open_items if r["kind"] == "issue"]
     prs = [r for r in open_items if r["kind"] == "pr"]
-    triaged = [r for r in open_items if r["category"]]
-    untriaged = [r for r in open_items if not r["category"]]
+    triaged = [r for r in open_items if has_decision(r)]
+    untriaged = [r for r in open_items if not has_decision(r)]
     reviewed = [r for r in triaged if r["reviewed"]]
     pending_review = [r for r in triaged if not r["reviewed"]]
 
@@ -125,18 +125,27 @@ def render(ledger):
             lines.append("")
 
     for kind, items in (("Issue", issues), ("PR", prs)):
-        cats = Counter(r["category"] or "(untriaged)" for r in items)
-        if not cats:
-            continue
+        labels = Counter(name for r in items for name in (r.get("proposed_labels") or []))
+        if labels:
+            lines.append(f"## {kind} proposed labels")
+            lines.append("")
+            lines.append("Items may have several proposed labels; these counts are local decisions, not GitHub changes.")
+            lines.append("")
+            lines.append("| label | items | % of open |")
+            lines.append("|---|---|---|")
+            for name, n in labels.most_common():
+                lines.append(f"| {name} | {n} | {pct(n, len(items))} |")
+            lines.append("")
 
-        lines.append(f"## {kind} categories")
-        lines.append("")
-        lines.append("| category | count | % of open |")
-        lines.append("|---|---|---|")
-        for cat, n in cats.most_common():
-            lines.append(f"| {cat} | {n} | {pct(n, len(items))} |")
-
-        lines.append("")
+        legacy = Counter(r["category"] for r in items if r.get("category"))
+        if legacy:
+            lines.append(f"## {kind} legacy categories")
+            lines.append("")
+            lines.append("| category | items | % of open |")
+            lines.append("|---|---|---|")
+            for name, n in legacy.most_common():
+                lines.append(f"| {name} | {n} | {pct(n, len(items))} |")
+            lines.append("")
 
     if pending_review:
         lines.append("## Awaiting human review, by recommended action")
@@ -152,7 +161,7 @@ def render(ledger):
     merge_ready = [
         r
         for r in prs
-        if r["category"] == "merge-ready"
+        if (r.get("category") == "merge-ready" or "merge-ready" in (r.get("proposed_labels") or []))
         and r["confidence"] == "high"
         and not r["reviewed"]
     ]

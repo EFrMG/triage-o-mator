@@ -451,18 +451,21 @@ func (m model) clickDetail(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
 	}
 	row := event.Y - formY
 	if m.form.pick.open && formFieldIsEnum(m.form.focused) {
-		field := int(m.form.focused - fieldCategory)
+		field := int(m.form.focused - fieldLabels)
 		first := formY + field + 2
 		start := maxInt(minInt(m.form.pick.cursor-dropdownRows/2, len(m.form.pick.options)-dropdownRows), 0)
 		index := start + event.Y - first
 		if event.Y >= first && event.Y < first+minInt(dropdownRows, len(m.form.pick.options)) && event.X >= formX+formLabelWidth && index < len(m.form.pick.options) {
 			m.form.pick.cursor = index
+			if m.form.focused == fieldLabels {
+				return m.mousePress("space")
+			}
 			return m.mousePress("enter")
 		}
 		return m, nil
 	}
 	if row >= 0 && row <= 2 {
-		field := formField(int(fieldCategory) + row)
+		field := formField(int(fieldLabels) + row)
 		if m.form.focused == field && repeat {
 			return m.mousePress("l")
 		}

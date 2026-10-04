@@ -68,7 +68,7 @@ Mouse controls work alongside the keyboard keys.
 
 ![Selecting and reading backlog items](captures/flow-1.webp)
 
-2. **Make a first pass, then review it.** Choose a category, action and confidence, with a short reason. Save a decision for later review or confirm one you have checked yourself. An agent can prepare a batch from copied item or list context; inspect its suggestions in **Batches**, then save them individually or apply the rest as unreviewed decisions. **Pending Review** is where a person verifies and revises those decisions. Reviewed items stay in **All Items** and groups; editing one removes its old confirmation. A reviewed ledger decision does not execute its recommended action.
+2. **Make a first pass, then review it.** Propose zero or more labels from the repository's GitHub catalog, choose an action and confidence, and give a short reason. Save a decision for later review or confirm one you have checked yourself. An agent can prepare a batch from copied item or list context; inspect its suggestions in **Batches**, then save them individually or apply the rest as unreviewed decisions. **Pending Review** is where a person verifies and revises those decisions. Reviewed items stay in **All Items** and groups; editing one removes its old confirmation. A reviewed ledger decision does not execute its recommended action or apply labels on GitHub.
 
 ![Saving and reviewing triage decisions](captures/flow-2.webp)
 
@@ -114,7 +114,7 @@ The paths below are relative to an install: `data/<owner>/<repo>/ledger.jsonl`, 
 
 ### Local records
 
-Each ledger row has a category, recommended action, confidence and reason, plus triage attribution and optional agent notes. Separate review fields record whether a person confirmed it and any reviewer notes; [the playbook](prompts/PLAYBOOK.md#two-stage-review) explains the distinction. Teams own their [taxonomy](config/taxonomy.md), with a [machine-readable copy](config/taxonomy.json) used by the TUI and scripts.
+Each ledger row separates observed GitHub labels from proposed labels, and records a recommended action, confidence and reason, plus triage attribution and optional agent notes. Existing category values remain readable as legacy decisions. Separate review fields record whether a person confirmed the call and any reviewer notes; [the playbook](prompts/PLAYBOOK.md#two-stage-review) explains the distinction. Teams own their [taxonomy](config/taxonomy.md), with a [machine-readable copy](config/taxonomy.json) used by the TUI and scripts.
 
 The ledger and other transactional records use atomic replacement; reports and CSV exports do not. See [local storage and recovery](docs/storage.md).
 

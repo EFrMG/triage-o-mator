@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never res
 from _groups import list_groups
 from _similar import TitleIndex
 from _notdupes import TitleVerdicts
-from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, load_jsonl, load_ledger
+from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, has_decision, load_jsonl, load_ledger
 
 STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
@@ -42,9 +42,9 @@ def batch_states(by_key):
         batch_id = items_path.name[: -len(".items.jsonl")]
         keys = [(r["kind"], r["number"]) for r in load_jsonl(items_path)]
         rows = load_jsonl(BATCHES_DIR / f"{batch_id}.decisions.jsonl")
-        filled = [r for r in rows if r.get("category") and r.get("action")]
-        waiting = [r for r in filled if not (by_key.get((r["kind"], r["number"])) or {}).get("category")]
-        done = sum(1 for k in keys if (by_key.get(k) or {}).get("category"))
+        filled = [r for r in rows if r.get("action")]
+        waiting = [r for r in filled if not has_decision(by_key.get((r["kind"], r["number"])) or {})]
+        done = sum(1 for k in keys if has_decision(by_key.get(k) or {}))
         states.append(dict(id=batch_id, items=len(keys), filled=len(filled), waiting=len(waiting), done=done))
 
     return states
@@ -78,20 +78,20 @@ def suggestions(ledger):
             add("human", f"Delete finished batch {b['id']}", f"bin/batch --delete {b['id']} (or d d in the TUI's Batches)",
                 "every item in it is in the ledger")
 
-    pending = [r for r in open_items if r["category"] and not r["reviewed"]]
+    pending = [r for r in open_items if has_decision(r) and not r["reviewed"]]
     if pending:
         closes = sum(1 for r in pending if r["action"].startswith("close-"))
         add("human", f"Review {len(pending)} triaged decisions ({closes} would close something)",
             "TUI: Pending Review (a approves, Ctrl-S corrects); or bin/export-csv --pending-review, edit, bin/import-csv --by <you>",
             "nothing is acted on until a human confirms it")
 
-    unreviewed_code = [r for r in open_items if r["kind"] == "pr" and r["category"] in CODE_REVIEW_CATEGORIES
+    unreviewed_code = [r for r in open_items if r["kind"] == "pr" and (r.get("category") in CODE_REVIEW_CATEGORIES or any(name in CODE_REVIEW_CATEGORIES for name in r.get("proposed_labels") or []))
                        and not r["reviewed"] and not (r.get("agent_notes") or "").strip()]
     if unreviewed_code:
-        merge_ready = sum(1 for r in unreviewed_code if r["category"] == "merge-ready")
-        sample = ", ".join(f"#{r['number']}" for r in sorted(unreviewed_code, key=lambda r: r["category"] != "merge-ready")[:5])
+        merge_ready = sum(1 for r in unreviewed_code if r.get("category") == "merge-ready" or "merge-ready" in (r.get("proposed_labels") or []))
+        sample = ", ".join(f"#{r['number']}" for r in sorted(unreviewed_code, key=lambda r: r.get("category") != "merge-ready" and "merge-ready" not in (r.get("proposed_labels") or []))[:5])
         add("agent", f"Code-review {len(unreviewed_code)} triaged PRs nobody has read the diff of ({merge_ready} marked merge-ready)",
-            f"prompts/review-pr.md (e.g. {sample})", "their category was judged from the description alone")
+            f"prompts/review-pr.md (e.g. {sample})", "their code evidence has not been reviewed")
 
     open_prs = [r for r in open_items if r["kind"] == "pr"]
     if open_prs:
@@ -100,7 +100,7 @@ def suggestions(ledger):
             "a scoped recommendation can keep the PR open; a saved proposal needs exact approval before any GitHub write")
 
     pairs = [p for p in TitleVerdicts().pairs(TitleIndex(ledger), min_score=STRONG_PAIR)
-             if not by_key[(p["item"]["kind"], p["item"]["number"])]["category"]]
+             if not has_decision(by_key[(p["item"]["kind"], p["item"]["number"])])]
     if pairs:
         sample = ", ".join(f"#{p['item']['number']}~#{p['original']['number']}" for p in pairs[:3])
         add("agent", f"Check {len(pairs)} near-identical title pairs for duplicates", f"prompts/find-duplicates.md (e.g. {sample})",
@@ -131,7 +131,7 @@ def suggestions(ledger):
         add("agent", "Organize related items into review groups for maintainers", "prompts/organize-groups.md",
             "there are duplicate clusters and no groups yet")
 
-    untriaged = [r for r in open_items if not r["category"]]
+    untriaged = [r for r in open_items if not has_decision(r)]
     if open_items:
         add("agent", "Prepare reusable evidence for a focused analysis", "prompts/prepare-analysis.md",
             "optional: inspect existing references offline first; agree scope and request budget before any download (cache coverage is not assessed here)")

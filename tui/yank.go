@@ -44,8 +44,8 @@ func truncate(text string, limit int) string {
 func itemLine(item Item, proposal string) string {
 	line := fmt.Sprintf("- %s #%d — %s", item.Kind, item.Number, item.Title)
 	switch {
-	case item.Category != "":
-		line += fmt.Sprintf(" [%s / %s, %s, by %s", item.Category, item.Action, item.Confidence, item.TriagedBy)
+	case !item.Untriaged():
+		line += fmt.Sprintf(" [%s / %s, %s, by %s", item.DecisionLabel(), item.Action, item.Confidence, item.TriagedBy)
 		if item.Reviewed {
 			line += fmt.Sprintf("; reviewed by %s", item.ReviewedBy)
 		}
@@ -66,15 +66,15 @@ func (m model) itemBlock(item Item, enriched EnrichedItem, withBody bool) string
 	fmt.Fprintf(&b, "## %s #%d — %s\n", item.Kind, item.Number, item.Title)
 	fmt.Fprintf(&b, "%s · by %s · opened %s · updated %s · %d comments\n", item.State, item.Author, item.CreatedAt, item.UpdatedAt, item.CommentsCount)
 	if len(item.Labels) > 0 {
-		fmt.Fprintf(&b, "Labels: %s\n", strings.Join(item.Labels, ", "))
+		fmt.Fprintf(&b, "GitHub labels: %s\n", strings.Join(item.Labels, ", "))
 	}
 
 	if item.URL != "" {
 		fmt.Fprintf(&b, "%s\n", item.URL)
 	}
 
-	if item.Category != "" {
-		fmt.Fprintf(&b, "\nDecision: %s / %s (%s) by %s — %s\n", item.Category, item.Action, item.Confidence, item.TriagedBy, item.Reason)
+	if !item.Untriaged() {
+		fmt.Fprintf(&b, "\nDecision: %s / %s (%s) by %s — %s\n", item.DecisionLabel(), item.Action, item.Confidence, item.TriagedBy, item.Reason)
 		if item.Reviewed {
 			fmt.Fprintf(&b, "Reviewed by %s on %s. %s\n", item.ReviewedBy, item.ReviewedAt, item.ReviewerNotes)
 		} else {
@@ -328,8 +328,12 @@ func (m model) yankBatch(all bool) (string, string) {
 		}
 
 		proposed := ""
-		if p, ok := record.Proposals[key]; ok && p.Category != "" {
-			proposed = fmt.Sprintf("%s / %s (%s) — %s", p.Category, p.Action, p.Confidence, p.Reason)
+		if p, ok := record.Proposals[key]; ok && p.Action != "" {
+			labels := strings.Join(p.ProposedLabels, ", ")
+			if labels == "" {
+				labels = p.Category
+			}
+			proposed = fmt.Sprintf("%s / %s (%s) — %s", labels, p.Action, p.Confidence, p.Reason)
 		}
 
 		b.WriteString(itemLine(item, proposed))

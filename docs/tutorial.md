@@ -57,7 +57,7 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 ## 5. Record a decision
 
 - In an untriaged item, `l` moves into the form: Category, Action, Confidence, and Reason.
-- On a choice, `j`/`k` change the value and `Enter` moves to the next field. Category, action, and confidence come from `config/taxonomy.json`; reason is free text.
+- The **Labels** field opens the repository's saved GitHub label catalog with `l` or `→`. Move with `j`/`k`, toggle any number of labels with `Space`, then press `Enter` to keep the selection or `Esc` to cancel. These are local proposals, separate from the item's current GitHub labels. Action and confidence cycle with `j`/`k`; reason is free text. Older decisions keep their legacy category visible below the form.
 - Saved values missing from the current taxonomy stay visible and require an explicit supported choice before saving.
 - `Tab`/`Shift-Tab` or `J`/`K` move between fields. On a choice, `l` opens all values; select with `Enter` or `l`, or close the list with `Esc` or `h`. Printable keys remain text while editing.
 - In most forms, `Ctrl-S` submits from any field; `Esc` cancels.

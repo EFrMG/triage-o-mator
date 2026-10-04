@@ -1,14 +1,14 @@
 # Triage taxonomy
 
-`taxonomy.json` also holds `label_catalog`, the GitHub label definitions observed for the selected repository. Its `observed_at` time identifies the last successful online read; `pending` means no label definitions have been read for that repository. `guidance` is optional local advice, preserved by GitHub label ID when a label is renamed. Removed labels move to `retired` with their history intact. `label_catalog_archive` keeps prior repositories' catalogs if this install is pointed elsewhere and back. Running `bin/label-catalog sync` reads GitHub labels and updates this catalog without changing labels on GitHub. The issue/PR categories and actions below remain the current decision vocabulary until the multi-selection migration.
+`taxonomy.json` holds `label_catalog`, the GitHub label definitions observed for the selected repository. Its `observed_at` time identifies the last successful online read; `pending` means no label definitions have been read for that repository. `guidance` is optional local advice, preserved by GitHub label ID when a label is renamed. Removed labels move to `retired` with their history intact. `label_catalog_archive` keeps prior repositories' catalogs if this install is pointed elsewhere and back. Running `bin/label-catalog sync` reads GitHub labels and updates this catalog without changing labels on GitHub. New decisions propose zero or more names from the observed catalog in `proposed_labels`; the existing `labels` field remains GitHub's observed item state. Proposed labels do not change GitHub by themselves.
 
 `action_guidance` in the JSON holds descriptions for the current action names. The TUI's Settings → Actions menu creates and edits action titles and descriptions through `bin/taxonomy-settings`; it does not apply an action to an item. Settings → Labels previews and explicitly changes GitHub label names and descriptions through `bin/label-definitions`, then refreshes the saved catalog. The older per-label local `guidance` is retained by label ID but is not edited in this menu.
 
-This is the categorization scheme every batch is judged against.
+`issue_categories` and `pr_categories` are retained for existing ledger rows and older batch files. The decision form uses proposed labels and actions; it does not assign a legacy category to new decisions. Actions remain the recommended next step, independent of labels.
 
-It is a living document. If a category or action stops being useful, or a new one is clearly needed, propose the change to a human maintainer of this project rather than silently drifting from `taxonomy.json` (which is what the scripts actually validate against; make sure to keep the two in sync if you edit either).
+It is a living document. If a label or action stops being useful, or a new one is clearly needed, propose the change to a human maintainer rather than inventing it in a decision. GitHub owns label definitions; Settings reads and explicitly edits them. This install owns its action names and descriptions in `taxonomy.json`.
 
-## Issue categories
+## Legacy issue categories
 
 | Category            | Meaning                                                                                                                                                                                                                                                                           |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -24,7 +24,7 @@ It is a living document. If a category or action stops being useful, or a new on
 | `out-of-scope`      | Conflicts with Omarchy's opinionated design, or belongs upstream (Arch, Hyprland, an app it ships) rather than in this repo.                                                                                                                                                      |
 | `invalid`           | Spam, empty, or not a real issue.                                                                                                                                                                                                                                                 |
 
-## PR categories
+## Legacy PR categories
 
 | Category                | Meaning                                                                                               |
 | ----------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -39,7 +39,7 @@ It is a living document. If a category or action stops being useful, or a new on
 
 ## Actions
 
-The action is the _recommended next step_; independent of category, since two items in the same category can warrant different actions.
+The action is the _recommended next step_; independent of proposed labels, since items with the same labels can warrant different actions.
 
 - `label-only`: apply/confirm a label, no other action needed yet.
 - `comment-request-info`: ask the reporter for repro/logs/version.
@@ -55,12 +55,12 @@ The action is the _recommended next step_; independent of category, since two it
 
 ## Confidence
 
-`low` / `medium` / `high`: how sure the triager is about the category + action. **Use `low` liberally.** A wrong `high`-confidence call that a human rubber-stamps is worse than an honest `low` that gets a second look. When unsure between two categories, pick the closer one and say so in `reason` without hesitation, or use `escalate-maintainer` as the action.
+`low` / `medium` / `high`: how sure the triager is about the proposed labels and action. **Use `low` liberally.** A wrong `high`-confidence call that a human rubber-stamps is worse than an honest `low` that gets a second look. When no observed label fits, leave the proposal empty, explain the gap in `reason`, or use `escalate-maintainer` when a specific human judgment is needed.
 
 ## What good triage looks like
 
 1. Read the title, body, and at least the first couple of comments before deciding, not just the title.
 2. Before marking something `duplicate`/`duplicate-pr`, actually check the issue you think it duplicates still exists and is genuinely the same report, not just a similar symptom.
-3. Prefer specific `reason` text a human can skim in three seconds over vague restatements of the category name. "Same freeze as #12201, same GPU" beats "duplicate of another issue."
-4. Never invent a category or action not listed here, `bin/apply` will warn on unrecognized values but won't block them, so the discipline is on you.
+3. Prefer specific `reason` text a human can skim in three seconds over vague restatements of a label name. "Same freeze as #12201, same GPU" beats "duplicate of another issue."
+4. Never invent a label or action. `bin/apply` refuses proposed labels absent from this repository's observed catalog, and warns about unrecognized legacy categories or actions.
 5. Leaving `reviewed: false` is the default and correct state for anything an agent triaged. Only a human reviewer flips it to `true` (see AGENTS.md).

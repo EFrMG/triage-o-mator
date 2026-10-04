@@ -6,17 +6,18 @@ Usage:
     bin/export-csv [--open-only] [--pending-review]
     -> data/<owner>/<repo>/exports/ledger-<date>.csv
 
-Edit category / action / confidence / reason / reviewed / reviewed_by / reviewer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. Keep `number`, `kind`, and `review_revision` intact; the revision rejects stale rows.
+Edit proposed_labels (a JSON list), action, confidence, reason, reviewed, reviewed_by or reviewer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. Legacy category remains editable for old rows. Keep `number`, `kind`, and `review_revision` intact; the revision rejects stale rows.
 """
 
 import argparse
 import csv
+import json
 import sys
 from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import EXPORTS_DIR, FIELDS, load_ledger
+from _triage import EXPORTS_DIR, FIELDS, has_decision, load_ledger
 from _csv_revision import review_revision
 
 
@@ -35,7 +36,7 @@ def main():
         ledger = [r for r in ledger if r["state"] == "open"]
 
     if args.pending_review:
-        ledger = [r for r in ledger if r["category"] and not r["reviewed"]]
+        ledger = [r for r in ledger if has_decision(r) and not r["reviewed"]]
 
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = EXPORTS_DIR / f"ledger-{date.today().isoformat()}.csv"
@@ -46,6 +47,7 @@ def main():
             row = dict(rec)
             row["review_revision"] = review_revision(rec)
             row["labels"] = ",".join(row.get("labels") or [])
+            row["proposed_labels"] = json.dumps(row.get("proposed_labels") or [], ensure_ascii=False)
             writer.writerow(row)
 
     print(f"Exported {len(ledger)} rows -> {out_path}")

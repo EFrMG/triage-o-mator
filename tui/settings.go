@@ -96,7 +96,7 @@ func (m *model) openSettings() {
 		return
 	}
 	m.taxonomy = taxonomy
-	m.form.taxonomy = taxonomy
+	m.form.SetTaxonomy(taxonomy)
 	m.settings = settingsUI{open: true}
 	m.status = ""
 }
@@ -640,7 +640,7 @@ func (m model) finishSettings(msg settingsDoneMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.taxonomy = msg.taxonomy
-	m.form.taxonomy = msg.taxonomy
+	m.form.SetTaxonomy(msg.taxonomy)
 	if msg.name != "" {
 		for i, row := range m.settingsRows() {
 			if row.name == msg.name {

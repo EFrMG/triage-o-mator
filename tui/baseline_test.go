@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -337,6 +338,7 @@ func TestBaselineDraftAndQuitConfirmation(t *testing.T) {
 	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
 	m.form.NextField()
+	m.form.NextField()
 	m.form.CycleValue(1)
 	if !m.form.dirty {
 		t.Fatal("editing should create a draft")
@@ -480,7 +482,7 @@ func TestBaselineItemTabsLeadIntoForm(t *testing.T) {
 		t.Fatal("L did not select the last tab")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Text: "L"})
-	if m.detail.active != 1 || m.form.focused != fieldCategory {
+	if m.detail.active != 1 || m.form.focused != fieldLabels {
 		t.Fatal("L on the last tab did not focus the form")
 	}
 	m.form.FocusField(fieldAction)
@@ -630,6 +632,48 @@ func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 			}
 		})
 	}
+
+	root := baselineRoot(t)
+	taxonomy, err := LoadTaxonomy(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taxonomy.LabelCatalog = LabelCatalog{Repository: "owner/repo", Status: "observed", Labels: []GitHubLabel{{ID: 7, Name: "bug", Color: "ff0000"}, {ID: 8, Name: "needs-info", Color: "ededed"}}}
+	data, err := json.Marshal(taxonomy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config/taxonomy.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := baselineModel(t, root)
+	m.activateTab(untriagedTab)
+	m.selectCurrentListItem()
+	m.form.FocusField(fieldLabels)
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyRight})
+	if !m.form.pick.open {
+		t.Fatal("Labels did not open the multi-select list")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeySpace})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeySpace})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !slices.Equal(m.form.ProposedLabels(), []string{"bug", "needs-info"}) || m.form.focused != fieldAction {
+		t.Fatal("selected labels were not retained in the decision form")
+	}
+	m.form.reason.SetValue("Confirmed bug")
+	_, cmd := m.requestSave()
+	if cmd == nil {
+		t.Fatal("label decision produced no save command")
+	}
+	if result := cmd().(applyDoneMsg); result.err != nil {
+		t.Fatal(result.err)
+	}
+	row := baselineLedgerRow(t, root)
+	if row["category"] != "" || row["action"] != "label-only" || !slices.Equal(row["proposed_labels"].([]any), []any{"bug", "needs-info"}) || row["reviewed"] != false {
+		t.Fatalf("new label decision did not stay separate from legacy categories and review: %v", row)
+	}
 }
 
 func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) {
@@ -655,13 +699,11 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 		t.Fatal("blocked save changed the ledger")
 	}
 
-	m.form.FocusField(fieldCategory)
-	m.form.CycleValue(0)
 	m.form.FocusField(fieldAction)
 	m.form.CycleValue(0)
 	m.commitDraftIfDirty()
 	m.loadForm(m.items[0])
-	if m.form.Category() != "bug" || m.form.Action() != "label-only" || m.form.Confidence() != "obsolete" {
+	if m.form.Category() != "retired" || m.form.Action() != "label-only" || m.form.Confidence() != "obsolete" {
 		t.Fatal("draft lost corrected or unlisted values")
 	}
 	m.form.FocusField(fieldConfidence)
@@ -679,7 +721,7 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	if result := cmd().(applyDoneMsg); result.err != nil {
 		t.Fatal(result.err)
 	}
-	if got := baselineLedgerRow(t, root); got["category"] != "bug" || got["action"] != "label-only" || got["confidence"] != "low" || got["reason"] != "Explicitly checked" {
+	if got := baselineLedgerRow(t, root); got["category"] != "retired" || got["action"] != "label-only" || got["confidence"] != "low" || got["reason"] != "Explicitly checked" {
 		t.Fatalf("corrected decision = %v", got)
 	}
 }
@@ -837,6 +879,7 @@ func TestBaselineRepoPickerWarnsBeforeDiscardingDraft(t *testing.T) {
 	m := baselineModel(t, root)
 	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
+	m.form.NextField()
 	m.form.NextField()
 	m.form.CycleValue(1)
 	m.detail.loading = false

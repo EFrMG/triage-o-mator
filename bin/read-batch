@@ -77,7 +77,8 @@ def main():
         decisions = {(d["kind"], d["number"]): d for d in load_jsonl(path.with_name(path.name.replace(".items.", ".decisions.")))}
         for item in items:
             d = decisions.get((item["kind"], item["number"]), {})
-            proposal = f"{d['category']}/{d['action']} {d.get('confidence', '')}" if d.get("category") else "(blank)"
+            labels = ", ".join(d.get("proposed_labels") or []) or d.get("category") or "no labels"
+            proposal = f"{labels}/{d['action']} {d.get('confidence', '')}" if d.get("action") else "(blank)"
             print(f"{item['kind']:5} #{item['number']:<6} {proposal:45} {item['title']}")
 
         return

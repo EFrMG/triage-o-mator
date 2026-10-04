@@ -57,6 +57,7 @@ FIELDS = [
     "labels",
     "comments_count",
     "category",
+    "proposed_labels",
     "action",
     "confidence",
     "reason",
@@ -74,6 +75,7 @@ FIELDS = [
 
 TRIAGE_DEFAULTS = {
     "category": "",
+    "proposed_labels": [],
     "action": "",
     "confidence": "",
     "reason": "",
@@ -138,7 +140,7 @@ def save_jsonl(path, records, field_order=None):
     order = field_order or FIELDS
     with atomic_writer(path) as f:
         for rec in records:
-            ordered = {k: rec.get(k, "") for k in order}
+            ordered = {k: rec.get(k, TRIAGE_DEFAULTS.get(k, "")) for k in order}
             # Preserve any extra fields (e.g. body, diff stats) not in the canonical order, appended after it, so nothing is silently lost.
             for k, v in rec.items():
                 if k not in ordered:
@@ -159,6 +161,26 @@ def save_ledger(records):
 
 def ledger_key(rec):
     return (rec.get("kind"), rec.get("number"))
+
+
+def has_decision(rec):
+    """Legacy categories and current actions both identify a saved local decision."""
+    return bool(rec.get("category") or rec.get("action"))
+
+
+def decision_text(rec):
+    if not has_decision(rec):
+        return "untriaged"
+
+    labels = rec.get("proposed_labels") or []
+    if labels:
+        source = "labels: " + ", ".join(labels)
+    elif rec.get("category"):
+        source = "legacy: " + rec["category"]
+    else:
+        source = "no labels"
+
+    return source + " / " + (rec.get("action") or "no action")
 
 
 def run_gh(args, **kwargs):

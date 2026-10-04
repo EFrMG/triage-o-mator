@@ -293,10 +293,28 @@ class LedgerTests(Workspace):
     def test_sync_preserves_proposals(self):
         self.sync()
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "label-only", "--by", "agent:triage")
+        taxonomy_path = self.root / "config/taxonomy.json"
+        taxonomy = json.loads(taxonomy_path.read_text())
+        taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--proposed-label", "bug", "--action", "label-only", "--by", "agent:triage")
+        self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], ["bug"])
+        self.assertEqual(self.ledger()[("issue", 2)]["category"], "")
+        self.assertEqual(self.ledger()[("issue", 2)]["labels"], [])
         self.run_cli("fetch", "--full")
         self.run_cli("sync")
         self.assertEqual(self.ledger()[("issue", 1)]["category"], "bug")
         self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
+        self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], ["bug"])
+        self.assertIn("Triaged: 2/2", self.run_cli("stats").stdout)
+        report = self.run_cli("report", "--stdout").stdout
+        self.assertIn("Issue proposed labels", report)
+        self.assertIn("| bug | 1 |", report)
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--approve", "--by", "human")
+        self.assertTrue(self.ledger()[("issue", 2)]["reviewed"])
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--replace-proposed-labels", "--action", "label-only", "--by", "human")
+        self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], [])
+        self.assertFalse(self.ledger()[("issue", 2)]["reviewed"])
 
     def test_csv_review_revisions_and_approval(self):
         self.sync()

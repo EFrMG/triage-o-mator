@@ -12,7 +12,7 @@ Writes:
     data/<owner>/<repo>/batches/<batch_id>.items.jsonl       full context, one item per line, including `duplicate_candidates` (the top title matches from bin/similar, minus pairs already ruled out; leads to check, not proof)
     data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl   template to fill in and pass to bin/apply
 
-The template has category/action/confidence/reason blanked out; fill those in per config/taxonomy.md (optionally also agent_notes, the longer evidence, and proposed_by, e.g. "agent:<contributor>"), then run:
+The template has proposed_labels/action/confidence/reason blanked out; choose only labels in the repository's observed catalog and fill the action per config/taxonomy.md (optionally also agent_notes, the longer evidence, and proposed_by, e.g. "agent:<contributor>"), then run:
 
     bin/apply data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl
 
@@ -37,7 +37,7 @@ from _groups import load_group
 from _storage import atomic_writer
 from _similar import TitleIndex
 from _evidence import DEFAULT_MAX_AGE
-from _triage import BATCHES_DIR, enrich_item, here, load_ledger, new_batch_id
+from _triage import BATCHES_DIR, enrich_item, has_decision, here, load_ledger, new_batch_id
 
 # Only IDs new_batch_id() can produce, so --delete can never reach a path outside data/<owner>/<repo>/batches/.
 BATCH_ID_RE = re.compile(r"^b\d{8}-\d{6}(-\d+)?$")
@@ -155,7 +155,7 @@ def main():
         ap.error("batch size must be positive")
 
     ledger = load_ledger()
-    candidates = [r for r in ledger if r["state"] == "open" and not r["category"]]
+    candidates = [r for r in ledger if r["state"] == "open" and not has_decision(r)]
     if args.group:
         group = load_group(args.group)
         members = {(m["kind"], m["number"]): m for m in group["members"]}
@@ -205,7 +205,7 @@ def main():
 
         items.append(enriched)
         decisions.append({
-            "number": rec["number"], "kind": rec["kind"], "category": "", "action": "", "confidence": "", "reason": "",
+            "number": rec["number"], "kind": rec["kind"], "proposed_labels": [], "action": "", "confidence": "", "reason": "",
             "agent_notes": "", "proposed_by": "",
         })
         print(f"  [{i}/{len(selected)}] #{rec['number']} {rec['kind']}", file=sys.stderr)

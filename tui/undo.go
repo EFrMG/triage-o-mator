@@ -65,7 +65,7 @@ func (m model) requestUndo(targets []Item) (tea.Model, tea.Cmd) {
 func undoQuestion(targets []Item, unapprove, clear []Key) string {
 	if len(targets) == 1 {
 		it := targets[0]
-		decision := it.Category + "/" + it.Action
+		decision := it.DecisionLabel() + "/" + it.Action
 		if it.Reviewed {
 			return fmt.Sprintf("Take back the approval of %s on %s #%d? The decision stays, unreviewed. Press u again.", decision, it.Kind, it.Number)
 		}

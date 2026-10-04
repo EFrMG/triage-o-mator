@@ -267,11 +267,11 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if !msg.approval || msg.snapshot != nil {
-			if draft, ok := m.drafts[msg.key]; ok && (msg.snapshot == nil || draft == *msg.snapshot) {
+			if draft, ok := m.drafts[msg.key]; ok && (msg.snapshot == nil || draft.Equal(*msg.snapshot)) {
 				delete(m.drafts, msg.key)
 			}
 
-			if m.detail.key == msg.key && (msg.snapshot == nil || m.form.Snapshot() == *msg.snapshot) {
+			if m.detail.key == msg.key && (msg.snapshot == nil || m.form.Snapshot().Equal(*msg.snapshot)) {
 				m.form.saved = true
 				m.form.dirty = false
 				m.form.proposed = false
@@ -555,7 +555,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.focus == FocusDetail && !m.detail.AnySectionFull() {
 		switch {
 		case m.form.focused == fieldContent && key.Matches(msg, keys.Forward):
-			m.form.FocusField(fieldCategory)
+			m.form.FocusField(fieldLabels)
 
 			return m, nil
 		case m.form.focused != fieldContent && msg.Code != tea.KeyEsc && key.Matches(msg, keys.Back):
@@ -1089,15 +1089,23 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case onChoice && key.Matches(msg, keys.Confirm):
 		m.form.NextField()
 	case onChoice && key.Matches(msg, keys.ValueNext):
-		m.form.CycleValue(1)
+		if m.form.focused == fieldLabels {
+			m.form.OpenPick()
+		} else {
+			m.form.CycleValue(1)
+		}
 	case onChoice && key.Matches(msg, keys.ValuePrev):
-		m.form.CycleValue(-1)
+		if m.form.focused == fieldLabels {
+			m.form.OpenPick()
+		} else {
+			m.form.CycleValue(-1)
+		}
 	case key.Matches(msg, keys.TabNext):
 		if m.form.focused != fieldContent && !m.detail.AnySectionFull() {
 			return m, nil
 		}
 		if m.sideBySide() && m.detail.active == len(m.detail.sections)-1 {
-			m.form.FocusField(fieldCategory)
+			m.form.FocusField(fieldLabels)
 			return m, nil
 		}
 		m.detail.CycleSection(1)
@@ -1119,7 +1127,7 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 		if tab == m.detail.active && !m.detail.AnySectionFull() {
 			if m.form.focused == fieldContent {
-				m.form.FocusField(fieldCategory)
+				m.form.FocusField(fieldLabels)
 			} else {
 				m.form.FocusField(fieldContent)
 			}
@@ -1196,7 +1204,7 @@ func (m model) diffIfNeeded() tea.Cmd {
 }
 
 func formFieldIsEnum(f formField) bool {
-	return f == fieldCategory || f == fieldAction || f == fieldConfidence
+	return f == fieldLabels || f == fieldAction || f == fieldConfidence
 }
 
 // requestSave saves the decision, but first warns (and requires a repeated save action) when the fields are still the untouched defaults or the reason is empty, so a stray keypress can't record "bug / label-only / low" with no justification.
@@ -1263,7 +1271,7 @@ func (m model) requestApprove() (tea.Model, tea.Cmd) {
 
 	if m.form.dirty && !m.confirmApprove {
 		m.confirmApprove = true
-		m.status = fmt.Sprintf("Unsaved edits won't be approved. Press a again to approve the saved %s/%s, or S to save and approve your edits.", it.Category, it.Action)
+		m.status = fmt.Sprintf("Unsaved edits won't be approved. Press a again to approve the saved %s/%s, or S to save and approve your edits.", it.DecisionLabel(), it.Action)
 
 		return m, nil
 	}
@@ -1279,7 +1287,7 @@ func (m model) saveDecisionCmd(approve bool) tea.Cmd {
 	by, reviewedBy := m.reviewer, ""
 	if approve {
 		reviewedBy = m.reviewer
-		if m.form.proposed && snapshot == m.form.proposalSnapshot {
+		if m.form.proposed && snapshot.Equal(m.form.proposalSnapshot) {
 			by = m.form.proposalBy
 			if by == "" {
 				by = "agent"
@@ -1287,7 +1295,7 @@ func (m model) saveDecisionCmd(approve bool) tea.Cmd {
 		}
 	}
 
-	cmd := applyDecisionCmd(m.installRoot, m.repo, m.detail.key, m.form.Category(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, by, m.activeBatch, reviewedBy)
+	cmd := applyDecisionCmd(m.installRoot, m.repo, m.detail.key, m.form.Category(), m.form.ProposedLabels(), m.form.ReplaceProposedLabels(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, by, m.activeBatch, reviewedBy)
 
 	return func() tea.Msg { msg := cmd().(applyDoneMsg); msg.snapshot = &snapshot; return msg }
 }

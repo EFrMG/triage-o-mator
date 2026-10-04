@@ -23,6 +23,7 @@ from _triage import (
     LEDGER_PATH,
     RAW_DIR,
     TRIAGE_DEFAULTS,
+    has_decision,
     load_jsonl,
     load_ledger,
     now_iso,
@@ -104,7 +105,7 @@ def sync():
         f"Ledger now has {len(by_key)} items."
     )
     untriaged = sum(
-        1 for r in by_key.values() if r["state"] == "open" and not r["category"]
+        1 for r in by_key.values() if r["state"] == "open" and not has_decision(r)
     )
     print(f"Open + untriaged: {untriaged}")
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,14 +24,15 @@ import (
 
 // proposal is one filled-in row of a batch's decisions file.
 type proposal struct {
-	Number     int    `json:"number"`
-	Kind       string `json:"kind"`
-	Category   string `json:"category"`
-	Action     string `json:"action"`
-	Confidence string `json:"confidence"`
-	Reason     string `json:"reason"`
-	AgentNotes string `json:"agent_notes"`
-	ProposedBy string `json:"proposed_by"`
+	Number         int      `json:"number"`
+	Kind           string   `json:"kind"`
+	Category       string   `json:"category"`
+	ProposedLabels []string `json:"proposed_labels"`
+	Action         string   `json:"action"`
+	Confidence     string   `json:"confidence"`
+	Reason         string   `json:"reason"`
+	AgentNotes     string   `json:"agent_notes"`
+	ProposedBy     string   `json:"proposed_by"`
 }
 
 type batchRecord struct {
@@ -140,7 +142,7 @@ func loadBatches(root, repo string) ([]batchRecord, error) {
 					return err
 				}
 
-				if p.Category != "" && p.Action != "" {
+				if p.Action != "" {
 					rec.Proposals[Key{Kind: p.Kind, Number: p.Number}] = p
 				}
 
@@ -699,8 +701,15 @@ func (m model) countProposals(b batchRecord) (pending, invalid int) {
 	for key, p := range b.Proposals {
 		if it, ok := m.findItem(key); ok && it.Untriaged() {
 			pending++
-			if unlisted(m.taxonomy.CategoriesFor(key.Kind), p.Category) != "" || unlisted(m.taxonomy.Actions, p.Action) != "" {
+			if unlisted(m.taxonomy.Actions, p.Action) != "" {
 				invalid++
+			} else {
+				for _, label := range p.ProposedLabels {
+					if !slices.Contains(m.form.labelOptions(), label) {
+						invalid++
+						break
+					}
+				}
 			}
 		}
 	}
@@ -750,7 +759,11 @@ func (m model) batchItems(b batchRecord) ([]list.Item, int) {
 
 		li := listItem{Item: it}
 		if p, ok := b.Proposals[key]; ok && it.Untriaged() {
-			li.proposal = p.Category + "/" + p.Action
+			labels := strings.Join(p.ProposedLabels, ", ")
+			if labels == "" {
+				labels = p.Category
+			}
+			li.proposal = labels + "/" + p.Action
 		}
 
 		out = append(out, li)

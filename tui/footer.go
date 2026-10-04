@@ -363,11 +363,18 @@ func (m model) itemFooter() []footerGroup {
 	}
 
 	if m.form.pick.open {
+		if m.form.focused == fieldLabels {
+			return []footerGroup{group("Labels", hint{"j/k", "select"}, hint{"Space", "toggle"}, hint{"Enter", "done"}, hint{"Esc", "cancel"}), group("Navigation", bind("", keys.Quit), bind("exit", keys.ForceQuit))}
+		}
 		return []footerGroup{group("List", bind("move", keys.ValueNext, keys.ValuePrev), bind("pick", keys.Confirm, keys.OpenList), bind("", keys.CloseList)), group("Navigation", bind("", keys.Quit), bind("exit", keys.ForceQuit))}
 	}
 
 	fields := group("Fields", bind("fields", keys.FieldNext, keys.FieldPrev), hint{"h/l", "content / form"})
-	if formFieldIsEnum(m.form.focused) {
+	if m.form.focused == fieldLabels {
+		fields = group("Labels", bind("fields", keys.FieldNext, keys.FieldPrev), hint{"l/→", "choose labels"})
+		read = group("Read", bind("focus tab", keys.TabPrev), bind("", keys.TabJump))
+	}
+	if formFieldIsEnum(m.form.focused) && m.form.focused != fieldLabels {
 		fields = group("Fields", bind("fields", keys.FieldNext, keys.FieldPrev, keys.ChoiceNext, keys.ChoicePrev), hint{"h", "content"}, bind("change", keys.ValueNext, keys.ValuePrev), bind("", keys.OpenList), bind("next", keys.Confirm))
 		read = group("Read", bind("focus tab", keys.TabPrev), bind("", keys.TabJump))
 	}

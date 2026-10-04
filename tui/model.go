@@ -178,7 +178,7 @@ func newModel(installRoot, repo string, taxonomy Taxonomy, reviewer string, item
 		items:       items,
 		sidebar:     newSidebar(),
 		detail:      newDetailModel(),
-		form:        newDecisionForm(taxonomy),
+		form:        newDecisionForm(taxonomy, repo),
 		drafts:      make(map[Key]decisionSnapshot),
 		similar:     make(map[Key][]dupCandidate),
 		ticked:      map[Key]bool{},
@@ -819,7 +819,7 @@ func (m *model) switchInstall(root, repo string) tea.Cmd {
 	}
 
 	m.installRoot, m.taxonomy = root, taxonomy
-	m.form = newDecisionForm(taxonomy)
+	m.form = newDecisionForm(taxonomy, repo)
 
 	// A palette that can't be read there (a checkout that moved, say) is no reason to refuse the switch: the one already loaded stays.
 	_ = loadTheme(root)

@@ -441,6 +441,14 @@ def automation_policy(repo, proposal):
     action = proposal.get("action")
     if not action:
         raise ValueError("older PR closure proposal has no saved action type; stage it for human review")
+    inputs = proposal.get("inputs") or {}
+    evidence = inputs.get("evidence") or []
+    complete_target = any(selected["kind"] == "pr" and selected["number"] == proposal["number"] and
+                          all(component["status"] in ("complete", "not_applicable") for component in selected["components"].values())
+                          for selected in evidence)
+    if not complete_target or inputs.get("evidence_gaps") or proposal.get("reconsideration"):
+        raise ValueError("direct PR closure needs complete selected target evidence and no unresolved gap or rejection")
+
     result = subprocess.run([str(Path(__file__).absolute().with_name("action-policy")), "status", "--expected-repo", repo], capture_output=True, text=True)
     if result.returncode:
         raise ValueError(result.stderr.strip() or "could not read action automation policy")

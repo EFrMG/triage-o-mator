@@ -68,6 +68,12 @@ def run(numbers, preview_sha256):
     if executing:
         selection = [part for number in executing for part in ("--number", str(number))]
         reviewed = script("auto-close", "--expected-repo", REPO, "review", *selection)
+        expected = {item["number"]: item for item in current["plan"]["items"] if item["mode"] == "execute"}
+        for row in reviewed["plan"]["proposals"]:
+            selected = expected.get(row["number"])
+            if selected is None or row["checkpoint"] != selected["proposal_checkpoint"] or row["comment"] != selected["comment"] or row.get("action") != selected["action"]:
+                raise ValueError("action proposal changed after the selected preview; stop before writing")
+
         execution = script("auto-close", "--expected-repo", REPO, "execute", *selection, "--publish", "--approve", reviewed["approval"], "--automation")
         results.extend(execution["results"])
 

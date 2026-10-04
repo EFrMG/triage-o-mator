@@ -182,12 +182,19 @@ class AutoCloseWriteTests(Workspace):
         self.run_cli("action-pass", "run", *selected, "--preview-sha256", staged["preview_sha256"], ok=False)
         self.assertEqual(self.write_calls(), [])
 
+        rows[1].update(action="close-duplicate", confidence="high", reason="Also superseded")
+        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        self.propose(2, "--action", "close-duplicate")
+        gap_review = self.auto_close("review", "--number", "2")
+        self.auto_close("execute", "--number", "2", "--publish", "--approve", gap_review["approval"], "--automation", ok=False)
+        self.assertEqual(self.write_calls(), [])
+
         preview = self.json_cli("action-pass", "preview", *selected)
         self.assertEqual(preview["plan"]["items"][0]["mode"], "execute")
         result = self.json_cli("action-pass", "run", *selected, "--preview-sha256", preview["preview_sha256"])
         self.assertEqual(result["results"][0]["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
-        self.assertEqual(len(self.auto_close("list")["rows"]), 1)
+        self.assertEqual({row["number"]: row["status"] for row in self.auto_close("list")["rows"]}, {1: "executed", 2: "pending"})
         record = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
         self.assertEqual(record["outcome"]["authorization"]["source"], "repository-policy")
 

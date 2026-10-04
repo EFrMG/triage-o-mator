@@ -6,6 +6,8 @@
 
 `issue_categories` and `pr_categories` are retained for existing ledger rows and older batch files. The decision form uses proposed labels and actions; it does not assign a legacy category to new decisions. Actions remain the recommended next step, independent of labels.
 
+Item labeling is a separate pass under Settings. It is disabled until a person enables it for this repository, then acts only on reviewed decisions after a bounded preview and live revalidation. It records outcomes outside the ledger, removes only labels it previously added, and pauses items after human corrections or uncertain writes. A proposed label or a reviewed decision alone does not perform a GitHub write.
+
 It is a living document. If a label or action stops being useful, or a new one is clearly needed, propose the change to a human maintainer rather than inventing it in a decision. GitHub owns label definitions; Settings reads and explicitly edits them. This install owns its action names and descriptions in `taxonomy.json`.
 
 ## Legacy issue categories

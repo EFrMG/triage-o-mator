@@ -86,7 +86,7 @@ Mouse controls work alongside the keyboard keys.
 
 6. **Publish an approved GitHub action.** Compose a comment, or close or reopen an item with one as well. Bulk actions show every target before publication; an uncertain result stops the remaining actions for inspection.
 
-> GitHub PR approval, labeling and merging are not supported (yet).
+> GitHub PR approval and merging are not supported. Item labeling has its own reviewed-decision pass under Settings → Item labeling.
 
 ![Approving a GitHub comment or state change](captures/flow-6.webp)
 
@@ -140,6 +140,7 @@ bin/report
 | Read guidance and evidence                | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |
 | Edit action settings                      | `bin/taxonomy-settings`                                                        |
 | Preview and edit GitHub label definitions | `bin/label-definitions`                                                        |
+| Preview and apply reviewed labels         | `bin/item-labels`                                                              |
 | Propose and publish actions               | `bin/auto-close`, `bin/comment-plus`                                           |
 | See progress and handoffs                 | `bin/stats`, `bin/next`, `bin/report`                                          |
 
@@ -197,6 +198,6 @@ Use `mise exec -- make check` for Go and Python checks, and `mise exec -- make b
 
 ## Not Built (yet)
 
-- **GitHub write actions**: the tool does not label or merge items. See [comment publishing](docs/comment-plus.md).
+- **Other GitHub write actions**: the tool does not approve or merge PRs. See [comment publishing](docs/comment-plus.md) and [item labeling](docs/install.md#github-labels-and-local-taxonomy).
 - **Automatic appeal monitoring**: closed-PR watches require explicit enrollment and polling after the ledger baseline; closed issues have no watch yet.
 - **Verified identification of an external auto-closure operator**: imported explanations are attributed claims, not authenticated runner records.

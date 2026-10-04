@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "taxonomy-settings"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -279,6 +279,48 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	m = baselineSend(m, cmd().(settingsDoneMsg))
 	if m.settings.editor != nil || m.taxonomy.ActionGuidance["request-review"] != "Ask a maintainer to review" {
 		t.Fatal("new action was not saved and reloaded")
+	}
+
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if cmd == nil || m.settings.section != "labeling" {
+		t.Fatal("Item labeling did not open from Settings")
+	}
+	m = baselineSend(m, cmd().(labelingMsg))
+	if !m.settings.labeling.loaded || m.settings.labeling.enabled {
+		t.Fatal("item labeling did not load its disabled repository setting")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "e"})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("enabling item labeling did not request a preview")
+	}
+	m = baselineSend(m, cmd().(labelingMsg))
+	if m.settings.labeling.policy == nil || m.settings.labeling.policy.Repository != m.repo {
+		t.Fatal("item labeling preview did not pin the selected repository")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "e"})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("item labeling preview could not be confirmed")
+	}
+	m = baselineSend(m, cmd().(labelingMsg))
+	if !m.settings.labeling.enabled {
+		t.Fatal("confirmed item labeling setting was not reloaded")
+	}
+	var planPreview labelingPreview
+	planPreview.Repository, planPreview.Enabled, planPreview.Limit, planPreview.PreviewSHA256 = m.repo, true, labelingViewLimit, "pinned-pass"
+	planPreview.Items = append(planPreview.Items, labelingPreviewItem{Kind: "issue", Number: 1, Status: "ready", Desired: []string{"bug"}, Add: []string{"bug"}})
+	m.settings.request++
+	m = baselineSend(m, labelingMsg{root: root, repo: m.repo, request: m.settings.request, operation: "pass-preview", preview: planPreview})
+	if !strings.Contains(ansi.Strip(m.labelingContent()), "Add: bug") {
+		t.Fatal("item labeling preview hid the exact proposed label change")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "a"})
+	if cmd == nil || !next.(model).settings.busy {
+		t.Fatal("item labeling could not run its pinned preview")
 	}
 }
 

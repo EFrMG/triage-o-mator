@@ -150,10 +150,17 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{group(label, hint{"Tab/Shift-Tab", "field"}, hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", save}, hint{"Esc", "discard"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.settings.open:
 		if m.settings.busy {
-			return []footerGroup{group("Settings", hint{"", "reading labels…"})}
+			return []footerGroup{group("Settings", hint{"", "working…"})}
 		}
 		if m.settings.section == "" {
 			return []footerGroup{group("Settings", hint{"j/k", "select"}, hint{"Enter", "open"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+		}
+		if m.settings.section == "labeling" {
+			labels := group("Item labeling", hint{"e", "enable/disable"}, hint{"p", "preview pass"}, hint{"j/k", "scroll"})
+			if m.settings.labeling.preview != nil {
+				labels.hints = append(labels.hints, hint{"a", "apply preview"})
+			}
+			return []footerGroup{labels, group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}
 		settings := group("Settings", hint{"j/k", "select"}, hint{"n", "new"}, hint{"Enter/e", "edit"})
 		if m.settings.section == "label" {

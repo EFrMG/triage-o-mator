@@ -40,6 +40,7 @@ type settingsUI struct {
 	selected, offset int
 	request          uint64
 	editor           *settingsEditor
+	labeling         labelingUI
 }
 
 type settingsDoneMsg struct {
@@ -103,7 +104,7 @@ func (m *model) openSettings() {
 
 func (m *model) settingsMove(delta int) {
 	if m.settings.section == "" {
-		m.settings.menuSelected = (m.settings.menuSelected + delta%2 + 2) % 2
+		m.settings.menuSelected = (m.settings.menuSelected + delta%3 + 3) % 3
 		return
 	}
 
@@ -126,8 +127,12 @@ func (m model) settingsView() string {
 		cards := [][2]string{
 			{"Labels", "Create and edit GitHub label names and descriptions"},
 			{"Actions", "Create and edit local action titles and descriptions"},
+			{"Item labeling", "Preview and apply reviewed label decisions for this repository"},
 		}
 		return inset(titleBar("Settings", "", m.menuWidth())) + "\n\n" + cardList(cards, m.settings.menuSelected, w, h-2)
+	}
+	if m.settings.section == "labeling" {
+		return m.labelingView()
 	}
 
 	catalog := m.taxonomy.LabelCatalog
@@ -226,6 +231,9 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
+	if m.settings.section == "labeling" {
+		return m.handleLabelingKey(msg)
+	}
 
 	switch msg.String() {
 	case "esc", "h", "left":
@@ -252,7 +260,7 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "G", "end":
 		if m.settings.section == "" {
-			m.settings.menuSelected = 1
+			m.settings.menuSelected = 2
 		} else {
 			m.settings.selected = maxInt(len(m.settingsRows())-1, 0)
 			m.settingsMove(0)
@@ -271,8 +279,14 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter", "l", "right":
 		if m.settings.section == "" {
-			m.settings.section = []string{"label", "action"}[m.settings.menuSelected]
+			m.settings.section = []string{"label", "action", "labeling"}[m.settings.menuSelected]
 			m.settings.selected, m.settings.offset = 0, 0
+			if m.settings.section == "labeling" {
+				m.settings.labeling = labelingUI{}
+				m.settings.busy = true
+				m.settings.request++
+				return m, labelingCmd(m.installRoot, m.repo, m.settings.request, "status", "", 0)
+			}
 			return m, nil
 		}
 		return m.openSelectedSettingsEditor()

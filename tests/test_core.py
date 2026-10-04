@@ -265,6 +265,89 @@ print(json.dumps(label))
         self.assertEqual(saved["action_guidance"]["request-review"], "Ask a maintainer to review")
 
 
+class LabelApplicationTests(Workspace):
+    def test_enabled_bounded_pass_revalidates_and_respects_human_corrections(self):
+        (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[])))
+        (self.mock / "gh").write_text('''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+root = Path(os.environ["FAKE_GH_DIR"])
+args = sys.argv[1:]
+with (root / "calls.jsonl").open("a") as out:
+    out.write(json.dumps(args) + "\\n")
+method = args[args.index("--method") + 1]
+endpoint = args[args.index("--method") + 2]
+live = json.loads((root / "live.json").read_text())
+if endpoint == "repos/owner/repo/issues/1" and method == "GET":
+    print(json.dumps(live))
+    sys.exit(0)
+if endpoint == "repos/owner/repo/issues/1/labels" and method == "POST":
+    names = json.load(sys.stdin)["labels"]
+    for name in names:
+        if name not in [label["name"] for label in live["labels"]]:
+            live["labels"].append(dict(name=name))
+elif endpoint.startswith("repos/owner/repo/issues/1/labels/") and method == "DELETE":
+    name = endpoint.rsplit("/", 1)[-1]
+    live["labels"] = [label for label in live["labels"] if label["name"] != name]
+else:
+    sys.exit("unexpected GitHub operation")
+(root / "live.json").write_text(json.dumps(live))
+print(json.dumps(live["labels"]))
+''')
+        (self.mock / "gh").chmod(0o755)
+
+        taxonomy_path = self.root / "config/taxonomy.json"
+        taxonomy = json.loads(taxonomy_path.read_text())
+        taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        ledger_path = self.root / "data/owner/repo/ledger.jsonl"
+        ledger_path.write_text(json.dumps(dict(item(1, "Bug"), category="", proposed_labels=["bug"], action="label-only", confidence="high", reason="Confirmed", reviewed=True, reviewed_by="human", reviewed_at="2026-01-01T00:00:00Z")) + "\n")
+
+        enable = self.json_cli("item-labels", "enable", "--expected-repo", "owner/repo")
+        self.assertFalse(enable["before"])
+        self.assertFalse((self.root / "config/label-application.json").exists())
+        self.json_cli("item-labels", "enable", "--expected-repo", "owner/repo", "--apply", "--preview-sha256", enable["preview_sha256"])
+
+        preview = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertEqual(preview["items"][0]["add"], ["bug"])
+        self.assertFalse(any("POST" in call for call in self.calls()))
+        (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[dict(name="manual")])))
+        self.run_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", preview["preview_sha256"], ok=False)
+        self.assertFalse(any("POST" in call for call in self.calls()))
+        (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[])))
+        preview = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        result = self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", preview["preview_sha256"])
+        self.assertEqual(result["outcomes"][0]["status"], "written")
+        self.assertEqual(json.loads((self.mock / "live.json").read_text())["labels"], [dict(name="bug")])
+        self.assertEqual(json.loads((self.root / "data/owner/repo/local/item-labels-state.json").read_text())["items"]["issue:1"]["managed"], ["bug"])
+
+        row = json.loads(ledger_path.read_text())
+        row["proposed_labels"], row["reviewed_at"] = [], "2026-01-02T00:00:00Z"
+        ledger_path.write_text(json.dumps(row) + "\n")
+        removal = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertEqual(removal["items"][0]["remove"], ["bug"])
+        self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", removal["preview_sha256"])
+        self.assertEqual(json.loads((self.mock / "live.json").read_text())["labels"], [])
+        row["proposed_labels"], row["reviewed_at"] = ["bug"], "2026-01-03T00:00:00Z"
+        ledger_path.write_text(json.dumps(row) + "\n")
+        again = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", again["preview_sha256"])
+
+        (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[])))
+        corrected = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertEqual(corrected["items"][0]["status"], "human-correction")
+        calls = len(self.calls())
+        self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", corrected["preview_sha256"])
+        self.assertFalse(any("POST" in call for call in self.calls()[calls:]))
+        paused = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertEqual(paused["items"][0]["status"], "paused-after-correction")
+        reset = self.json_cli("item-labels", "reset-item", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1")
+        self.assertEqual(reset["before"]["managed"], ["bug"])
+        self.json_cli("item-labels", "reset-item", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--apply", "--preview-sha256", reset["preview_sha256"])
+        renewed = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertEqual(renewed["items"][0]["add"], ["bug"])
+
+
 class LedgerTests(Workspace):
     def setUp(self):
         super().setUp()

@@ -349,10 +349,12 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 		}
 		row := (event.Y - 3) / cardHeight
 		if m.settings.section == "" {
-			if row >= 2 {
+			if row >= 3 {
 				return m, nil
 			}
 			m.settings.menuSelected = row
+		} else if m.settings.section == "labeling" {
+			return m, nil
 		} else {
 			row += m.settings.offset
 			if row >= len(m.settingsRows()) {

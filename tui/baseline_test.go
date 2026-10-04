@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -352,8 +352,22 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	if !m.settings.automations.labelingEnabled {
 		t.Fatal("Labeling did not turn back on")
 	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.settings.selected != 2 || m.settings.automations.actions[0].Name != "comment-request-info" {
+		t.Fatal("first writing action did not appear after Scoring")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("action card did not offer an explicit mode change")
+	}
+	m = baselineSend(m, cmd().(automationMsg))
+	if m.settings.automations.actions[0].Mode != "execute" {
+		t.Fatal("action mode did not update for the selected repository")
+	}
 	m = baselineSend(m, automationMsg{root: root, repo: "other/repo", request: m.settings.request, status: automationStatus{Repository: "other/repo"}})
-	if !m.settings.automations.labelingEnabled {
+	if !m.settings.automations.labelingEnabled || m.settings.automations.actions[0].Mode != "execute" {
 		t.Fatal("stale Automations response changed the selected repository's setting")
 	}
 }

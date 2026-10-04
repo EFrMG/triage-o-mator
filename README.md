@@ -138,7 +138,7 @@ bin/report
 | Prepare and review decisions              | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv` |
 | Compare and group                         | `bin/similar`, `bin/not-duplicate`, `bin/group`                                |
 | Read guidance and evidence                | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |
-| Edit action settings                      | `bin/taxonomy-settings`                                                        |
+| Edit action settings                      | `bin/taxonomy-settings`, `bin/action-policy`                                   |
 | Preview and edit GitHub label definitions | `bin/label-definitions`                                                        |
 | Preview and apply proposed labels         | `bin/item-labels`                                                              |
 | Propose and publish actions               | `bin/auto-close`, `bin/comment-plus`                                           |

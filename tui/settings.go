@@ -119,7 +119,8 @@ func (m *model) settingsMove(delta int) {
 		return
 	}
 	if m.settings.section == "automations" {
-		m.settings.selected = (m.settings.selected + delta%2 + 2) % 2
+		count := 2 + len(m.settings.automations.actions)
+		m.settings.selected = (m.settings.selected + delta%count + count) % count
 		return
 	}
 

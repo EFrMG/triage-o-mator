@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""Read or explicitly change repository-scoped automated-action modes."""
+
+import argparse
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _storage import atomic_writer, locked
+from _triage import CONFIG_DIR, REPO, load_taxonomy
+
+
+POLICY_PATH = CONFIG_DIR / "action-automation.json"
+OPERATIONS = {"comment", "close", "reopen"}
+
+
+def digest(value):
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def policy():
+    if not POLICY_PATH.exists():
+        return {"version": 1, "repositories": {}}
+
+    value = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("version") != 1 or not isinstance(value.get("repositories"), dict):
+        raise ValueError("action automation policy is malformed")
+
+    for repo, settings in value["repositories"].items():
+        if not isinstance(repo, str) or not isinstance(settings, dict):
+            raise ValueError("action automation repository setting is malformed")
+
+        for action, setting in settings.items():
+            if not isinstance(action, str) or not isinstance(setting, dict) or setting.get("mode") not in ("stage", "execute") or not isinstance(setting.get("definition_sha256"), str) or len(setting["definition_sha256"]) != 64:
+                raise ValueError("action automation setting is malformed")
+
+    return value
+
+
+def definitions():
+    taxonomy = load_taxonomy()
+    actions = taxonomy.get("actions")
+    operations = taxonomy.get("action_operations")
+    guidance = taxonomy.get("action_guidance", {})
+    if not isinstance(actions, list) or not isinstance(operations, dict) or not isinstance(guidance, dict) or len(actions) != len(set(actions)):
+        raise ValueError("action taxonomy is malformed")
+
+    rows = []
+    for action in actions:
+        operation = operations.get(action)
+        if not isinstance(action, str) or not action or operation not in OPERATIONS | {"none"} or not isinstance(guidance.get(action, ""), str):
+            raise ValueError("action taxonomy is malformed")
+
+        rows.append({"name": action, "operation": operation, "definition_sha256": digest([action, operation, guidance.get(action, "")])})
+
+    return rows
+
+
+def status():
+    saved = policy()["repositories"].get(REPO, {})
+    rows = []
+    for definition in definitions():
+        stored = saved.get(definition["name"])
+        current = stored is not None and stored["definition_sha256"] == definition["definition_sha256"]
+        rows.append({**definition, "mode": stored["mode"] if current and definition["operation"] in OPERATIONS else "stage",
+                     "configured": current and definition["operation"] in OPERATIONS,
+                     "stale_setting": stored is not None and not current,
+                     "writable": definition["operation"] in OPERATIONS})
+
+    return {"repository": REPO, "actions": rows}
+
+
+def plan(action, mode):
+    row = next((row for row in status()["actions"] if row["name"] == action), None)
+    if row is None or not row["writable"]:
+        raise ValueError("select a configured writing action")
+
+    result = {"repository": REPO, "action": action, "operation": row["operation"], "definition_sha256": row["definition_sha256"],
+              "before": row["mode"], "after": mode}
+    result["preview_sha256"] = digest(result)
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("status", "set"))
+    parser.add_argument("--expected-repo", required=True)
+    parser.add_argument("--action")
+    parser.add_argument("--mode", choices=("stage", "execute"))
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--preview-sha256")
+    args = parser.parse_args()
+    if args.expected_repo != REPO:
+        raise ValueError("configured repository changed; reopen Automations")
+
+    if args.command == "status":
+        if args.action or args.mode or args.apply or args.preview_sha256:
+            parser.error("status takes no change arguments")
+
+        result = status()
+    else:
+        if not args.action or not args.mode or args.apply != bool(args.preview_sha256):
+            parser.error("set requires --action and --mode; --apply requires --preview-sha256")
+
+        with locked(POLICY_PATH):
+            result = plan(args.action, args.mode)
+            if args.apply:
+                if result["preview_sha256"] != args.preview_sha256:
+                    raise ValueError("action or policy changed; preview Automations again")
+
+                saved = policy()
+                saved["repositories"].setdefault(REPO, {})[args.action] = {"mode": args.mode, "definition_sha256": result["definition_sha256"]}
+                with atomic_writer(POLICY_PATH) as out:
+                    out.write(json.dumps(saved, indent=2, ensure_ascii=False) + "\n")
+
+                result = status()
+
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+        sys.exit(f"error: {error}")

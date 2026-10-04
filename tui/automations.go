@@ -10,6 +10,32 @@ import (
 type automationsUI struct {
 	loaded, labelingEnabled bool
 	pending, paused         []string
+	actions                 []automationAction
+}
+
+type automationAction struct {
+	Name             string `json:"name"`
+	Operation        string `json:"operation"`
+	Mode             string `json:"mode"`
+	DefinitionSHA256 string `json:"definition_sha256"`
+	Writable         bool   `json:"writable"`
+	Configured       bool   `json:"configured"`
+	StaleSetting     bool   `json:"stale_setting"`
+}
+
+type actionPolicyStatus struct {
+	Repository string             `json:"repository"`
+	Actions    []automationAction `json:"actions"`
+}
+
+type actionPolicyPlan struct {
+	Repository       string `json:"repository"`
+	Action           string `json:"action"`
+	Operation        string `json:"operation"`
+	DefinitionSHA256 string `json:"definition_sha256"`
+	Before           string `json:"before"`
+	After            string `json:"after"`
+	PreviewSHA256    string `json:"preview_sha256"`
 }
 
 type automationStatus struct {
@@ -31,16 +57,29 @@ type automationMsg struct {
 	root, repo, operation string
 	request               uint64
 	status                automationStatus
+	actions               actionPolicyStatus
 	err                   error
+}
+
+func readAutomationStatus(root, repo string, msg *automationMsg) error {
+	out, err := runScript(root, "item-labels", "status", "--expected-repo", repo)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal([]byte(out), &msg.status); err != nil {
+		return err
+	}
+	out, err = runScript(root, "action-policy", "status", "--expected-repo", repo)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(out), &msg.actions)
 }
 
 func automationStatusCmd(root, repo string, request uint64) tea.Cmd {
 	return func() tea.Msg {
-		out, err := runScript(root, "item-labels", "status", "--expected-repo", repo)
-		msg := automationMsg{root: root, repo: repo, request: request, operation: "status", err: err}
-		if err == nil {
-			msg.err = json.Unmarshal([]byte(out), &msg.status)
-		}
+		msg := automationMsg{root: root, repo: repo, request: request, operation: "status"}
+		msg.err = readAutomationStatus(root, repo, &msg)
 		return msg
 	}
 }
@@ -71,7 +110,33 @@ func automationToggleCmd(root, repo string, request uint64, before, after bool) 
 			msg.err = err
 			return msg
 		}
-		msg.err = json.Unmarshal([]byte(out), &msg.status)
+		msg.err = readAutomationStatus(root, repo, &msg)
+		return msg
+	}
+}
+
+func automationActionCmd(root, repo string, request uint64, action, before, after string) tea.Cmd {
+	return func() tea.Msg {
+		msg := automationMsg{root: root, repo: repo, request: request, operation: "action"}
+		out, err := runScript(root, "action-policy", "set", "--expected-repo", repo, "--action", action, "--mode", after)
+		if err != nil {
+			msg.err = err
+			return msg
+		}
+		var plan actionPolicyPlan
+		if err := json.Unmarshal([]byte(out), &plan); err != nil {
+			msg.err = err
+			return msg
+		}
+		if plan.Repository != repo || plan.Action != action || plan.Before != before || plan.After != after || plan.PreviewSHA256 == "" {
+			msg.err = fmt.Errorf("action policy changed; refresh Automations")
+			return msg
+		}
+		if _, err := runScript(root, "action-policy", "set", "--expected-repo", repo, "--action", action, "--mode", after, "--apply", "--preview-sha256", plan.PreviewSHA256); err != nil {
+			msg.err = err
+			return msg
+		}
+		msg.err = readAutomationStatus(root, repo, &msg)
 		return msg
 	}
 }
@@ -80,7 +145,7 @@ func (m model) automationsView() string {
 	state := "Loading…"
 	labeling := "Reading repository setting…"
 	if m.settings.automations.loaded {
-		state = "1 available · 1 planned"
+		state = fmt.Sprintf("%d available · 1 planned", 1+len(m.settings.automations.actions))
 		labeling = "OFF · Agent label writes disabled"
 		if m.settings.automations.labelingEnabled {
 			labeling = "ON · Agent may apply proposed labels to GitHub"
@@ -98,6 +163,16 @@ func (m model) automationsView() string {
 	cards := [][2]string{
 		{"Labeling", labeling},
 		{"Scoring", "Planned · Individual merit score from 0 to 5"},
+	}
+	for _, action := range m.settings.automations.actions {
+		summary := "STAGE · Suggested " + action.Operation + " waits in Notifications"
+		if action.Mode == "execute" {
+			summary = "EXECUTE · Agent pass may publish a checked " + action.Operation
+		}
+		if action.StaleSetting {
+			summary += " · Prior setting expired after action edit"
+		}
+		cards = append(cards, [2]string{action.Name, summary})
 	}
 	return inset(titleBar("Automations", state, m.menuWidth())) + "\n\n" + cardList(cards, m.settings.selected, m.cardWidth(), m.mainHeight()-2)
 }
@@ -128,7 +203,7 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "j", "down", "tab":
 		m.settingsMove(1)
 	case "G", "end":
-		m.settings.selected = 1
+		m.settings.selected = 1 + len(m.settings.automations.actions)
 	case "k", "up", "shift+tab":
 		m.settingsMove(-1)
 	case "g", "home":
@@ -148,11 +223,23 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.settings.busy = true
 		m.settings.request++
+		if m.settings.selected >= 2 {
+			action := m.settings.automations.actions[m.settings.selected-2]
+			after := "execute"
+			if action.Mode == "execute" {
+				after = "stage"
+			}
+			return m, automationActionCmd(m.installRoot, m.repo, m.settings.request, action.Name, action.Mode, after)
+		}
 		before := m.settings.automations.labelingEnabled
 		return m, automationToggleCmd(m.installRoot, m.repo, m.settings.request, before, !before)
 	case "y":
 		if m.settings.selected == 1 {
 			m.status = "The scoring pass and its agent prompt are planned."
+			return m, nil
+		}
+		if m.settings.selected >= 2 {
+			m.status = "The automated-actions pass and its agent prompt are planned."
 			return m, nil
 		}
 		if !m.settings.automations.loaded {
@@ -174,17 +261,26 @@ func (m model) finishAutomation(msg automationMsg) (tea.Model, tea.Cmd) {
 		m.failErr("Couldn't update Automations", msg.err)
 		return m, nil
 	}
-	if msg.status.Repository != m.repo {
+	if msg.status.Repository != m.repo || msg.actions.Repository != m.repo {
 		m.fail("Automation status belongs to another repository.")
 		return m, nil
 	}
-	m.settings.automations = automationsUI{loaded: true, labelingEnabled: msg.status.Enabled, pending: msg.status.Pending, paused: msg.status.Paused}
+	actions := []automationAction{}
+	for _, action := range msg.actions.Actions {
+		if action.Writable {
+			actions = append(actions, action)
+		}
+	}
+	m.settings.automations = automationsUI{loaded: true, labelingEnabled: msg.status.Enabled, pending: msg.status.Pending, paused: msg.status.Paused, actions: actions}
+	m.settings.selected = minInt(m.settings.selected, 1+len(actions))
 	if msg.operation == "toggle" {
 		state := "OFF"
 		if msg.status.Enabled {
 			state = "ON"
 		}
 		m.status = "Labeling automation is " + state + " for " + m.repo + "."
+	} else if msg.operation == "action" {
+		m.status = "Action policy updated for " + m.repo + "."
 	}
 	return m, nil
 }

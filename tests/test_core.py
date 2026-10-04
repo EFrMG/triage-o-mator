@@ -268,6 +268,37 @@ print(json.dumps(label))
 
 
 class LabelApplicationTests(Workspace):
+    def test_action_modes_are_explicit_per_repository_and_reset_after_guidance_changes(self):
+        args = ("--expected-repo", "owner/repo")
+        initial = self.json_cli("action-policy", "status", *args)
+        modes = {row["name"]: row for row in initial["actions"]}
+        self.assertFalse(modes["no-action-needed"]["writable"])
+        self.assertTrue(all(row["mode"] == "stage" for row in modes.values()))
+        self.assertFalse((self.root / "config/action-automation.json").exists())
+
+        proposal = self.json_cli("action-policy", "set", *args, "--action", "comment-request-info", "--mode", "execute")
+        self.assertEqual(proposal["before"], "stage")
+        self.assertFalse((self.root / "config/action-automation.json").exists())
+        self.run_cli("action-policy", "set", *args, "--action", "comment-feedback", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"], ok=False)
+        self.json_cli("action-policy", "set", *args, "--action", "comment-request-info", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"])
+        modes = {row["name"]: row for row in self.json_cli("action-policy", "status", *args)["actions"]}
+        self.assertEqual(modes["comment-request-info"]["mode"], "execute")
+        self.assertEqual(modes["comment-feedback"]["mode"], "stage")
+
+        taxonomy_path = self.root / "config/taxonomy.json"
+        taxonomy = json.loads(taxonomy_path.read_text())
+        taxonomy["action_guidance"]["comment-request-info"] = "Ask only for missing reproduction details"
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        changed = {row["name"]: row for row in self.json_cli("action-policy", "status", *args)["actions"]}
+        self.assertEqual(changed["comment-request-info"]["mode"], "stage")
+        self.assertTrue(changed["comment-request-info"]["stale_setting"])
+        self.run_cli("action-policy", "set", *args, "--action", "comment-request-info", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"], ok=False)
+
+        (self.root / "config/repo").write_text("other/repo\n")
+        other = self.json_cli("action-policy", "status", "--expected-repo", "other/repo")
+        self.assertTrue(all(row["mode"] == "stage" for row in other["actions"]))
+        self.run_cli("action-policy", "status", *args, ok=False)
+
     def test_enabled_bounded_pass_revalidates_and_respects_human_corrections(self):
         (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[])))
         (self.mock / "gh").write_text('''#!/usr/bin/env python3

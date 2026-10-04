@@ -33,6 +33,20 @@ func (m model) breadcrumb() []string {
 		return crumbs
 	}
 
+	if m.settings.open {
+		crumbs = append(crumbs, "Settings")
+		switch m.settings.section {
+		case "label":
+			crumbs = append(crumbs, "Labels")
+		case "action":
+			crumbs = append(crumbs, "Actions")
+		}
+		if m.settings.editor != nil {
+			crumbs = append(crumbs, m.settings.editor.row.name)
+		}
+		return crumbs
+	}
+
 	if m.batches.open {
 		crumbs = append(crumbs, "Batches")
 		if m.batches.editing {

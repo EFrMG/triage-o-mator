@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -23,6 +24,8 @@ type settingsEditor struct {
 
 type settingsUI struct {
 	open, busy       bool
+	section          string
+	menuSelected     int
 	selected, offset int
 	request          uint64
 	editor           *settingsEditor
@@ -38,13 +41,15 @@ type settingsDoneMsg struct {
 
 func (m model) settingsRows() []settingsRow {
 	var rows []settingsRow
-	if catalog := m.taxonomy.LabelCatalog; catalog.Repository == m.repo && catalog.Status == "observed" {
+	if catalog := m.taxonomy.LabelCatalog; m.settings.section == "label" && catalog.Repository == m.repo && catalog.Status == "observed" {
 		for _, label := range catalog.Labels {
 			rows = append(rows, settingsRow{kind: "label", id: label.ID, name: label.Name, description: label.Description, guidance: label.Guidance})
 		}
 	}
-	for _, action := range m.taxonomy.Actions {
-		rows = append(rows, settingsRow{kind: "action", name: action, guidance: m.taxonomy.ActionGuidance[action]})
+	if m.settings.section == "action" {
+		for _, action := range m.taxonomy.Actions {
+			rows = append(rows, settingsRow{kind: "action", name: action, guidance: m.taxonomy.ActionGuidance[action]})
+		}
 	}
 	return rows
 }
@@ -62,12 +67,17 @@ func (m *model) openSettings() {
 }
 
 func (m *model) settingsMove(delta int) {
+	if m.settings.section == "" {
+		m.settings.menuSelected = (m.settings.menuSelected + delta%2 + 2) % 2
+		return
+	}
+
 	rows := m.settingsRows()
 	if len(rows) == 0 {
 		return
 	}
-	m.settings.selected = (m.settings.selected + delta + len(rows)) % len(rows)
-	visible := maxInt((m.mainHeight()-10)/cardHeight, 1)
+	m.settings.selected = (m.settings.selected + delta%len(rows) + len(rows)) % len(rows)
+	visible := maxInt((m.mainHeight()-4)/cardHeight, 1)
 	if m.settings.selected < m.settings.offset {
 		m.settings.offset = m.settings.selected
 	} else if m.settings.selected >= m.settings.offset+visible {
@@ -76,51 +86,75 @@ func (m *model) settingsMove(delta int) {
 }
 
 func (m model) settingsView() string {
-	w := m.cardWidth()
+	w, h := m.cardWidth(), m.mainHeight()
+	if m.settings.section == "" {
+		cards := [][2]string{
+			{"Labels", "View GitHub labels and edit local guidance"},
+			{"Actions", "View available actions and edit local guidance"},
+		}
+		return inset(titleBar("Settings", "", m.menuWidth())) + "\n\n" + cardList(cards, m.settings.menuSelected, w, h-2)
+	}
+
 	catalog := m.taxonomy.LabelCatalog
-	state := "Labels pending · r reads GitHub"
-	if catalog.Repository == m.repo && catalog.Status == "observed" {
-		state = fmt.Sprintf("%d GitHub labels · %d local actions", len(catalog.Labels), len(m.taxonomy.Actions))
+	title, state := "Labels", "Labels pending · r reads GitHub"
+	if m.settings.section == "label" && catalog.Repository == m.repo && catalog.Status == "observed" {
+		state = pluralize(len(catalog.Labels), "GitHub label", "GitHub labels")
+	}
+	if m.settings.section == "action" {
+		title, state = "Actions", pluralize(len(m.taxonomy.Actions), "local action", "local actions")
 	}
 	if m.settings.busy {
 		state = "Working…"
 	}
-	view := titleBar("Settings", m.repo, w) + "\n" + mutedText(state) + "\n"
+	view := inset(titleBar(title, state, m.menuWidth())) + "\n\n"
 
 	if editor := m.settings.editor; editor != nil {
 		target := sanitize(editor.row.kind + ": " + editor.row.name)
-		view += "\n" + ansi.Truncate(target, w, "…") + "\n"
+		view += inset(ansi.Truncate(target, m.menuWidth(), "…")) + "\n"
 		if editor.row.description != "" {
-			view += ansi.Wrap(sanitize(editor.row.description), w, "") + "\n"
+			view += inset(ansi.Wrap(sanitize(editor.row.description), m.menuWidth(), "")) + "\n"
 		}
-		view += "\nLocal guidance\n" + editor.text.View()
+		view += "\n" + inset("Local guidance (optional advice for triage)") + "\n" + editor.text.View()
 		return view
 	}
 
 	rows := m.settingsRows()
 	if len(rows) == 0 {
-		return view + "\nNo entries yet. Press r to read the selected repository's labels."
+		message := "No actions configured."
+		if m.settings.section == "label" {
+			message = "No labels saved. Press r to read this repository's labels from GitHub."
+		}
+		return view + inset(message)
 	}
-	visible := maxInt((m.mainHeight()-10)/cardHeight, 1)
+	visible := maxInt((h-4)/cardHeight, 1)
 	start := minInt(m.settings.offset, maxInt(len(rows)-visible, 0))
 	end := minInt(start+visible, len(rows))
 	for i := start; i < end; i++ {
 		row := rows[i]
 		summary := row.description
-		if row.guidance != "" {
-			summary = "Local: " + row.guidance
+		if row.kind == "action" {
+			summary = "Local guidance: " + row.guidance
+			if row.guidance == "" {
+				summary = "No local guidance added"
+			}
+		} else if summary == "" {
+			summary = "No GitHub description"
 		}
-		view += markedCard(sanitize(row.kind+": "+row.name), singleLine(sanitize(summary)), cardMark{}, i == m.settings.selected, w) + "\n"
+		view += markedCard(sanitize(row.name), singleLine(sanitize(summary)), cardMark{}, i == m.settings.selected, w) + "\n"
 	}
 	selected := rows[m.settings.selected]
-	view += fmt.Sprintf("%d/%d · %s guidance: ", m.settings.selected+1, len(rows), selected.kind)
+	footer := fmt.Sprintf("%d of %d · Local guidance: ", m.settings.selected+1, len(rows))
 	if selected.guidance == "" {
-		view += "none"
+		footer += "None added"
 	} else {
-		view += ansi.Wrap(sanitize(selected.guidance), w, "")
+		footer += singleLine(sanitize(selected.guidance))
 	}
-	return view
+	footer = inset(mutedText(ansi.Truncate(footer, m.menuWidth(), "…")))
+	view = strings.TrimRight(view, "\n")
+	return view + strings.Repeat("\n", maxInt(h-ansiHeight(view), 1)) + footer
 }
+
+func ansiHeight(s string) int { return strings.Count(s, "\n") + 1 }
 
 func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.settings.busy {
@@ -159,7 +193,12 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "esc", "h", "left":
-		m.settings.open = false
+		if m.settings.section == "" {
+			m.settings.open = false
+		} else {
+			m.settings.section = ""
+			m.settings.selected, m.settings.offset = 0, 0
+		}
 		return m, nil
 	case "q":
 		return m.requestQuit()
@@ -170,16 +209,33 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "k", "up", "shift+tab":
 		m.settingsMove(-1)
 	case "g", "home":
-		m.settings.selected, m.settings.offset = 0, 0
+		if m.settings.section == "" {
+			m.settings.menuSelected = 0
+		} else {
+			m.settings.selected, m.settings.offset = 0, 0
+		}
 	case "G", "end":
-		m.settings.selected = maxInt(len(m.settingsRows())-1, 0)
-		m.settingsMove(0)
+		if m.settings.section == "" {
+			m.settings.menuSelected = 1
+		} else {
+			m.settings.selected = maxInt(len(m.settingsRows())-1, 0)
+			m.settingsMove(0)
+		}
 	case "r":
+		if m.settings.section != "label" {
+			return m, nil
+		}
 		m.settings.busy = true
 		m.settings.request++
 		m.status = "Reading GitHub labels…"
 		return m, settingsSyncCmd(m.installRoot, m.repo, m.settings.request)
 	case "enter", "l", "right", "e":
+		if m.settings.section == "" {
+			m.settings.section = []string{"label", "action"}[m.settings.menuSelected]
+			m.settings.selected, m.settings.offset = 0, 0
+			return m, nil
+		}
+
 		rows := m.settingsRows()
 		if len(rows) == 0 {
 			return m, nil

@@ -56,7 +56,7 @@ A tracked install creates the target repository's `AGENTS.md` when it is missing
 
 Installation reads that repository's GitHub label definitions into `config/taxonomy.json` through a read-only GET. `label_catalog.observed_at` records the successful observation time. `--offline` skips the read; a new catalog stays `pending`, while an existing catalog keeps its dated observation. A failed GitHub read also leaves the install usable with a pending or previously observed catalog. Run `triage-o-mator/bin/label-catalog sync` for an explicit online refresh, or `show` to inspect the saved catalog offline. `sync --dry-run` previews the result without saving it. The sync retains local `guidance` by label ID, records prior names, and moves removed labels into `retired`; it never changes label definitions on GitHub or rewrites saved decisions.
 
-The TUI's **Settings** menu shows the saved GitHub labels and local actions. Press `r` there to refresh label definitions from GitHub, or select an entry to edit its optional local guidance. `Ctrl-S` saves guidance through `bin/taxonomy-settings`; it does not edit the GitHub label or execute an action. A pending label catalog leaves the action list available while labels wait for an online read.
+The TUI's **Settings** menu has separate **Labels** and **Actions** cards. Open **Labels** to view saved GitHub labels, or **Actions** to view local actions. Select an entry to edit its optional local guidance. Press `r` in **Labels** to refresh label definitions from GitHub. `Ctrl-S` saves guidance through `bin/taxonomy-settings`; it does not edit the GitHub label or execute an action. A pending label catalog leaves **Actions** available while labels wait for an online read.
 
 ## Working from a fork
 

@@ -137,7 +137,14 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.settings.busy {
 			return []footerGroup{group("Settings", hint{"", "reading labels…"})}
 		}
-		return []footerGroup{group("Settings", hint{"j/k", "select"}, hint{"Enter/e", "edit guidance"}, hint{"r", "sync labels"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+		if m.settings.section == "" {
+			return []footerGroup{group("Settings", hint{"j/k", "select"}, hint{"Enter", "open"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+		}
+		settings := group("Settings", hint{"j/k", "select"}, hint{"Enter/e", "edit guidance"})
+		if m.settings.section == "label" {
+			settings.hints = append(settings.hints, hint{"r", "sync labels"})
+		}
+		return []footerGroup{settings, group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 	case m.notificationPR.open:
 		back := "back to Notifications"
 		if m.notifications.review != nil {

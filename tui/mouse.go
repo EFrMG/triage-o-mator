@@ -344,12 +344,24 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 
 	switch {
 	case m.settings.open:
-		row := m.settings.offset + (event.Y-4)/cardHeight
-		if event.Y >= 4 && row >= 0 && row < len(m.settingsRows()) {
-			m.settings.selected = row
-			if repeat {
-				return m.handleSettingsKey(mouseKey("enter"))
+		if m.settings.editor != nil || m.settings.busy || event.Y < 3 {
+			return m, nil
+		}
+		row := (event.Y - 3) / cardHeight
+		if m.settings.section == "" {
+			if row >= 2 {
+				return m, nil
 			}
+			m.settings.menuSelected = row
+		} else {
+			row += m.settings.offset
+			if row >= len(m.settingsRows()) {
+				return m, nil
+			}
+			m.settings.selected = row
+		}
+		if repeat {
+			return m.handleSettingsKey(mouseKey("enter"))
 		}
 		return m, nil
 	case m.groups.open:

@@ -164,8 +164,25 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	m := baselineModel(t, root)
 	m.sidebar.selected = settingsIndex
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !m.settings.open || !strings.Contains(ansi.Strip(m.settingsView()), "Labels pending") {
-		t.Fatal("Settings did not show the pending label catalog")
+	menu := ansi.Strip(m.settingsView())
+	if !m.settings.open || !strings.Contains(menu, "Labels") || !strings.Contains(menu, "Actions") || strings.Contains(menu, "owner/repo") {
+		t.Fatal("Settings did not show separate cards without repeating the repository")
+	}
+
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.settings.section != "label" || !strings.Contains(ansi.Strip(m.settingsView()), "Labels pending") {
+		t.Fatal("Labels did not show the pending catalog")
+	}
+	m.taxonomy.LabelCatalog = LabelCatalog{Repository: m.repo, Status: "observed", Labels: []GitHubLabel{{ID: 1, Name: "bug", Description: "Something is broken"}}}
+	labels := strings.Split(ansi.Strip(m.settingsView()), "\n")
+	if len(labels) != m.mainHeight() || !strings.Contains(labels[len(labels)-1], "1 of 1 · Local guidance: None added") {
+		t.Fatalf("Labels summary at wrong position: lines=%d height=%d last=%q", len(labels), m.mainHeight(), labels[len(labels)-1])
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.settings.section != "action" || !strings.Contains(ansi.Strip(m.settingsView()), "No local guidance added") {
+		t.Fatal("Actions did not open their own guidance list")
 	}
 
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})

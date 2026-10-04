@@ -157,7 +157,7 @@ class InstallTests(unittest.TestCase):
             settings = [str(target / "triage-o-mator/bin/taxonomy-settings"), "set-guidance", "--expected-repo", "owner/repo"]
             guidance = subprocess.run([*settings, "--label-id", "2", "--expected-name", "old", "--expected", "", "--value", "Keep this history"], env=env, capture_output=True, text=True)
             self.assertEqual(guidance.returncode, 0, guidance.stderr)
-            action_guidance = subprocess.run([*settings, "--action", "label-only", "--expected", "", "--value", "Suggest labels only"], env=env, capture_output=True, text=True)
+            action_guidance = subprocess.run([*settings, "--action", "no-action-needed", "--expected", "", "--value", "No conversation needed"], env=env, capture_output=True, text=True)
             self.assertEqual(action_guidance.returncode, 0, action_guidance.stderr)
             stale = subprocess.run([*settings, "--label-id", "2", "--expected-name", "old", "--expected", "", "--value", "Overwrite"], env=env, capture_output=True, text=True)
             self.assertNotEqual(stale.returncode, 0)
@@ -178,7 +178,7 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(catalog["labels"][1]["previous_names"], ["old"])
             self.assertEqual([row["name"] for row in catalog["retired"]], ["bug"])
             self.assertTrue(catalog["retired"][0]["retired_at"])
-            self.assertEqual(json.loads(taxonomy_path.read_text())["action_guidance"]["label-only"], "Suggest labels only")
+            self.assertEqual(json.loads(taxonomy_path.read_text())["action_guidance"]["no-action-needed"], "No conversation needed")
 
             responses[endpoint] = {"data": [{"name": "broken"}]}
             (mock / "responses.json").write_text(json.dumps(responses))
@@ -283,6 +283,9 @@ live = json.loads((root / "live.json").read_text())
 if endpoint == "repos/owner/repo/issues/1" and method == "GET":
     print(json.dumps(live))
     sys.exit(0)
+if endpoint == "repos/owner/repo/issues/2" and method == "GET":
+    print(json.dumps(dict(number=2, state="open", labels=[])))
+    sys.exit(0)
 if endpoint == "repos/owner/repo/issues/1/labels" and method == "POST":
     names = json.load(sys.stdin)["labels"]
     for name in names:
@@ -306,12 +309,20 @@ print(json.dumps(live["labels"]))
         taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
         taxonomy_path.write_text(json.dumps(taxonomy))
         ledger_path = self.root / "data/owner/repo/ledger.jsonl"
-        ledger_path.write_text(json.dumps(dict(item(1, "Bug"), category="", proposed_labels=["bug"], action="label-only", confidence="high", reason="Confirmed", reviewed=True, reviewed_by="human", reviewed_at="2026-01-01T00:00:00Z")) + "\n")
+        first = dict(item(1, "Bug"), category="", proposed_labels=["bug"], action="", confidence="high", reason="Agent proposal", reviewed=False, reviewed_by="", reviewed_at="")
+        second = dict(item(2, "Unlabeled"), category="", proposed_labels=["bug"], action="", confidence="medium", reason="Agent proposal", reviewed=False, reviewed_by="", reviewed_at="")
+        first["labels"] = ["manual"]
+        ledger_path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
 
         enable = self.json_cli("item-labels", "enable", "--expected-repo", "owner/repo")
         self.assertFalse(enable["before"])
         self.assertFalse((self.root / "config/label-application.json").exists())
         self.json_cli("item-labels", "enable", "--expected-repo", "owner/repo", "--apply", "--preview-sha256", enable["preview_sha256"])
+
+        initial = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertEqual(initial["items"][0]["number"], 2)
+        first["labels"] = []
+        ledger_path.write_text(json.dumps(first) + "\n")
 
         preview = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(preview["items"][0]["add"], ["bug"])
@@ -327,13 +338,13 @@ print(json.dumps(live["labels"]))
         self.assertEqual(json.loads((self.root / "data/owner/repo/local/item-labels-state.json").read_text())["items"]["issue:1"]["managed"], ["bug"])
 
         row = json.loads(ledger_path.read_text())
-        row["proposed_labels"], row["reviewed_at"] = [], "2026-01-02T00:00:00Z"
+        row["proposed_labels"] = []
         ledger_path.write_text(json.dumps(row) + "\n")
         removal = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(removal["items"][0]["remove"], ["bug"])
         self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", removal["preview_sha256"])
         self.assertEqual(json.loads((self.mock / "live.json").read_text())["labels"], [])
-        row["proposed_labels"], row["reviewed_at"] = ["bug"], "2026-01-03T00:00:00Z"
+        row["proposed_labels"] = ["bug"]
         ledger_path.write_text(json.dumps(row) + "\n")
         again = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", again["preview_sha256"])
@@ -357,6 +368,9 @@ print(json.dumps(live["labels"]))
         self.assertIn("issue:1", self.json_cli("item-labels", "status", "--expected-repo", "owner/repo")["pending_items"])
         blocked = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(blocked["items"][0]["status"], "uncertain-write")
+        ledger_path.write_text(json.dumps(row) + "\n" + json.dumps(second) + "\n")
+        next_item = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertEqual(next_item["items"][0]["number"], 2)
 
 
 class LedgerTests(Workspace):
@@ -375,8 +389,22 @@ class LedgerTests(Workspace):
         self.assertTrue(all(not row["reviewed"] for row in self.ledger().values()))
 
         ledger_path = self.root / "data/owner/repo/ledger.jsonl"
+        rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+        rows[0]["labels"] = ["existing"]
+        ledger_path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        (self.mock / "gh").write_text('''#!/usr/bin/env python3
+import json, sys
+if sys.argv[1:4] != ["issue", "view", "2"]:
+    sys.exit("unexpected GitHub operation")
+print(json.dumps(dict(title="NVIDIA suspend crash", body="Details", comments=[])))
+''')
+        (self.mock / "gh").chmod(0o755)
+        self.run_cli("batch", "1", "--unlabeled-first")
+        batch = next((self.root / "data/owner/repo/batches").glob("*.items.jsonl"))
+        self.assertEqual(json.loads(batch.read_text().splitlines()[0])["number"], 2)
+
         before = ledger_path.read_bytes()
-        args = ("--number", "1", "--kind", "issue", "--category", "bug", "--action", "label-only", "--reason", "Reproduced", "--by", "agent:triage")
+        args = ("--number", "1", "--kind", "issue", "--category", "bug", "--action", "no-action-needed", "--reason", "Reproduced", "--by", "agent:triage")
         self.run_cli("apply", *args, "--dry-run")
         self.assertEqual(ledger_path.read_bytes(), before)
         self.run_cli("apply", *args)
@@ -386,13 +414,14 @@ class LedgerTests(Workspace):
 
     def test_sync_preserves_proposals(self):
         self.sync()
-        self.run_cli("apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "label-only", "--by", "agent:triage")
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "no-action-needed", "--by", "agent:triage")
         taxonomy_path = self.root / "config/taxonomy.json"
         taxonomy = json.loads(taxonomy_path.read_text())
         taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
         taxonomy_path.write_text(json.dumps(taxonomy))
-        self.run_cli("apply", "--number", "2", "--kind", "issue", "--proposed-label", "bug", "--action", "label-only", "--by", "agent:triage")
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--proposed-label", "bug", "--by", "agent:triage")
         self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], ["bug"])
+        self.assertEqual(self.ledger()[("issue", 2)]["action"], "")
         self.assertEqual(self.ledger()[("issue", 2)]["category"], "")
         self.assertEqual(self.ledger()[("issue", 2)]["labels"], [])
         self.run_cli("fetch", "--full")
@@ -406,7 +435,7 @@ class LedgerTests(Workspace):
         self.assertIn("| bug | 1 |", report)
         self.run_cli("apply", "--number", "2", "--kind", "issue", "--approve", "--by", "human")
         self.assertTrue(self.ledger()[("issue", 2)]["reviewed"])
-        self.run_cli("apply", "--number", "2", "--kind", "issue", "--replace-proposed-labels", "--action", "label-only", "--by", "human")
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--replace-proposed-labels", "--action", "no-action-needed", "--by", "human")
         self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], [])
         self.assertFalse(self.ledger()[("issue", 2)]["reviewed"])
 
@@ -420,7 +449,7 @@ class LedgerTests(Workspace):
             reader = csv.DictReader(source)
             fields, rows = reader.fieldnames, list(reader)
 
-        rows[0].update(category="bug", action="label-only", reviewed="true", reviewed_by="human")
+        rows[0].update(category="bug", action="no-action-needed", reviewed="true", reviewed_by="human")
         with csv_path.open("w", newline="") as out:
             writer = csv.DictWriter(out, fieldnames=fields)
             writer.writeheader()
@@ -462,7 +491,7 @@ class LedgerTests(Workspace):
             writer = csv.DictWriter(out, fieldnames=fields)
             writer.writeheader()
             writer.writerows(rows)
-        self.run_cli("apply", "--number", "2", "--kind", "issue", "--category", "bug", "--action", "label-only", "--by", "agent:triage")
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--category", "bug", "--action", "no-action-needed", "--by", "agent:triage")
         before = ledger_path.read_bytes()
         self.run_cli("import-csv", str(csv_path), ok=False)
         self.assertEqual(ledger_path.read_bytes(), before)
@@ -513,8 +542,8 @@ class LedgerTests(Workspace):
 
         read_fd, write_fd = os.pipe()
         commands = [
-            ["apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "label-only"],
-            ["apply", "--number", "2", "--kind", "issue", "--category", "bug", "--action", "label-only"],
+            ["apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "no-action-needed"],
+            ["apply", "--number", "2", "--kind", "issue", "--category", "bug", "--action", "no-action-needed"],
             ["sync"],
             ["import-csv", str(csv_path)],
         ]

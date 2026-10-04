@@ -4,7 +4,7 @@ Apply a filled-in decisions file (from bin/batch) back into the ledger, or apply
 
 Usage:
     bin/apply data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl [--by NAME] [--reviewed] [--only-untriaged]
-    bin/apply --number N --kind issue|pr --action A [--proposed-label NAME ...] \\
+    bin/apply --number N --kind issue|pr [--action A] [--proposed-label NAME ...] \\
         [--replace-proposed-labels] [--confidence L] [--reason TEXT] [--agent-notes TEXT] [--by NAME] [--reviewed] [--batch-id ID]
     bin/apply --number N --kind issue|pr --approve --by NAME
     bin/apply --approve --key issue:N --key pr:M ... --by NAME
@@ -13,7 +13,7 @@ Usage:
     bin/apply (--number N --kind issue|pr | --key issue:N ...) --unapprove | --clear
     any of the above with --dry-run to validate and report without writing the ledger
 
-Each line in the decisions file needs number, kind and action. It may carry `proposed_labels` (a list of names from this repository's observed GitHub label catalog), confidence, reason, agent_notes and proposed_by. Observed GitHub `labels` are separate from these local proposals. A legacy `category` is accepted and preserved for existing decisions. A row without `proposed_labels` leaves the item's proposal unchanged; an empty list clears it. `--replace-proposed-labels` does the same in single-item mode, including when no `--proposed-label` is given. Unknown proposed labels are refused until the catalog is refreshed. A row without `agent_notes` leaves the item's existing notes alone.
+Each line in the decisions file needs number, kind and an action field, which may be blank when labels are proposed before an action is assessed. It may carry `proposed_labels` (a list of names from this repository's observed GitHub label catalog), confidence, reason, agent_notes and proposed_by. Observed GitHub `labels` are separate from these local proposals. A legacy `category` is accepted and preserved for existing decisions. A row without `proposed_labels` leaves the item's proposal unchanged; an empty list clears it. `--replace-proposed-labels` does the same in single-item mode, including when no `--proposed-label` is given. Unknown proposed labels are refused until the catalog is refreshed. A row without `agent_notes` leaves the item's existing notes alone.
 
 By default this records a human's or agent's first-pass decision without granting review. Pass --reviewed when a human explicitly saves and confirms a decision together. --reviewed-by names that reviewer separately from --by (the decision author); otherwise --by names both. Review operations require an explicit reviewer, never a fallback to "agent".
 
@@ -29,7 +29,7 @@ Saving and approving an unchanged decision preserves its original triager, triag
 
 --agent-notes on its own (no --category/--action/--approve) only replaces the item's agent_notes, leaving its decision and review state untouched: how prompts/review-pr.md attaches a code review to a PR someone already triaged.
 
---batch-id stamps a single-item decision with the batch it was made in (default "tui"), so decisions made while working through a batch in the TUI stay attributable to that batch. --only-untriaged skips decisions-file rows whose item already has a saved action or legacy category, so applying an agent's proposals never overwrites a decision someone already saved.
+--batch-id stamps a single-item decision with the batch it was made in (default "tui"), so decisions made while working through a batch in the TUI stay attributable to that batch. --only-untriaged skips decisions-file rows whose item already has proposed labels, an action or a legacy category, so applying an agent's proposals never overwrites a decision someone already saved.
 
 --expected-repo refuses the operation if the install's configured repository changed after the caller selected it.
 """
@@ -70,7 +70,7 @@ def main():
     ap.add_argument(
         "--approve",
         action="store_true",
-        help="single-item mode: mark reviewed=true without changing the saved decision (it needs an action)",
+        help="single-item mode: mark reviewed=true without changing the saved decision (it needs proposed labels, an action or a legacy category)",
     )
     ap.add_argument(
         "--unapprove",
@@ -101,7 +101,7 @@ def main():
     ap.add_argument(
         "--only-untriaged",
         action="store_true",
-        help="decisions-file mode: skip rows whose item already has a saved action or legacy category",
+        help="decisions-file mode: skip rows whose item already has proposed labels, an action or a legacy category",
     )
     ap.add_argument(
         "--key",
@@ -165,14 +165,14 @@ def main():
 
         if undo:
             decisions = [{"number": args.number, "kind": args.kind}]
-        elif args.approve and (args.category or args.action):
+        elif args.approve and (args.category or args.action or args.proposed_labels is not None or args.replace_proposed_labels):
             decisions = [
                 {
                     "number": args.number,
                     "kind": args.kind,
                     **({"category": args.category} if args.category is not None else {}),
                     **({"proposed_labels": args.proposed_labels or []} if args.proposed_labels is not None or args.replace_proposed_labels else {}),
-                    "action": args.action,
+                    "action": args.action or "",
                     "confidence": args.confidence,
                     "reason": args.reason,
                 }
@@ -181,24 +181,24 @@ def main():
             decisions = [{"number": args.number, "kind": args.kind}]
         elif args.agent_notes is not None and not args.category and not args.action and args.proposed_labels is None and not args.replace_proposed_labels:
             decisions = [{"number": args.number, "kind": args.kind, "agent_notes": args.agent_notes, "notes_only": True}]
-        elif args.action:
+        elif args.action or args.proposed_labels is not None or args.replace_proposed_labels:
             decisions = [
                 {
                     "number": args.number,
                     "kind": args.kind,
                     **({"category": args.category} if args.category is not None else {}),
                     **({"proposed_labels": args.proposed_labels or []} if args.proposed_labels is not None or args.replace_proposed_labels else {}),
-                    "action": args.action,
+                    "action": args.action or "",
                     "confidence": args.confidence,
                     "reason": args.reason,
                 }
             ]
         else:
             sys.exit(
-                "error: --number requires --action, --approve, or --agent-notes"
+                "error: --number requires --action, --proposed-label, --approve, or --agent-notes"
             )
 
-        if args.agent_notes is not None and decisions[0].get("action"):
+        if args.agent_notes is not None and not decisions[0].get("notes_only"):
             decisions[0]["agent_notes"] = args.agent_notes
 
         batch_id = args.batch_id
@@ -252,11 +252,11 @@ def main():
 
                 continue
 
-            # --approve with no action: review-only, leave the existing decision untouched.
-            if args.approve and not d.get("category") and not d.get("action"):
-                if not has_decision(rec) or not rec.get("action"):
+            # --approve without a new decision: review-only, leave the existing decision untouched.
+            if args.approve and not d.get("category") and not d.get("action") and not d.get("proposed_labels"):
+                if not has_decision(rec):
                     sys.exit(
-                        f"error: cannot --approve {key} — it has no action yet"
+                        f"error: cannot --approve {key} — it has no decision yet"
                     )
 
                 rec["reviewed"] = True
@@ -271,7 +271,7 @@ def main():
 
                 continue
 
-            if not d.get("action"):
+            if not d.get("action") and not d.get("category") and not d.get("proposed_labels"):
                 blank.append((d["kind"], d["number"]))
 
                 continue
@@ -284,9 +284,9 @@ def main():
             if d.get("category") and d["category"] not in valid_categories:
                 warnings.append(f"#{d['number']}: unrecognized category {d['category']!r}")
 
-            if d["action"] not in valid_actions:
+            if d["action"] and d["action"] not in valid_actions:
                 warnings.append(f"#{d['number']}: unrecognized action {d['action']!r}")
-            elif not action_operation(taxonomy, d["action"]):
+            elif d["action"] and not action_operation(taxonomy, d["action"]):
                 warnings.append(f"#{d['number']}: action {d['action']!r} has no GitHub operation in taxonomy.json")
 
             desired_labels = rec.get("proposed_labels", [])

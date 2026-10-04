@@ -138,7 +138,7 @@ func (m model) settingsView() string {
 		cards := [][2]string{
 			{"Labels", "Create and edit GitHub label names and descriptions"},
 			{"Actions", "Create and edit local actions tied to GitHub operations"},
-			{"Item labeling", "Preview and apply reviewed label decisions for this repository"},
+			{"Item labeling", "Preview and apply proposed labels for this repository"},
 		}
 		return inset(titleBar("Settings", "", m.menuWidth())) + "\n\n" + cardList(cards, m.settings.menuSelected, w, h-2)
 	}
@@ -177,14 +177,11 @@ func (m model) settingsView() string {
 			summary = "No description"
 		}
 		if row.kind == "action" {
-			operation := row.operation
+			operation := m.taxonomy.OperationFor(row.name)
 			if operation == "" {
-				operation = m.taxonomy.OperationFor(row.name)
-				if operation == "" {
-					operation = "unmapped"
-				} else {
-					operation = "legacy " + operation
-				}
+				operation = "unmapped"
+			} else if row.operation == "" {
+				operation = "legacy " + operation
 			}
 			summary = operation + " · " + summary
 		}

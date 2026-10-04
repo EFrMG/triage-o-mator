@@ -226,11 +226,10 @@ func (f *decisionForm) LoadItem(it Item) {
 	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), it.Action)
 	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, it.Confidence)
 	hasDecision := !it.Untriaged() || it.Confidence != "" || it.Reason != "" || it.Reviewed
+	if it.Action == "" {
+		f.actionIdx = -1
+	}
 	if hasDecision {
-		if it.Action == "" {
-			f.actionIdx = -1
-		}
-
 		if it.Confidence == "" {
 			f.confidenceIdx = -1
 		}
@@ -339,6 +338,16 @@ func (f decisionForm) Action() string {
 	}
 
 	return ""
+}
+
+func (f *decisionForm) ClearAction() {
+	if f.actionIdx < 0 && f.badAction == "" {
+		return
+	}
+
+	f.actionIdx = -1
+	f.badAction = ""
+	f.dirty, f.saved, f.touched = true, false, true
 }
 
 func (f decisionForm) Confidence() string {
@@ -517,13 +526,17 @@ func (f decisionForm) View(width int) string {
 	if len(f.badLabels) > 0 {
 		labels += " (missing from catalog)"
 	}
+	action := f.Action()
+	if action == "" {
+		action = "not assessed"
+	}
 	for _, field := range []struct {
 		id         formField
 		name       string
 		bad, value string
 	}{
 		{fieldLabels, "labels", "", labels},
-		{fieldAction, "action", f.badAction, f.Action()},
+		{fieldAction, "action", f.badAction, action},
 		{fieldConfidence, "confidence", f.badConfidence, f.Confidence()},
 	} {
 		rows = append(rows, ansi.Truncate(label(field.id, field.name)+value(field.id, field.bad, field.value), width, "…"))

@@ -328,12 +328,16 @@ func (m model) yankBatch(all bool) (string, string) {
 		}
 
 		proposed := ""
-		if p, ok := record.Proposals[key]; ok && p.Action != "" {
+		if p, ok := record.Proposals[key]; ok && (p.Action != "" || len(p.ProposedLabels) > 0 || p.Category != "") {
 			labels := strings.Join(p.ProposedLabels, ", ")
 			if labels == "" {
 				labels = p.Category
 			}
-			proposed = fmt.Sprintf("%s / %s (%s) — %s", labels, p.Action, p.Confidence, p.Reason)
+			action := p.Action
+			if action == "" {
+				action = "action not assessed"
+			}
+			proposed = fmt.Sprintf("%s / %s (%s) — %s", labels, action, p.Confidence, p.Reason)
 		}
 
 		b.WriteString(itemLine(item, proposed))

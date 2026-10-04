@@ -3,7 +3,7 @@
 Pull the next batch of untriaged items and enrich them with full body text (and, for PRs, diff stats) so an agent has enough context to categorize them without re-fetching anything by hand.
 
 Usage:
-    bin/batch [N] [--kind issue|pr] [--order oldest|newest] [--group ID] [--diff]
+    bin/batch [N] [--kind issue|pr] [--order oldest|newest] [--unlabeled-first] [--group ID] [--diff]
     bin/batch --delete BATCH_ID
     bin/batch --remove BATCH_ID --key issue:N [--key pr:M ...]
     bin/batch [N] --cache-mode offline|cache-preferred|refresh [--snapshot ID]
@@ -12,7 +12,7 @@ Writes:
     data/<owner>/<repo>/batches/<batch_id>.items.jsonl       full context, one item per line, including `duplicate_candidates` (the top title matches from bin/similar, minus pairs already ruled out; leads to check, not proof)
     data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl   template to fill in and pass to bin/apply
 
-The template has proposed_labels/action/confidence/reason blanked out; choose only labels in the repository's observed catalog and fill the action per config/taxonomy.md (optionally also agent_notes, the longer evidence, and proposed_by, e.g. "agent:<contributor>"), then run:
+The template has proposed_labels/action/confidence/reason blanked out; choose only labels in the repository's observed catalog and fill the action per config/taxonomy.md when assessed (optionally also agent_notes, the longer evidence, and proposed_by, e.g. "agent:<contributor>"), then run:
 
     bin/apply data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl
 
@@ -115,6 +115,7 @@ def main():
         default="oldest",
         help="oldest-first clears backlog; newest-first keeps up with new inflow",
     )
+    ap.add_argument("--unlabeled-first", action="store_true", help="select items with no observed GitHub labels before labeled items")
     ap.add_argument("--group", help="only untriaged open members of this group")
     ap.add_argument("--diff", action="store_true", help="include each PR's full diff (one more GitHub call per PR)")
     ap.add_argument("--delete", metavar="BATCH_ID", help="delete a batch's items and decisions files instead of creating one")
@@ -165,6 +166,8 @@ def main():
         candidates = [r for r in candidates if r["kind"] == args.kind]
 
     candidates.sort(key=lambda r: r["created_at"], reverse=(args.order == "newest"))
+    if args.unlabeled_first:
+        candidates.sort(key=lambda r: bool(r.get("labels")))
     selected = candidates[: args.n]
 
     if not selected:

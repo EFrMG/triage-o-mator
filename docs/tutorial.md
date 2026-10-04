@@ -56,8 +56,8 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 
 ## 5. Record a decision
 
-- In an untriaged item, `l` moves into the form: Category, Action, Confidence, and Reason.
-- The **Labels** field opens the repository's saved GitHub label catalog with `l` or `→`. Move with `j`/`k`, toggle any number of labels with `Space`, then press `Enter` to keep the selection or `Esc` to cancel. These are local proposals, separate from the item's current GitHub labels. Action and confidence cycle with `j`/`k`; reason is free text. Older decisions keep their legacy category visible below the form.
+- In an untriaged item, `l` moves into the form: Labels, Action, Confidence, and Reason.
+- The **Labels** field opens the repository's saved GitHub label catalog with `l` or `→`. Move with `j`/`k`, toggle any number of labels with `Space`, then press `Enter` to keep the selection or `Esc` to cancel. These are local proposals, separate from the item's current GitHub labels. Action and confidence cycle with `j`/`k`; reason is free text. Action can remain **not assessed** while labels are proposed; `Backspace` clears a selected Action. Choose `no-action-needed` only after assessing actions and finding no conversation or state write to suggest. Older decisions keep their legacy category visible below the form.
 - Saved values missing from the current taxonomy stay visible and require an explicit supported choice before saving.
 - `Tab`/`Shift-Tab` or `J`/`K` move between fields. On a choice, `l` opens all values; select with `Enter` or `l`, or close the list with `Esc` or `h`. Printable keys remain text while editing.
 - In most forms, `Ctrl-S` submits from any field; `Esc` cancels.
@@ -81,7 +81,7 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 
 Human review distinguishes an agent's proposal from a decision you stand behind. Check the recommendation, its evidence, and any uncertainty before approving it. You can save and approve your own decision with `S`; a second reviewer is not required.
 
-A saved decision is a proposed call until a human marks it reviewed. Review records the confirmation in the ledger; it does not label, comment on, close, approve, or merge anything on GitHub. Reviewed decisions leave **Pending Review**, remain available in **All Items** and their groups, and appear in `bin/report` under **Human-reviewed, ready to act**. **Settings → Item labeling** is a separate opt-in pass for reviewed proposed labels: enable it for this repository, preview the exact live additions or removals with `p`, and apply that preview with `a`.
+A saved decision is a proposed call until a human marks it reviewed. Review records the confirmation in the ledger; it does not label, comment on, close, approve, or merge anything on GitHub. Reviewed decisions leave **Pending Review**, remain available in **All Items** and their groups, and appear in `bin/report` under **Human-reviewed, ready to act**. **Settings → Item labeling** is a separate opt-in pass for proposed labels, including unreviewed agent proposals: enable it for this repository, use `p` to list exact live additions or removals without writing, and `a` to run that bounded plan with another live check.
 
 - In **Pending Review**, `a` marks the saved decision in front of you reviewed. The TUI calls this approval, but it is approval of the ledger decision, not approval of a pull request or execution of its recommended action.
 - If the form has unsaved edits, `a` warns that it will approve the saved decision. Use `S` to save and approve the edited call together, or `s` to save it for later review. Editing a reviewed decision later removes its review because the confirmation applied to the old call.

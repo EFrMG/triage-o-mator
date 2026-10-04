@@ -8,7 +8,7 @@ import (
 	"slices"
 )
 
-var actionOperations = []string{"label", "comment", "close", "reopen", "none"}
+var actionOperations = []string{"comment", "close", "reopen", "none"}
 
 // Taxonomy mirrors config/taxonomy.json exactly.
 type Taxonomy struct {
@@ -57,8 +57,6 @@ func (t Taxonomy) OperationFor(action string) string {
 
 	// Older installs own their taxonomy copy and have no action_operations map. These names already describe supported writes.
 	switch action {
-	case "label-only":
-		return "label"
 	case "comment-request-info":
 		return "comment"
 	case "comment-explain-close", "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved":

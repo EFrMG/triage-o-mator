@@ -30,7 +30,7 @@
     "invalid"
   ],
   "actions": [
-    "label-only",
+    "no-action-needed",
     "comment-request-info",
     "comment-feedback",
     "close-duplicate",
@@ -38,11 +38,10 @@
     "close-out-of-scope",
     "close-resolved",
     "close-with-explanation",
-    "reopen-with-explanation",
-    "no-action-needed"
+    "reopen-with-explanation"
   ],
   "action_operations": {
-    "label-only": "label",
+    "no-action-needed": "none",
     "comment-request-info": "comment",
     "comment-feedback": "comment",
     "close-duplicate": "close",
@@ -50,8 +49,7 @@
     "close-out-of-scope": "close",
     "close-resolved": "close",
     "close-with-explanation": "close",
-    "reopen-with-explanation": "reopen",
-    "no-action-needed": "none"
+    "reopen-with-explanation": "reopen"
   },
   "action_guidance": {},
   "confidence": [

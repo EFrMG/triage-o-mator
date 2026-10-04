@@ -6,7 +6,7 @@ Usage:
     bin/next           numbered suggestions, most urgent first
     bin/next --json    the same, machine-readable, for agents
 
-Each suggestion says who should do it: [agent] steps prepare evidence or proposals within the requested scope, [human] steps need a person (reviewing, marking groups ready, acting on GitHub). A suggestion is not authorization for an unbounded download. It points at the exact command or prompts/<name>.md playbook to follow. This is the answer to "what could be done next?" in AGENTS.md.
+Each suggestion says who should do it: [agent] steps prepare evidence or proposals within the requested scope and may run repository-enabled bounded labeling; [human] steps need a person for review, Settings changes, or exact write approval. A suggestion is not authorization for an unbounded download or an unconfigured write. It points at the exact command or prompts/<name>.md playbook to follow. This is the answer to "what could be done next?" in AGENTS.md.
 """
 
 import argparse
@@ -42,7 +42,7 @@ def batch_states(by_key):
         batch_id = items_path.name[: -len(".items.jsonl")]
         keys = [(r["kind"], r["number"]) for r in load_jsonl(items_path)]
         rows = load_jsonl(BATCHES_DIR / f"{batch_id}.decisions.jsonl")
-        filled = [r for r in rows if r.get("action")]
+        filled = [r for r in rows if r.get("action") or r.get("proposed_labels")]
         waiting = [r for r in filled if not has_decision(by_key.get((r["kind"], r["number"])) or {})]
         done = sum(1 for k in keys if has_decision(by_key.get(k) or {}))
         states.append(dict(id=batch_id, items=len(keys), filled=len(filled), waiting=len(waiting), done=done))
@@ -83,7 +83,7 @@ def suggestions(ledger):
         closes = sum(1 for r in pending if r["action"].startswith("close-"))
         add("human", f"Review {len(pending)} triaged decisions ({closes} would close something)",
             "TUI: Pending Review (a approves, Ctrl-S corrects); or bin/export-csv --pending-review, edit, bin/import-csv --by <you>",
-            "nothing is acted on until a human confirms it")
+            "review remains separate from repository-enabled label automation and action-write approval")
 
     unreviewed_code = [r for r in open_items if r["kind"] == "pr" and (r.get("category") in CODE_REVIEW_CATEGORIES or any(name in CODE_REVIEW_CATEGORIES for name in r.get("proposed_labels") or []))
                        and not r["reviewed"] and not (r.get("agent_notes") or "").strip()]
@@ -135,6 +135,12 @@ def suggestions(ledger):
     if open_items:
         add("agent", "Prepare reusable evidence for a focused analysis", "prompts/prepare-analysis.md",
             "optional: inspect existing references offline first; agree scope and request budget before any download (cache coverage is not assessed here)")
+
+    unlabeled = [r for r in untriaged if not r.get("labels")]
+    if unlabeled:
+        add("agent", f"Prepare a bounded labeling pass for {len(unlabeled)} untriaged items with no observed labels",
+            "prompts/label-items.md (start with bin/batch 25 --unlabeled-first)",
+            "the label pass is separate from the suggested Action; GitHub writes require this repository's Item labeling setting")
 
     if untriaged:
         fresh = [r for r in untriaged if (hours_since(r.get("first_seen_at")) or 1e9) < 24]

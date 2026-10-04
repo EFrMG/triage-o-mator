@@ -121,10 +121,8 @@ def action_operation(taxonomy, action):
     operations = taxonomy.get("action_operations", {})
     if action in operations:
         operation = operations[action]
-        return operation if operation in ("label", "comment", "close", "reopen", "none") else ""
+        return operation if operation in ("comment", "close", "reopen", "none") else ""
 
-    if action == "label-only":
-        return "label"
     if action == "comment-request-info":
         return "comment"
     if action in ("comment-explain-close", "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved"):
@@ -183,8 +181,8 @@ def ledger_key(rec):
 
 
 def has_decision(rec):
-    """Legacy categories and current actions both identify a saved local decision."""
-    return bool(rec.get("category") or rec.get("action"))
+    """Legacy categories, proposed labels, or an action identify a saved local decision."""
+    return bool(rec.get("category") or rec.get("proposed_labels") or rec.get("action"))
 
 
 def decision_text(rec):
@@ -199,7 +197,7 @@ def decision_text(rec):
     else:
         source = "no labels"
 
-    return source + " / " + (rec.get("action") or "no action")
+    return source + " / " + (rec.get("action") or "action not assessed")
 
 
 def run_gh(args, **kwargs):

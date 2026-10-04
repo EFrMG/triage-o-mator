@@ -68,7 +68,7 @@ Mouse controls work alongside the keyboard keys.
 
 ![Selecting and reading backlog items](captures/flow-1.webp)
 
-2. **Make a first pass, then review it.** Propose zero or more labels from the repository's GitHub catalog, choose an action and confidence, and give a short reason. Save a decision for later review or confirm one you have checked yourself. An agent can prepare a batch from copied item or list context; inspect its suggestions in **Batches**, then save them individually or apply the rest as unreviewed decisions. **Pending Review** is where a person verifies and revises those decisions. Reviewed items stay in **All Items** and groups; editing one removes its old confirmation. A reviewed ledger decision does not execute its recommended action or apply labels on GitHub.
+2. **Make a first pass, then review it.** Propose zero or more labels from the repository's GitHub catalog, suggest an action when assessed, and give a short reason and confidence. A label-first pass can leave Action blank for later assessment. Save a decision for later review or confirm one you have checked yourself. An agent can prepare a batch from copied item or list context; inspect its suggestions in **Batches**, then save them individually or apply the rest as unreviewed decisions. **Pending Review** is where a person verifies and revises those decisions. Reviewed items stay in **All Items** and groups; editing one removes its old confirmation. Saving or reviewing a decision does not itself write to GitHub; the repository-enabled labeling pass may apply proposed labels separately, including from unreviewed decisions.
 
 ![Saving and reviewing triage decisions](captures/flow-2.webp)
 
@@ -86,7 +86,7 @@ Mouse controls work alongside the keyboard keys.
 
 6. **Publish an approved GitHub action.** Compose a comment, or close or reopen an item with one as well. Bulk actions show every target before publication; an uncertain result stops the remaining actions for inspection.
 
-> GitHub PR approval and merging are not supported. Item labeling has its own reviewed-decision pass under Settings → Item labeling.
+> GitHub PR approval and merging are not supported. Item labeling has its own repository-enabled pass under Settings → Item labeling; it reads proposed labels independently of the suggested action and review status.
 
 ![Approving a GitHub comment or state change](captures/flow-6.webp)
 
@@ -140,7 +140,7 @@ bin/report
 | Read guidance and evidence                | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |
 | Edit action settings                      | `bin/taxonomy-settings`                                                        |
 | Preview and edit GitHub label definitions | `bin/label-definitions`                                                        |
-| Preview and apply reviewed labels         | `bin/item-labels`                                                              |
+| Preview and apply proposed labels         | `bin/item-labels`                                                              |
 | Propose and publish actions               | `bin/auto-close`, `bin/comment-plus`                                           |
 | See progress and handoffs                 | `bin/stats`, `bin/next`, `bin/report`                                          |
 
@@ -163,6 +163,7 @@ Turning automatic download ON installs the optional engine from the checked-in, 
 | Ask                                            | Prompt                                                                                            | Result                                       |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------- |
 | “triage 25 issues”                             | [Auto triage](prompts/auto-triage.md)                                                             | Unreviewed batch proposals                   |
+| “label the backlog”                            | [Label items](prompts/label-items.md)                                                             | Bounded proposed-label pass                  |
 | “prepare offline analysis”                     | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps             |
 | “is #N a duplicate?”                           | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal             |
 | “review PR #N”                                 | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and an unreviewed decision |

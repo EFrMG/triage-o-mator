@@ -23,7 +23,7 @@ func baselineItems() []Item {
 }
 
 func baselineTaxonomy() Taxonomy {
-	return Taxonomy{IssueCategories: []string{"bug"}, PRCategories: []string{"merge-ready"}, Actions: []string{"label-only"}, Confidence: []string{"low", "medium", "high"}}
+	return Taxonomy{IssueCategories: []string{"bug"}, PRCategories: []string{"merge-ready"}, Actions: []string{"no-action-needed"}, Confidence: []string{"low", "medium", "high"}}
 }
 
 func baselineSend(m model, msg tea.Msg) model {
@@ -169,8 +169,8 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 			t.Fatalf("default action %q has no supported GitHub operation", action)
 		}
 	}
-	if slices.Contains(m.taxonomy.Actions, "escalate-maintainer") || slices.Contains(m.taxonomy.Actions, "approve-merge-candidate") {
-		t.Fatal("default action list still contains advice rather than a GitHub operation")
+	if slices.Contains(m.taxonomy.Actions, "label-only") || slices.Contains(actionOperations, "label") || slices.Contains(m.taxonomy.Actions, "escalate-maintainer") || slices.Contains(m.taxonomy.Actions, "approve-merge-candidate") {
+		t.Fatal("default actions still include labeling or unsupported advice")
 	}
 	custom := Taxonomy{Actions: []string{"request logs", "archive", "escalate-maintainer"}, ActionOperations: map[string]string{"request logs": "comment", "archive": "close"}}
 	if !slices.Equal(custom.SelectableActions(), custom.Actions[:2]) || !(Item{Action: "archive"}).CloseCandidate(custom) || (Item{Action: "request logs"}).CloseCandidate(custom) {
@@ -253,8 +253,8 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	if cmd == nil || !m.settings.busy {
 		t.Fatal("Ctrl-E did not open $EDITOR for the selected Settings field")
 	}
-	m = baselineSend(m, settingsEditorMsg{root: root, repo: m.repo, kind: "action", originalName: "label-only", field: 1, request: m.settings.request, text: "Suggest only the needed labels"})
-	if !m.settings.editor.previewing || m.settings.editor.description.Value() != "Suggest only the needed labels" {
+	m = baselineSend(m, settingsEditorMsg{root: root, repo: m.repo, kind: "action", originalName: "no-action-needed", field: 1, request: m.settings.request, text: "No conversation or state write needed"})
+	if !m.settings.editor.previewing || m.settings.editor.description.Value() != "No conversation or state write needed" {
 		t.Fatal("$EDITOR result did not return to the Settings preview")
 	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
@@ -267,13 +267,13 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 		t.Fatalf("Settings script failed: %+v", message)
 	}
 	m = baselineSend(m, message)
-	if m.settings.editor != nil || m.taxonomy.ActionGuidance["label-only"] != "Suggest only the needed labels" {
+	if m.settings.editor != nil || m.taxonomy.ActionGuidance["no-action-needed"] != "No conversation or state write needed" {
 		t.Fatal("Settings did not reload saved guidance")
 	}
 
 	stale := settingsDoneMsg{root: root, repo: "other/repo", request: m.settings.request, operation: "save", taxonomy: Taxonomy{}}
 	m = baselineSend(m, stale)
-	if m.taxonomy.ActionGuidance["label-only"] != "Suggest only the needed labels" {
+	if m.taxonomy.ActionGuidance["no-action-needed"] != "No conversation or state write needed" {
 		t.Fatal("stale Settings reply replaced the selected repository's guidance")
 	}
 
@@ -286,6 +286,10 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyRight})
+	if m.settings.editor.operation != "close" {
+		t.Fatal("action editor did not move to the next operation")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.settings.editor.operation != "comment" {
 		t.Fatal("action editor did not select a GitHub operation")
 	}
@@ -366,7 +370,7 @@ func TestBaselineScriptsUseSelectedInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := runScript(relativeRoot, "apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "label-only", "--reason", "selected install", "--by", "tester"); err != nil {
+	if _, err := runScript(relativeRoot, "apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "no-action-needed", "--reason", "selected install", "--by", "tester"); err != nil {
 		t.Fatal(err)
 	}
 	if got := baselineLedgerRow(t, selectedRoot)["reason"]; got != "selected install" {
@@ -673,7 +677,7 @@ func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 			m := baselineModel(t, root)
 			m.activateTab(untriagedTab)
 			m.selectCurrentListItem()
-			m.form.ApplyProposal(proposal{Category: "bug", Action: "label-only", Confidence: "medium", Reason: "Reviewed source", ProposedBy: "agent:triage"})
+			m.form.ApplyProposal(proposal{Category: "bug", Action: "no-action-needed", Confidence: "medium", Reason: "Reviewed source", ProposedBy: "agent:triage"})
 			shortcut := "s"
 			if approve {
 				shortcut = "S"
@@ -722,6 +726,11 @@ func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 	if !slices.Equal(m.form.ProposedLabels(), []string{"bug", "needs-info"}) || m.form.focused != fieldAction {
 		t.Fatal("selected labels were not retained in the decision form")
 	}
+	m.form.CycleValue(1)
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if m.form.Action() != "" {
+		t.Fatal("Backspace did not leave action assessment pending")
+	}
 	m.form.reason.SetValue("Confirmed bug")
 	_, cmd := m.requestSave()
 	if cmd == nil {
@@ -731,7 +740,7 @@ func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 		t.Fatal(result.err)
 	}
 	row := baselineLedgerRow(t, root)
-	if row["category"] != "" || row["action"] != "label-only" || !slices.Equal(row["proposed_labels"].([]any), []any{"bug", "needs-info"}) || row["reviewed"] != false {
+	if row["category"] != "" || row["action"] != "" || !slices.Equal(row["proposed_labels"].([]any), []any{"bug", "needs-info"}) || row["reviewed"] != false {
 		t.Fatalf("new label decision did not stay separate from legacy categories and review: %v", row)
 	}
 }
@@ -763,7 +772,7 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	m.form.CycleValue(0)
 	m.commitDraftIfDirty()
 	m.loadForm(m.items[0])
-	if m.form.Category() != "retired" || m.form.Action() != "label-only" || m.form.Confidence() != "obsolete" {
+	if m.form.Category() != "retired" || m.form.Action() != "no-action-needed" || m.form.Confidence() != "obsolete" {
 		t.Fatal("draft lost corrected or unlisted values")
 	}
 	m.form.FocusField(fieldConfidence)
@@ -781,7 +790,7 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	if result := cmd().(applyDoneMsg); result.err != nil {
 		t.Fatal(result.err)
 	}
-	if got := baselineLedgerRow(t, root); got["category"] != "retired" || got["action"] != "label-only" || got["confidence"] != "low" || got["reason"] != "Explicitly checked" {
+	if got := baselineLedgerRow(t, root); got["category"] != "retired" || got["action"] != "no-action-needed" || got["confidence"] != "low" || got["reason"] != "Explicitly checked" {
 		t.Fatalf("corrected decision = %v", got)
 	}
 }
@@ -794,7 +803,7 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 	if err := json.Unmarshal([]byte(baselineRow(1)), &row); err != nil {
 		t.Fatal(err)
 	}
-	row["category"], row["action"], row["confidence"], row["reason"] = "bug", "label-only", "", reason
+	row["category"], row["action"], row["confidence"], row["reason"] = "bug", "no-action-needed", "", reason
 	row["reviewed"], row["reviewed_by"] = true, "tester"
 	data, err := json.Marshal(row)
 	if err != nil {
@@ -817,7 +826,7 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 	if m.form.Reason() != reason {
 		t.Fatal("draft reason was truncated")
 	}
-	m.form.ApplyProposal(proposal{Category: "bug", Action: "label-only", Confidence: "", Reason: reason})
+	m.form.ApplyProposal(proposal{Category: "bug", Action: "no-action-needed", Confidence: "", Reason: reason})
 	if m.form.Reason() != reason || m.form.Confidence() != "" {
 		t.Fatal("proposal reason or confidence changed")
 	}
@@ -857,7 +866,7 @@ func TestBaselinePendingSavePinsRepositoryAndReleasesSwitch(t *testing.T) {
 	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
 	m.detail.loading = false
-	m.form.ApplyProposal(proposal{Category: "bug", Action: "label-only", Reason: "old repository decision"})
+	m.form.ApplyProposal(proposal{Category: "bug", Action: "no-action-needed", Reason: "old repository decision"})
 	next, cmd := m.Update(tea.KeyPressMsg{Text: "s"})
 	m = next.(model)
 	if cmd == nil || m.switchBusy() == "" {

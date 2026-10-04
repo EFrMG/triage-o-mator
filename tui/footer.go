@@ -383,6 +383,9 @@ func (m model) itemFooter() []footerGroup {
 	}
 	if formFieldIsEnum(m.form.focused) && m.form.focused != fieldLabels {
 		fields = group("Fields", bind("fields", keys.FieldNext, keys.FieldPrev, keys.ChoiceNext, keys.ChoicePrev), hint{"h", "content"}, bind("change", keys.ValueNext, keys.ValuePrev), bind("", keys.OpenList), bind("next", keys.Confirm))
+		if m.form.focused == fieldAction {
+			fields.hints = append(fields.hints, hint{"Backspace", "clear action"})
+		}
 		read = group("Read", bind("focus tab", keys.TabPrev), bind("", keys.TabJump))
 	}
 

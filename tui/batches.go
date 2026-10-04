@@ -142,7 +142,7 @@ func loadBatches(root, repo string) ([]batchRecord, error) {
 					return err
 				}
 
-				if p.Action != "" {
+				if p.Action != "" || len(p.ProposedLabels) > 0 || p.Category != "" {
 					rec.Proposals[Key{Kind: p.Kind, Number: p.Number}] = p
 				}
 

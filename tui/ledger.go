@@ -50,7 +50,9 @@ type Key struct {
 
 func (i Item) Key() Key { return Key{Kind: i.Kind, Number: i.Number} }
 
-func (i Item) Untriaged() bool { return i.Category == "" && i.Action == "" }
+func (i Item) Untriaged() bool {
+	return i.Category == "" && len(i.ProposedLabels) == 0 && i.Action == ""
+}
 
 func (i Item) DecisionLabel() string {
 	if len(i.ProposedLabels) > 0 {

@@ -121,7 +121,7 @@ func (m model) labelingContent() string {
 		}
 	}
 	view := inset(titleBar("Item labeling", state, w)) + "\n\n"
-	view += inset("Applies reviewed label decisions in bounded passes. GitHub labels remain unchanged until a preview is applied.") + "\n"
+	view += inset("Applies proposed labels in bounded passes after this repository is enabled. A preview lists exact changes; applying rechecks GitHub before each write.") + "\n"
 	if policy := m.settings.labeling.policy; policy != nil {
 		view += "\n" + inset(fmt.Sprintf("%s item labeling for %s? Press e again to confirm.", strings.ToUpper(policy.Operation[:1])+policy.Operation[1:], policy.Repository)) + "\n"
 	}

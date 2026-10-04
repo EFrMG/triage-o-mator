@@ -163,7 +163,7 @@ def render(ledger):
     if pending_review:
         lines.append("## Awaiting human review, by recommended action")
         lines.append("")
-        by_action = Counter(r["action"] or "(none)" for r in pending_review)
+        by_action = Counter(r["action"] or "(not assessed)" for r in pending_review)
         lines.append("| action | count |")
         lines.append("|---|---|")
         for action, n in by_action.most_common():

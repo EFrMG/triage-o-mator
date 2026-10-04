@@ -78,7 +78,7 @@ def main():
         for item in items:
             d = decisions.get((item["kind"], item["number"]), {})
             labels = ", ".join(d.get("proposed_labels") or []) or d.get("category") or "no labels"
-            proposal = f"{labels}/{d['action']} {d.get('confidence', '')}" if d.get("action") else "(blank)"
+            proposal = f"{labels}/{d.get('action') or 'action not assessed'} {d.get('confidence', '')}" if d.get("action") or d.get("proposed_labels") or d.get("category") else "(blank)"
             print(f"{item['kind']:5} #{item['number']:<6} {proposal:45} {item['title']}")
 
         return

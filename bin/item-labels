@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preview and run bounded, repository-enabled GitHub item labeling from reviewed local decisions."""
+"""Preview and run bounded, repository-enabled GitHub item labeling from local proposals."""
 
 import argparse
 import hashlib
@@ -63,8 +63,8 @@ def enabled():
 
 
 def state():
-    value = read_json(STATE_PATH, {"version": 1, "repository": REPO, "items": {}})
-    if value.get("version") != 1 or value.get("repository") != REPO or not isinstance(value.get("items"), dict):
+    value = read_json(STATE_PATH, {"version": 1, "repository": REPO, "items": {}, "next_order": 0})
+    if value.get("version") != 1 or value.get("repository") != REPO or not isinstance(value.get("items"), dict) or type(value.get("next_order", 0)) is not int or value.get("next_order", 0) < 0:
         raise ValueError("item-label state is malformed or belongs to another repository")
     for key, row in value["items"].items():
         if not isinstance(key, str) or not re.fullmatch(r"(issue|pr):[1-9][0-9]*", key) or not isinstance(row, dict):
@@ -77,6 +77,8 @@ def state():
             raise ValueError(f"item-label state has managed labels absent from its observation for {key}")
         if type(row.get("pending", False)) is not bool or type(row.get("paused", False)) is not bool:
             raise ValueError(f"item-label state has invalid control flags for {key}")
+        if "checked_order" in row and (type(row["checked_order"]) is not int or row["checked_order"] < 1 or row["checked_order"] > value.get("next_order", 0)):
+            raise ValueError(f"item-label state has an invalid checked order for {key}")
     return value
 
 
@@ -148,21 +150,35 @@ class Transport:
 
 
 def decision_digest(row):
-    return digest({key: row.get(key) for key in ("kind", "number", "state", "category", "proposed_labels", "action", "reviewed", "reviewed_by", "reviewed_at")})
+    return digest({key: row.get(key) for key in ("kind", "number", "state", "proposed_labels")})
 
 
 def candidates(saved, limit):
-    rows = sorted(load_ledger(), key=lambda row: (row["kind"], row["number"]))
+    def priority(row):
+        key = f"{row['kind']}:{row['number']}"
+        checked = saved["items"].get(key, {}).get("checked_order", 0)
+
+        return (checked > 0, checked, bool(row.get("labels")), row["kind"], row["number"])
+
+    rows = load_ledger()
+    rows.sort(key=priority)
     chosen = []
     for row in rows:
         key = f"{row['kind']}:{row['number']}"
-        if row.get("state") != "open" or not has_decision(row) or not row.get("reviewed"):
+        prior = saved["items"].get(key, {})
+        if row.get("state") != "open" or (not has_decision(row) and not (prior.get("managed") or prior.get("pending"))):
             continue
-        if row.get("proposed_labels") or saved["items"].get(key, {}).get("managed") or saved["items"].get(key, {}).get("pending"):
+        if row.get("proposed_labels") or prior.get("managed") or prior.get("pending"):
             chosen.append((key, row))
         if len(chosen) >= limit:
             break
     return chosen
+
+
+def mark_checked(saved, key, row):
+    saved["next_order"] = saved.get("next_order", 0) + 1
+    saved["items"][key] = {**row, "checked_order": saved["next_order"]}
+    save_json(STATE_PATH, saved)
 
 
 def build_plan(saved, limit, transport):
@@ -233,36 +249,36 @@ def run_pass(parser, args):
         for row in plan["items"]:
             key = f"{row['kind']}:{row['number']}"
             if row["status"] not in ("ready", "no-change"):
+                prior = saved["items"].get(key, {})
                 if row["status"] == "human-correction":
-                    prior = saved["items"].get(key, {})
-                    saved["items"][key] = {**prior, "paused": True}
-                    save_json(STATE_PATH, saved)
+                    prior = {**prior, "paused": True}
+                mark_checked(saved, key, prior)
                 record_outcome({"key": key, "status": row["status"], "preview_sha256": args.preview_sha256})
                 outcomes.append({"key": key, "status": row["status"]})
                 continue
 
             fresh = next((item for item in load_ledger() if item.get("kind") == row["kind"] and item.get("number") == row["number"]), None)
             if fresh is None or decision_digest(fresh) != row["decision_sha256"]:
+                mark_checked(saved, key, saved["items"].get(key, {}))
                 record_outcome({"key": key, "status": "changed-decision", "preview_sha256": args.preview_sha256})
                 outcomes.append({"key": key, "status": "changed-decision"})
                 continue
             live_state, live_labels = transport.item(row["number"])
             if live_state != row.get("observed_state") or set(live_labels) != set(row.get("observed_labels", [])):
+                mark_checked(saved, key, saved["items"].get(key, {}))
                 record_outcome({"key": key, "status": "changed-on-github", "preview_sha256": args.preview_sha256})
                 outcomes.append({"key": key, "status": "changed-on-github"})
                 continue
 
             prior = saved["items"].get(key, {})
             if row["status"] == "no-change":
-                saved["items"][key] = {"last_labels": live_labels, "managed": prior.get("managed", []), "pending": False}
-                save_json(STATE_PATH, saved)
+                mark_checked(saved, key, {"last_labels": live_labels, "managed": prior.get("managed", []), "pending": False})
                 record_outcome({"key": key, "status": "no-change", "labels": live_labels, "preview_sha256": args.preview_sha256})
                 outcomes.append({"key": key, "status": "no-change"})
                 continue
 
-            saved["items"][key] = {"last_labels": live_labels, "managed": prior.get("managed", []), "pending": True,
-                                   "attempt": {"add": row["add"], "remove": row["remove"], "preview_sha256": args.preview_sha256}}
-            save_json(STATE_PATH, saved)
+            mark_checked(saved, key, {"last_labels": live_labels, "managed": prior.get("managed", []), "pending": True,
+                                      "attempt": {"add": row["add"], "remove": row["remove"], "preview_sha256": args.preview_sha256}})
             record_outcome({"key": key, "status": "attempting", "add": row["add"], "remove": row["remove"], "preview_sha256": args.preview_sha256})
             endpoint = f"repos/{REPO}/issues/{row['number']}/labels"
             try:
@@ -288,7 +304,7 @@ def run_pass(parser, args):
                 break
 
             managed = [name for name in dict.fromkeys([*prior.get("managed", []), *row["add"]]) if name not in row["remove"]]
-            saved["items"][key] = {"last_labels": after, "managed": managed, "pending": False}
+            saved["items"][key] = {"last_labels": after, "managed": managed, "pending": False, "checked_order": saved["next_order"]}
             save_json(STATE_PATH, saved)
             record_outcome({"key": key, "status": "written", "before": live_labels, "after": after, "managed": managed, "preview_sha256": args.preview_sha256})
             outcomes.append({"key": key, "status": "written", "before": live_labels, "after": after})

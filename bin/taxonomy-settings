@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--expected-name", help="the GitHub label name shown when editing began")
     parser.add_argument("--name", help="new action title")
     parser.add_argument("--description", help="new action description")
-    parser.add_argument("--operation", choices=["label", "comment", "close", "reopen", "none"], help="GitHub operation for this action")
+    parser.add_argument("--operation", choices=["comment", "close", "reopen", "none"], help="GitHub operation for this action")
     parser.add_argument("--expected-operation", help="the operation shown when editing began")
     parser.add_argument("--expected-repo", required=True)
     args = parser.parse_args()

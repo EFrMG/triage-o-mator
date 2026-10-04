@@ -1090,6 +1090,8 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.form.OpenPick()
 	case onChoice && key.Matches(msg, keys.Confirm):
 		m.form.NextField()
+	case onChoice && m.form.focused == fieldAction && msg.String() == "backspace":
+		m.form.ClearAction()
 	case onChoice && key.Matches(msg, keys.ValueNext):
 		if m.form.focused == fieldLabels {
 			m.form.OpenPick()
@@ -1209,7 +1211,7 @@ func formFieldIsEnum(f formField) bool {
 	return f == fieldLabels || f == fieldAction || f == fieldConfidence
 }
 
-// requestSave saves the decision, but first warns (and requires a repeated save action) when the fields are still the untouched defaults or the reason is empty, so a stray keypress can't record "bug / label-only / low" with no justification.
+// requestSave saves the decision, but first warns (and requires a repeated save action) when the fields are still the untouched defaults or the reason is empty, so a stray keypress can't record "bug / no-action-needed / low" with no justification.
 func (m model) requestSave() (tea.Model, tea.Cmd) {
 	return m.requestDecisionSave(false)
 }
@@ -1223,6 +1225,11 @@ func (m model) requestDecisionSave(approve bool) (tea.Model, tea.Cmd) {
 
 	if bad := m.form.InvalidValues(); bad != "" {
 		m.fail("Can't save " + bad + ": not in config/taxonomy.json. Pick a value first.")
+
+		return m, nil
+	}
+	if m.form.Category() == "" && len(m.form.ProposedLabels()) == 0 && m.form.Action() == "" {
+		m.fail("Choose at least one proposed label or an action before saving.")
 
 		return m, nil
 	}

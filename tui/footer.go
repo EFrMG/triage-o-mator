@@ -155,12 +155,11 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.settings.section == "" {
 			return []footerGroup{group("Settings", hint{"j/k", "select"}, hint{"Enter", "open"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}
-		if m.settings.section == "labeling" {
-			labels := group("Item labeling", hint{"e", "enable/disable"}, hint{"p", "preview pass"}, hint{"j/k", "scroll"})
-			if m.settings.labeling.preview != nil {
-				labels.hints = append(labels.hints, hint{"a", "apply preview"})
+		if m.settings.section == "automations" {
+			if m.settings.selected == 1 {
+				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Scoring", "planned"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}
-			return []footerGroup{labels, group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+			return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle Labeling"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}
 		settings := group("Settings", hint{"j/k", "select"}, hint{"n", "new"}, hint{"Enter/e", "edit"})
 		if m.settings.section == "label" {

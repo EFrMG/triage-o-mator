@@ -307,42 +307,54 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
-	if cmd == nil || m.settings.section != "labeling" {
-		t.Fatal("Item labeling did not open from Settings")
+	if cmd == nil || m.settings.section != "automations" {
+		t.Fatal("Automations did not open from Settings")
 	}
-	m = baselineSend(m, cmd().(labelingMsg))
-	if !m.settings.labeling.loaded || m.settings.labeling.enabled {
-		t.Fatal("item labeling did not load its disabled repository setting")
+	m = baselineSend(m, cmd().(automationMsg))
+	if !m.settings.automations.loaded || !m.settings.automations.labelingEnabled || !strings.Contains(ansi.Strip(m.automationsView()), "Scoring") {
+		t.Fatal("Automations did not load default-on Labeling and planned Scoring cards")
 	}
-	next, cmd = m.Update(tea.KeyPressMsg{Text: "e"})
+	if prompt := m.labelingPrompt(); !strings.Contains(prompt, "prompts/label-items.md") || !strings.Contains(prompt, m.repo) || !strings.Contains(prompt, m.installRoot) {
+		t.Fatal("Labeling prompt lacked the pinned install or agent instructions")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "y"})
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("enabling item labeling did not request a preview")
+		t.Fatal("y did not copy the Labeling agent prompt")
 	}
-	m = baselineSend(m, cmd().(labelingMsg))
-	if m.settings.labeling.policy == nil || m.settings.labeling.policy.Repository != m.repo {
-		t.Fatal("item labeling preview did not pin the selected repository")
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if cmd == nil || !m.settings.busy {
+		t.Fatal("Labeling card did not toggle")
 	}
-	next, cmd = m.Update(tea.KeyPressMsg{Text: "e"})
+	m = baselineSend(m, cmd().(automationMsg))
+	if m.settings.automations.labelingEnabled {
+		t.Fatal("Labeling did not turn off for the selected repository")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if cmd != nil || m.settings.busy || !strings.Contains(m.status, "planned") {
+		t.Fatal("planned Scoring card acted like an available automation")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "y"})
+	m = next.(model)
+	if cmd != nil || !strings.Contains(m.status, "planned") {
+		t.Fatal("planned Scoring card copied a runnable agent prompt")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyUp})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 	m = next.(model)
 	if cmd == nil {
-		t.Fatal("item labeling preview could not be confirmed")
+		t.Fatal("Labeling card could not turn back on")
 	}
-	m = baselineSend(m, cmd().(labelingMsg))
-	if !m.settings.labeling.enabled {
-		t.Fatal("confirmed item labeling setting was not reloaded")
+	m = baselineSend(m, cmd().(automationMsg))
+	if !m.settings.automations.labelingEnabled {
+		t.Fatal("Labeling did not turn back on")
 	}
-	var planPreview labelingPreview
-	planPreview.Repository, planPreview.Enabled, planPreview.Limit, planPreview.PreviewSHA256 = m.repo, true, labelingViewLimit, "pinned-pass"
-	planPreview.Items = append(planPreview.Items, labelingPreviewItem{Kind: "issue", Number: 1, Status: "ready", Desired: []string{"bug"}, Add: []string{"bug"}})
-	m.settings.request++
-	m = baselineSend(m, labelingMsg{root: root, repo: m.repo, request: m.settings.request, operation: "pass-preview", preview: planPreview})
-	if !strings.Contains(ansi.Strip(m.labelingContent()), "Add: bug") {
-		t.Fatal("item labeling preview hid the exact proposed label change")
-	}
-	next, cmd = m.Update(tea.KeyPressMsg{Text: "a"})
-	if cmd == nil || !next.(model).settings.busy {
-		t.Fatal("item labeling could not run its pinned preview")
+	m = baselineSend(m, automationMsg{root: root, repo: "other/repo", request: m.settings.request, status: automationStatus{Repository: "other/repo"}})
+	if !m.settings.automations.labelingEnabled {
+		t.Fatal("stale Automations response changed the selected repository's setting")
 	}
 }
 

@@ -314,9 +314,14 @@ print(json.dumps(live["labels"]))
         first["labels"] = ["manual"]
         ledger_path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
 
+        self.assertTrue(self.json_cli("item-labels", "status", "--expected-repo", "owner/repo")["enabled"])
+        self.assertFalse((self.root / "config/label-application.json").exists())
+        disable = self.json_cli("item-labels", "disable", "--expected-repo", "owner/repo")
+        self.assertTrue(disable["before"])
+        self.json_cli("item-labels", "disable", "--expected-repo", "owner/repo", "--apply", "--preview-sha256", disable["preview_sha256"])
+        self.assertFalse(self.json_cli("item-labels", "status", "--expected-repo", "owner/repo")["enabled"])
         enable = self.json_cli("item-labels", "enable", "--expected-repo", "owner/repo")
         self.assertFalse(enable["before"])
-        self.assertFalse((self.root / "config/label-application.json").exists())
         self.json_cli("item-labels", "enable", "--expected-repo", "owner/repo", "--apply", "--preview-sha256", enable["preview_sha256"])
 
         initial = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")

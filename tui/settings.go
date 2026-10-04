@@ -42,7 +42,7 @@ type settingsUI struct {
 	selected, offset int
 	request          uint64
 	editor           *settingsEditor
-	labeling         labelingUI
+	automations      automationsUI
 }
 
 type settingsDoneMsg struct {
@@ -118,6 +118,10 @@ func (m *model) settingsMove(delta int) {
 		m.settings.menuSelected = (m.settings.menuSelected + delta%3 + 3) % 3
 		return
 	}
+	if m.settings.section == "automations" {
+		m.settings.selected = (m.settings.selected + delta%2 + 2) % 2
+		return
+	}
 
 	rows := m.settingsRows()
 	if len(rows) == 0 {
@@ -138,12 +142,12 @@ func (m model) settingsView() string {
 		cards := [][2]string{
 			{"Labels", "Create and edit GitHub label names and descriptions"},
 			{"Actions", "Create and edit local actions tied to GitHub operations"},
-			{"Item labeling", "Preview and apply proposed labels for this repository"},
+			{"Automations", "Control which agent passes may run for this repository"},
 		}
 		return inset(titleBar("Settings", "", m.menuWidth())) + "\n\n" + cardList(cards, m.settings.menuSelected, w, h-2)
 	}
-	if m.settings.section == "labeling" {
-		return m.labelingView()
+	if m.settings.section == "automations" {
+		return m.automationsView()
 	}
 
 	catalog := m.taxonomy.LabelCatalog
@@ -267,8 +271,8 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
-	if m.settings.section == "labeling" {
-		return m.handleLabelingKey(msg)
+	if m.settings.section == "automations" {
+		return m.handleAutomationsKey(msg)
 	}
 
 	switch msg.String() {
@@ -315,13 +319,13 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter", "l", "right":
 		if m.settings.section == "" {
-			m.settings.section = []string{"label", "action", "labeling"}[m.settings.menuSelected]
+			m.settings.section = []string{"label", "action", "automations"}[m.settings.menuSelected]
 			m.settings.selected, m.settings.offset = 0, 0
-			if m.settings.section == "labeling" {
-				m.settings.labeling = labelingUI{}
+			if m.settings.section == "automations" {
+				m.settings.automations = automationsUI{}
 				m.settings.busy = true
 				m.settings.request++
-				return m, labelingCmd(m.installRoot, m.repo, m.settings.request, "status", "", 0)
+				return m, automationStatusCmd(m.installRoot, m.repo, m.settings.request)
 			}
 			return m, nil
 		}

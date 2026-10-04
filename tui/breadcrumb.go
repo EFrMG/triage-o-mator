@@ -40,8 +40,8 @@ func (m model) breadcrumb() []string {
 			crumbs = append(crumbs, "Labels")
 		case "action":
 			crumbs = append(crumbs, "Actions")
-		case "labeling":
-			crumbs = append(crumbs, "Item labeling")
+		case "automations":
+			crumbs = append(crumbs, "Automations")
 		}
 		if m.settings.editor != nil {
 			name := m.settings.editor.row.name

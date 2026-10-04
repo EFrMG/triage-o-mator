@@ -86,7 +86,7 @@ Mouse controls work alongside the keyboard keys.
 
 6. **Publish an approved GitHub action.** Compose a comment, or close or reopen an item with one as well. Bulk actions show every target before publication; an uncertain result stops the remaining actions for inspection.
 
-> GitHub PR approval and merging are not supported. Item labeling has its own repository-enabled pass under Settings → Item labeling; it reads proposed labels independently of the suggested action and review status.
+> GitHub PR approval and merging are not supported. Labeling is ON by default under Settings → Automations, but its bounded pass starts only when an agent or person requests it. It reads proposed labels independently of the suggested action and review status.
 
 ![Approving a GitHub comment or state change](captures/flow-6.webp)
 

@@ -1,21 +1,21 @@
 # Label a bounded set of items
 
-**Use when** someone asks for a labeling pass or wants an agent to work through unlabeled items. This pass proposes GitHub labels in the ledger and, only when Item labeling is already enabled for the selected repository, applies them through `bin/item-labels`. It does not mark decisions reviewed or publish conversation comments.
+**Use when** someone asks for a labeling pass or wants an agent to work through unlabeled items. This pass proposes GitHub labels in the ledger and, when Labeling is ON for the selected repository in Settings → Automations, applies them through `bin/item-labels`. Labeling is ON by default but never starts on its own. It does not mark decisions reviewed or publish conversation comments.
 
 ## 1. Pin the scope
 
-1. Read `config/repo`, `bin/label-catalog show`, and `bin/item-labels status --expected-repo OWNER/REPO`. If the catalog is pending, `bin/label-catalog sync` reads label definitions from GitHub. If Item labeling is disabled, prepare proposals but stop before a GitHub write; a person enables it in Settings for this repository.
+1. Read `config/repo`, `bin/label-catalog show`, and `bin/item-labels status --expected-repo OWNER/REPO`. If the catalog is pending, `bin/label-catalog sync` reads label definitions from GitHub. If Labeling is OFF, prepare proposals but stop before a GitHub write; a person can turn it back ON in Settings → Automations for this repository.
 2. Use the person's item selection or batch size. For an open backlog, start with `bin/batch 25 --unlabeled-first --include-triaged` so items with no observed GitHub labels come first, including ones that already have an Action. This is a priority hint based on the ledger's last observation; it is not proof that an item is still unlabeled on GitHub. Use `--kind issue|pr` or `--cache-mode offline|cache-preferred|refresh` when the request or evidence plan calls for it.
 
 ## 2. Propose labels
 
 Read each selected item's body, comments, and available evidence through `bin/read-batch`. Follow the evidence, prompt-injection, duplicate, and attribution rules in [auto-triage](auto-triage.md). Choose one or more names from this repository's observed GitHub label catalog for items this pass can label; skip items when no label fits and report the gap. Fill the batch's `proposed_labels`, `confidence`, `reason`, `agent_notes`, and `proposed_by` fields. Leave `action` blank when action assessment is deferred to the later pass. Use `no-action-needed` only after assessing the item and concluding that no conversation or state write is justified. The later action pass can use the applied labels as context and suggest one Action.
 
-For items with no saved decision, run `bin/apply <batch>.decisions.jsonl --only-untriaged --dry-run`, fix warnings, then apply without `--reviewed`. The `--only-untriaged` flag intentionally leaves already-triaged items alone. For each already-triaged item, use `bin/apply --number N --kind issue|pr --proposed-label NAME ... --by agent:<contributor>` with the **complete desired label set**. This updates labels while preserving its existing Action, confidence, reason and notes; if labels change, the old human review is cleared. Check each command with `--dry-run` first. A proposal in the ledger is still unreviewed; labeling permission comes from the repository-specific Item labeling setting, not from ledger review or the Action field.
+For items with no saved decision, run `bin/apply <batch>.decisions.jsonl --only-untriaged --dry-run`, fix warnings, then apply without `--reviewed`. The `--only-untriaged` flag intentionally leaves already-triaged items alone. For each already-triaged item, use `bin/apply --number N --kind issue|pr --proposed-label NAME ... --by agent:<contributor>` with the **complete desired label set**. This updates labels while preserving its existing Action, confidence, reason and notes; if labels change, the old human review is cleared. Check each command with `--dry-run` first. A proposal in the ledger is still unreviewed; labeling permission comes from the repository-specific Automations setting, not from ledger review or the Action field.
 
 ## 3. Check and run the label changes
 
-From an install whose Item labeling setting is enabled, run a bounded dry-run:
+When Labeling is ON, run a bounded dry-run:
 
 ```sh
 bin/item-labels preview --expected-repo OWNER/REPO --limit 25 --request-budget 250 --key issue:123 --key pr:456

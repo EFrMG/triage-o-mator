@@ -59,7 +59,7 @@ def policy():
 
 
 def enabled():
-    return policy()["repositories"].get(REPO, {}).get("enabled") is True
+    return policy()["repositories"].get(REPO, {}).get("enabled", True) is True
 
 
 def state():
@@ -245,7 +245,7 @@ def run_pass(parser, args):
         if plan["preview_sha256"] != args.preview_sha256:
             fail(parser, "the selected decisions or GitHub labels changed; preview the pass again")
         if not enabled():
-            fail(parser, "item labeling is disabled for this repository in Settings")
+            fail(parser, "Labeling is OFF for this repository in Settings → Automations")
 
         remaining = sum(2 + 2 * bool(row.get("add")) + 2 * len(row.get("remove", [])) for row in plan["items"] if row["status"] in ("ready", "no-change"))
         if transport.used + remaining > transport.budget:

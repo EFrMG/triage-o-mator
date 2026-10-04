@@ -54,8 +54,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishSettingsPreview(msg)
 	case settingsEditorMsg:
 		return m.finishSettingsExternal(msg)
-	case labelingMsg:
-		return m.finishLabeling(msg)
+	case automationMsg:
+		return m.finishAutomation(msg)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true

@@ -353,8 +353,11 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.settings.menuSelected = row
-		} else if m.settings.section == "labeling" {
-			return m, nil
+		} else if m.settings.section == "automations" {
+			if row >= 2 {
+				return m, nil
+			}
+			m.settings.selected = row
 		} else {
 			row += m.settings.offset
 			if row >= len(m.settingsRows()) {

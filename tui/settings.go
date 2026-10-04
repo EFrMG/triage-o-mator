@@ -57,6 +57,15 @@ type settingsPreviewMsg struct {
 	err                           error
 }
 
+type settingsEditorMsg struct {
+	root, repo, kind, originalName string
+	id, field                      int
+	request                        uint64
+	creating                       bool
+	text                           string
+	err                            error
+}
+
 type labelDefinitionPlan struct {
 	Repository    string       `json:"repository"`
 	Operation     string       `json:"operation"`
@@ -169,17 +178,18 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+s":
 			return m.saveSettingsEditor()
+		case "ctrl+e":
+			return m.startSettingsExternal()
 		case "ctrl+p":
-			editor.previewing = !editor.previewing
 			if editor.previewing {
-				editor.title.Blur()
-				editor.description.Blur()
-				m.layoutSettingsEditor()
-				editor.preview.SetContent(m.settingsDraftPreview(editor.preview.Width()))
-				editor.preview.GotoTop()
-				return m, nil
+				editor.previewing = false
+				return m, m.focusSettingsEditor()
 			}
-			return m, m.focusSettingsEditor()
+			if editor.row.kind == "label" && editor.previewHash == "" {
+				return m.startSettingsLabelPreview()
+			}
+			m.showSettingsPreview()
+			return m, nil
 		case "tab", "shift+tab":
 			delta := 1
 			if msg.String() == "shift+tab" {
@@ -212,6 +222,7 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		if editor.title.Value() != beforeTitle || editor.description.Value() != beforeDescription {
 			editor.previewHash = ""
+			editor.plan = labelDefinitionPlan{}
 		}
 		return m, cmd
 	}
@@ -344,20 +355,47 @@ func (m *model) layoutSettingsEditor() {
 
 func (m model) settingsDraftPreview(width int) string {
 	e := m.settings.editor
-	lines := []string{"Title", wrapText(e.title.Value(), width), "", "Description", wrapText(orPlaceholder(e.description.Value(), "(none)"), width)}
-	if e.row.kind == "label" && e.previewHash != "" {
-		oldName, oldDescription := "(new label)", "(none)"
-		if e.plan.Current != nil {
-			oldName, oldDescription = e.plan.Current.Name, orPlaceholder(e.plan.Current.Description, "(none)")
-		}
-		lines = []string{"GitHub repository", e.plan.Repository, "", "Current title", wrapText(oldName, width),
-			"Current description", wrapText(oldDescription, width), "", "New title", wrapText(e.plan.Proposed.Name, width),
-			"New description", wrapText(orPlaceholder(e.plan.Proposed.Description, "(none)"), width),
-			"Color", e.plan.Proposed.Color, "", "Ctrl-S confirms this GitHub change."}
-	} else if e.row.kind == "label" {
-		lines = append([]string{"GitHub repository", m.repo, ""}, lines...)
+	heading := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true)
+	lines := []string{}
+	if e.row.kind == "label" {
+		lines = append(lines, heading.Render("GitHub repository"), wrapText(e.plan.Repository, width), "")
 	}
+
+	currentName, currentDescription := e.row.name, e.row.description
+	if e.row.kind == "label" && e.plan.Current != nil {
+		currentName, currentDescription = e.plan.Current.Name, e.plan.Current.Description
+	}
+	lines = append(lines, heading.Render("Current"))
+	if e.creating {
+		lines = append(lines, "No existing "+e.row.kind)
+	} else {
+		lines = append(lines, heading.Render("Title"), wrapText(currentName, width), "",
+			heading.Render("Description"), wrapText(settingsDescription(currentDescription), width))
+	}
+	lines = append(lines, "", heading.Render("After save"), heading.Render("Title"), wrapText(e.title.Value(), width), "",
+		heading.Render("Description"), wrapText(settingsDescription(e.description.Value()), width))
+	if e.row.kind == "label" {
+		lines = append(lines, "", heading.Render("Color"), e.plan.Proposed.Color, "", "Ctrl-S confirms this GitHub change.")
+	}
+
 	return strings.Join(lines, "\n")
+}
+
+func settingsDescription(value string) string {
+	if value == "" {
+		return "No description"
+	}
+	return value
+}
+
+func (m *model) showSettingsPreview() {
+	e := m.settings.editor
+	e.previewing = true
+	e.title.Blur()
+	e.description.Blur()
+	m.layoutSettingsEditor()
+	e.preview.SetContent(m.settingsDraftPreview(e.preview.Width()))
+	e.preview.GotoTop()
 }
 
 func (m model) settingsOverlay(background string) string {
@@ -386,13 +424,8 @@ func (m model) settingsOverlay(background string) string {
 
 func (m model) saveSettingsEditor() (tea.Model, tea.Cmd) {
 	e := m.settings.editor
-	name, description := e.title.Value(), e.description.Value()
-	if strings.TrimSpace(name) == "" || name != strings.TrimSpace(name) || strings.ContainsAny(name, "\n\x00") {
-		m.fail("Title must be a nonempty single line without leading or trailing spaces.")
-		return m, nil
-	}
-	if e.row.kind == "label" && (utf8.RuneCountInString(description) > 100 || strings.ContainsAny(description, "\n\x00")) {
-		m.fail("GitHub label descriptions must be one line and at most 100 characters.")
+	if problem := m.settingsEditorProblem(); problem != "" {
+		m.fail(problem)
 		return m, nil
 	}
 	if !e.creating && !m.settingsEditorChanged() {
@@ -401,19 +434,43 @@ func (m model) saveSettingsEditor() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if e.row.kind == "label" {
+		if e.previewHash == "" {
+			return m.startSettingsLabelPreview()
+		}
+		m.settings.busy = true
+		m.settings.request++
+		m.status = "Saving GitHub label…"
+		return m, settingsLabelApplyCmd(m.installRoot, m.repo, m.settings.request, e.title.Value(), settingsLabelArgs(m.repo, *e), e.previewHash)
+	}
 	m.settings.busy = true
 	m.settings.request++
-	if e.row.kind == "label" {
-		args := settingsLabelArgs(m.repo, *e)
-		if e.previewHash == "" {
-			m.status = "Checking GitHub label change…"
-			return m, settingsLabelPreviewCmd(m.installRoot, m.repo, m.settings.request, name, description, args)
-		}
-		m.status = "Saving GitHub label…"
-		return m, settingsLabelApplyCmd(m.installRoot, m.repo, m.settings.request, name, args, e.previewHash)
-	}
 	m.status = "Saving action…"
 	return m, settingsActionSaveCmd(m.installRoot, m.repo, m.settings.request, *e)
+}
+
+func (m model) settingsEditorProblem() string {
+	e := m.settings.editor
+	name, description := e.title.Value(), e.description.Value()
+	if strings.TrimSpace(name) == "" || name != strings.TrimSpace(name) || strings.ContainsAny(name, "\n\x00") {
+		return "Title must be a nonempty single line without leading or trailing spaces."
+	}
+	if e.row.kind == "label" && (utf8.RuneCountInString(description) > 100 || strings.ContainsAny(description, "\n\x00")) {
+		return "GitHub label descriptions must be one line and at most 100 characters."
+	}
+	return ""
+}
+
+func (m model) startSettingsLabelPreview() (tea.Model, tea.Cmd) {
+	if problem := m.settingsEditorProblem(); problem != "" {
+		m.fail(problem)
+		return m, nil
+	}
+	e := m.settings.editor
+	m.settings.busy = true
+	m.settings.request++
+	m.status = "Checking GitHub label change…"
+	return m, settingsLabelPreviewCmd(m.installRoot, m.repo, m.settings.request, e.title.Value(), e.description.Value(), settingsLabelArgs(m.repo, *e))
 }
 
 func settingsActionSaveCmd(root, repo string, request uint64, e settingsEditor) tea.Cmd {
@@ -431,6 +488,78 @@ func settingsActionSaveCmd(root, repo string, request uint64, e settingsEditor) 
 		taxonomy, err := LoadTaxonomy(root)
 		return settingsDoneMsg{root: root, repo: repo, request: request, operation: "save", name: name, taxonomy: taxonomy, err: err}
 	}
+}
+
+func (m model) startSettingsExternal() (tea.Model, tea.Cmd) {
+	e := m.settings.editor
+	value := e.description.Value()
+	limit := e.description.CharLimit
+	if e.field == 0 {
+		value = e.title.Value()
+		limit = e.title.CharLimit
+	}
+	if e.field == 0 || e.row.kind == "label" {
+		limit++
+	}
+	command, path, err := prepareCommentEditor(value)
+	if err != nil {
+		m.failErr("Couldn't open Settings field editor", err)
+		return m, nil
+	}
+
+	m.settings.busy = true
+	m.settings.request++
+	m.status = "Editing Settings field in $EDITOR…"
+	root, repo, request := m.installRoot, m.repo, m.settings.request
+	kind, originalName, id, field, creating := e.row.kind, e.row.name, e.row.id, e.field, e.creating
+	return m, tea.ExecProcess(command, func(err error) tea.Msg {
+		value, readErr := readCommentEditor(path, err, limit)
+		return settingsEditorMsg{root: root, repo: repo, kind: kind, originalName: originalName, id: id,
+			field: field, request: request, creating: creating, text: value, err: readErr}
+	})
+}
+
+func (m model) finishSettingsExternal(msg settingsEditorMsg) (tea.Model, tea.Cmd) {
+	e := m.settings.editor
+	if !m.settings.open || e == nil || msg.root != m.installRoot || msg.repo != m.repo || msg.request != m.settings.request ||
+		msg.kind != e.row.kind || msg.originalName != e.row.name || msg.id != e.row.id || msg.field != e.field || msg.creating != e.creating {
+		return m, nil
+	}
+	m.settings.busy = false
+	if msg.err != nil {
+		m.failErr("Couldn't load edited Settings field; draft retained", msg.err)
+		return m, nil
+	}
+
+	value := msg.text
+	if msg.field == 0 || e.row.kind == "label" {
+		value = strings.TrimSuffix(value, "\n")
+		if strings.Contains(value, "\n") {
+			m.fail("Title and GitHub label description must stay on one line; draft retained.")
+			return m, nil
+		}
+	}
+	limit := e.description.CharLimit
+	if msg.field == 0 {
+		limit = e.title.CharLimit
+	}
+	if utf8.RuneCountInString(value) > limit {
+		m.fail("Edited Settings field exceeds its length limit; draft retained.")
+		return m, nil
+	}
+	if msg.field == 0 {
+		e.title.SetValue(value)
+	} else {
+		e.description.SetValue(value)
+	}
+	e.previewHash = ""
+	e.plan = labelDefinitionPlan{}
+	if e.row.kind == "label" {
+		return m.startSettingsLabelPreview()
+	}
+	m.showSettingsPreview()
+	m.status = "Settings field loaded. Review it before saving."
+	return m, nil
 }
 
 func settingsLabelArgs(repo string, e settingsEditor) []string {
@@ -491,12 +620,7 @@ func (m model) finishSettingsPreview(msg settingsPreviewMsg) (tea.Model, tea.Cmd
 	}
 	e.plan = msg.plan
 	e.previewHash = msg.plan.PreviewSHA256
-	e.previewing = true
-	e.title.Blur()
-	e.description.Blur()
-	m.layoutSettingsEditor()
-	e.preview.SetContent(m.settingsDraftPreview(e.preview.Width()))
-	e.preview.GotoTop()
+	m.showSettingsPreview()
 	m.status = "Review the exact GitHub label change, then Ctrl-S to confirm."
 	return m, nil
 }

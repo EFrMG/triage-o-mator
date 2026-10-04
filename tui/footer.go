@@ -147,7 +147,7 @@ func (m model) contextFooterGroups() []footerGroup {
 				save = "confirm GitHub change"
 			}
 		}
-		return []footerGroup{group(label, hint{"Tab/Shift-Tab", "field"}, hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", save}, hint{"Esc", "discard"}), group("Navigation", bind("exit", keys.ForceQuit))}
+		return []footerGroup{group(label, hint{"Tab/Shift-Tab", "field"}, hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", save}, hint{"Esc", "discard"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.settings.open:
 		if m.settings.busy {
 			return []footerGroup{group("Settings", hint{"", "reading labels…"})}

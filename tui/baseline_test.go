@@ -13,6 +13,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -184,22 +185,42 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	}
 	m.settings.editor.title.SetValue("defect")
 	m.settings.editor.description.SetValue("A reproducible defect")
-	next, cmd := m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd == nil || !m.settings.busy {
-		t.Fatal("label save did not request a GitHub preview")
+		t.Fatal("Ctrl-P did not request a live GitHub preview")
 	}
 	plan := labelDefinitionPlan{Repository: m.repo, Operation: "edit", Current: &GitHubLabel{ID: 1, Name: "bug", Description: "Something is broken", Color: "ff0000"}, Proposed: GitHubLabel{Name: "defect", Description: "A reproducible defect", Color: "ff0000"}, PreviewSHA256: "reviewed-preview"}
 	m = baselineSend(m, settingsPreviewMsg{root: root, repo: m.repo, request: m.settings.request, name: "defect", description: "A reproducible defect", plan: plan})
-	if !m.settings.editor.previewing || !strings.Contains(ansi.Strip(m.viewContent()), "GitHub repository") {
-		t.Fatal("GitHub preview did not show the exact target in the floating editor")
+	preview := m.settingsDraftPreview(m.settings.editor.preview.Width())
+	plain := ansi.Strip(preview)
+	if !m.settings.editor.previewing || !strings.Contains(plain, "GitHub repository\nowner/repo") || !strings.Contains(plain, "Current\nTitle\nbug\n\nDescription\nSomething is broken") || !strings.Contains(plain, "After save\nTitle\ndefect") || strings.Contains(plain, "(bug)") {
+		t.Fatal("GitHub preview did not show current and next values together")
+	}
+	accentTitle := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true).Render("Title")
+	if !strings.Contains(preview, accentTitle) {
+		t.Fatal("preview titles did not use bold accent styling")
 	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd == nil || !m.settings.busy {
-		t.Fatal("label confirmation did not require a separate save")
+		t.Fatal("one save from the live preview did not confirm the label change")
 	}
 	m.settings.busy = false
+	m.settings.editor = nil
+	m = baselineSend(m, tea.KeyPressMsg{Text: "n"})
+	m.settings.editor.title.SetValue("triage")
+	m.settings.editor.description.SetValue("Ready to triage")
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.settings.busy {
+		t.Fatal("new label did not request a GitHub preview")
+	}
+	plan = labelDefinitionPlan{Repository: m.repo, Operation: "create", Proposed: GitHubLabel{Name: "triage", Description: "Ready to triage", Color: "ededed"}, PreviewSHA256: "new-preview"}
+	m = baselineSend(m, settingsPreviewMsg{root: root, repo: m.repo, request: m.settings.request, name: "triage", description: "Ready to triage", plan: plan})
+	if plain := ansi.Strip(m.settingsDraftPreview(m.settings.editor.preview.Width())); !strings.Contains(plain, "Current\nNo existing label") || !strings.Contains(plain, "After save\nTitle\ntriage") {
+		t.Fatal("new label preview did not show current and proposed values together")
+	}
 	m.settings.editor = nil
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
@@ -212,7 +233,16 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	if m.settings.editor == nil || m.settings.editor.row.kind != "action" {
 		t.Fatal("Settings did not open action guidance")
 	}
-	m.settings.editor.description.SetValue("Suggest only the needed labels")
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.settings.busy {
+		t.Fatal("Ctrl-E did not open $EDITOR for the selected Settings field")
+	}
+	m = baselineSend(m, settingsEditorMsg{root: root, repo: m.repo, kind: "action", originalName: "label-only", field: 1, request: m.settings.request, text: "Suggest only the needed labels"})
+	if !m.settings.editor.previewing || m.settings.editor.description.Value() != "Suggest only the needed labels" {
+		t.Fatal("$EDITOR result did not return to the Settings preview")
+	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd == nil || !m.settings.busy || m.switchBusy() == "" {
@@ -1560,6 +1590,9 @@ func TestGroupEditFloatingFieldsStayBoundedAndSave(t *testing.T) {
 	m = baselineSend(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	if !m.groups.edit.previewing || !strings.Contains(ansi.Strip(m.viewContent()), "Preview group") {
 		t.Fatal("Ctrl-P did not preview the edited group")
+	}
+	if !strings.Contains(m.groupEditPreviewText(m.groups.edit.preview.Width()), lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true).Render("Title")) {
+		t.Fatal("group preview title did not use bold accent styling")
 	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)

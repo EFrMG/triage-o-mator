@@ -323,14 +323,15 @@ func (m *model) layoutGroupEdit() {
 
 func (m model) groupEditPreviewText(width int) string {
 	e := m.groups.edit
+	heading := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true)
 	parts := []string{
-		"Title", wrapText(e.title.Value(), width), "",
-		"Description", renderMarkdownWithLineBreaks(e.description.Value(), width, true), "",
+		heading.Render("Title"), wrapText(e.title.Value(), width), "",
+		heading.Render("Description"), renderMarkdownWithLineBreaks(e.description.Value(), width, true), "",
 	}
 	if m.groups.editing == "edit" {
-		parts = append(parts, "Status", e.status, "")
+		parts = append(parts, heading.Render("Status"), e.status, "")
 	}
-	parts = append(parts, "Assignee", wrapText(orPlaceholder(e.assignee.Value(), "(none)"), width))
+	parts = append(parts, heading.Render("Assignee"), wrapText(orPlaceholder(e.assignee.Value(), "(none)"), width))
 	return strings.Join(parts, "\n")
 }
 

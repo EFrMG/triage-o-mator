@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preview and run a bounded repository-policy pass over saved PR closure proposals."""
+"""Preview and run a bounded repository-policy pass over saved action proposals."""
 
 import argparse
 import json
@@ -20,62 +20,85 @@ def script(name, *args):
     return json.loads(result.stdout)
 
 
-def select(numbers):
-    if not numbers or len(numbers) > 20 or len(numbers) != len(set(numbers)) or any(number < 1 for number in numbers):
-        raise ValueError("select one to twenty distinct PR numbers")
+def selection(numbers, items):
+    keys = [("pr", number) for number in numbers]
+    for token in items:
+        parts = token.split(":", 1)
+        if len(parts) != 2 or parts[0] not in ("issue", "pr") or not parts[1].isdigit() or int(parts[1]) < 1:
+            raise ValueError("select items as issue:NUMBER or pr:NUMBER")
+        keys.append((parts[0], int(parts[1])))
+
+    if not keys or len(keys) > 20 or len(keys) != len(set(keys)) or any(number < 1 for _, number in keys):
+        raise ValueError("select one to twenty distinct item keys")
+
+    return keys
+
+
+def select(keys):
 
     policy = script("action-policy", "status", "--expected-repo", REPO)
     settings = {row["name"]: row for row in policy["actions"]}
-    listing = script("auto-close", "--expected-repo", REPO, "list")
-    proposals = {row["number"]: row for row in listing["rows"]}
+    closures = {("pr", row["number"]): row for row in script("auto-close", "--expected-repo", REPO, "list")["rows"]}
+    other = {(row["kind"], row["number"]): row for row in script("action-proposals", "--expected-repo", REPO, "list")["rows"]}
     chosen = []
-    for number in numbers:
-        row = proposals.get(number)
+    for kind, number in keys:
+        key = (kind, number)
+        closure = closures.get(key)
+        proposal = other.get(key)
+        if closure and closure["active"] and proposal and proposal["active"]:
+            raise ValueError(f"{kind} #{number} has competing active action proposals")
+        source = "auto-close" if closure and closure["active"] else "action-proposals"
+        row = closure if source == "auto-close" else proposal
         if row is None or not row["active"] or not row.get("action"):
-            raise ValueError(f"PR #{number} has no active action-bound closure proposal")
+            raise ValueError(f"{kind} #{number} has no active action-bound proposal")
 
         setting = settings.get(row["action"])
-        if setting is None or setting["operation"] != "close":
-            raise ValueError(f"PR #{number} no longer has a configured close action")
+        operation = "close" if source == "auto-close" else row["operation"]
+        if setting is None or setting["operation"] != operation:
+            raise ValueError(f"{kind} #{number} no longer has the selected action operation")
 
-        reviewed = script("auto-close", "--expected-repo", REPO, "review", "--number", str(number))
+        target_args = ("--number", str(number)) if source == "auto-close" else ("--kind", kind, "--number", str(number))
+        reviewed = script(source, "--expected-repo", REPO, "review", *target_args)
         exact = reviewed["plan"]["proposals"][0]
         if exact["checkpoint"] != row["checkpoint"] or exact["comment"] != row["comment"]:
-            raise ValueError(f"PR #{number} changed during action preview")
+            raise ValueError(f"{kind} #{number} changed during action preview")
 
         evidence = (row.get("inputs") or {}).get("evidence") or []
-        complete_target = any(selected["kind"] == "pr" and selected["number"] == number and
+        complete_target = any(selected["kind"] == kind and selected["number"] == number and
                               all(component["status"] in ("complete", "not_applicable") for component in selected["components"].values())
                               for selected in evidence)
         eligible = complete_target and not row["inputs"].get("evidence_gaps") and not row.get("reconsideration")
         mode = "execute" if setting["mode"] == "execute" and setting["configured"] and eligible else "stage"
-        chosen.append(dict(number=number, action=row["action"], operation="close", mode=mode,
+        chosen.append(dict(kind=kind, number=number, source=source, action=row["action"], operation=operation, mode=mode,
                            policy_mode=setting["mode"], eligible=eligible, target=row["target"], comment=row["comment"],
                            proposal_checkpoint=row["checkpoint"], definition_sha256=setting["definition_sha256"],
                            evidence_gaps=row["inputs"].get("evidence_gaps", [])))
 
-    plan = dict(version=1, repository=REPO, operation="pr-closure-action-pass", items=chosen)
+    plan = dict(version=1, repository=REPO, operation="automated-actions", items=chosen)
     return dict(plan=plan, preview_sha256=digest(canonical(plan)), requests=0)
 
 
-def run(numbers, preview_sha256):
-    current = select(numbers)
+def run(keys, preview_sha256):
+    current = select(keys)
     if current["preview_sha256"] != preview_sha256:
         raise ValueError("action proposals or policy changed; preview the selected pass again")
 
-    executing = [item["number"] for item in current["plan"]["items"] if item["mode"] == "execute"]
-    results = [dict(number=item["number"], status="staged") for item in current["plan"]["items"] if item["mode"] == "stage"]
-    if executing:
-        selection = [part for number in executing for part in ("--number", str(number))]
-        reviewed = script("auto-close", "--expected-repo", REPO, "review", *selection)
-        expected = {item["number"]: item for item in current["plan"]["items"] if item["mode"] == "execute"}
-        for row in reviewed["plan"]["proposals"]:
-            selected = expected.get(row["number"])
-            if selected is None or row["checkpoint"] != selected["proposal_checkpoint"] or row["comment"] != selected["comment"] or row.get("action") != selected["action"]:
-                raise ValueError("action proposal changed after the selected preview; stop before writing")
+    results = []
+    for item in current["plan"]["items"]:
+        if item["mode"] == "stage":
+            results.append(dict(kind=item["kind"], number=item["number"], status="staged"))
+            continue
 
-        execution = script("auto-close", "--expected-repo", REPO, "execute", *selection, "--publish", "--approve", reviewed["approval"], "--automation")
-        results.extend(execution["results"])
+        source = item["source"]
+        target_args = ("--number", str(item["number"])) if source == "auto-close" else ("--kind", item["kind"], "--number", str(item["number"]))
+        reviewed = script(source, "--expected-repo", REPO, "review", *target_args)
+        row = reviewed["plan"]["proposals"][0]
+        if row["checkpoint"] != item["proposal_checkpoint"] or row["comment"] != item["comment"] or row.get("action") != item["action"]:
+            raise ValueError("action proposal changed after the selected preview; stop before writing")
+
+        executed = script(source, "--expected-repo", REPO, "execute", *target_args, "--publish", "--approve", reviewed["approval"], "--automation")
+        outcome = executed["results"][0] if source == "auto-close" else executed
+        results.append({**outcome, "kind": item["kind"]})
 
     return dict(repository=REPO, results=results)
 
@@ -84,7 +107,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("preview", "run"))
     parser.add_argument("--expected-repo", required=True)
-    parser.add_argument("--number", type=int, action="append", required=True)
+    parser.add_argument("--number", type=int, action="append", default=[], help="PR number for the existing closure path")
+    parser.add_argument("--item", action="append", default=[], help="explicit KIND:NUMBER item key")
     parser.add_argument("--preview-sha256")
     args = parser.parse_args()
     if args.expected_repo != REPO:
@@ -94,7 +118,8 @@ def main():
     if args.command == "preview" and args.preview_sha256:
         raise ValueError("preview does not accept a prior hash")
 
-    result = select(args.number) if args.command == "preview" else run(args.number, args.preview_sha256)
+    keys = selection(args.number, args.item)
+    result = select(keys) if args.command == "preview" else run(keys, args.preview_sha256)
     print(json.dumps(result, ensure_ascii=False))
 
 

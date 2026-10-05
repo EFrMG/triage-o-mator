@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).absolute().parent))
 
 from _evidence import canonical, digest, validate_payload
 from _auto_close_records import feedback as proposal_feedback, load, proposal_path
+from _action_proposal_records import load as load_action_proposal, proposal_path as action_proposal_path
 from _item_context import ContextIndex, read as read_item_context
 from _groups import load_group
 from _storage import atomic_writer, locked
@@ -76,7 +77,7 @@ def visible(proposal, state):
 def row(proposal, state):
     presentation = state["rows"].get(str(proposal["number"]), {})
     active = proposal["status"] == "pending" and "inputs" in proposal and visible(proposal, state)
-    needs = active and presentation.get("viewed_checkpoint") != proposal["checksum"]
+    needs = visible(proposal, state) and proposal["status"] in ("pending", "executed", "uncertain") and presentation.get("viewed_checkpoint") != proposal["checksum"]
     result = dict(number=proposal["number"], title=proposal["title"], target=proposal["target"], comment=proposal["comment"], reference=proposal["reference"], head_sha=proposal["head_sha"], updated_at=proposal["updated_at"], status=proposal["status"], checkpoint=proposal["checksum"], active=active, needs_attention=needs, dismissed=not visible(proposal, state), outcome=proposal.get("outcome"))
     if "rationale" in proposal:
         result["rationale"] = proposal["rationale"]
@@ -299,7 +300,12 @@ def propose(args, repo):
     path = proposal_path(args.number)
     if path.parent.is_symlink():
         raise ValueError("invalid proposal directory")
-    with guarded_lock(path):
+    guard = DATA_DIR / "action-proposals" / f"pr-{args.number}-selection"
+    with locked(guard), guarded_lock(path):
+        other_path = action_proposal_path("pr", args.number)
+        if other_path.exists() and load_action_proposal(other_path, repo)["status"] == "pending":
+            raise ValueError("this PR already has a pending action proposal; resolve it before closure")
+
         if path.exists():
             previous = load(path, repo)
             if args.replace_checkpoint != previous["checksum"] or previous["status"] not in ("pending", "rejected") or (DATA_DIR / "writes" / (previous["request_id"] + ".json")).exists():

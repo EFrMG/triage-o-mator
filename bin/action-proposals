@@ -1,0 +1,501 @@
+#!/usr/bin/env python3
+"""Save and execute exact issue actions and non-closing PR actions through comment-plus."""
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+import uuid
+from contextlib import nullcontext
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+
+from _action_proposal_records import load, proposal_path
+from _auto_close_records import load as load_closure, proposal_path as closure_path
+from _evidence import canonical, digest, validate_payload
+from _item_context import ContextIndex, read as read_item_context
+from _storage import atomic_writer, locked
+from _triage import DATA_DIR, load_taxonomy, now_iso, read_repo
+
+
+def save(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    value.pop("checksum", None)
+    value["checksum"] = digest(canonical(value))
+    with atomic_writer(path) as out:
+        out.write(canonical(value) + "\n")
+
+
+def all_proposals(repo):
+    directory = DATA_DIR / "action-proposals"
+    if not directory.exists():
+        return []
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError("invalid action proposal directory")
+
+    records = []
+    for path in sorted(directory.iterdir()):
+        if path.name == "local":
+            continue
+        if not re.fullmatch(r"(?:issue|pr)-[1-9][0-9]*\.json", path.name):
+            raise ValueError(f"unrecognized action proposal file: {path.name}")
+        records.append(load(path, repo))
+
+    return records
+
+
+def local_state(repo):
+    path = DATA_DIR / "local" / "action-proposals-state.json"
+    if path.parent.is_symlink() or path.is_symlink():
+        raise ValueError("invalid action proposal presentation state")
+    if not path.exists():
+        return dict(repository=repo, rows={})
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if value.get("repository") != repo or not isinstance(value.get("rows"), dict):
+        raise ValueError("action proposal presentation state belongs to another repository")
+
+    return value
+
+
+def row(value, state):
+    key = f"{value['kind']}:{value['number']}"
+    presentation = state["rows"].get(key, {})
+    visible = presentation.get("dismissed_checkpoint") != value["checksum"]
+    active = value["status"] == "pending" and visible
+    result = dict(kind=value["kind"], number=value["number"], title=value["title"], target=value["target"],
+                  action=value["action"], operation=value["operation"], comment=value["comment"],
+                  updated_at=value["updated_at"], head_sha=value.get("head_sha"), status=value["status"],
+                  checkpoint=value["checksum"], active=active, needs_attention=visible and value["status"] in ("pending", "executed", "uncertain") and presentation.get("viewed_checkpoint") != value["checksum"],
+                  dismissed=not visible, inputs=value["inputs"], outcome=value.get("outcome"))
+    for field in ("rejection", "reconsideration"):
+        if field in value:
+            result[field] = value[field]
+
+    return result
+
+
+def selected_evidence(cache, kind, number, snapshot_id):
+    manifest = cache.load_manifest(snapshot_id)
+    record = next((item for item in manifest["items"] if (item["identity"]["kind"], item["identity"]["number"]) == (kind, number)), None)
+    if record is None:
+        raise ValueError("selected evidence item is absent from its snapshot")
+
+    for name, component in record["components"].items():
+        if component["object"] is not None:
+            validate_payload(name, component, kind, cache.read_object(component["object"]))
+
+    return dict(kind=kind, number=number, snapshot_id=snapshot_id, repository=manifest["repository"],
+                identity=record["identity"], revision=record["revision"],
+                components={name: dict(status=component["status"], object=component["object"]) for name, component in record["components"].items()})
+
+
+def evidence_selection(repo, host, tokens):
+    if not tokens:
+        return []
+
+    from _cache import EvidenceCache
+    from _evidence import repository
+
+    cache = EvidenceCache(repository(repo, host=host))
+    selected = []
+    seen = set()
+    for token in tokens:
+        parts = token.split(":", 2)
+        if len(parts) != 3 or parts[0] not in ("issue", "pr") or not parts[1].isdigit() or int(parts[1]) < 1:
+            raise ValueError("invalid --evidence; expected KIND:NUMBER:SNAPSHOT_ID")
+        key = (parts[0], int(parts[1]), parts[2])
+        if key in seen:
+            raise ValueError("repeated evidence selection")
+        seen.add(key)
+        selected.append(selected_evidence(cache, *key))
+
+    return selected
+
+
+def check_current(value):
+    current = ContextIndex().collect(value["kind"], value["number"], include_rows=False)
+    if current["checkpoint"] != value["inputs"]["context_checkpoint"]:
+        raise ValueError("local item guidance changed; prepare a fresh action proposal")
+
+    if value["inputs"]["evidence"]:
+        from _cache import EvidenceCache
+        from _evidence import repository
+
+        cache = EvidenceCache(repository(value["repo"], host=value["host"]))
+        for selected in value["inputs"]["evidence"]:
+            try:
+                verified = selected_evidence(cache, selected["kind"], selected["number"], selected["snapshot_id"])
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                raise ValueError("selected action evidence is unavailable; restore it or replace the proposal") from error
+            if verified != selected:
+                raise ValueError("selected action evidence changed; replace the proposal")
+
+
+def inspect(repo, host, kind, number):
+    if not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)*", host) or number < 1:
+        raise ValueError("invalid action host or number")
+
+    def get(endpoint):
+        result = subprocess.run(["gh", "api", "--hostname", host, "--method", "GET", endpoint], capture_output=True, text=True, timeout=60)
+        if result.returncode:
+            raise ValueError(result.stderr.strip() or "GitHub read failed")
+        return json.loads(result.stdout)
+
+    target = f"https://{host}/{repo}/{'pull' if kind == 'pr' else 'issues'}/{number}"
+    issue = get(f"repos/{repo}/issues/{number}")
+    if not isinstance(issue, dict) or issue.get("html_url") != target or issue.get("number") != number or issue.get("state") not in ("open", "closed") or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", issue.get("updated_at") or "") or ("pull_request" in issue) != (kind == "pr"):
+        raise ValueError("live item differs from the selected target")
+
+    head = None
+    title = issue.get("title")
+    if kind == "pr":
+        pull = get(f"repos/{repo}/pulls/{number}")
+        head = (pull.get("head") or {}).get("sha") if isinstance(pull, dict) else None
+        if not isinstance(pull, dict) or pull.get("html_url") != target or pull.get("number") != number or pull.get("state") != issue["state"] or not re.fullmatch(r"[0-9a-f]{40}", head or "") or pull.get("merged_at") is not None or pull.get("merged") is True:
+            raise ValueError("pull request is merged or differs from the selected target")
+        title = pull.get("title")
+
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("live item has no usable title")
+
+    return dict(repository=repo, kind=kind, number=number, target=target, title=title, state=issue["state"],
+                updated_at=issue["updated_at"], head_sha=head, requests=2 if kind == "pr" else 1)
+
+
+def valid_comment(text):
+    return bool(text.strip()) and len(text) <= 65536 and not any((ord(char) < 32 and char not in "\n\t") or 127 <= ord(char) <= 159 for char in text)
+
+
+def valid_short_text(text, limit):
+    return isinstance(text, str) and bool(text.strip()) and len(text) <= limit and not any((ord(char) < 32 and char not in "\n\t") or 127 <= ord(char) <= 159 for char in text)
+
+
+def propose(args, repo):
+    taxonomy = load_taxonomy()
+    operation = taxonomy.get("action_operations", {}).get(args.action)
+    if args.action not in taxonomy.get("actions", []) or operation not in ("comment", "close", "reopen"):
+        raise ValueError("selected action is not a configured writing type")
+    if args.kind == "pr" and operation == "close":
+        raise ValueError("PR closure proposals belong to bin/auto-close")
+    if args.number < 1 or not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)*", args.host) or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", args.updated_at):
+        raise ValueError("invalid action target or observed update time")
+    if args.kind == "pr" and not re.fullmatch(r"[0-9a-f]{40}", args.head_sha or "") or args.kind == "issue" and args.head_sha:
+        raise ValueError("PR actions require a head SHA; issue actions cannot have one")
+    if operation == "close" and args.observed_state != "open" or operation == "reopen" and args.observed_state != "closed":
+        raise ValueError("observed state does not permit the selected action")
+    if not valid_short_text(args.title, 1000) or not valid_short_text(args.by, 200):
+        raise ValueError("title and proposer are required")
+    if args.reconsideration_reason is not None and not valid_short_text(args.reconsideration_reason, 10000):
+        raise ValueError("reconsideration needs a valid explanation")
+
+    comment = args.comment_file.read_text(encoding="utf-8")
+    if not valid_comment(comment):
+        raise ValueError("action comment must contain valid text of at most 65536 characters")
+
+    context = ContextIndex().collect(args.kind, args.number, include_rows=False)
+    if context["checkpoint"] != args.context_checkpoint or context["ledger_guidance"] is None or context["ledger_guidance"]["action"] != args.action:
+        raise ValueError("saved action or local guidance changed; read item-context again")
+
+    evidence = evidence_selection(repo, args.host, args.evidence)
+    if not evidence and not args.evidence_gap:
+        raise ValueError("declare selected evidence or an explicit evidence gap")
+    if any(not gap.strip() or len(gap) > 2000 for gap in args.evidence_gap):
+        raise ValueError("evidence gaps must be nonempty text of at most 2000 characters")
+
+    inputs = dict(context_checkpoint=context["checkpoint"], context_revision=context["context_revision"],
+                  feedback_checkpoint=context["feedback_checkpoint"], evidence=evidence, evidence_gaps=args.evidence_gap)
+    value = dict(schema_version=1, artifact="action-proposal", repo=repo, host=args.host, kind=args.kind, number=args.number,
+                 target=f"https://{args.host}/{repo}/{'pull' if args.kind == 'pr' else 'issues'}/{args.number}",
+                 title=args.title, action=args.action, operation=operation, comment=comment, updated_at=args.updated_at,
+                 observed_state=args.observed_state, proposed_by=args.by, proposed_at=now_iso(), request_id=str(uuid.uuid4()),
+                 status="pending", inputs=inputs)
+    if args.kind == "pr":
+        value["head_sha"] = args.head_sha
+
+    path = proposal_path(args.kind, args.number)
+    if path.parent.is_symlink():
+        raise ValueError("invalid action proposal directory")
+    guard = DATA_DIR / "action-proposals" / f"pr-{args.number}-selection" if args.kind == "pr" else path
+    with (locked(guard) if args.kind == "pr" else nullcontext()), locked(path):
+        if args.kind == "pr" and closure_path(args.number).exists() and load_closure(closure_path(args.number), repo)["status"] == "pending":
+            raise ValueError("this PR already has a pending auto-close proposal; resolve it before another action")
+
+        if path.exists():
+            previous = load(path, repo)
+            receipt = DATA_DIR / "writes" / (previous["request_id"] + ".json")
+            if args.replace_checkpoint != previous["checksum"] or previous["status"] not in ("pending", "rejected") or receipt.exists():
+                raise ValueError("action proposal exists or has a write attempt; inspect it before replacing")
+            if previous["status"] == "rejected":
+                if not args.reconsideration_reason or not args.reconsideration_reason.strip():
+                    raise ValueError("reconsidering a rejected action requires an attributed explanation")
+                value["reconsideration"] = dict(by=args.by, at=value["proposed_at"], reason=args.reconsideration_reason,
+                                                rejected_checkpoint=previous["checksum"])
+            elif args.reconsideration_reason:
+                raise ValueError("reconsideration requires a rejected action proposal")
+            elif "reconsideration" in previous:
+                value["reconsideration"] = previous["reconsideration"]
+
+            value["history"] = previous.get("history", []) + [{key: item for key, item in previous.items() if key != "history"}]
+        elif args.replace_checkpoint or args.reconsideration_reason:
+            raise ValueError("there is no rejected or pending proposal at that checkpoint")
+
+        save(path, value)
+
+    return row(value, local_state(repo))
+
+
+def edit(args, repo):
+    previous = load(proposal_path(args.kind, args.number), repo)
+    if previous["checksum"] != args.checkpoint or previous["status"] != "pending":
+        raise ValueError("action proposal changed; reopen Notifications")
+    if (DATA_DIR / "writes" / (previous["request_id"] + ".json")).exists():
+        raise ValueError("action proposal has a write attempt; reconcile it before editing")
+
+    text = args.comment_file.read_text(encoding="utf-8")
+    if text == previous["comment"]:
+        raise ValueError("action comment is unchanged")
+
+    replacement = argparse.Namespace(kind=args.kind, number=args.number, action=previous["action"], title=previous["title"],
+                                     host=previous["host"], updated_at=previous["updated_at"], head_sha=previous.get("head_sha"),
+                                     observed_state=previous["observed_state"], comment_file=args.comment_file, by=args.by,
+                                     context_checkpoint=previous["inputs"]["context_checkpoint"],
+                                     evidence=[f"{item['kind']}:{item['number']}:{item['snapshot_id']}" for item in previous["inputs"]["evidence"]],
+                                     evidence_gap=previous["inputs"]["evidence_gaps"], replace_checkpoint=args.checkpoint,
+                                     reconsideration_reason=None)
+    return propose(replacement, repo)
+
+
+def review(repo, kind, number, check=True):
+    value = load(proposal_path(kind, number), repo)
+    state = local_state(repo)
+    selected = row(value, state)
+    if not selected["active"]:
+        raise ValueError("no actionable pending proposal for this item")
+    if check:
+        check_current(value)
+
+    plan = dict(version=1, repo=repo, operation="conversation-or-state-action", proposals=[selected])
+    return dict(plan=plan, approval=digest(canonical(plan)))
+
+
+def automation_policy(repo, value):
+    inputs = value["inputs"]
+    complete_target = any(selected["kind"] == value["kind"] and selected["number"] == value["number"] and
+                          all(component["status"] in ("complete", "not_applicable") for component in selected["components"].values())
+                          for selected in inputs["evidence"])
+    if not complete_target or inputs["evidence_gaps"] or value.get("reconsideration"):
+        raise ValueError("direct action needs complete selected target evidence and no unresolved gap or rejection")
+
+    result = subprocess.run([str(Path(__file__).absolute().with_name("action-policy")), "status", "--expected-repo", repo], capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "could not read action automation policy")
+    setting = next((row for row in json.loads(result.stdout)["actions"] if row["name"] == value["action"]), None)
+    if setting is None or setting["operation"] != value["operation"] or setting["mode"] != "execute" or not setting["configured"]:
+        raise ValueError("selected action is not enabled for direct execution in this repository")
+
+    return setting["definition_sha256"]
+
+
+def call_comment(repo, value):
+    script = Path(__file__).absolute().with_name("comment-plus")
+    base = [str(script), "--expected-repo", repo, "--host", value["host"], "--kind", value["kind"],
+            "--number", str(value["number"]), "--body=" + value["comment"], "--request-id", value["request_id"],
+            "--expected-updated-at", value["updated_at"]]
+    if value["kind"] == "pr":
+        base += ["--expected-head", value["head_sha"]]
+    if value["operation"] in ("close", "reopen"):
+        base.append("--" + value["operation"])
+
+    preview = subprocess.run(base, capture_output=True, text=True)
+    if preview.returncode:
+        raise ValueError(preview.stderr.strip() or "comment plan failed")
+    planned = json.loads(preview.stdout)
+    if planned["plan"]["target"] != value["target"] or planned["plan"]["body"] != value["comment"] or planned["plan"]["operation"] != value["operation"]:
+        raise ValueError("comment plan differs from the action proposal")
+
+    result = subprocess.run(base + ["--publish", "--approve", planned["approval"]], capture_output=True, text=True)
+    receipt = DATA_DIR / "writes" / (value["request_id"] + ".json")
+    if receipt.exists():
+        outcome = json.loads(receipt.read_text(encoding="utf-8"))
+        if outcome.get("approval") != planned["approval"]:
+            raise ValueError("saved write outcome differs from the action proposal")
+        return outcome, result.returncode == 0
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "comment request failed before writing")
+
+    raise ValueError("comment reported success without a saved write outcome")
+
+
+def execute(repo, kind, number, approval, automation):
+    prepared = review(repo, kind, number, check=False)
+    if prepared["approval"] != approval:
+        raise ValueError("action proposal changed or approval does not match exact review")
+
+    path = proposal_path(kind, number)
+    with locked(path):
+        value = load(path, repo)
+        selected = prepared["plan"]["proposals"][0]
+        if value["checksum"] != selected["checkpoint"] or value["status"] != "pending":
+            raise ValueError("action proposal changed during execution")
+
+        receipt = DATA_DIR / "writes" / (value["request_id"] + ".json")
+        new_attempt = not receipt.exists()
+        definition = None
+        if new_attempt:
+            check_current(value)
+            if automation:
+                definition = automation_policy(repo, value)
+
+        outcome, ok = call_comment(repo, value)
+        value["outcome"] = dict(request_id=value["request_id"], comment=outcome["comment"], state_change=outcome["state_change"])
+        if automation and new_attempt:
+            value["outcome"]["authorization"] = dict(source="repository-policy", action=value["action"], definition_sha256=definition)
+        state_ok = value["operation"] == "comment" or outcome["state_change"]["status"] == "succeeded"
+        value["status"] = "executed" if ok and outcome["comment"]["status"] == "succeeded" and state_ok else "uncertain"
+        save(path, value)
+        result = dict(kind=kind, number=number, status=value["status"], outcome=value["outcome"])
+        if value["status"] != "executed":
+            print(canonical(result))
+            raise ValueError("write outcome uncertain; inspect GitHub and the saved record")
+
+        return result
+
+
+def reject(repo, kind, number, checkpoint, by, reason):
+    if not valid_short_text(by, 200) or len(reason) > 10000 or any((ord(char) < 32 and char not in "\n\t") or 127 <= ord(char) <= 159 for char in reason):
+        raise ValueError("rejection needs an author and a short reason")
+
+    path = proposal_path(kind, number)
+    with locked(path):
+        value = load(path, repo)
+        if value["checksum"] != checkpoint or value["status"] != "pending" or (DATA_DIR / "writes" / (value["request_id"] + ".json")).exists():
+            raise ValueError("action proposal changed or has a write attempt")
+
+        previous = {key: item for key, item in value.items() if key != "history"}
+        value["history"] = value.get("history", []) + [previous]
+        value["status"] = "rejected"
+        value["rejection"] = dict(proposal_checkpoint=checkpoint, by=by, at=now_iso(), reason=reason)
+        save(path, value)
+
+    return row(value, local_state(repo))
+
+
+def change(repo, action, kind, number, checkpoint):
+    value = load(proposal_path(kind, number), repo)
+    if value["checksum"] != checkpoint:
+        raise ValueError("action proposal changed; reopen Notifications")
+
+    path = DATA_DIR / "local" / "action-proposals-state.json"
+    with locked(path):
+        state = local_state(repo)
+        entry = state["rows"].setdefault(f"{kind}:{number}", {})
+        entry["viewed_checkpoint" if action == "view" else "dismissed_checkpoint"] = checkpoint
+        with atomic_writer(path) as out:
+            out.write(json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+
+    return row(value, state)
+
+
+def context(repo, kind, number, checkpoint):
+    value = load(proposal_path(kind, number), repo)
+    if value["checksum"] != checkpoint:
+        raise ValueError("action proposal changed; reopen Notifications")
+
+    current, reason = False, None
+    if value["status"] == "pending":
+        try:
+            check_current(value)
+            current = True
+        except ValueError as error:
+            reason = str(error)
+    else:
+        reason = f"proposal is {value['status']}"
+
+    return dict(repository=repo, kind=kind, number=number, proposal_checkpoint=checkpoint,
+                current=current, reason=reason, item_context=read_item_context(kind, number), requests=0)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-repo", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
+    add = commands.add_parser("propose")
+    add.add_argument("--kind", choices=("issue", "pr"), required=True)
+    add.add_argument("--number", type=int, required=True)
+    add.add_argument("--action", required=True)
+    add.add_argument("--title", required=True)
+    add.add_argument("--host", default="github.com")
+    add.add_argument("--observed-state", choices=("open", "closed"), required=True)
+    add.add_argument("--updated-at", required=True)
+    add.add_argument("--head-sha")
+    add.add_argument("--comment-file", type=Path, required=True)
+    add.add_argument("--by", required=True)
+    add.add_argument("--context-checkpoint", required=True)
+    add.add_argument("--evidence", action="append", default=[])
+    add.add_argument("--evidence-gap", action="append", default=[])
+    add.add_argument("--replace-checkpoint")
+    add.add_argument("--reconsideration-reason")
+    edit_text = commands.add_parser("edit")
+    edit_text.add_argument("--kind", choices=("issue", "pr"), required=True)
+    edit_text.add_argument("--number", type=int, required=True)
+    edit_text.add_argument("--checkpoint", required=True)
+    edit_text.add_argument("--comment-file", type=Path, required=True)
+    edit_text.add_argument("--by", required=True)
+    read = commands.add_parser("inspect")
+    read.add_argument("--kind", choices=("issue", "pr"), required=True)
+    read.add_argument("--number", type=int, required=True)
+    read.add_argument("--host", default="github.com")
+    commands.add_parser("list")
+    for command in ("review", "execute", "context", "view", "dismiss", "reject"):
+        selected = commands.add_parser(command)
+        selected.add_argument("--kind", choices=("issue", "pr"), required=True)
+        selected.add_argument("--number", type=int, required=True)
+        if command in ("context", "view", "dismiss", "reject"):
+            selected.add_argument("--checkpoint", required=True)
+        if command == "reject":
+            selected.add_argument("--by", required=True)
+            selected.add_argument("--reason", default="")
+        if command == "execute":
+            selected.add_argument("--publish", action="store_true")
+            selected.add_argument("--approve")
+            selected.add_argument("--automation", action="store_true")
+
+    args = parser.parse_args()
+    repo = read_repo()
+    if args.expected_repo != repo:
+        raise ValueError("configured repository changed; reopen action proposals")
+
+    if args.command == "propose":
+        result = propose(args, repo)
+    elif args.command == "edit":
+        result = edit(args, repo)
+    elif args.command == "inspect":
+        result = inspect(repo, args.host, args.kind, args.number)
+    elif args.command == "list":
+        state = local_state(repo)
+        result = dict(repository=repo, rows=[row(value, state) for value in all_proposals(repo)], requests=0)
+    elif args.command == "review" or args.command == "execute" and not args.publish:
+        result = review(repo, args.kind, args.number)
+    elif args.command == "execute":
+        if not args.approve:
+            raise ValueError("publishing needs the exact reviewed proposal approval")
+        result = execute(repo, args.kind, args.number, args.approve, args.automation)
+    elif args.command == "reject":
+        result = reject(repo, args.kind, args.number, args.checkpoint, args.by, args.reason)
+    elif args.command in ("view", "dismiss"):
+        result = change(repo, args.command, args.kind, args.number, args.checkpoint)
+    else:
+        result = context(repo, args.kind, args.number, args.checkpoint)
+
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired) as error:
+        sys.exit(f"error: {error}")

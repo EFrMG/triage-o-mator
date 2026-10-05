@@ -1,5 +1,6 @@
 """Only comment-plus can publish, and its approval binds the exact operation."""
 
+import hashlib
 import json
 
 from support import FAKE_GH, Workspace, item
@@ -116,6 +117,83 @@ class WriteTests(Workspace):
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET"])
         self.assertFalse((self.root / "data/owner/repo/writes" / f"{preview['plan']['request_id']}.json").exists())
 
+    def test_issue_action_stages_exact_comment_and_keeps_rejection_outside_ledger(self):
+        timestamp = "2026-10-04T01:00:00Z"
+        live = json.loads((self.mock / "item.json").read_text())
+        live["updated_at"] = timestamp
+        (self.mock / "item.json").write_text(json.dumps(live))
+        decision = dict(item(1, "Needs a reproduction"), action="comment-request-info", confidence="medium",
+                        reason="The report lacks steps", reviewed=False)
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text(json.dumps(decision) + "\n")
+        context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "issue", "--number", "1")
+        comment = self.root / "request-info.md"
+        comment.write_text("Could you share steps to reproduce this issue?\n")
+        args = ("--expected-repo", "owner/repo")
+        saved = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
+                              "--action", "comment-request-info", "--title", "Needs a reproduction", "--observed-state", "open",
+                              "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
+                              "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
+        self.assertTrue(saved["active"])
+        self.assertEqual(self.write_calls(), [])
+        self.assertEqual(self.json_cli("action-proposals", *args, "list")["rows"][0]["comment"], comment.read_text())
+        reviewed = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
+        self.assertEqual(reviewed["plan"]["proposals"][0]["checkpoint"], saved["checkpoint"])
+
+        rejected = self.json_cli("action-proposals", *args, "reject", "--kind", "issue", "--number", "1",
+                                 "--checkpoint", saved["checkpoint"], "--by", "maintainer", "--reason", "Ask for the version too")
+        self.assertEqual(rejected["status"], "rejected")
+        self.assertEqual(self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")["feedback_count"], 1)
+        self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
+        self.assertEqual(self.write_calls(), [])
+
+        refreshed = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
+        reconsidered = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
+                                     "--action", "comment-request-info", "--title", "Needs a reproduction", "--observed-state", "open",
+                                     "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
+                                     "--context-checkpoint", refreshed["checkpoint"], "--evidence-gap", "Discussion not acquired",
+                                     "--replace-checkpoint", rejected["checkpoint"], "--reconsideration-reason", "Include the version in the request")
+        self.assertEqual(reconsidered["reconsideration"]["rejected_checkpoint"], rejected["checkpoint"])
+        path = self.root / "data/owner/repo/action-proposals/issue-1.json"
+        corrupt = json.loads(path.read_text())
+        corrupt.pop("checksum")
+        corrupt.pop("reconsideration")
+        canonical = json.dumps(corrupt, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        corrupt["checksum"] = hashlib.sha256(canonical.encode()).hexdigest()
+        path.write_text(json.dumps(corrupt))
+        self.run_cli("action-proposals", *args, "list", ok=False)
+
+    def test_reopen_action_requires_explanation_and_keeps_gap_staged(self):
+        timestamp = "2026-10-04T03:00:00Z"
+        live = json.loads((self.mock / "item.json").read_text())
+        live.update(state="closed", updated_at=timestamp)
+        (self.mock / "item.json").write_text(json.dumps(live))
+        decision = dict(item(1, "Closed too early"), state="closed", action="reopen-with-explanation",
+                        confidence="high", reason="The reported behavior still reproduces", reviewed=False)
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
+        args = ("--expected-repo", "owner/repo")
+        context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
+        comment = self.root / "reopen.md"
+        comment.write_text("This still reproduces, so I am reopening it for investigation.\n")
+        self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
+                      "--action", "reopen-with-explanation", "--title", "Closed too early", "--observed-state", "closed",
+                      "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
+                      "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
+        review = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
+        policy_args = (*args, "--action", "reopen-with-explanation", "--mode", "execute")
+        policy = self.json_cli("action-policy", "set", *policy_args)
+        self.json_cli("action-policy", "set", *policy_args, "--apply", "--preview-sha256", policy["preview_sha256"])
+        self.run_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1", "--publish",
+                     "--approve", review["approval"], "--automation", ok=False)
+        self.assertEqual(self.write_calls(), [])
+
+        outcome = self.json_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1",
+                                "--publish", "--approve", review["approval"])
+        self.assertEqual(outcome["status"], "executed")
+        self.assertEqual(outcome["outcome"]["state_change"]["state"], "open")
+        self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "POST", "PATCH"])
+        self.assertEqual(self.write_calls()[1]["body"]["body"], comment.read_text())
+
     def test_comment_and_state_outcomes_are_separate(self):
         preview = self.call("--close")
         (self.mock / "fail-patch").touch()
@@ -195,8 +273,47 @@ class AutoCloseWriteTests(Workspace):
         self.assertEqual(result["results"][0]["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
         self.assertEqual({row["number"]: row["status"] for row in self.auto_close("list")["rows"]}, {1: "executed", 2: "pending"})
+        self.assertTrue(next(row for row in self.auto_close("list")["rows"] if row["number"] == 1)["needs_attention"])
         record = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
         self.assertEqual(record["outcome"]["authorization"]["source"], "repository-policy")
+
+    def test_policy_routes_pr_comment_without_creating_a_closure_proposal(self):
+        write_gh = (self.mock / "gh").read_text()
+        (self.mock / "gh").write_text(FAKE_GH)
+        self.seed_pr()
+        snapshot = self.json_cli("cache", "fetch", "--kind", "pr", "--number", "1", "--profile", "discussion",
+                                 "--mode", "refresh", "--request-budget", "100")["snapshot_id"]
+        (self.mock / "gh").write_text(write_gh)
+
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        rows[0].update(action="comment-feedback", confidence="high", reason="The change needs a focused follow-up")
+        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
+        comment = self.root / "feedback.md"
+        comment.write_text("Please add coverage for the changed behavior.\n")
+        self.json_cli("action-proposals", "--expected-repo", "owner/repo", "propose", "--kind", "pr", "--number", "1",
+                      "--action", "comment-feedback", "--title", "PR 1", "--observed-state", "open",
+                      "--updated-at", "2026-09-29T00:00:00Z", "--head-sha", "b" * 40,
+                      "--comment-file", str(comment), "--by", "agent:helper", "--context-checkpoint", context["checkpoint"],
+                      "--evidence", f"pr:1:{snapshot}")
+        self.auto_close("propose", "--number", "1", "--title", "PR 1", "--head-sha", "b" * 40,
+                        "--updated-at", "2026-09-29T00:00:00Z", "--comment-file", str(comment), "--by", "agent:helper",
+                        "--context-checkpoint", context["checkpoint"], "--evidence-gap", "No selected close evidence", ok=False)
+        selection = ("--expected-repo", "owner/repo", "--item", "pr:1")
+        self.assertEqual(self.json_cli("action-pass", "preview", *selection)["plan"]["items"][0]["mode"], "stage")
+
+        setting = ("--expected-repo", "owner/repo", "--action", "comment-feedback", "--mode", "execute")
+        policy = self.json_cli("action-policy", "set", *setting)
+        self.json_cli("action-policy", "set", *setting, "--apply", "--preview-sha256", policy["preview_sha256"])
+        preview = self.json_cli("action-pass", "preview", *selection)
+        self.assertEqual(preview["plan"]["items"][0]["mode"], "execute")
+        result = self.json_cli("action-pass", "run", *selection, "--preview-sha256", preview["preview_sha256"])
+        self.assertEqual(result["results"][0]["status"], "executed")
+        self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST"])
+        self.assertFalse((self.root / "data/owner/repo/auto-close/pr-1.json").exists())
+        self.assertTrue(self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"][0]["needs_attention"])
+        self.assertEqual(self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")["feedback_count"], 1)
 
     def test_changed_guidance_requires_fresh_review_and_approval(self):
         self.assertNotIn("rationale", self.propose(1))

@@ -198,8 +198,17 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 		t.Fatal("stale starter label preview opened Settings")
 	}
 	m = baselineSend(m, settingsDefaultsMsg{root: root, repo: m.repo, request: m.settings.request, plan: defaults})
-	if m.settings.defaults == nil || !strings.Contains(ansi.Strip(m.viewContent()), "Initialize defaults") || !strings.Contains(m.settingsDefaultsContent(), "Color: #d73a4a") {
-		t.Fatal("Initialize defaults did not show the exact missing label")
+	if m.settings.defaults == nil {
+		t.Fatal("Initialize defaults did not open its preview")
+	}
+	defaultsContent := m.settingsDefaultsContent(m.settings.defaults.preview.Width())
+	plainDefaults := ansi.Strip(defaultsContent)
+	if !strings.Contains(ansi.Strip(m.viewContent()), "Preview starter labels") || !strings.Contains(plainDefaults, "GitHub repository\nowner/repo\n\n  Current\n  Existing labels stay unchanged.\n\n  After save\n  Title\n  bug") || !strings.Contains(plainDefaults, "  Description\n  Something is broken\n\n  Color\n  d73a4a") {
+		t.Fatal("Initialize defaults did not show the exact label in the label preview layout")
+	}
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent))
+	if !strings.Contains(defaultsContent, accent.Bold(true).Render("After save")) || !strings.Contains(defaultsContent, accent.Render("Title")) || strings.Contains(defaultsContent, accent.Bold(true).Render("Title")) {
+		t.Fatal("Initialize defaults did not use the label preview heading and field styles")
 	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)

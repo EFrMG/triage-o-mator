@@ -774,38 +774,53 @@ func (m model) finishSettingsDefaults(msg settingsDefaultsMsg) (tea.Model, tea.C
 		return m, nil
 	}
 	preview := viewport.New()
-	preview.SetWidth(maxInt(m.commentWidth()-4, 1))
-	preview.SetHeight(maxInt(m.commentHeight()-4, 3))
 	m.settings.defaults = &settingsDefaults{plan: msg.plan, preview: preview}
-	m.settings.defaults.preview.SetContent(m.settingsDefaultsContent())
+	m.layoutSettingsDefaults()
+	m.settings.defaults.preview.SetContent(m.settingsDefaultsContent(m.settings.defaults.preview.Width()))
 	m.status = "Review each missing GitHub label, then Ctrl-S to create them."
 	return m, nil
 }
 
-func (m model) settingsDefaultsContent() string {
+func (m model) settingsDefaultsContent(width int) string {
 	plan := m.settings.defaults.plan
-	lines := []string{"GitHub repository: " + plan.Repository, "", "Existing labels stay unchanged."}
+	heading := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true)
+	field := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent))
+	bodyWidth := maxInt(width-2, 1)
+	lines := []string{heading.Render("Current"), "Existing labels stay unchanged.", "", heading.Render("After save")}
 	if len(plan.Create) == 0 {
-		lines = append(lines, "", "All starter labels already exist. No GitHub write is needed.")
+		lines = append(lines, "All starter labels already exist. No GitHub write is needed.")
 	} else {
-		lines = append(lines, "", "Create these missing labels:")
-		for _, label := range plan.Create {
-			lines = append(lines, "", label.Name, "  Description: "+label.Description, "  Color: #"+label.Color)
+		for i, label := range plan.Create {
+			if i > 0 {
+				lines = append(lines, "")
+			}
+			lines = append(lines, field.Render("Title"), wrapText(label.Name, bodyWidth), "",
+				field.Render("Description"), wrapText(settingsDescription(label.Description), bodyWidth), "",
+				field.Render("Color"), label.Color)
 		}
 	}
-	return strings.Join(lines, "\n")
+	return heading.Render("GitHub repository") + "\n" + wrapText(plan.Repository, width) + "\n\n" + inset(inset(strings.Join(lines, "\n")))
 }
 
 func (m *model) layoutSettingsDefaults() {
 	if m.settings.defaults == nil {
 		return
 	}
-	m.settings.defaults.preview.SetWidth(maxInt(m.commentWidth()-4, 1))
-	m.settings.defaults.preview.SetHeight(maxInt(m.commentHeight()-4, 3))
+	preview := &m.settings.defaults.preview
+	width := maxInt(m.commentWidth()-4, 1)
+	resized := preview.Width() != width
+	preview.SetWidth(width)
+	preview.SetHeight(maxInt(m.commentHeight()-4, 3))
+	if resized {
+		offset := preview.YOffset()
+		preview.SetContent(m.settingsDefaultsContent(width))
+		preview.SetYOffset(offset)
+	}
 }
 
 func (m model) settingsDefaultsOverlay(background string) string {
-	return m.composerOverlay(background, m.composerPanel("Initialize defaults", m.settings.defaults.preview.View()))
+	header := composerHeader("Initialize defaults", "Preview starter labels", m.repo, true, m.commentWidth()-4)
+	return m.composerOverlay(background, m.composerPanel(header, m.settings.defaults.preview.View()))
 }
 
 func (m model) finishSettingsPreview(msg settingsPreviewMsg) (tea.Model, tea.Cmd) {

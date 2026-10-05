@@ -193,11 +193,11 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 		t.Fatal("Initialize defaults did not request a live preview")
 	}
 	defaults := labelDefaultsPlan{Repository: m.repo, Operation: "initialize-defaults", Create: []GitHubLabel{{Name: "bug", Description: "Something is broken", Color: "d73a4a"}}, PreviewSHA256: "defaults-preview"}
-	m = baselineSend(m, settingsDefaultsMsg{root: root, repo: "other/repo", request: m.settings.request, plan: defaults})
+	m = baselineSend(m, settingsDefaultsMsg{root: root, repo: "other/repo", operation: "initialize-defaults", request: m.settings.request, plan: defaults})
 	if m.settings.defaults != nil || !m.settings.busy {
 		t.Fatal("stale starter label preview opened Settings")
 	}
-	m = baselineSend(m, settingsDefaultsMsg{root: root, repo: m.repo, request: m.settings.request, plan: defaults})
+	m = baselineSend(m, settingsDefaultsMsg{root: root, repo: m.repo, operation: "initialize-defaults", request: m.settings.request, plan: defaults})
 	if m.settings.defaults == nil {
 		t.Fatal("Initialize defaults did not open its preview")
 	}
@@ -221,6 +221,21 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 		t.Fatal("Initialize defaults preview did not close")
 	}
 	m.taxonomy.LabelCatalog = LabelCatalog{Repository: m.repo, Status: "observed", Labels: []GitHubLabel{{ID: 1, Name: "bug", Description: "Something is broken"}}}
+	next, cmd = m.Update(tea.KeyPressMsg{Text: "I"})
+	m = next.(model)
+	if cmd == nil || !m.settings.busy {
+		t.Fatal("capital I did not request a live comparison with the saved local catalog")
+	}
+	localPlan := labelDefaultsPlan{Repository: m.repo, Operation: "reconcile-local", Current: []GitHubLabel{{ID: 1, Name: "bug", Description: "Remote bug"}, {ID: 2, Name: "remote-only", Description: "Remove me", Color: "ff0000"}}, Create: []GitHubLabel{{Name: "local-custom", Description: "Keep me", Color: "abcdef"}}, Update: []labelDefinitionPlan{{Current: &GitHubLabel{ID: 1, Name: "bug", Description: "Remote bug", Color: "ff0000"}, Proposed: GitHubLabel{Name: "bug", Description: "Local bug", Color: "112233"}}}, Delete: []GitHubLabel{{ID: 2, Name: "remote-only", Description: "Remove me", Color: "ff0000"}}, PreviewSHA256: "local-preview"}
+	m = baselineSend(m, settingsDefaultsMsg{root: root, repo: m.repo, operation: "reconcile-local", request: m.settings.request, plan: localPlan})
+	if m.settings.defaults == nil || !strings.Contains(ansi.Strip(m.viewContent()), "Preview local label catalog") {
+		t.Fatal("capital I did not open the local catalog preview")
+	}
+	localContent := ansi.Strip(m.settingsDefaultsContent(m.settings.defaults.preview.Width()))
+	if !strings.Contains(localContent, "Deleting a GitHub label removes it from issues and PRs") || !strings.Contains(localContent, "Create") || !strings.Contains(localContent, "Edit bug") || !strings.Contains(localContent, "Delete from GitHub") || !strings.Contains(localContent, "remote-only") {
+		t.Fatal("local catalog preview omitted an exact change or deletion consequence")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	labels := strings.Split(ansi.Strip(m.settingsView()), "\n")
 	if len(labels) != m.mainHeight() || !strings.Contains(labels[len(labels)-1], "1 of 1") {
 		t.Fatalf("Labels summary at wrong position: lines=%d height=%d last=%q", len(labels), m.mainHeight(), labels[len(labels)-1])

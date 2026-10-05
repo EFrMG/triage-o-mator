@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preview and explicitly apply one GitHub label definition change for the selected repository."""
+"""Preview and explicitly apply GitHub label definition changes for the selected repository."""
 
 import argparse
 import hashlib
@@ -68,17 +68,81 @@ def plan_defaults(labels):
     return plan
 
 
-def save_catalog(parser, labels):
+def local_catalog(parser):
+    try:
+        original = TAXONOMY_PATH.read_bytes()
+        taxonomy = json.loads(original)
+        catalog = taxonomy["label_catalog"]
+        rows = catalog["labels"]
+        if catalog["repository"] != REPO or catalog["status"] != "observed" or not isinstance(rows, list):
+            raise ValueError("the selected repository needs an observed local label catalog")
+
+        ids, names = set(), set()
+        for row in rows:
+            label_id, name, color, description = row["id"], row["name"], row["color"], row["description"]
+            valid_id = type(label_id) is int and label_id > 0
+            valid_name = isinstance(name, str) and bool(name) and "\n" not in name and "\x00" not in name
+            valid_color = isinstance(color, str) and len(color) == 6 and all(char in "0123456789abcdefABCDEF" for char in color)
+            valid_description = isinstance(description, str) and len(description) <= 100 and "\n" not in description and "\x00" not in description
+            if not all((valid_id, valid_name, valid_color, valid_description)):
+                raise ValueError("invalid saved label definition")
+            if label_id in ids or name.casefold() in names:
+                raise ValueError("duplicate saved label identity")
+            ids.add(label_id)
+            names.add(name.casefold())
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        fail(parser, f"could not use the saved local catalog: {error}")
+
+    return hashlib.sha256(original).hexdigest(), rows
+
+
+def plan_local(parser, labels):
+    local_sha256, desired = local_catalog(parser)
+    live_by_id = {row["id"]: row for row in labels}
+    live_by_name = {row["name"].casefold(): row for row in labels}
+    matched = set()
+    create, update = [], []
+    for row in desired:
+        proposed = {"name": row["name"], "description": row["description"], "color": row["color"].lower()}
+        current = live_by_id.get(row["id"]) or live_by_name.get(row["name"].casefold())
+        if current is None:
+            create.append(proposed)
+            continue
+        conflict = live_by_name.get(row["name"].casefold())
+        if current["id"] in matched or conflict is not None and conflict["id"] != current["id"]:
+            fail(parser, f"saved label {row['name']} conflicts with a live GitHub label; resolve the conflicting names before reconciling")
+        matched.add(current["id"])
+        if any(current[key] != proposed[key] for key in ("name", "description", "color")):
+            update.append({"current": current, "proposed": proposed})
+
+    plan = {"repository": REPO, "operation": "reconcile-local", "local_sha256": local_sha256, "current": labels,
+            "create": create, "update": update, "delete": [row for row in labels if row["id"] not in matched]}
+    plan["preview_sha256"] = plan_hash(plan)
+    return plan
+
+
+def save_catalog(parser, labels, expected_local_sha256=None):
     with locked(TAXONOMY_PATH):
         try:
-            taxonomy = json.loads(TAXONOMY_PATH.read_text())
+            original = TAXONOMY_PATH.read_bytes()
+            if expected_local_sha256 is not None and hashlib.sha256(original).hexdigest() != expected_local_sha256:
+                raise ValueError("saved local catalog changed during the GitHub writes")
+            taxonomy = json.loads(original)
             if not isinstance(taxonomy, dict):
                 raise ValueError("taxonomy is not a JSON object")
+            catalog = taxonomy.get("label_catalog")
+            prior_rows = catalog.get("labels", []) if isinstance(catalog, dict) else []
+            old_by_name = {row["name"].casefold(): row for row in prior_rows if isinstance(row, dict) and isinstance(row.get("name"), str)}
             reconcile_label_catalog(taxonomy, REPO, labels, now_iso())
+            if expected_local_sha256 is not None:
+                for row in taxonomy["label_catalog"]["labels"]:
+                    old = old_by_name.get(row["name"].casefold())
+                    if old is not None:
+                        row["guidance"] = old.get("guidance", "")
             with atomic_writer(TAXONOMY_PATH) as out:
                 out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
         except (OSError, ValueError) as error:
-            fail(parser, f"GitHub saved the label, but local refresh failed: {error}; sync Labels before retrying")
+            fail(parser, f"GitHub labels may have changed, but local refresh failed: {error}; inspect GitHub and preview again")
 
 
 def write_label(parser, method, endpoint, body):
@@ -86,9 +150,9 @@ def write_label(parser, method, endpoint, body):
         response = subprocess.run(["gh", "api", "--method", method, endpoint, "--input", "-"],
                                   input=json.dumps(body, ensure_ascii=False), capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as error:
-        fail(parser, f"GitHub label write may have been attempted: {error}; refresh Labels before retrying")
+        fail(parser, f"GitHub label write may have been attempted: {error}; inspect GitHub and preview again")
     if response.returncode:
-        fail(parser, f"GitHub label write failed: {response.stderr.strip() or 'gh api failed'}; refresh Labels before retrying")
+        fail(parser, f"GitHub label write failed: {response.stderr.strip() or 'gh api failed'}; inspect GitHub and preview again")
 
     try:
         written = json.loads(response.stdout)
@@ -96,7 +160,7 @@ def write_label(parser, method, endpoint, body):
             raise ValueError("unexpected label response")
         return written
     except (ValueError, TypeError, json.JSONDecodeError) as error:
-        fail(parser, f"GitHub may have saved the label, but its response was invalid: {error}; refresh Labels before retrying")
+        fail(parser, f"GitHub may have saved the label, but its response was invalid: {error}; inspect GitHub and preview again")
 
 
 def apply_defaults(parser, plan):
@@ -123,12 +187,68 @@ def apply_defaults(parser, plan):
     return created
 
 
+def verify_live_labels(parser, expected):
+    try:
+        actual = read_github_labels(REPO)
+    except ValueError as error:
+        fail(parser, f"could not verify live GitHub labels: {error}; inspect GitHub and preview again")
+    if actual != sorted(expected, key=lambda row: (row["name"].casefold(), row["id"])):
+        fail(parser, "GitHub labels changed during the operation; inspect GitHub and preview again")
+    return actual
+
+
+def delete_label(parser, label):
+    endpoint = f"repos/{REPO}/labels/{quote(label['name'], safe='')}"
+    try:
+        response = subprocess.run(["gh", "api", "--method", "DELETE", endpoint], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        fail(parser, f"GitHub label deletion may have been attempted: {error}; inspect GitHub and preview again")
+    if response.returncode:
+        fail(parser, f"GitHub label deletion may have failed: {response.stderr.strip() or 'gh api failed'}; inspect GitHub and preview again")
+
+
+def apply_local(parser, plan):
+    expected = plan["current"]
+    results = {"created": [], "updated": [], "deleted": []}
+    operations = [("update", row) for row in plan["update"]] + [("create", row) for row in plan["create"]] + [("delete", row) for row in plan["delete"]]
+    for operation, row in operations:
+        try:
+            local_sha256 = hashlib.sha256(TAXONOMY_PATH.read_bytes()).hexdigest()
+        except OSError as error:
+            fail(parser, f"could not recheck the saved local catalog: {error}")
+        if local_sha256 != plan["local_sha256"]:
+            fail(parser, "saved local catalog changed during the operation; inspect GitHub and preview again")
+        verify_live_labels(parser, expected)
+        if operation == "update":
+            current, proposed = row["current"], row["proposed"]
+            endpoint = f"repos/{REPO}/labels/{quote(current['name'], safe='')}"
+            written = write_label(parser, "PATCH", endpoint, {"new_name": proposed["name"], "description": proposed["description"], "color": proposed["color"]})
+            if written["id"] != current["id"]:
+                fail(parser, f"GitHub returned another identity for {current['name']}; inspect GitHub and preview again")
+            expected = [{"id": current["id"], **proposed} if item["id"] == current["id"] else item for item in expected]
+            results["updated"].append({"id": current["id"], **proposed})
+        elif operation == "create":
+            written = write_label(parser, "POST", f"repos/{REPO}/labels", row)
+            expected = [*expected, {"id": written["id"], **row}]
+            results["created"].append({"id": written["id"], **row})
+        else:
+            delete_label(parser, row)
+            expected = [item for item in expected if item["id"] != row["id"]]
+            results["deleted"].append(row)
+        verify_live_labels(parser, expected)
+
+    verify_live_labels(parser, expected)
+    save_catalog(parser, expected, plan["local_sha256"])
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected-repo", required=True)
     parser.add_argument("--name")
     parser.add_argument("--description")
     parser.add_argument("--initialize-defaults", action="store_true", help="preview or create only missing starter labels")
+    parser.add_argument("--reconcile-local", action="store_true", help="preview or make GitHub match the saved local label catalog")
     parser.add_argument("--label-id", type=int)
     parser.add_argument("--expected-name")
     parser.add_argument("--expected-description")
@@ -137,9 +257,11 @@ def main():
     args = parser.parse_args()
     if args.expected_repo != REPO:
         parser.error("configured repository changed; reopen Settings")
-    if args.initialize_defaults:
+    if args.initialize_defaults and args.reconcile_local:
+        parser.error("choose one label batch operation")
+    if args.initialize_defaults or args.reconcile_local:
         if any(value is not None for value in (args.name, args.description, args.label_id, args.expected_name, args.expected_description)):
-            parser.error("Initialize defaults does not accept an individual label change")
+            parser.error("batch label operations do not accept an individual label change")
     else:
         if args.name is None or not args.name.strip() or args.name != args.name.strip() or "\n" in args.name or "\x00" in args.name:
             parser.error("label name must be a nonempty single line")
@@ -156,7 +278,7 @@ def main():
         labels = read_github_labels(REPO)
     except ValueError as error:
         fail(parser, str(error))
-    plan = plan_defaults(labels) if args.initialize_defaults else plan_change(parser, args, labels)
+    plan = plan_defaults(labels) if args.initialize_defaults else plan_local(parser, labels) if args.reconcile_local else plan_change(parser, args, labels)
     if not args.apply:
         print(json.dumps(plan, indent=2, ensure_ascii=False))
         return
@@ -166,6 +288,10 @@ def main():
     if args.initialize_defaults:
         created = apply_defaults(parser, plan)
         print(json.dumps({"created": created, "preview_sha256": plan["preview_sha256"]}, ensure_ascii=False))
+        return
+    if args.reconcile_local:
+        result = apply_local(parser, plan)
+        print(json.dumps({**result, "preview_sha256": plan["preview_sha256"]}, ensure_ascii=False))
         return
 
     body = {"name": args.name, "description": args.description, "color": NEW_LABEL_COLOR}

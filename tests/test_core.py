@@ -213,8 +213,15 @@ if method == "GET" and "--paginate" in args:
     for label in labels:
         print(json.dumps(label))
     sys.exit(0)
-if method not in ("POST", "PATCH") or args[0] != "api" or "--input" not in args:
+if method not in ("POST", "PATCH", "DELETE") or args[0] != "api" or (method != "DELETE" and "--input" not in args):
     sys.exit("unexpected GitHub operation")
+if method == "DELETE":
+    name = args[args.index("DELETE") + 1].rsplit("/", 1)[-1]
+    if (root / "fail-delete").exists() and name == (root / "fail-delete").read_text():
+        sys.exit("simulated label deletion failure")
+    labels = [row for row in labels if row["name"] != name]
+    (root / "labels.json").write_text(json.dumps(labels))
+    sys.exit(0)
 body = json.load(sys.stdin)
 if method == "POST":
     if (root / "fail-label").exists() and body["name"] == (root / "fail-label").read_text():
@@ -224,7 +231,7 @@ if method == "POST":
 else:
     old = args[args.index("PATCH") + 1].rsplit("/", 1)[-1]
     label = next(row for row in labels if row["name"] == old)
-    label.update(name=body["new_name"], description=body["description"])
+    label.update(name=body["new_name"], description=body["description"], color=body.get("color", label["color"]))
 (root / "labels.json").write_text(json.dumps(labels))
 print(json.dumps(label))
 ''')
@@ -289,6 +296,56 @@ print(json.dumps(label))
         self.assertEqual(no_change["create"], [])
         self.assertEqual(self.json_cli("label-definitions", *defaults, "--apply", "--preview-sha256", no_change["preview_sha256"])["created"], [])
         self.assertEqual(len([call for call in self.calls() if "POST" in call]), writes_before + 8)
+
+        taxonomy = json.loads(taxonomy_path.read_text())
+        bug = next(row for row in taxonomy["label_catalog"]["labels"] if row["name"] == "BUG")
+        bug.update(description="Local bug guidance", color="112233", guidance="Keep this local guidance")
+        enhancement = next(row for row in taxonomy["label_catalog"]["labels"] if row["name"] == "enhancement")
+        ghost = dict(id=777, name="local-custom", description="Keep this custom label", color="abcdef", guidance="Local only")
+        taxonomy["label_catalog"]["labels"] = [bug, enhancement, ghost]
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        remote = json.loads((self.mock / "labels.json").read_text())
+        remote.append(dict(id=199, name="remote-only", description="Remove me", color="ff0000"))
+        (self.mock / "labels.json").write_text(json.dumps(remote))
+
+        local_args = ("--expected-repo", "owner/repo", "--reconcile-local")
+        taxonomy["label_catalog"]["status"] = "pending"
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        self.run_cli("label-definitions", *local_args, ok=False)
+        taxonomy["label_catalog"]["status"] = "observed"
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        local_preview = self.json_cli("label-definitions", *local_args)
+        self.assertEqual(local_preview["operation"], "reconcile-local")
+        self.assertEqual([row["name"] for row in local_preview["create"]], ["local-custom"])
+        self.assertEqual(local_preview["update"][0]["proposed"]["description"], "Local bug guidance")
+        self.assertIn("remote-only", [row["name"] for row in local_preview["delete"]])
+        self.assertFalse(any("DELETE" in call for call in self.calls()))
+        taxonomy["label_catalog"]["labels"][0]["description"] = "Changed while previewing"
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        self.run_cli("label-definitions", *local_args, "--apply", "--preview-sha256", local_preview["preview_sha256"], ok=False)
+        self.assertFalse(any("DELETE" in call for call in self.calls()))
+        taxonomy["label_catalog"]["labels"][0]["description"] = "Local bug guidance"
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        changed_remote = [*remote, dict(id=200, name="added-during-preview", description="New", color="abc123")]
+        (self.mock / "labels.json").write_text(json.dumps(changed_remote))
+        self.run_cli("label-definitions", *local_args, "--apply", "--preview-sha256", local_preview["preview_sha256"], ok=False)
+        self.assertFalse(any("DELETE" in call for call in self.calls()))
+        (self.mock / "labels.json").write_text(json.dumps(remote))
+
+        (self.mock / "fail-delete").write_text(local_preview["delete"][0]["name"])
+        self.run_cli("label-definitions", *local_args, "--apply", "--preview-sha256", local_preview["preview_sha256"], ok=False)
+        self.assertEqual([row["name"] for row in json.loads(taxonomy_path.read_text())["label_catalog"]["labels"]], ["BUG", "enhancement", "local-custom"])
+        (self.mock / "fail-delete").unlink()
+        resumed_local = self.json_cli("label-definitions", *local_args)
+        self.assertEqual(resumed_local["create"], [])
+        self.assertEqual(resumed_local["update"], [])
+        self.assertEqual(len(resumed_local["delete"]), len(local_preview["delete"]))
+        self.json_cli("label-definitions", *local_args, "--apply", "--preview-sha256", resumed_local["preview_sha256"])
+        final_remote = json.loads((self.mock / "labels.json").read_text())
+        self.assertEqual({row["name"] for row in final_remote}, {"BUG", "enhancement", "local-custom"})
+        self.assertEqual(next(row for row in final_remote if row["name"] == "BUG")["color"], "112233")
+        final_local = json.loads(taxonomy_path.read_text())["label_catalog"]["labels"]
+        self.assertEqual(next(row for row in final_local if row["name"] == "local-custom")["guidance"], "Local only")
 
         before = len(self.calls())
         self.json_cli("taxonomy-settings", "create-action", "--expected-repo", "owner/repo", "--name", "ask-review", "--description", "Ask a maintainer", "--operation", "comment")

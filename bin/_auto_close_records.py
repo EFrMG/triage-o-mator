@@ -5,6 +5,7 @@ import re
 import uuid
 
 from _evidence import canonical, digest
+from _action_proposal_records import valid_decision_hold
 from _triage import DATA_DIR
 
 FEEDBACK_POLICY = "auto-close-feedback-v1"
@@ -72,6 +73,8 @@ def load(path, repo):
         raise ValueError(f"invalid proposal identity or status: {path.name}")
     if value.get("target") != f"https://{value.get('host')}/{repo}/pull/{value['number']}":
         raise ValueError(f"invalid proposal target: {path.name}")
+    if not valid_decision_hold(value):
+        raise ValueError(f"invalid human decision question: {path.name}")
     if value["status"] == "rejected":
         if not valid_rejection(value):
             raise ValueError(f"invalid proposal rejection: {path.name}")

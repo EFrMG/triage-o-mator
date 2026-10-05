@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).absolute().parent))
 
 from _evidence import canonical, digest, validate_payload
 from _auto_close_records import feedback as proposal_feedback, load, proposal_path
-from _action_proposal_records import load as load_action_proposal, proposal_path as action_proposal_path
+from _action_proposal_records import load as load_action_proposal, proposal_path as action_proposal_path, valid_decision_hold
 from _item_context import ContextIndex, read as read_item_context
 from _groups import load_group
 from _storage import atomic_writer, locked
@@ -81,6 +81,10 @@ def row(proposal, state):
     result = dict(number=proposal["number"], title=proposal["title"], target=proposal["target"], comment=proposal["comment"], reference=proposal["reference"], head_sha=proposal["head_sha"], updated_at=proposal["updated_at"], status=proposal["status"], checkpoint=proposal["checksum"], active=active, needs_attention=needs, dismissed=not visible(proposal, state), outcome=proposal.get("outcome"))
     if "rationale" in proposal:
         result["rationale"] = proposal["rationale"]
+    if "decision_question" in proposal:
+        result["decision_question"] = proposal["decision_question"]
+    if "decision_resolution" in proposal:
+        result["decision_resolution"] = proposal["decision_resolution"]
     if "action" in proposal:
         result["action"] = proposal["action"]
     result["inputs"] = proposal.get("inputs")
@@ -131,6 +135,9 @@ def selected_evidence(cache, kind, number, snapshot_id):
 
 
 def check_current_context(proposal, completed_batch=None):
+    if proposal.get("decision_question"):
+        raise ValueError("human decision required before this action can be approved: " + proposal["decision_question"])
+
     inputs = proposal["inputs"]
     index = ContextIndex(completed_batch=completed_batch)
     target = index.collect("pr", proposal["number"], include_rows=False)
@@ -279,6 +286,10 @@ def propose(args, repo):
         raise ValueError("title and proposer are required")
     if args.rationale is not None and (not args.rationale.strip() or len(args.rationale) > 10000 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in args.rationale)):
         raise ValueError("supplied legacy rationale must be valid text of at most 10000 characters")
+    if args.decision_question is not None and (not args.decision_question.strip() or len(args.decision_question) > 2000 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in args.decision_question)):
+        raise ValueError("human decision question must be nonempty text of at most 2000 characters")
+    if args.decision_resolution is not None and (not args.decision_resolution.strip() or len(args.decision_resolution) > 10000 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in args.decision_resolution)):
+        raise ValueError("human decision resolution must be nonempty text of at most 10000 characters")
     reference = dict(kind=args.reference_kind, number=args.reference_number) if args.reference_kind else None
     inputs = declared_inputs(args, repo)
     if args.action is not None:
@@ -297,6 +308,10 @@ def propose(args, repo):
         value["action"] = args.action
     if args.rationale is not None:
         value["rationale"] = args.rationale
+    if args.decision_question is not None:
+        value["decision_question"] = args.decision_question
+        guidance = ContextIndex().collect("pr", args.number, include_rows=False)["ledger_guidance"]
+        value["decision_review"] = dict(reviewed=guidance["reviewed"], by=guidance["reviewed_by"], at=guidance["reviewed_at"]) if guidance else dict(reviewed=False, by="", at="")
     path = proposal_path(args.number)
     if path.parent.is_symlink():
         raise ValueError("invalid proposal directory")
@@ -310,6 +325,21 @@ def propose(args, repo):
             previous = load(path, repo)
             if args.replace_checkpoint != previous["checksum"] or previous["status"] not in ("pending", "rejected") or (DATA_DIR / "writes" / (previous["request_id"] + ".json")).exists():
                 raise ValueError("proposal exists or has a write attempt; inspect it before replacing")
+            if previous.get("decision_question") and not args.decision_question:
+                guidance = ContextIndex().collect("pr", args.number, include_rows=False)
+                review = guidance["ledger_guidance"]
+                prior = previous.get("decision_review") or {}
+                if (not args.decision_resolution or guidance["checkpoint"] != args.context_checkpoint or
+                        previous["inputs"]["context_checkpoint"] == guidance["checkpoint"] or review is None or
+                        not review["reviewed"] or not review["reviewed_by"].strip() or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", review["reviewed_at"]) or
+                        review["reviewed_at"] == prior.get("at")):
+                    raise ValueError("clearing a human decision question needs changed attributed human review and an exact resolution")
+                value["decision_resolution"] = dict(by=review["reviewed_by"], at=review["reviewed_at"],
+                                                    reason=args.decision_resolution, held_checkpoint=previous["checksum"])
+            elif args.decision_resolution:
+                raise ValueError("a decision resolution requires clearing a held question")
+            elif "decision_resolution" in previous:
+                value["decision_resolution"] = previous["decision_resolution"]
             if previous["status"] == "rejected":
                 reason = args.reconsideration_reason
                 if reason is None or not reason.strip() or len(reason) > 10000 or len(args.by) > 200 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in reason):
@@ -325,6 +355,10 @@ def propose(args, repo):
             raise ValueError("there is no proposal at the specified checkpoint")
         elif args.reconsideration_reason is not None:
             raise ValueError("a reconsideration explanation requires a rejected proposal")
+        elif args.decision_resolution is not None:
+            raise ValueError("a decision resolution requires a held proposal")
+        if not valid_decision_hold(value):
+            raise ValueError("human decision resolution does not bind the held proposal")
         save(path, value)
 
     return row(value, local_state(repo))
@@ -353,7 +387,8 @@ def edit(args, repo):
                                      member_context=[f"{member['kind']}:{member['number']}:{member['checkpoint']}" for member in handoff["members"]] if handoff else [],
                                      evidence=[f"{item['kind']}:{item['number']}:{item['snapshot_id']}" for item in inputs["evidence"]],
                                      evidence_gap=inputs["evidence_gaps"], replace_checkpoint=args.checkpoint,
-                                     reconsideration_reason=None, action=previous.get("action"))
+                                     reconsideration_reason=None, action=previous.get("action"),
+                                     decision_question=previous.get("decision_question"), decision_resolution=None)
     return propose(replacement, repo)
 
 
@@ -447,6 +482,8 @@ def automation_policy(repo, proposal):
     action = proposal.get("action")
     if not action:
         raise ValueError("older PR closure proposal has no saved action type; stage it for human review")
+    if proposal.get("decision_question"):
+        raise ValueError("human decision question keeps this PR closure staged")
     inputs = proposal.get("inputs") or {}
     evidence = inputs.get("evidence") or []
     complete_target = any(selected["kind"] == "pr" and selected["number"] == proposal["number"] and
@@ -517,6 +554,8 @@ def main():
     add.add_argument("--reference-number", type=int)
     add.add_argument("--by", required=True)
     add.add_argument("--action", help="saved ledger close type for a repository-enabled action pass")
+    add.add_argument("--decision-question", help="hold the proposal for an attributed human decision before approval")
+    add.add_argument("--decision-resolution", help="explain the changed human review when clearing a held question")
     add.add_argument("--context-checkpoint", required=True, help="checkpoint from item-context read for this PR")
     add.add_argument("--group-id", help="active group whose exported member context informed this proposal")
     add.add_argument("--member-context", action="append", default=[], help="KIND:NUMBER:CHECKPOINT for every exported group member")

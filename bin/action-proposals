@@ -13,7 +13,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 
-from _action_proposal_records import load, proposal_path
+from _action_proposal_records import load, proposal_path, valid_decision_hold
 from _auto_close_records import load as load_closure, proposal_path as closure_path
 from _evidence import canonical, digest, validate_payload
 from _item_context import ContextIndex, read as read_item_context
@@ -71,6 +71,10 @@ def row(value, state):
                   updated_at=value["updated_at"], head_sha=value.get("head_sha"), status=value["status"],
                   checkpoint=value["checksum"], active=active, needs_attention=visible and value["status"] in ("pending", "executed", "uncertain") and presentation.get("viewed_checkpoint") != value["checksum"],
                   dismissed=not visible, inputs=value["inputs"], outcome=value.get("outcome"))
+    if "decision_question" in value:
+        result["decision_question"] = value["decision_question"]
+    if "decision_resolution" in value:
+        result["decision_resolution"] = value["decision_resolution"]
     for field in ("rejection", "reconsideration"):
         if field in value:
             result[field] = value[field]
@@ -117,6 +121,9 @@ def evidence_selection(repo, host, tokens):
 
 
 def check_current(value):
+    if value.get("decision_question"):
+        raise ValueError("human decision required before this action can be approved: " + value["decision_question"])
+
     current = ContextIndex().collect(value["kind"], value["number"], include_rows=False)
     if current["checkpoint"] != value["inputs"]["context_checkpoint"]:
         raise ValueError("local item guidance changed; prepare a fresh action proposal")
@@ -191,6 +198,10 @@ def propose(args, repo):
         raise ValueError("title and proposer are required")
     if args.reconsideration_reason is not None and not valid_short_text(args.reconsideration_reason, 10000):
         raise ValueError("reconsideration needs a valid explanation")
+    if args.decision_question is not None and not valid_short_text(args.decision_question, 2000):
+        raise ValueError("human decision question must be valid text of at most 2000 characters")
+    if args.decision_resolution is not None and not valid_short_text(args.decision_resolution, 10000):
+        raise ValueError("human decision resolution must be valid text of at most 10000 characters")
 
     comment = args.comment_file.read_text(encoding="utf-8")
     if not valid_comment(comment):
@@ -215,6 +226,10 @@ def propose(args, repo):
                  status="pending", inputs=inputs)
     if args.kind == "pr":
         value["head_sha"] = args.head_sha
+    if args.decision_question is not None:
+        value["decision_question"] = args.decision_question
+        guidance = context["ledger_guidance"]
+        value["decision_review"] = dict(reviewed=guidance["reviewed"], by=guidance["reviewed_by"], at=guidance["reviewed_at"])
 
     path = proposal_path(args.kind, args.number)
     if path.parent.is_symlink():
@@ -229,6 +244,21 @@ def propose(args, repo):
             receipt = DATA_DIR / "writes" / (previous["request_id"] + ".json")
             if args.replace_checkpoint != previous["checksum"] or previous["status"] not in ("pending", "rejected") or receipt.exists():
                 raise ValueError("action proposal exists or has a write attempt; inspect it before replacing")
+            if previous.get("decision_question") and not args.decision_question:
+                guidance = ContextIndex().collect(args.kind, args.number, include_rows=False)
+                review = guidance["ledger_guidance"]
+                prior = previous.get("decision_review") or {}
+                if (not args.decision_resolution or guidance["checkpoint"] != args.context_checkpoint or
+                        previous["inputs"]["context_checkpoint"] == guidance["checkpoint"] or review is None or
+                        not review["reviewed"] or not review["reviewed_by"].strip() or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", review["reviewed_at"]) or
+                        review["reviewed_at"] == prior.get("at")):
+                    raise ValueError("clearing a human decision question needs changed attributed human review and an exact resolution")
+                value["decision_resolution"] = dict(by=review["reviewed_by"], at=review["reviewed_at"],
+                                                    reason=args.decision_resolution, held_checkpoint=previous["checksum"])
+            elif args.decision_resolution:
+                raise ValueError("a decision resolution requires clearing a held question")
+            elif "decision_resolution" in previous:
+                value["decision_resolution"] = previous["decision_resolution"]
             if previous["status"] == "rejected":
                 if not args.reconsideration_reason or not args.reconsideration_reason.strip():
                     raise ValueError("reconsidering a rejected action requires an attributed explanation")
@@ -240,9 +270,11 @@ def propose(args, repo):
                 value["reconsideration"] = previous["reconsideration"]
 
             value["history"] = previous.get("history", []) + [{key: item for key, item in previous.items() if key != "history"}]
-        elif args.replace_checkpoint or args.reconsideration_reason:
+        elif args.replace_checkpoint or args.reconsideration_reason or args.decision_resolution:
             raise ValueError("there is no rejected or pending proposal at that checkpoint")
 
+        if not valid_decision_hold(value):
+            raise ValueError("human decision resolution does not bind the held proposal")
         save(path, value)
 
     return row(value, local_state(repo))
@@ -265,7 +297,7 @@ def edit(args, repo):
                                      context_checkpoint=previous["inputs"]["context_checkpoint"],
                                      evidence=[f"{item['kind']}:{item['number']}:{item['snapshot_id']}" for item in previous["inputs"]["evidence"]],
                                      evidence_gap=previous["inputs"]["evidence_gaps"], replace_checkpoint=args.checkpoint,
-                                     reconsideration_reason=None)
+                                     reconsideration_reason=None, decision_question=previous.get("decision_question"), decision_resolution=None)
     return propose(replacement, repo)
 
 
@@ -283,6 +315,9 @@ def review(repo, kind, number, check=True):
 
 
 def automation_policy(repo, value):
+    if value.get("decision_question"):
+        raise ValueError("human decision question keeps this action staged")
+
     inputs = value["inputs"]
     complete_target = any(selected["kind"] == value["kind"] and selected["number"] == value["number"] and
                           all(component["status"] in ("complete", "not_applicable") for component in selected["components"].values())
@@ -439,6 +474,8 @@ def main():
     add.add_argument("--evidence-gap", action="append", default=[])
     add.add_argument("--replace-checkpoint")
     add.add_argument("--reconsideration-reason")
+    add.add_argument("--decision-question", help="hold this proposal until a person resolves a specific decision")
+    add.add_argument("--decision-resolution", help="attributed resolution when replacing a held proposal after human review")
     edit_text = commands.add_parser("edit")
     edit_text.add_argument("--kind", choices=("issue", "pr"), required=True)
     edit_text.add_argument("--number", type=int, required=True)

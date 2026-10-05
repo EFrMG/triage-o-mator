@@ -15,6 +15,35 @@ def proposal_path(kind, number):
     return DATA_DIR / "action-proposals" / f"{kind}-{number}.json"
 
 
+def valid_decision_hold(value):
+    question = value.get("decision_question")
+    if question is not None:
+        if not isinstance(question, str) or not question.strip() or len(question) > 2000:
+            return False
+        review = value.get("decision_review")
+        if not isinstance(review, dict) or type(review.get("reviewed")) is not bool or not isinstance(review.get("by"), str) or not isinstance(review.get("at"), str):
+            return False
+
+        return True
+
+    history = value.get("history", [])
+    if not isinstance(history, list):
+        return False
+    held = next((version for version in reversed(history) if isinstance(version, dict) and version.get("decision_question")), None)
+    resolution = value.get("decision_resolution")
+    if held is None:
+        return resolution is None
+    if not isinstance(resolution, dict):
+        return False
+
+    prior = held.get("decision_review") or {}
+    return (resolution.get("held_checkpoint") == held.get("checksum") and
+            isinstance(resolution.get("by"), str) and bool(resolution["by"].strip()) and len(resolution["by"]) <= 200 and
+            isinstance(resolution.get("at"), str) and bool(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", resolution["at"])) and
+            resolution["at"] != prior.get("at") and
+            isinstance(resolution.get("reason"), str) and bool(resolution["reason"].strip()) and len(resolution["reason"]) <= 10000)
+
+
 def valid_reconsideration(versions):
     current = versions[-1]
     index = next((position for position in range(len(versions) - 2, -1, -1) if versions[position].get("status") == "rejected"), None)
@@ -55,6 +84,8 @@ def load(path, repo):
         raise ValueError(f"invalid action proposal target: {path.name}")
     if not isinstance(value.get("action"), str) or not value["action"] or not isinstance(value.get("comment"), str) or not value["comment"].strip():
         raise ValueError(f"invalid action proposal content: {path.name}")
+    if not valid_decision_hold(value):
+        raise ValueError(f"invalid human decision question: {path.name}")
 
     if not isinstance(value.get("history", []), list):
         raise ValueError("invalid action proposal history")

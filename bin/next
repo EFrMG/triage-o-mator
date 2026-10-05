@@ -96,7 +96,7 @@ def suggestions(ledger):
     open_prs = [r for r in open_items if r["kind"] == "pr"]
     if open_prs:
         add("agent", f"Assess a named PR for an explained closure proposal ({len(open_prs)} open PRs available)",
-            "prompts/recommend-auto-close.md (ask for the PR and read budget)",
+            "prompts/recommend-auto-close.md (select the PR; reuse cached evidence first)",
             "a scoped recommendation can keep the PR open; a saved proposal needs exact approval before any GitHub write")
 
     operations = load_taxonomy().get("action_operations", {})
@@ -104,7 +104,7 @@ def suggestions(ledger):
                          (operations[r["action"]] == "reopen" and r["state"] == "closed" or r["state"] == "open")]
     if action_candidates:
         add("agent", f"Prepare a bounded action pass for {len(action_candidates)} suggested item actions",
-            "prompts/automated-actions.md (ask for selected keys and read budget)",
+            "prompts/automated-actions.md (select exact keys; reuse cached evidence first)",
             "each action follows its repository policy; incomplete or disputed cases stay staged")
 
     pairs = [p for p in TitleVerdicts().pairs(TitleIndex(ledger), min_score=STRONG_PAIR)
@@ -142,7 +142,7 @@ def suggestions(ledger):
     untriaged = [r for r in open_items if not has_decision(r)]
     if open_items:
         add("agent", "Prepare reusable evidence for a focused analysis", "prompts/prepare-analysis.md",
-            "optional: inspect existing references offline first; agree scope and request budget before any download (cache coverage is not assessed here)")
+            "optional: inspect existing references offline first; choose a bounded script budget if downloading (cache coverage is not assessed here)")
 
     unlabeled = [r for r in open_items if not r.get("labels")]
     if unlabeled:

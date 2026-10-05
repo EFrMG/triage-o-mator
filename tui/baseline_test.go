@@ -756,6 +756,11 @@ func TestBaselineCommentStateComesFromLedgerRefresh(t *testing.T) {
 	if !strings.Contains(header, "closed") {
 		t.Fatal("fixed packet state displaced the ledger state in the header")
 	}
+	m.detail.sections[m.detail.active].renderedFor = ""
+	m.detail.renderActive()
+	if detail := ansi.Strip(m.detail.View()); strings.Contains(detail, "snapshot: fixed") || !strings.Contains(detail, "Fixed evidence packet") {
+		t.Fatal("fixed evidence exposed a machine identifier in the item view")
+	}
 }
 
 func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
@@ -2042,6 +2047,87 @@ func TestCompletedOutcomesStayVisibleAndRejectedProposalsLeaveNotifications(t *t
 	}
 }
 
+func TestSuggestedActionsLiveInNotificationsWithoutSeparateReviewTabs(t *testing.T) {
+	if len(tabs) != 3 || tabs[0].Name != "Untriaged" || tabs[1].Name != "Merge-Ready PRs" || tabs[2].Name != "All Items" {
+		t.Fatal("separate Pending Review or Close Candidates menu remains")
+	}
+
+	m := baselineModel(t, baselineRoot(t))
+	m.taxonomy = Taxonomy{ActionOperations: map[string]string{"comment": "comment", "close": "close", "reopen": "reopen"}}
+	for number := 1; number <= 23; number++ {
+		m.items = append(m.items, Item{Kind: "issue", Number: number, State: "open", Action: "close", Title: fmt.Sprintf("Fixture %d", number), CreatedAt: fmt.Sprintf("2026-01-%02dT00:00:00Z", number)})
+	}
+	m.items = append(m.items, Item{Kind: "issue", Number: 24, State: "closed", Action: "reopen", Title: "Reopen fixture"})
+	m.items = append(m.items, Item{Kind: "issue", Number: 25, State: "closed", Action: "close", Title: "Already closed"})
+	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{{Kind: "issue", Number: 1, Status: "pending", Active: true}}}}
+	m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, m.notifications.proposals, m.notifications.actions)
+	if len(m.notifications.suggestions) != 23 {
+		t.Fatalf("saved action suggestions were lost or duplicated: %d", len(m.notifications.suggestions))
+	}
+	allItems := append([]Item(nil), m.items...)
+	m = baselineSend(m, ledgerReloadedMsg{root: m.installRoot, repo: m.repo, items: []Item{{Kind: "issue", Number: 2, State: "open", Action: "close"}}})
+	if len(m.notifications.suggestions) != 1 {
+		t.Fatalf("Notifications kept suggestions from an older ledger: %d", len(m.notifications.suggestions))
+	}
+	m.items = allItems
+	m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, m.notifications.proposals, m.notifications.actions)
+	choices := m.notifications.choices()
+	suggestionIndex, moreIndex := -1, -1
+	for i, choice := range choices {
+		if choice.kind == "item" && choice.suggestion >= 0 && m.notifications.suggestions[choice.suggestion].Action == "close" && suggestionIndex < 0 {
+			suggestionIndex = i
+		}
+		if choice.kind == "suggestion-more" {
+			moreIndex = i
+		}
+	}
+	if suggestionIndex < 0 || moreIndex < 0 {
+		t.Fatal("Notifications did not page suggested actions")
+	}
+	m.notifications.selected = suggestionIndex
+	var cardSummary string
+	renderNotificationChoice(m.notifications, choices[suggestionIndex], func(_, summary string, _ cardMark) { cardSummary = summary })
+	if !strings.Contains(cardSummary, "Suggested close · exact action needed") {
+		t.Fatal("saved suggestion looked like an approved exact proposal")
+	}
+	next, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "y"})
+	if cmd == nil || !strings.Contains(next.(model).status, "action suggestion") {
+		t.Fatal("suggested action did not offer a focused agent handoff")
+	}
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if cmd != nil || !strings.Contains(next.(model).status, "exact action proposal") {
+		t.Fatal("suggested action offered publication without an exact proposal")
+	}
+	m.notifications.selected = moreIndex
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if cmd != nil || m.notifications.suggestionOffset != suggestedActionPageSize || m.notifications.choices()[m.notifications.selected].suggestion != suggestedActionPageSize {
+		t.Fatal("suggested action page did not advance to the next bounded set")
+	}
+
+	proposalList := notificationsUI{proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Status: "pending", Active: true, Needs: true}}}, actions: actionProposalList{Rows: []actionProposalRow{{Kind: "issue", Number: 2, Action: "close", Operation: "close", Status: "pending", Active: true, Needs: true}}}}
+	var summaries []string
+	var marks []string
+	for _, choice := range proposalList.choices() {
+		renderNotificationChoice(proposalList, choice, func(_, summary string, mark cardMark) {
+			summaries = append(summaries, summary)
+			marks = append(marks, mark.text)
+		})
+	}
+	if len(summaries) != 2 || summaries[0] != "Close proposed" || summaries[1] != "Close proposed" || marks[0] != marks[1] {
+		t.Fatalf("issue and PR closures had different notification cards: %v, %v", summaries, marks)
+	}
+	proposalList.proposals.Rows[0].Needs = false
+	proposalList.actions.Rows[0].Needs = false
+	marks = nil
+	for _, choice := range proposalList.choices() {
+		renderNotificationChoice(proposalList, choice, func(_, _ string, mark cardMark) { marks = append(marks, mark.text) })
+	}
+	if len(marks) != 2 || marks[0] != "ACTION" || marks[1] != "ACTION" {
+		t.Fatalf("viewed issue and PR proposals had different card marks: %v", marks)
+	}
+}
+
 func TestProposalReaderShowsCurrentGuidanceAndBlocksStaleApproval(t *testing.T) {
 	root := baselineRoot(t)
 	script := `#!/usr/bin/env python3
@@ -2242,7 +2328,11 @@ else:
 		t.Fatal(err)
 	}
 	row := actionProposalRow{Kind: "issue", Number: 1, Title: "Needs reproduction", Target: "https://github.com/owner/repo/issues/1", Action: "comment-request-info", Operation: "comment", Comment: "Could you share steps to reproduce?", UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "action-1", Status: "pending", Active: true, Needs: true, Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}, DecisionQuestion: "Should this request be sent?"}
+	if err := json.Unmarshal([]byte(`{"context_checkpoint":"ctx-a","evidence":[{"kind":"issue","number":1,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}}]}`), row.Inputs); err != nil {
+		t.Fatal(err)
+	}
 	m := baselineModel(t, root)
+	m.height = 80
 	m.reviewer = "maintainer"
 	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{row}}}
 	choice := m.notifications.choices()[0]
@@ -2266,8 +2356,12 @@ else:
 	}
 	next, cmd = m.openActionReview(choice)
 	m = baselineSend(next.(model), cmd().(actionReviewMsg))
-	if view := ansi.Strip(m.actionReviewView()); !strings.Contains(view, "Could you share steps to reproduce?") || !strings.Contains(view, "Should this request be sent?") {
+	styledReview := m.actionReviewView()
+	if view := ansi.Strip(styledReview); !strings.Contains(view, "Could you share steps to reproduce?") || !strings.Contains(view, "Should this request be sent?") || strings.Contains(view, "snapshot-1") || strings.Contains(view, "summary: complete") {
 		t.Fatal("exact proposed comment or question was absent from the action review")
+	}
+	if !strings.Contains(styledReview, newProposalReviewStyles().section.Render("Proposed action")) || !strings.Contains(styledReview, newProposalReviewStyles().section.Render("Comment to publish")) {
+		t.Fatal("issue action did not use the shared proposal review styling")
 	}
 	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
 	if cmd != nil {

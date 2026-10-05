@@ -141,7 +141,7 @@ type model struct {
 	// ticked holds the items ticked with Space in the list on screen; listConfirm is the list action ("a", "d") whose second press will act.
 	ticked      map[Key]bool
 	listConfirm string
-	// lastStep is what the last approval, or approval taken back, acted on, so a u right after it undoes the next layer on those items (undo.go) rather than on the hovered one: an approved item leaves Pending Review, and the cursor falls on the next. Any key but u forgets it.
+	// lastStep is what the last approval, or approval taken back, acted on, so a u right after it undoes the next layer on those items (undo.go) rather than on the hovered one. Any key but u forgets it.
 	lastStep               []Key
 	lastMouseX, lastMouseY int
 	lastMouseAt            time.Time

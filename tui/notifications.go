@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Notifications presents tracked comments and retained PR records in two sections.
+// Notifications presents saved action suggestions, proposals, tracked comments and retained activity in two sections.
 type notificationsUI struct {
 	open, busy        bool
 	tracked           *trackedPage
@@ -19,6 +19,8 @@ type notificationsUI struct {
 	closures          *actionHistoryPage
 	proposals         autoCloseList
 	actions           actionProposalList
+	suggestions       []Item
+	suggestionOffset  int
 	actionReview      *actionReviewUI
 	ticked            map[int]bool
 	review            *autoCloseReview
@@ -72,13 +74,13 @@ type notificationsMsg struct {
 }
 
 type notificationChoice struct {
-	kind                                                  string
-	key                                                   Key
-	proposal, actionProposal, tracked, attention, closure int
+	kind                                                              string
+	key                                                               Key
+	proposal, actionProposal, suggestion, tracked, attention, closure int
 }
 
 func itemChoice(key Key) notificationChoice {
-	return notificationChoice{kind: "item", key: key, proposal: -1, actionProposal: -1, tracked: -1, attention: -1, closure: -1}
+	return notificationChoice{kind: "item", key: key, proposal: -1, actionProposal: -1, suggestion: -1, tracked: -1, attention: -1, closure: -1}
 }
 
 type actionProposalRow struct {
@@ -491,6 +493,10 @@ func (m model) finishNotifications(msg notificationsMsg) (tea.Model, tea.Cmd) {
 	m.notifications.closures = &msg.closures
 	m.notifications.proposals = msg.proposals
 	m.notifications.actions = msg.actions
+	m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, msg.proposals, msg.actions)
+	if m.notifications.suggestionOffset >= len(m.notifications.suggestions) {
+		m.notifications.suggestionOffset = maxInt((len(m.notifications.suggestions)-1)/suggestedActionPageSize*suggestedActionPageSize, 0)
+	}
 	m.notifications.tracked = &msg.tracked
 	m.notifications.state = msg.state
 	m.sidebar.notificationCount = notificationCount(msg.unreadKeys, msg.proposals, msg.actions)
@@ -550,16 +556,39 @@ func (n notificationsUI) actionNeeds(row actionHistoryRow) bool {
 func (n notificationsUI) choiceNeeds(choice notificationChoice) bool {
 	switch choice.kind {
 	case "item":
-		return choice.proposal >= 0 && n.proposals.Rows[choice.proposal].Needs ||
+		return choice.suggestion >= 0 || choice.proposal >= 0 && n.proposals.Rows[choice.proposal].Needs ||
 			choice.actionProposal >= 0 && n.actions.Rows[choice.actionProposal].Needs ||
 			choice.tracked >= 0 && n.tracked.Rows[choice.tracked].NewCount > 0 ||
 			choice.attention >= 0 && n.watchNeeds(n.attention.Rows[choice.attention]) ||
 			choice.closure >= 0 && n.actionNeeds(n.closures.Rows[choice.closure])
-	case "attention-prev", "attention-more", "closure-prev", "closure-more":
+	case "attention-prev", "attention-more", "closure-prev", "closure-more", "suggestion-prev", "suggestion-more":
 		return true
 	default:
 		return false
 	}
+}
+
+const suggestedActionPageSize = 20
+
+func suggestedActions(items []Item, taxonomy Taxonomy, proposals autoCloseList, actions actionProposalList) []Item {
+	covered := make(map[Key]bool)
+	for _, row := range proposals.Rows {
+		covered[Key{Kind: "pr", Number: row.Number}] = true
+	}
+	for _, row := range actions.Rows {
+		covered[Key{Kind: row.Kind, Number: row.Number}] = true
+	}
+
+	var suggested []Item
+	for _, item := range items {
+		operation := taxonomy.OperationFor(item.Action)
+		if covered[item.Key()] || operation != "comment" && operation != "close" && operation != "reopen" ||
+			operation == "close" && item.State != "open" || operation == "reopen" && item.State != "closed" {
+			continue
+		}
+		suggested = append(suggested, item)
+	}
+	return byCreatedAtAsc(suggested)
 }
 
 func (n notificationsUI) choices() []notificationChoice {
@@ -577,6 +606,8 @@ func (n notificationsUI) choices() []notificationChoice {
 			items[index].proposal = row
 		case "action-proposal":
 			items[index].actionProposal = row
+		case "suggestion":
+			items[index].suggestion = row
 		case "tracked":
 			items[index].tracked = row
 		case "attention":
@@ -594,6 +625,10 @@ func (n notificationsUI) choices() []notificationChoice {
 		if !row.Dismissed && (row.Status == "pending" || row.Status == "executed" || row.Status == "uncertain") {
 			add(Key{Kind: row.Kind, Number: row.Number}, "action-proposal", i)
 		}
+	}
+	end := minInt(n.suggestionOffset+suggestedActionPageSize, len(n.suggestions))
+	for i := n.suggestionOffset; i < end; i++ {
+		add(n.suggestions[i].Key(), "suggestion", i)
 	}
 	if n.tracked != nil {
 		for i := range n.tracked.Rows {
@@ -619,6 +654,12 @@ func (n notificationsUI) choices() []notificationChoice {
 		if n.choiceNeeds(item) {
 			choices = append(choices, item)
 		}
+	}
+	if n.suggestionOffset > 0 {
+		choices = append(choices, notificationChoice{kind: "suggestion-prev"})
+	}
+	if end < len(n.suggestions) {
+		choices = append(choices, notificationChoice{kind: "suggestion-more"})
 	}
 	if n.attention != nil {
 		if n.attention.Pagination.Offset > 0 {
@@ -680,6 +721,18 @@ func (m model) openNotificationChoice(choice notificationChoice) (tea.Model, tea
 	}
 
 	return m.openNotificationSource(choice, "item")
+}
+
+func (m model) pageSuggestedActions(offset int) (tea.Model, tea.Cmd) {
+	m.notifications.suggestionOffset = maxInt(offset, 0)
+	m.notifications.selected = 0
+	for i, choice := range m.notifications.choices() {
+		if choice.kind == "item" && choice.suggestion == m.notifications.suggestionOffset {
+			m.notifications.selected = i
+			break
+		}
+	}
+	return m, nil
 }
 
 func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -927,6 +980,12 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			m.status = "Taking " + what + "…"
 			return m, yankCmd(m.installRoot, m.repo, what, text)
 		}
+		if len(choices) > 0 && choices[m.notifications.selected].kind == "item" && choices[m.notifications.selected].suggestion >= 0 {
+			item := m.notifications.suggestions[choices[m.notifications.selected].suggestion]
+			text, what := m.yankActionSuggestion(item)
+			m.status = "Taking " + what + "…"
+			return m, yankCmd(m.installRoot, m.repo, what, text)
+		}
 	case "e":
 		if len(choices) > 0 && !m.trackingBusy {
 			return m.openProposalEdit(choices[m.notifications.selected])
@@ -961,6 +1020,10 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 		if msg.String() == "a" && len(choices) > 0 {
 			choice := choices[m.notifications.selected]
+			if choice.kind == "item" && choice.suggestion >= 0 && choice.actionProposal < 0 && choice.proposal < 0 {
+				m.warn("Prepare an exact action proposal before approval; press y to copy this item for an agent.")
+				return m, nil
+			}
 			if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
 				return m.openActionReview(choice)
 			}
@@ -1047,6 +1110,10 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m.pageNotifications("closure", *m.notifications.closures.Pagination.Next)
 		case "closure-prev":
 			return m.pageNotifications("closure", maxInt(0, m.notifications.closures.Pagination.Offset-notificationsPageSize))
+		case "suggestion-more":
+			return m.pageSuggestedActions(m.notifications.suggestionOffset + suggestedActionPageSize)
+		case "suggestion-prev":
+			return m.pageSuggestedActions(m.notifications.suggestionOffset - suggestedActionPageSize)
 		}
 	}
 	return m, nil
@@ -1092,7 +1159,7 @@ func (m model) notificationsView() string {
 		n.tracked = &trackedPage{}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\n", inset(titleBar("Notifications", m.repo+" · retained offline records", w)))
+	fmt.Fprintf(&b, "%s\n\n", inset(titleBar("Notifications", m.repo+" · actions and updates", w)))
 	if n.busy {
 		return b.String() + inset("Reading retained notifications…")
 	}
@@ -1159,38 +1226,26 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		title = "Rejected PR closure proposal"
 	}
 	fmt.Fprintf(&b, "%s\n\n", inset(titleBar(title, m.repo, m.menuWidth())))
-	section := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(currentTheme.Accent))
-	target := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(currentTheme.Info))
-	action := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
-	danger := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Error)).Bold(true)
-	success := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Success))
-	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
-	comment := lipgloss.NewStyle().BorderLeft(true).BorderForeground(lipgloss.Color(currentTheme.Accent)).PaddingLeft(1)
+	styles := newProposalReviewStyles()
 	textWidth := maxInt(m.menuWidth()-4, 1)
 	for i, row := range n.review.Plan.Proposals {
 		context := n.proposalContext(row)
 		if i > 0 {
 			fmt.Fprintln(&b)
 		}
-		itemHeading := fmt.Sprintf("PR #%d %s", row.Number, sanitize(row.Title))
-		if styled, ok := styledItemHeading(itemHeading, lipgloss.Color(currentTheme.Info), nil); ok {
-			itemHeading = styled
-		} else {
-			itemHeading = target.Render(itemHeading)
-		}
-		fmt.Fprintf(&b, "%s\n", inset(itemHeading))
+		styles.writeItemHeading(&b, "PR", row.Number, row.Title)
 		if len(n.review.Plan.Proposals) > 1 {
-			fmt.Fprintf(&b, "%s\n", inset(muted.Render(fmt.Sprintf("%d of %d", i+1, len(n.review.Plan.Proposals)))))
+			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render(fmt.Sprintf("%d of %d", i+1, len(n.review.Plan.Proposals)))))
 		}
-		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Proposed action")))
+		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Proposed action")))
 		if row.Status == "rejected" {
-			fmt.Fprintf(&b, "%s\n", inset(muted.Render("This proposal was rejected; no GitHub action is available.")))
+			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("This proposal was rejected; no GitHub action is available.")))
 		} else if context != nil && !context.Current || n.contextError != "" {
-			fmt.Fprintf(&b, "%s\n", inset(danger.Render("Changed context: prepare a fresh proposal and review.")))
+			fmt.Fprintf(&b, "%s\n", inset(styles.danger.Render("Changed context: prepare a fresh proposal and review.")))
 		} else if row.Status != "pending" || !row.Active || context == nil || !context.Current || n.contextBusy || n.contextError != "" {
-			fmt.Fprintf(&b, "%s\n", inset(action.Render("Approval unavailable until the saved local context is current.")))
+			fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Approval unavailable until the saved local context is current.")))
 		} else {
-			fmt.Fprintf(&b, "%s\n", inset(action.Render("Publish the comment below, then close this PR.")))
+			fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Publish the comment below, then close this PR.")))
 		}
 		fmt.Fprintf(&b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), textWidth)))
 		if row.DecisionQuestion != "" {
@@ -1198,72 +1253,58 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		}
 		if row.DecisionResolution != nil {
 			resolution := row.DecisionResolution
-			fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Human decision resolution")))
+			fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Human decision resolution")))
 			fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(resolution.By)+" · At: "+sanitize(resolution.At), textWidth)))
 			fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(resolution.Reason), textWidth)))
 		}
 		if row.Reference != nil {
-			fmt.Fprintf(&b, "%s\n", inset(muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))
+			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))
 		}
-		commentTitle := "Comment to publish"
-		if row.Status == "rejected" {
-			commentTitle = "Proposed comment (not published)"
-		}
-		fmt.Fprintf(&b, "\n%s\n", inset(section.Render(commentTitle)))
-		fmt.Fprintf(&b, "%s\n", inset(comment.Render(wrapText(sanitize(row.Comment), textWidth-2))))
-		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Human context")))
+		styles.writeComment(&b, row.Comment, row.Status, textWidth)
+		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Human context")))
 		if n.contextBusy {
-			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Reading current local guidance…")))
+			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Reading current local guidance…")))
 		} else if n.contextError != "" {
-			fmt.Fprintf(&b, "%s\n", inset(action.Render(n.contextError)))
+			fmt.Fprintf(&b, "%s\n", inset(styles.action.Render(n.contextError)))
 		} else if context == nil {
-			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Local guidance has not been checked.")))
+			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Local guidance has not been checked.")))
 		} else {
 			if !context.Current && row.Status == "pending" {
 				detail := strings.TrimSuffix(context.Reason, "; prepare a fresh proposal and review")
-				fmt.Fprintf(&b, "%s\n", inset(action.Render(wrapText("Why: "+sanitize(detail), textWidth))))
+				fmt.Fprintf(&b, "%s\n", inset(styles.action.Render(wrapText("Why: "+sanitize(detail), textWidth))))
 			}
 			for _, block := range context.guidanceBlocks() {
-				fmt.Fprintf(&b, "\n%s\n", inset(muted.Bold(true).Render(sanitize(block.title))))
+				fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Bold(true).Render(sanitize(block.title))))
 				for _, line := range block.lines {
 					fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(line), textWidth)))
 				}
 			}
 			if context.LatestRejection != nil && row.Status != "rejected" {
-				fmt.Fprintf(&b, "\n%s\n", inset(muted.Bold(true).Render("Earlier objection · By: "+sanitize(context.LatestRejection.By))))
+				fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Bold(true).Render("Earlier objection · By: "+sanitize(context.LatestRejection.By))))
 				fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(context.LatestRejection.Reason), textWidth)))
 			}
 			if context.ItemContext.Pagination.Offset > 0 || context.ItemContext.Pagination.Next != nil {
-				fmt.Fprintf(&b, "%s\n", inset(muted.Render(fmt.Sprintf("Local context page %d · [ and ] move between pages", context.ItemContext.Pagination.Offset/10+1))))
+				fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render(fmt.Sprintf("Local context page %d · [ and ] move between pages", context.ItemContext.Pagination.Offset/10+1))))
 			}
 		}
 		if row.Reconsideration != nil {
-			fmt.Fprintf(&b, "\n%s\n", inset(muted.Bold(true).Render("Reconsideration · "+sanitize(row.Reconsideration.By))))
+			fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Bold(true).Render("Reconsideration · "+sanitize(row.Reconsideration.By))))
 			fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(row.Reconsideration.Reason), textWidth)))
 		}
-		fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Selected evidence")))
-		for _, line := range proposalEvidenceLines(row) {
-			value := sanitize(line.item)
-			if line.complete {
-				value += " " + success.Render("Complete")
-			} else if line.missing != "" {
-				value += " " + danger.Render("Not found:") + " " + sanitize(line.missing)
-			}
-			fmt.Fprintf(&b, "%s\n", inset(ansi.Wrap(value, textWidth, "")))
-		}
+		styles.writeEvidence(&b, row.Inputs, textWidth)
 		if row.Rejection != nil {
-			fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Rejection")))
+			fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Rejection")))
 			fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(row.Rejection.By)+" · At: "+sanitize(row.Rejection.At), textWidth)))
 			fmt.Fprintf(&b, "%s\n", inset(wrapText(orPlaceholder(sanitize(row.Rejection.Reason), "(no reason given)"), textWidth)))
 		}
 		if row.Outcome != nil {
-			fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Previous attempt")))
-			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Comment: "+sanitize(row.Outcome.Comment.Status))))
-			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Close: "+sanitize(row.Outcome.StateChange.Status))))
-			fmt.Fprintf(&b, "%s\n", inset(muted.Render("Write request: "+sanitize(row.Outcome.RequestID))))
+			fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Previous attempt")))
+			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Comment: "+sanitize(row.Outcome.Comment.Status))))
+			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Close: "+sanitize(row.Outcome.StateChange.Status))))
+			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Write request: "+sanitize(row.Outcome.RequestID))))
 		}
 		if len(n.review.Plan.Proposals) > 1 {
-			fmt.Fprintf(&b, "\n%s\n", inset(muted.Render(proposalRevisionFooter(row, textWidth))))
+			fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Render(proposalRevisionFooter(row, textWidth))))
 		}
 	}
 	height := m.mainHeight()
@@ -1300,6 +1341,24 @@ func (m model) autoCloseReviewView() string {
 	return view + "\n" + inset(mutedText(footer))
 }
 
+func proposalStatusSummary(operation, status string) string {
+	if operation == "" {
+		operation = "action"
+	}
+	name := strings.ToUpper(operation[:1]) + operation[1:]
+	switch status {
+	case "pending":
+		return name + " proposed"
+	case "executed":
+		return name + " completed"
+	case "uncertain":
+		return name + " outcome uncertain"
+	case "rejected":
+		return name + " proposal rejected"
+	}
+	return name + " proposal"
+}
+
 func renderNotificationChoice(n notificationsUI, choice notificationChoice, card func(string, string, cardMark)) {
 	switch choice.kind {
 	case "item":
@@ -1309,30 +1368,24 @@ func renderNotificationChoice(n notificationsUI, choice notificationChoice, card
 		if choice.proposal >= 0 {
 			row := n.proposals.Rows[choice.proposal]
 			title = row.Title
-			switch row.Status {
-			case "pending":
-				parts = append(parts, "Closure proposed")
-			case "executed":
-				parts = append(parts, "Comment and closure completed")
-			case "uncertain":
-				parts = append(parts, "Closure outcome uncertain")
-			case "rejected":
-				parts = append(parts, "Closure proposal rejected")
-			}
+			parts = append(parts, proposalStatusSummary("close", row.Status))
 		}
 		if choice.actionProposal >= 0 {
 			row := n.actions.Rows[choice.actionProposal]
 			if title == "" {
 				title = row.Title
 			}
-			switch row.Status {
-			case "pending":
-				parts = append(parts, "Suggested "+row.Operation+" · "+row.Action)
-			case "executed":
-				parts = append(parts, "Action completed · "+row.Action)
-			case "uncertain":
-				parts = append(parts, "Action outcome uncertain")
+			parts = append(parts, proposalStatusSummary(row.Operation, row.Status))
+			if row.Action != row.Operation {
+				parts = append(parts, "Action: "+row.Action)
 			}
+		}
+		if choice.suggestion >= 0 {
+			row := n.suggestions[choice.suggestion]
+			if title == "" {
+				title = row.Title
+			}
+			parts = append(parts, "Suggested "+row.Action+" · exact action needed")
 		}
 		if choice.tracked >= 0 {
 			row := n.tracked.Rows[choice.tracked]
@@ -1380,16 +1433,22 @@ func renderNotificationChoice(n notificationsUI, choice notificationChoice, card
 			label = "✓ " + label
 		}
 		mark := cardMark{}
-		if n.choiceNeeds(choice) {
+		if choice.suggestion >= 0 && choice.proposal < 0 && choice.actionProposal < 0 && (choice.tracked < 0 || n.tracked.Rows[choice.tracked].NewCount == 0) {
+			mark = cardMark{text: "SUGGESTED", color: currentTheme.Warning}
+		} else if n.choiceNeeds(choice) {
 			mark = cardMark{text: "NEW", color: currentTheme.Info}
-		} else if choice.proposal >= 0 {
-			mark = cardMark{text: "PR", color: currentTheme.Warning}
+		} else if choice.proposal >= 0 || choice.actionProposal >= 0 {
+			mark = cardMark{text: "ACTION", color: currentTheme.Warning}
 		}
 		card(label, strings.Join(parts, " · "), mark)
 	case "tracked-prev", "attention-prev", "closure-prev":
 		card("Previous saved items", "Show the preceding saved page", cardMark{})
 	case "tracked-more", "attention-more", "closure-more":
 		card("More saved items", "Show the next saved page here", cardMark{})
+	case "suggestion-prev":
+		card("Previous suggested actions", "Show the preceding saved suggestions", cardMark{})
+	case "suggestion-more":
+		card("More suggested actions", "Show the next saved suggestions", cardMark{})
 	}
 }
 

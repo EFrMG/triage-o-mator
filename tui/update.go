@@ -175,6 +175,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.items = msg.items
+		if m.notifications.open {
+			m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, m.notifications.proposals, m.notifications.actions)
+			if m.notifications.suggestionOffset >= len(m.notifications.suggestions) {
+				m.notifications.suggestionOffset = maxInt((len(m.notifications.suggestions)-1)/suggestedActionPageSize*suggestedActionPageSize, 0)
+			}
+		}
 		if !m.notificationPR.open && m.detail.key.Number > 0 && !m.detail.blockLegacy && m.detail.enriched.Evidence == nil {
 			if it, ok := m.findItem(m.detail.key); ok {
 				m.detail.item.State = it.State

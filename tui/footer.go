@@ -278,11 +278,14 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.notifications.reviewBusy {
 			return []footerGroup{group("Notifications", hint{"", "preparing exact review…"}), group("Navigation", bind("dataset", keys.Corpus), hint{"Esc/h", "back"}, hint{"q", "quit"})}
 		}
-		notifications := group("Notifications", hint{"j/k/Tab", "select"}, hint{"Space", "tick proposal"}, hint{"a/A", "review closures"}, hint{"Enter/l/→", "open"})
+		notifications := group("Notifications", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open"})
 		choices := m.notifications.choices()
 		if len(choices) > 0 && m.notifications.selected < len(choices) {
 			choice := choices[m.notifications.selected]
 			if choice.kind == "item" {
+				if choice.suggestion >= 0 {
+					notifications.hints = append(notifications.hints, hint{"y", "prepare exact action"})
+				}
 				if choice.actionProposal >= 0 {
 					notifications.hints = append(notifications.hints, hint{"a", "review action"})
 					row := m.notifications.actions.Rows[choice.actionProposal]
@@ -291,7 +294,7 @@ func (m model) contextFooterGroups() []footerGroup {
 					}
 				}
 				if choice.proposal >= 0 {
-					notifications.hints = append(notifications.hints, hint{"y", "copy for agent"})
+					notifications.hints = append(notifications.hints, hint{"Space", "tick proposal"}, hint{"a/A", "review closures"}, hint{"y", "copy for agent"})
 					row := m.notifications.proposals.Rows[choice.proposal]
 					if row.Status == "pending" && row.Inputs != nil {
 						notifications.hints = append(notifications.hints, hint{"e", "edit proposal"})
@@ -319,7 +322,12 @@ func (m model) contextFooterGroups() []footerGroup {
 				notifications.hints = append(notifications.hints, bind("", keys.RejectEditor))
 			}
 		}
-		notifications.hints = append(notifications.hints, hint{"d", dismiss})
+		if len(choices) > 0 && m.notifications.selected < len(choices) {
+			choice := choices[m.notifications.selected]
+			if choice.kind == "item" && (choice.proposal >= 0 || choice.actionProposal >= 0 || choice.tracked >= 0 || choice.attention >= 0 || choice.closure >= 0) {
+				notifications.hints = append(notifications.hints, hint{"d", dismiss})
+			}
+		}
 		return []footerGroup{notifications, group("Navigation", bind("dataset", keys.Corpus), hint{"Esc/h", "back"}, hint{"q", "quit"})}
 	case m.corpus.open:
 		if m.corpus.busy {

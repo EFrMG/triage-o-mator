@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -223,69 +222,74 @@ func (m model) actionReviewView() string {
 		return ""
 	}
 	row := review.row
-	width := maxInt(m.cardWidth()-2, 1)
+	styles := newProposalReviewStyles()
+	width := maxInt(m.menuWidth()-4, 1)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\n", inset(titleBar("Action proposal", fmt.Sprintf("%s #%d", strings.ToUpper(row.Kind), row.Number), m.menuWidth())))
-	fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(row.Title), width)))
-	fmt.Fprintf(&b, "\n%s\n", inset(wrapText("Action: "+sanitize(row.Action)+" · "+sanitize(row.Operation), width)))
+	title := "Action proposal"
+	if row.Status == "rejected" {
+		title = "Rejected action proposal"
+	}
+	fmt.Fprintf(&b, "%s\n\n", inset(titleBar(title, m.repo, m.menuWidth())))
+	kind := "Issue"
+	if row.Kind == "pr" {
+		kind = "PR"
+	}
+	styles.writeItemHeading(&b, kind, row.Number, row.Title)
+	fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Proposed action")))
+	if row.Status == "rejected" {
+		fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("This proposal was rejected; no GitHub action is available.")))
+	} else if review.context != nil && !review.context.Current || review.problem != "" {
+		fmt.Fprintf(&b, "%s\n", inset(styles.danger.Render("Changed context: prepare a fresh proposal and review.")))
+	} else if row.Status != "pending" || !row.Active || review.context == nil || !review.context.Current || review.busy {
+		fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Approval unavailable until the saved local context is current.")))
+	} else {
+		operation := "Publish the comment below."
+		if row.Operation == "close" || row.Operation == "reopen" {
+			operation = "Publish the comment below, then " + row.Operation + " this " + kind + "."
+		}
+		fmt.Fprintf(&b, "%s\n", inset(styles.action.Render(operation)))
+	}
 	fmt.Fprintf(&b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), width)))
 	if row.DecisionQuestion != "" {
-		fmt.Fprintf(&b, "\n%s\n", inset(wrapText("Question for this action: "+sanitize(row.DecisionQuestion), width)))
+		fmt.Fprintf(&b, "%s\n", inset(wrapText("Question for this action: "+sanitize(row.DecisionQuestion), width)))
 	}
 	if row.DecisionResolution != nil {
 		resolution := row.DecisionResolution
-		fmt.Fprintf(&b, "\n%s\n", inset(wrapText("Human decision resolved by "+sanitize(resolution.By)+" at "+sanitize(resolution.At), width)))
+		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Human decision resolution")))
+		fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(resolution.By)+" · At: "+sanitize(resolution.At), width)))
 		fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(resolution.Reason), width)))
 	}
-	fmt.Fprintf(&b, "\n%s\n", inset("Exact comment:"))
-	fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(row.Comment), width)))
-	if row.Inputs != nil {
-		fmt.Fprintf(&b, "\n%s\n", inset(fmt.Sprintf("Selected evidence: %d snapshot(s)", len(row.Inputs.Evidence))))
-		for _, selected := range row.Inputs.Evidence {
-			fmt.Fprintf(&b, "%s\n", inset(wrapText(fmt.Sprintf("%s #%d · %s", selected.Kind, selected.Number, selected.SnapshotID), width)))
-			names := make([]string, 0, len(selected.Components))
-			for name := range selected.Components {
-				names = append(names, name)
-			}
-			sort.Strings(names)
-			for _, name := range names {
-				component := selected.Components[name]
-				fmt.Fprintf(&b, "%s\n", inset(wrapText("  "+name+": "+component.Status, width)))
-			}
-		}
-		for _, gap := range row.Inputs.EvidenceGaps {
-			fmt.Fprintf(&b, "%s\n", inset(wrapText("Gap: "+sanitize(gap), width)))
-		}
-	}
-	if review.context != nil {
+	styles.writeComment(&b, row.Comment, row.Status, width)
+	fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Human context")))
+	if review.context == nil {
+		fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Local guidance has not been checked.")))
+	} else {
 		if !review.context.Current {
-			label := "Changed context: "
-			if row.Status != "pending" {
-				label = "Saved outcome: "
-			}
-			fmt.Fprintf(&b, "\n%s\n", inset(wrapText(label+sanitize(review.context.Reason), width)))
-		} else {
-			fmt.Fprintf(&b, "\n%s\n", inset("Current local guidance:"))
-			for _, source := range review.context.ItemContext.Rows {
-				for _, field := range []string{"action", "reason", "agent_notes", "reviewer_notes", "notes"} {
-					if value := contextField(source.Fields, field); value != "" {
-						fmt.Fprintf(&b, "%s\n", inset(wrapText(source.Kind+" "+field+": "+sanitize(value), width)))
-					}
-				}
+			fmt.Fprintf(&b, "%s\n", inset(styles.action.Render(wrapText("Why: "+sanitize(review.context.Reason), width))))
+		}
+		context := autoCloseContext{ItemContext: review.context.ItemContext}
+		for _, block := range context.guidanceBlocks() {
+			fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Bold(true).Render(sanitize(block.title))))
+			for _, line := range block.lines {
+				fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(line), width)))
 			}
 		}
 	}
+	styles.writeEvidence(&b, row.Inputs, width)
 	if review.problem != "" {
-		fmt.Fprintf(&b, "\n%s\n", inset(wrapText("Action unavailable: "+sanitize(review.problem), width)))
+		fmt.Fprintf(&b, "\n%s\n", inset(styles.danger.Render(wrapText("Action unavailable: "+sanitize(review.problem), width))))
 	}
 	if review.approval != "" {
-		fmt.Fprintf(&b, "\n%s\n", inset("Exact review is ready. Press a again to publish."))
+		fmt.Fprintf(&b, "\n%s\n", inset(styles.action.Render("Exact review is ready. Press a again to publish.")))
 	}
 	if row.Outcome != nil {
-		fmt.Fprintf(&b, "\n%s\n", inset("Previous attempt: comment "+sanitize(row.Outcome.Comment.Status)+", state "+sanitize(row.Outcome.StateChange.Status)))
+		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Previous attempt")))
+		fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Comment: "+sanitize(row.Outcome.Comment.Status))))
+		fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("State: "+sanitize(row.Outcome.StateChange.Status))))
 	}
-	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(m.mainHeight()))
+	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(maxInt(m.mainHeight()-1, 1)))
 	vp.SetContent(b.String())
 	vp.SetYOffset(review.scroll)
-	return vp.View()
+	footer := proposalRevisionFooter(autoCloseRow{UpdatedAt: row.UpdatedAt, HeadSHA: row.HeadSHA}, maxInt(m.cardWidth()-1, 1))
+	return vp.View() + "\n" + inset(styles.muted.Render(footer))
 }

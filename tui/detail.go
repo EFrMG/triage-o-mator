@@ -368,13 +368,9 @@ func (d *detailModel) renderActive() {
 	}
 
 	if evidence := d.enriched.Evidence; evidence != nil && !d.notificationOnly {
-		id := evidence.SnapshotID
-		if id == "" {
-			id = "none"
-		}
-		notice := "Fixed packet snapshot: " + id + ". Coverage recorded at creation, not current GitHub state."
+		notice := "Fixed evidence packet. Coverage was recorded when it was created; GitHub may have changed."
 		if d.enriched.CachedRead {
-			notice = "Cache read (" + evidence.Mode + "), snapshot: " + id + ". Recorded evidence, not guaranteed current GitHub state."
+			notice = "Saved evidence (" + evidence.Mode + "). Recorded observation, not guaranteed current GitHub state."
 			if c := evidence.Components[component]; c != nil {
 				notice += "\n" + component + ": " + c.Status + "; observed " + c.FetchedAt
 			}

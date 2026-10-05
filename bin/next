@@ -80,9 +80,10 @@ def suggestions(ledger):
 
     pending = [r for r in open_items if has_decision(r) and not r["reviewed"]]
     if pending:
-        closes = sum(1 for r in pending if r["action"].startswith("close-"))
-        add("human", f"Review {len(pending)} triaged decisions ({closes} would close something)",
-            "TUI: Pending Review (a approves, Ctrl-S corrects); or bin/export-csv --pending-review, edit, bin/import-csv --by <you>",
+        closes = sum(1 for r in pending if r["action"] == "close" or r["action"].startswith("close-"))
+        sample = ", ".join(f"{r['kind']} #{r['number']}" for r in pending[:3])
+        add("human", f"Review {len(pending)} triaged decisions ({closes} suggest closing)",
+            f"TUI: All Items (search {sample}, a confirms a saved call); or bin/export-csv --pending-review, edit, bin/import-csv --by <you>",
             "review remains separate from repository-enabled label automation and action-write approval")
 
     unreviewed_code = [r for r in open_items if r["kind"] == "pr" and (r.get("category") in CODE_REVIEW_CATEGORIES or any(name in CODE_REVIEW_CATEGORIES for name in r.get("proposed_labels") or []))

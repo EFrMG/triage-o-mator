@@ -3,7 +3,7 @@ package main
 import "sort"
 
 // Tab defines one sidebar entry: a name and how to derive its item list from the full ledger.
-// It filters mirror bin/report's sections exactly so the TUI's counts and the markdown report always agree.
+// Its filters define the durable item lists shown in the TUI.
 type Tab struct {
 	Name   string
 	Filter func([]Item, Taxonomy) []Item
@@ -58,38 +58,16 @@ func untriagedOpen(items []Item) []Item {
 
 const (
 	untriagedTab = iota
-	pendingReviewTab
 	mergeReadyTab
-	closeCandidatesTab
 	allItemsTab
 )
 
 var tabs = []Tab{
 	{Name: "Untriaged", Filter: func(items []Item, _ Taxonomy) []Item { return untriagedOpen(items) }},
-	{Name: "Pending Review", Filter: func(items []Item, _ Taxonomy) []Item {
-		var out []Item
-		for _, it := range openOnly(items) {
-			if it.PendingReview() {
-				out = append(out, it)
-			}
-		}
-
-		return byCreatedAtAsc(out)
-	}},
 	{Name: "Merge-Ready PRs", Filter: func(items []Item, _ Taxonomy) []Item {
 		var out []Item
 		for _, it := range openOnly(items) {
 			if it.MergeReadyHighConfidence() {
-				out = append(out, it)
-			}
-		}
-
-		return byCreatedAtAsc(out)
-	}},
-	{Name: "Close Candidates", Filter: func(items []Item, taxonomy Taxonomy) []Item {
-		var out []Item
-		for _, it := range openOnly(items) {
-			if it.CloseCandidate(taxonomy) {
 				out = append(out, it)
 			}
 		}

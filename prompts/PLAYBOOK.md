@@ -97,9 +97,9 @@ The ledger has two layers of state, deliberately kept separate:
 1. **Triaged** (one or more `proposed_labels`, an `action`, or a legacy category saved with confidence, reason and optional `agent_notes`): an agent or a human has made a first-pass call. A label-first pass may leave `action` blank until action assessment.
 2. **Reviewed** (`reviewed: true`, `reviewed_by`, `reviewed_at`): a human has confirmed that call. It is distinct from repository-enabled label automation and approval of a conversation or state write.
 
-Nothing here auto-escalates a triaged item to "reviewed". The path to review is manual revision, either in the TUI’s **Pending Review** view or via a spreadsheet. The [TUI tutorial](docs/tutorial.md#7-review-proposed-decisions) covers the controls.
+Nothing here auto-escalates a triaged item to "reviewed". A person can confirm a saved call from **All Items** or review unreviewed calls through a spreadsheet. Action preparation and exact write approval happen in **Notifications**. The [TUI tutorial](docs/tutorial.md#7-review-proposed-decisions) covers the controls.
 
-A human can save and approve a decision together in the TUI without a second reviewer or a visit to Pending Review. This is explicit human confirmation, not automatic approval of agent work. `bin/apply --reviewed` supports the same operation; use `--by <author>` and, when the reviewer differs, `--reviewed-by <human>`. Ground rule #2 still governs an agent invoking either review flag.
+A human can save and approve a decision together in the TUI without a second reviewer. This is explicit human confirmation, not automatic approval of agent work. `bin/apply --reviewed` supports the same operation; use `--by <author>` and, when the reviewer differs, `--reviewed-by <human>`. Ground rule #2 still governs an agent invoking either review flag.
 
 For spreadsheet review:
 

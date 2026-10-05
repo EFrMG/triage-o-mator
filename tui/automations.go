@@ -195,7 +195,7 @@ func (m model) actionPrompt(action automationAction) string {
 	return m.yankHeader("Automated action pass") + fmt.Sprintf(`
 Please prepare one bounded %s action pass for %s from %s.
 
-Follow prompts/automated-actions.md. Ask me for selected item keys and a read budget before acquiring evidence. Read each item's saved decision, human guidance, earlier objections and selected evidence. Draft the exact public comment in a UTF-8 file, then save the proposal through bin/auto-close for a PR closure or bin/action-proposals for every other writing operation. Do not mark the ledger decision reviewed.
+Follow prompts/automated-actions.md. Ask me for selected item keys when the scope is unclear, then choose a bounded script budget yourself and use saved evidence first. Read each item's saved decision, human guidance, earlier objections and selected evidence. Draft the exact public comment in a UTF-8 file, then save the proposal through bin/auto-close for a PR closure or bin/action-proposals for every other writing operation. Do not mark the ledger decision reviewed.
 
 This repository currently sets %s to %s. Preview only the named keys with bin/action-pass and inspect the exact target, operation, comment, evidence and mode. Run only that matching preview. Stage any disputed or incomplete item for a person even if the type is configured to execute. Stop on an uncertain write and report each outcome. Do not change code or PR diffs.
 `, action.Name, m.repo, m.installRoot, action.Name, action.Mode)

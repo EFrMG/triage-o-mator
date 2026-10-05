@@ -35,7 +35,7 @@ target-repo/
     AGENTS.md -> ~/src/triage-o-mator/…      symlink   ignored
     prompts/auto-triage.md -> …              symlink   ignored (one per prompt)
     config/repo                              generated tracked
-    config/taxonomy.json, taxonomy.md        copies    tracked
+    config/taxonomy.json                     copy      tracked
     config/theme.local                                 ignored
     data/<owner>/<repo>/ledger.jsonl                   tracked
     data/<owner>/<repo>/groups/, not-duplicates.jsonl  tracked
@@ -56,9 +56,11 @@ A tracked install creates the target repository's `AGENTS.md` when it is missing
 
 Installation reads that repository's GitHub label definitions into `config/taxonomy.json` through a read-only GET. `label_catalog.observed_at` records the successful observation time. `--offline` skips the read; a new catalog stays `pending`, while an existing catalog keeps its dated observation. A failed GitHub read also leaves the install usable with a pending or previously observed catalog. Run `triage-o-mator/bin/label-catalog sync` for an explicit online refresh, or `show` to inspect the saved catalog offline. `sync --dry-run` previews the result without saving it. The sync retains local `guidance` by label ID, records prior names, and moves removed labels into `retired`; it never changes label definitions on GitHub or rewrites saved decisions.
 
-The TUI's **Settings** menu has separate **Labels**, **Actions** and **Automations** cards. Labels and Actions accept `n` to create an entry and `e` or Enter to edit the selected entry in a floating editor. Action editors add a GitHub operation field: use Tab to focus it and Left or Right to choose `comment`, `close`, `reopen`, or the explicit `none` choice. An action without a recognized operation is visible in Settings but cannot be selected for a new decision until mapped. `Ctrl-E` opens `$EDITOR` for the focused Title or Description field. **Actions** saves locally through `bin/taxonomy-settings`; choosing an action or reviewing a decision does not write to GitHub. **Labels** changes GitHub label definitions: `Ctrl-P` reads current GitHub values and previews them alongside the proposed values, then `Ctrl-S` confirms the change. From the editor, `Ctrl-S` opens that preview first, so a second `Ctrl-S` confirms it. A changed GitHub label invalidates the preview. New labels use a neutral `ededed` color. Press `r` in **Labels** to refresh the saved catalog. A pending catalog still allows action editing and new label creation.
+The TUI's **Settings** menu has separate **Labels**, **Actions** and **Automations** cards. Labels and Actions accept `n` to create an entry and `e` or Enter to edit the selected entry in a floating editor. Action editors add a GitHub operation field: use Tab to focus it and Left or Right to choose `comment`, `close`, `reopen`, or the explicit `none` choice. An action without a recognized operation is visible in Settings but cannot be selected for a new decision until mapped. `Ctrl-E` opens `$EDITOR` for the focused Title or Description field. **Actions** saves locally through `bin/taxonomy-settings`; choosing an action or reviewing a decision does not write to GitHub. **Labels** changes GitHub label definitions: `Ctrl-P` reads current GitHub values and previews them alongside the proposed values, then `Ctrl-S` confirms the change. From the editor, `Ctrl-S` opens that preview first, so a second `Ctrl-S` confirms it. A changed GitHub label invalidates the preview. New individual labels use a neutral `ededed` color. Press `r` in **Labels** to refresh the saved catalog. Press `i` to preview **Initialize defaults**, showing each missing starter label's exact name, description, and color; `Ctrl-S` creates those labels after review. Existing labels stay unchanged. A pending catalog still allows action editing and label creation.
 
 `bin/label-definitions --expected-repo OWNER/REPO --name NAME --description TEXT` previews a new label without writing it. To edit one, also pass its `--label-id`, `--expected-name`, and `--expected-description` from the saved list. The output contains a `preview_sha256`; repeating the exact command with `--apply --preview-sha256 HASH` rechecks GitHub and applies that preview. The Settings editor handles these steps interactively.
+
+`bin/label-definitions --expected-repo OWNER/REPO --initialize-defaults` previews the missing starter labels. Repeat it with `--apply --preview-sha256 HASH` from that preview to create them. The script rechecks the live catalog before writing and refreshes the local catalog after each successful creation, so a partial run remains visible. See [taxonomy guidance](taxonomy.md) for the starter set and decision guidance.
 
 ### Automations and item labeling
 
@@ -150,7 +152,7 @@ To move or back up an install, preserve its `config/`, `data/` and `reports/`; `
 
 ## Making it yours
 
-`config/taxonomy.json` and `config/taxonomy.md` are committed with your repository. The installer reconciles the JSON label catalog from GitHub on each online run while preserving local label guidance and the existing category/action lists. The Markdown guidance remains your own copy. Local label guidance can be edited in JSON until Settings provides an editor for it.
+`config/taxonomy.json` is committed with your repository. The installer reconciles its label catalog from GitHub on each online run while preserving local label guidance and the existing category/action lists. General guidance lives in the linked [taxonomy guide](taxonomy.md). Local label guidance can be edited in JSON until Settings provides an editor for it.
 
 Prompts are symlinked one file at a time, so you can make them yours without touching the checkout. A directory symlink would put edits into the shared tool checkout and affect every install. The installer regenerates the ignored-symlink list between managed markers while leaving your own files visible to Git:
 

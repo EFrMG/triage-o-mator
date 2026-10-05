@@ -16,6 +16,16 @@ from _triage import REPO, TAXONOMY_PATH
 
 
 NEW_LABEL_COLOR = "ededed"
+STARTER_LABELS = [
+    {"name": "bug", "description": "Something is not working as expected", "color": "d73a4a"},
+    {"name": "enhancement", "description": "A proposed improvement or new capability", "color": "a2eeef"},
+    {"name": "documentation", "description": "Documentation needs to be added or improved", "color": "0075ca"},
+    {"name": "question", "description": "A request for information or clarification", "color": "d876e3"},
+    {"name": "duplicate", "description": "Substantially overlaps another item", "color": "cfd3d7"},
+    {"name": "needs-info", "description": "More information is needed to assess this item", "color": "fbca04"},
+    {"name": "verified", "description": "The reported result or proposed change has been checked", "color": "0e8a16"},
+    {"name": "ready", "description": "Ready for a maintainer decision or next step", "color": "7057ff"},
+]
 
 
 def fail(parser, message):
@@ -41,16 +51,84 @@ def plan_change(parser, args, labels):
 
     plan = {"repository": REPO, "operation": "create" if current is None else "edit", "method": method,
             "endpoint": endpoint, "current": current, "proposed": proposed}
-    encoded = json.dumps(plan, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    plan["preview_sha256"] = hashlib.sha256(encoded).hexdigest()
+    plan["preview_sha256"] = plan_hash(plan)
     return plan
+
+
+def plan_hash(plan):
+    encoded = json.dumps(plan, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def plan_defaults(labels):
+    existing = {row["name"].casefold() for row in labels}
+    plan = {"repository": REPO, "operation": "initialize-defaults", "current": labels,
+            "create": [row for row in STARTER_LABELS if row["name"].casefold() not in existing]}
+    plan["preview_sha256"] = plan_hash(plan)
+    return plan
+
+
+def save_catalog(parser, labels):
+    with locked(TAXONOMY_PATH):
+        try:
+            taxonomy = json.loads(TAXONOMY_PATH.read_text())
+            if not isinstance(taxonomy, dict):
+                raise ValueError("taxonomy is not a JSON object")
+            reconcile_label_catalog(taxonomy, REPO, labels, now_iso())
+            with atomic_writer(TAXONOMY_PATH) as out:
+                out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
+        except (OSError, ValueError) as error:
+            fail(parser, f"GitHub saved the label, but local refresh failed: {error}; sync Labels before retrying")
+
+
+def write_label(parser, method, endpoint, body):
+    try:
+        response = subprocess.run(["gh", "api", "--method", method, endpoint, "--input", "-"],
+                                  input=json.dumps(body, ensure_ascii=False), capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        fail(parser, f"GitHub label write may have been attempted: {error}; refresh Labels before retrying")
+    if response.returncode:
+        fail(parser, f"GitHub label write failed: {response.stderr.strip() or 'gh api failed'}; refresh Labels before retrying")
+
+    try:
+        written = json.loads(response.stdout)
+        if not isinstance(written, dict) or type(written.get("id")) is not int or written["id"] <= 0:
+            raise ValueError("unexpected label response")
+        return written
+    except (ValueError, TypeError, json.JSONDecodeError) as error:
+        fail(parser, f"GitHub may have saved the label, but its response was invalid: {error}; refresh Labels before retrying")
+
+
+def apply_defaults(parser, plan):
+    created = []
+    labels = plan["current"]
+    for proposed in plan["create"]:
+        if any(row["name"].casefold() == proposed["name"].casefold() for row in labels):
+            fail(parser, f"{proposed['name']} now exists; preview Initialize defaults again")
+
+        written = write_label(parser, "POST", f"repos/{REPO}/labels", proposed)
+        try:
+            labels = read_github_labels(REPO)
+            if not any(row["id"] == written["id"] and all(row[key] == proposed[key] for key in ("name", "description", "color")) for row in labels):
+                raise ValueError(f"{proposed['name']} is absent or changed in the refreshed GitHub list")
+        except ValueError as error:
+            fail(parser, f"GitHub may have saved {proposed['name']}, but refresh failed: {error}; sync Labels before retrying")
+
+        save_catalog(parser, labels)
+        created.append({"id": written["id"], **proposed})
+
+    if not created:
+        save_catalog(parser, labels)
+
+    return created
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected-repo", required=True)
-    parser.add_argument("--name", required=True)
-    parser.add_argument("--description", required=True)
+    parser.add_argument("--name")
+    parser.add_argument("--description")
+    parser.add_argument("--initialize-defaults", action="store_true", help="preview or create only missing starter labels")
     parser.add_argument("--label-id", type=int)
     parser.add_argument("--expected-name")
     parser.add_argument("--expected-description")
@@ -59,10 +137,14 @@ def main():
     args = parser.parse_args()
     if args.expected_repo != REPO:
         parser.error("configured repository changed; reopen Settings")
-    if not args.name.strip() or args.name != args.name.strip() or "\n" in args.name or "\x00" in args.name:
-        parser.error("label name must be a nonempty single line")
-    if len(args.description) > 100 or "\n" in args.description or "\x00" in args.description:
-        parser.error("GitHub label description must be one line and at most 100 characters")
+    if args.initialize_defaults:
+        if any(value is not None for value in (args.name, args.description, args.label_id, args.expected_name, args.expected_description)):
+            parser.error("Initialize defaults does not accept an individual label change")
+    else:
+        if args.name is None or not args.name.strip() or args.name != args.name.strip() or "\n" in args.name or "\x00" in args.name:
+            parser.error("label name must be a nonempty single line")
+        if args.description is None or len(args.description) > 100 or "\n" in args.description or "\x00" in args.description:
+            parser.error("GitHub label description must be one line and at most 100 characters")
     if args.label_id is not None and (args.label_id <= 0 or args.expected_name is None or args.expected_description is None):
         parser.error("editing requires the displayed label identity, name and description")
     if args.label_id is None and (args.expected_name is not None or args.expected_description is not None):
@@ -74,26 +156,24 @@ def main():
         labels = read_github_labels(REPO)
     except ValueError as error:
         fail(parser, str(error))
-    plan = plan_change(parser, args, labels)
+    plan = plan_defaults(labels) if args.initialize_defaults else plan_change(parser, args, labels)
     if not args.apply:
         print(json.dumps(plan, indent=2, ensure_ascii=False))
         return
     if args.preview_sha256 != plan["preview_sha256"]:
         fail(parser, "the label change no longer matches its preview; preview it again")
 
+    if args.initialize_defaults:
+        created = apply_defaults(parser, plan)
+        print(json.dumps({"created": created, "preview_sha256": plan["preview_sha256"]}, ensure_ascii=False))
+        return
+
     body = {"name": args.name, "description": args.description, "color": NEW_LABEL_COLOR}
     if args.label_id is not None:
         body = {"new_name": args.name, "description": args.description}
+    written = write_label(parser, plan["method"], plan["endpoint"], body)
     try:
-        response = subprocess.run(["gh", "api", "--method", plan["method"], plan["endpoint"], "--input", "-"],
-                                  input=json.dumps(body, ensure_ascii=False), capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        fail(parser, f"GitHub label write may have been attempted: {error}; refresh Labels before retrying")
-    if response.returncode:
-        fail(parser, f"GitHub label write failed: {response.stderr.strip() or 'gh api failed'}")
-    try:
-        written = json.loads(response.stdout)
-        if not isinstance(written, dict) or type(written.get("id")) is not int or written.get("id") <= 0 or written.get("name") != args.name or (written.get("description") or "") != args.description or args.label_id is not None and written["id"] != args.label_id:
+        if written.get("name") != args.name or (written.get("description") or "") != args.description or args.label_id is not None and written["id"] != args.label_id:
             raise ValueError("unexpected label response")
         labels = read_github_labels(REPO)
         if not any(row["id"] == written["id"] and row["name"] == args.name and row["description"] == args.description for row in labels):
@@ -101,16 +181,7 @@ def main():
     except (ValueError, TypeError, json.JSONDecodeError) as error:
         fail(parser, f"GitHub may have saved the label, but refresh failed: {error}; refresh Labels before retrying")
 
-    with locked(TAXONOMY_PATH):
-        try:
-            taxonomy = json.loads(TAXONOMY_PATH.read_text())
-            if not isinstance(taxonomy, dict):
-                raise ValueError("taxonomy is not a JSON object")
-            reconcile_label_catalog(taxonomy, REPO, labels, now_iso())
-            with atomic_writer(TAXONOMY_PATH) as out:
-                out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
-        except (OSError, ValueError) as error:
-            fail(parser, f"GitHub saved the label, but local refresh failed: {error}; sync Labels before retrying")
+    save_catalog(parser, labels)
 
     print(json.dumps({"written": written["id"], "preview_sha256": plan["preview_sha256"]}))
 

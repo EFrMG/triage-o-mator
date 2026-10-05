@@ -187,6 +187,30 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	if m.settings.section != "label" || !strings.Contains(ansi.Strip(m.settingsView()), "Labels pending") {
 		t.Fatal("Labels did not show the pending catalog")
 	}
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "i"})
+	m = next.(model)
+	if cmd == nil || !m.settings.busy {
+		t.Fatal("Initialize defaults did not request a live preview")
+	}
+	defaults := labelDefaultsPlan{Repository: m.repo, Operation: "initialize-defaults", Create: []GitHubLabel{{Name: "bug", Description: "Something is broken", Color: "d73a4a"}}, PreviewSHA256: "defaults-preview"}
+	m = baselineSend(m, settingsDefaultsMsg{root: root, repo: "other/repo", request: m.settings.request, plan: defaults})
+	if m.settings.defaults != nil || !m.settings.busy {
+		t.Fatal("stale starter label preview opened Settings")
+	}
+	m = baselineSend(m, settingsDefaultsMsg{root: root, repo: m.repo, request: m.settings.request, plan: defaults})
+	if m.settings.defaults == nil || !strings.Contains(ansi.Strip(m.viewContent()), "Initialize defaults") || !strings.Contains(m.settingsDefaultsContent(), "Color: #d73a4a") {
+		t.Fatal("Initialize defaults did not show the exact missing label")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.settings.busy {
+		t.Fatal("Initialize defaults did not require confirmation after preview")
+	}
+	m.settings.busy = false
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.settings.defaults != nil {
+		t.Fatal("Initialize defaults preview did not close")
+	}
 	m.taxonomy.LabelCatalog = LabelCatalog{Repository: m.repo, Status: "observed", Labels: []GitHubLabel{{ID: 1, Name: "bug", Description: "Something is broken"}}}
 	labels := strings.Split(ansi.Strip(m.settingsView()), "\n")
 	if len(labels) != m.mainHeight() || !strings.Contains(labels[len(labels)-1], "1 of 1") {
@@ -198,7 +222,7 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	}
 	m.settings.editor.title.SetValue("defect")
 	m.settings.editor.description.SetValue("A reproducible defect")
-	next, cmd := m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 	m = next.(model)
 	if cmd == nil || !m.settings.busy {
 		t.Fatal("Ctrl-P did not request a live GitHub preview")

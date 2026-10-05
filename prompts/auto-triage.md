@@ -50,7 +50,7 @@ Keep it short and concrete:
 
 - counts by proposed label and action, and how many are `low` confidence or have a maintainer question in `agent_notes`;
 - anything that would close an item (`close`), listed by number, since those are the calls a reviewer must check first;
-- items that didn't fit the taxonomy well, and whether that suggests a taxonomy change (propose it; don't edit `config/taxonomy.*`);
+- items that didn't fit the taxonomy well, and whether that suggests a taxonomy change (propose it; don't edit `config/taxonomy.json`);
 - anything suspicious in the item text;
 - if many items need a maintainer decision, state the specific question for each; re-check any row where you cannot name one, without forcing the batch toward a quota;
 - then run `bin/next` and pass on its top suggestions.

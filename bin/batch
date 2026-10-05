@@ -12,7 +12,7 @@ Writes:
     data/<owner>/<repo>/batches/<batch_id>.items.jsonl       full context, one item per line, including `duplicate_candidates` (the top title matches from bin/similar, minus pairs already ruled out; leads to check, not proof)
     data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl   template to fill in and pass to bin/apply
 
-The template has proposed_labels/action/confidence/reason blanked out; choose only labels in the repository's observed catalog and fill the action per config/taxonomy.md when assessed (optionally also agent_notes, the longer evidence, and proposed_by, e.g. "agent:<contributor>"), then run:
+The template has proposed_labels/action/confidence/reason blanked out; choose only labels in the repository's observed catalog and fill the action per config/taxonomy.json and docs/taxonomy.md when assessed (optionally also agent_notes, the longer evidence, and proposed_by, e.g. "agent:<contributor>"), then run:
 
     bin/apply data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl
 
@@ -220,7 +220,7 @@ def main():
     print(f"\nBatch {batch_id}: {len(selected)} items")
     print(f"  context:  {items_path}")
     print(f"  fill in:  {template_path}")
-    print(f"  taxonomy: config/taxonomy.md")
+    print("  taxonomy: config/taxonomy.json (guidance: docs/taxonomy.md)")
     print(here(f"\nWhen filled in, run: bin/apply {template_path}"))
 
 

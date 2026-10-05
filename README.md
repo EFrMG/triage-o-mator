@@ -114,7 +114,7 @@ The paths below are relative to an install: `data/<owner>/<repo>/ledger.jsonl`, 
 
 ### Local records
 
-Each ledger row separates observed GitHub labels from proposed labels, and records a recommended action, confidence and reason, plus triage attribution and optional agent notes. Existing category values remain readable as legacy decisions. Separate review fields record whether a person confirmed the call and any reviewer notes; [the playbook](prompts/PLAYBOOK.md#two-stage-review) explains the distinction. Teams own their [taxonomy](config/taxonomy.md), with a [machine-readable copy](config/taxonomy.json) used by the TUI and scripts.
+Each ledger row separates observed GitHub labels from proposed labels, and records a recommended action, confidence and reason, plus triage attribution and optional agent notes. Existing category values remain readable as legacy decisions. Separate review fields record whether a person confirmed the call and any reviewer notes; [the playbook](prompts/PLAYBOOK.md#two-stage-review) explains the distinction. Each install owns its [taxonomy.json](config/taxonomy.json); [taxonomy guidance](docs/taxonomy.md) explains how to use it.
 
 The ledger and other transactional records use atomic replacement; reports and CSV exports do not. See [local storage and recovery](docs/storage.md).
 
@@ -132,17 +132,17 @@ bin/apply data/<owner>/<repo>/batches/<id>.decisions.jsonl --only-untriaged
 bin/report
 ```
 
-| Task                                      | Commands                                                                        |
-| ----------------------------------------- | ------------------------------------------------------------------------------- |
-| Install and refresh                       | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                  |
-| Prepare and review decisions              | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv`  |
-| Compare and group                         | `bin/similar`, `bin/not-duplicate`, `bin/group`                                 |
-| Read guidance and evidence                | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`         |
-| Edit action settings                      | `bin/taxonomy-settings`, `bin/action-policy`                                    |
-| Preview and edit GitHub label definitions | `bin/label-definitions`                                                         |
-| Preview and apply proposed labels         | `bin/item-labels`                                                               |
-| Propose and publish actions               | `bin/auto-close`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus` |
-| See progress and handoffs                 | `bin/stats`, `bin/next`, `bin/report`                                           |
+| Task                                       | Commands                                                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------- |
+| Install and refresh                        | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                  |
+| Prepare and review decisions               | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv`  |
+| Compare and group                          | `bin/similar`, `bin/not-duplicate`, `bin/group`                                 |
+| Read guidance and evidence                 | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`         |
+| Edit action settings                       | `bin/taxonomy-settings`, `bin/action-policy`                                    |
+| Preview, initialize and edit GitHub labels | `bin/label-definitions`                                                         |
+| Preview and apply proposed labels          | `bin/item-labels`                                                               |
+| Propose and publish actions                | `bin/auto-close`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus` |
+| See progress and handoffs                  | `bin/stats`, `bin/next`, `bin/report`                                           |
 
 The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md) and [comment publishing guide](docs/comment-plus.md) cover the commands and their limits.
 

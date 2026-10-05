@@ -500,6 +500,7 @@ func (m *model) layout() {
 	m.layoutGroupNote()
 	m.layoutGroupEdit()
 	m.layoutSettingsEditor()
+	m.layoutSettingsDefaults()
 	listW, _ := m.panelWidths()
 	if m.listReady {
 		m.list.SetSize(listW, maxInt(m.mainHeight()-listHeaderHeight, 1))
@@ -701,6 +702,9 @@ func (m model) viewContent() string {
 	}
 	if m.settings.open && m.settings.editor != nil {
 		body = m.settingsOverlay(body)
+	}
+	if m.settings.open && m.settings.defaults != nil {
+		body = m.settingsDefaultsOverlay(body)
 	}
 	if m.comment.open {
 		body = m.commentOverlay(body)

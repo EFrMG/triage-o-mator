@@ -138,6 +138,11 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{group("Quit", bind("discard drafts", keys.Quit), hint{"any key", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.lastError.open:
 		return []footerGroup{group("Error", bind("scroll", keys.Down, keys.Up), bind("page", keys.HalfDown, keys.HalfUp)), group("Navigation", bind("close", keys.Back), bind("exit", keys.ForceQuit))}
+	case m.settings.open && m.settings.defaults != nil:
+		if m.settings.busy {
+			return []footerGroup{group("Initialize defaults", hint{"", "working…"})}
+		}
+		return []footerGroup{group("Initialize defaults", hint{"↑/↓", "scroll"}, hint{"Ctrl-S", "create missing labels"}, hint{"Esc", "cancel"})}
 	case m.settings.open && m.settings.editor != nil:
 		if m.settings.busy {
 			return []footerGroup{group("Settings", hint{"", "working…"})}
@@ -172,7 +177,7 @@ func (m model) contextFooterGroups() []footerGroup {
 		}
 		settings := group("Settings", hint{"j/k", "select"}, hint{"n", "new"}, hint{"Enter/e", "edit"})
 		if m.settings.section == "label" {
-			settings.hints = append(settings.hints, hint{"r", "sync labels"})
+			settings.hints = append(settings.hints, hint{"r", "sync labels"}, hint{"i", "initialize defaults"})
 		}
 		return []footerGroup{settings, group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 	case m.notificationPR.open:

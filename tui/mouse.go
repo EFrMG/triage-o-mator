@@ -306,7 +306,7 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 	if m.themePicker.open {
 		return m.clickTheme(event, repeat)
 	}
-	if m.settings.open && m.settings.editor != nil {
+	if m.settings.open && (m.settings.editor != nil || m.settings.defaults != nil) {
 		return m, nil
 	}
 	if m.notificationPR.open || m.focus == FocusDetail && !m.groups.open && !m.batches.open && !m.dups.open && !m.notifications.open && !m.attention.open && !m.actionHistory.open && !m.corpus.open {
@@ -344,7 +344,7 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 
 	switch {
 	case m.settings.open:
-		if m.settings.editor != nil || m.settings.busy || event.Y < 3 {
+		if m.settings.editor != nil || m.settings.defaults != nil || m.settings.busy || event.Y < 3 {
 			return m, nil
 		}
 		row := (event.Y - 3) / cardHeight
@@ -834,7 +834,7 @@ func (m model) handleMouseWheel(event tea.Mouse) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.settings.open {
-		if m.settings.editor != nil {
+		if m.settings.editor != nil || m.settings.defaults != nil {
 			return m, nil
 		}
 		for i := 0; i < 3; i++ {

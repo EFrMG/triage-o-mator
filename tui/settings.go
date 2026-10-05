@@ -42,7 +42,28 @@ type settingsUI struct {
 	selected, offset int
 	request          uint64
 	editor           *settingsEditor
+	defaults         *settingsDefaults
 	automations      automationsUI
+}
+
+type settingsDefaults struct {
+	plan    labelDefaultsPlan
+	preview viewport.Model
+}
+
+type labelDefaultsPlan struct {
+	Repository    string        `json:"repository"`
+	Operation     string        `json:"operation"`
+	Current       []GitHubLabel `json:"current"`
+	Create        []GitHubLabel `json:"create"`
+	PreviewSHA256 string        `json:"preview_sha256"`
+}
+
+type settingsDefaultsMsg struct {
+	root, repo string
+	request    uint64
+	plan       labelDefaultsPlan
+	err        error
 }
 
 type settingsDoneMsg struct {
@@ -168,7 +189,7 @@ func (m model) settingsView() string {
 	if len(rows) == 0 {
 		message := "No actions configured."
 		if m.settings.section == "label" {
-			message = "No labels saved. Press r to read GitHub labels, or n to create one."
+			message = "No labels saved. Press r to read GitHub labels, i to initialize defaults, or n to create one."
 		}
 		return view + inset(message)
 	}
@@ -202,6 +223,23 @@ func ansiHeight(s string) int { return strings.Count(s, "\n") + 1 }
 
 func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.settings.busy {
+		return m, nil
+	}
+	if defaults := m.settings.defaults; defaults != nil {
+		switch msg.String() {
+		case "esc":
+			m.settings.defaults = nil
+			m.status = ""
+			return m, nil
+		case "ctrl+s":
+			m.settings.busy = true
+			m.settings.request++
+			m.status = "Creating missing starter labels…"
+			return m, settingsDefaultsApplyCmd(m.installRoot, m.repo, m.settings.request, defaults.plan.PreviewSHA256)
+		case "ctrl+c":
+			return m, tea.Quit
+		}
+		defaults.preview, _ = defaults.preview.Update(msg)
 		return m, nil
 	}
 	if editor := m.settings.editor; editor != nil {
@@ -314,6 +352,14 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.settings.request++
 		m.status = "Reading GitHub labels…"
 		return m, settingsSyncCmd(m.installRoot, m.repo, m.settings.request)
+	case "i":
+		if m.settings.section != "label" {
+			return m, nil
+		}
+		m.settings.busy = true
+		m.settings.request++
+		m.status = "Checking starter labels on GitHub…"
+		return m, settingsDefaultsPreviewCmd(m.installRoot, m.repo, m.settings.request)
 	case "n":
 		if m.settings.section != "" {
 			return m.openSettingsEditor(settingsRow{kind: m.settings.section}, true)
@@ -692,6 +738,76 @@ func settingsSyncCmd(root, repo string, request uint64) tea.Cmd {
 	}
 }
 
+func settingsDefaultsPreviewCmd(root, repo string, request uint64) tea.Cmd {
+	return func() tea.Msg {
+		out, err := runScript(root, "label-definitions", "--expected-repo", repo, "--initialize-defaults")
+		var plan labelDefaultsPlan
+		if err == nil {
+			err = json.Unmarshal([]byte(out), &plan)
+		}
+		return settingsDefaultsMsg{root: root, repo: repo, request: request, plan: plan, err: err}
+	}
+}
+
+func settingsDefaultsApplyCmd(root, repo string, request uint64, hash string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := runScript(root, "label-definitions", "--expected-repo", repo, "--initialize-defaults", "--apply", "--preview-sha256", hash)
+		taxonomy, loadErr := LoadTaxonomy(root)
+		if err == nil {
+			err = loadErr
+		}
+		return settingsDoneMsg{root: root, repo: repo, request: request, operation: "initialize", taxonomy: taxonomy, err: err}
+	}
+}
+
+func (m model) finishSettingsDefaults(msg settingsDefaultsMsg) (tea.Model, tea.Cmd) {
+	if !m.settings.open || m.settings.section != "label" || m.settings.editor != nil || msg.root != m.installRoot || msg.repo != m.repo || msg.request != m.settings.request {
+		return m, nil
+	}
+	m.settings.busy = false
+	if msg.err != nil {
+		m.failErr("Couldn't preview starter labels", msg.err)
+		return m, nil
+	}
+	if msg.plan.Repository != m.repo || msg.plan.Operation != "initialize-defaults" || msg.plan.PreviewSHA256 == "" {
+		m.fail("Starter label preview did not match this repository; try again.")
+		return m, nil
+	}
+	preview := viewport.New()
+	preview.SetWidth(maxInt(m.commentWidth()-4, 1))
+	preview.SetHeight(maxInt(m.commentHeight()-4, 3))
+	m.settings.defaults = &settingsDefaults{plan: msg.plan, preview: preview}
+	m.settings.defaults.preview.SetContent(m.settingsDefaultsContent())
+	m.status = "Review each missing GitHub label, then Ctrl-S to create them."
+	return m, nil
+}
+
+func (m model) settingsDefaultsContent() string {
+	plan := m.settings.defaults.plan
+	lines := []string{"GitHub repository: " + plan.Repository, "", "Existing labels stay unchanged."}
+	if len(plan.Create) == 0 {
+		lines = append(lines, "", "All starter labels already exist. No GitHub write is needed.")
+	} else {
+		lines = append(lines, "", "Create these missing labels:")
+		for _, label := range plan.Create {
+			lines = append(lines, "", label.Name, "  Description: "+label.Description, "  Color: #"+label.Color)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *model) layoutSettingsDefaults() {
+	if m.settings.defaults == nil {
+		return
+	}
+	m.settings.defaults.preview.SetWidth(maxInt(m.commentWidth()-4, 1))
+	m.settings.defaults.preview.SetHeight(maxInt(m.commentHeight()-4, 3))
+}
+
+func (m model) settingsDefaultsOverlay(background string) string {
+	return m.composerOverlay(background, m.composerPanel("Initialize defaults", m.settings.defaults.preview.View()))
+}
+
 func (m model) finishSettingsPreview(msg settingsPreviewMsg) (tea.Model, tea.Cmd) {
 	e := m.settings.editor
 	if !m.settings.open || e == nil || msg.root != m.installRoot || msg.repo != m.repo || msg.request != m.settings.request ||
@@ -720,6 +836,13 @@ func (m model) finishSettings(msg settingsDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	m.settings.busy = false
 	if msg.err != nil {
+		if msg.operation == "initialize" {
+			m.settings.defaults = nil
+			if msg.taxonomy.LabelCatalog.Repository == m.repo {
+				m.taxonomy = msg.taxonomy
+				m.form.SetTaxonomy(msg.taxonomy)
+			}
+		}
 		if m.settings.editor != nil && m.settings.editor.row.kind == "label" {
 			m.settings.editor.previewHash = ""
 			m.settings.editor.previewing = false
@@ -743,7 +866,10 @@ func (m model) finishSettings(msg settingsDoneMsg) (tea.Model, tea.Cmd) {
 		m.settings.selected = maxInt(len(rows)-1, 0)
 		m.settings.offset = 0
 	}
-	if msg.operation == "save" {
+	if msg.operation == "initialize" {
+		m.settings.defaults = nil
+		m.status = "Starter labels initialized; GitHub labels refreshed."
+	} else if msg.operation == "save" {
 		m.settings.editor = nil
 		m.status = "Setting saved."
 	} else {

@@ -139,7 +139,7 @@ Several contributors (and their agents) share one ledger and one set of groups t
 
 ## Changing this install's setup
 
-- New label or action: ask a human to use Settings for the selected repository. Label creation previews the exact GitHub definition change; actions save locally. The TUI form and `bin/apply` read the selected install's `config/taxonomy.json`; refresh the observed label catalog before proposing labels absent from it.
+- New label or action: ask a human to use Settings for the selected repository. Label creation and Initialize defaults preview the exact GitHub definition changes; actions save locally. The TUI form and `bin/apply` read the selected install's `config/taxonomy.json`; refresh the observed label catalog before proposing labels absent from it.
 - Replace a playbook: `prompts/` holds symlinks into the `triage-o-mator` checkout. Delete one and write a file in its place and it becomes this repository's own, committed with the rest; add a new file and the same is true.
 - New repo to triage: install into its repository with `bin/install-to /path/to/that/repository` from the checkout, which is a person's job ([docs/install.md](docs/install.md)). One install can hold several repos: `config/repo` (a single `owner/repo` line) names the one in play, and the TUI's Switch Repo writes it.
 - Changing `triage-o-mator`'s own code, rather than this backlog, is a different job in a different place.

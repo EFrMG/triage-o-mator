@@ -56,6 +56,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishSettings(msg)
 	case settingsPreviewMsg:
 		return m.finishSettingsPreview(msg)
+	case settingsDefaultsMsg:
+		return m.finishSettingsDefaults(msg)
 	case settingsEditorMsg:
 		return m.finishSettingsExternal(msg)
 	case automationMsg:

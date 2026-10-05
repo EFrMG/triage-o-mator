@@ -15,7 +15,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,9 +24,6 @@ from _install import CODE_ROOT, INSTALL_DIR_NAME, MARKER_NAME, REPO_RE, now_iso,
 
 # The version of the install layout this script writes, for when a later one has to recognize an older install.
 LAYOUT_VERSION = 1
-
-# Copied into the install and then owned by the target repository. The JSON copy is also reconciled with the selected repository's GitHub labels below.
-COPIED = ["config/taxonomy.md"]
 
 # Symlinked as whole directories: the program, and the palettes it reads.
 LINKED_DIRS = ["bin", "themes", "docs"]
@@ -131,20 +127,6 @@ class Plan:
         if not self.dry_run:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.symlink_to(target)
-
-    def copy(self, source, path, root):
-        if path.exists():
-            if source.read_bytes() != path.read_bytes():
-                self.say("keep", rel(path, root), f"yours; the checkout's is in {path.name}.dist")
-                if not self.dry_run:
-                    shutil.copyfile(source, path.with_suffix(path.suffix + ".dist"))
-
-            return
-
-        self.say("copy", rel(path, root), f"from {rel(source, CODE_ROOT)}")
-        if not self.dry_run:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, path)
 
     def write(self, path, content, root, detail=""):
         if path.exists() and path.read_text() == content:
@@ -400,9 +382,6 @@ def main():
     for pattern in LINKED_GLOBS:
         for source in sorted(CODE_ROOT.glob(pattern)):
             plan.symlink(install / rel(source, CODE_ROOT), source, target)
-
-    for name in COPIED:
-        plan.copy(CODE_ROOT / name, install / name, target)
 
     plan.write(taxonomy_path, json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n", target, "GitHub label catalog and local taxonomy")
 

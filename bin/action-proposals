@@ -236,11 +236,30 @@ def propose(args, repo):
         if path.exists():
             previous = load(path, repo)
             receipt = DATA_DIR / "writes" / (previous["request_id"] + ".json")
-            if args.replace_checkpoint != previous["checksum"] or previous["status"] not in ("pending", "rejected") or receipt.exists():
-                raise ValueError("action proposal exists or has a write attempt; inspect it before replacing")
+            completed = previous["status"] == "executed"
+            if args.replace_checkpoint != previous["checksum"] or previous["status"] not in ("pending", "rejected", "executed"):
+                raise ValueError("action proposal changed or has an unresolved write attempt; inspect it before replacing")
+            if completed:
+                if receipt.parent.is_symlink() or receipt.is_symlink() or not receipt.is_file():
+                    raise ValueError("completed action has no saved write receipt")
+                saved = json.loads(receipt.read_text(encoding="utf-8"))
+                plan = saved.get("plan") if isinstance(saved, dict) else None
+
+                if (not isinstance(plan, dict) or plan.get("request_id") != previous["request_id"] or
+                        plan.get("repo") != repo or plan.get("kind") != args.kind or plan.get("number") != args.number or
+                        plan.get("target") != previous["target"] or plan.get("operation") != previous["operation"] or
+                        plan.get("body") != previous["comment"] or
+                        saved.get("comment") != previous["outcome"]["comment"] or
+                        saved.get("state_change") != previous["outcome"]["state_change"]):
+                    raise ValueError("completed action differs from its saved write receipt")
+            elif receipt.exists() or receipt.is_symlink():
+                raise ValueError("action proposal has a write attempt; inspect it before replacing")
             if retired_action and previous["action"] != args.action:
                 raise ValueError("a retired action can only edit its existing proposal")
-            if previous.get("decision_question"):
+            if completed:
+                if args.reconsideration_reason:
+                    raise ValueError("reconsideration applies only to a rejected proposal")
+            elif previous.get("decision_question"):
                 question = args.decision_question or previous["decision_question"]
                 value["decision_question"] = question
                 if question == previous["decision_question"]:
@@ -257,12 +276,12 @@ def propose(args, repo):
                                                 rejected_checkpoint=previous["checksum"])
             elif args.reconsideration_reason:
                 raise ValueError("reconsideration requires a rejected action proposal")
-            elif "reconsideration" in previous:
+            elif not completed and "reconsideration" in previous:
                 value["reconsideration"] = previous["reconsideration"]
 
             value["history"] = previous.get("history", []) + [{key: item for key, item in previous.items() if key != "history"}]
         elif args.replace_checkpoint or args.reconsideration_reason:
-            raise ValueError("there is no rejected or pending proposal at that checkpoint")
+            raise ValueError("there is no replaceable proposal at that checkpoint")
 
         if not valid_decision_hold(value):
             raise ValueError("human decision resolution does not bind the held proposal")

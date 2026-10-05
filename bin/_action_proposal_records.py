@@ -15,7 +15,18 @@ def proposal_path(kind, number):
     return DATA_DIR / "action-proposals" / f"{kind}-{number}.json"
 
 
+def current_cycle(history):
+    last_completed = next((index for index in range(len(history) - 1, -1, -1) if isinstance(history[index], dict) and history[index].get("status") == "executed"), -1)
+    return history[last_completed + 1:]
+
+
 def valid_decision_hold(value):
+    history = value.get("history", [])
+    if not isinstance(history, list):
+        return False
+
+    history = current_cycle(history)
+
     question = value.get("decision_question")
     if question is not None:
         if not isinstance(question, str) or not question.strip() or len(question) > 2000:
@@ -28,8 +39,7 @@ def valid_decision_hold(value):
         if answer is None:
             return True
 
-        history = value.get("history", [])
-        if not isinstance(answer, dict) or not isinstance(history, list):
+        if not isinstance(answer, dict):
             return False
         held = next((version for version in reversed(history) if isinstance(version, dict) and version.get("checksum") == answer.get("held_checkpoint")), None)
         return (held is not None and held.get("decision_question") == question and held.get("target") == value.get("target") and
@@ -38,9 +48,6 @@ def valid_decision_hold(value):
                 isinstance(answer.get("at"), str) and bool(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", answer["at"])) and
                 isinstance(answer.get("reason"), str) and bool(answer["reason"].strip()) and len(answer["reason"]) <= 10000)
 
-    history = value.get("history", [])
-    if not isinstance(history, list):
-        return False
     held = next((version for version in reversed(history) if isinstance(version, dict) and version.get("decision_question")), None)
     resolution = value.get("decision_resolution")
     if held is None:
@@ -57,6 +64,7 @@ def valid_decision_hold(value):
 
 
 def valid_reconsideration(versions):
+    versions = [*current_cycle(versions[:-1]), versions[-1]]
     current = versions[-1]
     index = next((position for position in range(len(versions) - 2, -1, -1) if versions[position].get("status") == "rejected"), None)
     explanation = current.get("reconsideration")

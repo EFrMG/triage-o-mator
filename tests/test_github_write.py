@@ -186,10 +186,13 @@ class WriteTests(Workspace):
         context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
         comment = self.root / "reopen.md"
         comment.write_text("This still reproduces, so I am reopening it for investigation.\n")
-        self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
-                      "--action", "reopen", "--title", "Closed too early", "--observed-state", "closed",
-                      "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
-                      "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
+        held = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
+                             "--action", "reopen", "--title", "Closed too early", "--observed-state", "closed",
+                             "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
+                             "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired",
+                             "--decision-question", "Should this fixture be reopened?")
+        self.json_cli("action-proposals", *args, "answer", "--kind", "issue", "--number", "1",
+                      "--checkpoint", held["checkpoint"], "--by", "maintainer", "--answer", "Yes, complete the trial")
         review = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
         policy_args = (*args, "--action", "reopen", "--mode", "execute")
         policy = self.json_cli("action-policy", "set", *policy_args)
@@ -204,6 +207,33 @@ class WriteTests(Workspace):
         self.assertEqual(outcome["outcome"]["state_change"]["state"], "open")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "POST", "PATCH"])
         self.assertEqual(self.write_calls()[1]["body"]["body"], comment.read_text())
+
+        first = self.json_cli("action-proposals", *args, "list")["rows"][0]
+        live.update(state="open", updated_at="2026-10-04T04:00:00Z")
+        (self.mock / "item.json").write_text(json.dumps(live))
+        decision.update(state="open", action="close", reason="Return this synthetic fixture to its starting state")
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
+        context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
+        comment.write_text("Closing this synthetic fixture after the reopen trial.\n")
+        next_action = ("--kind", "issue", "--number", "1", "--action", "close", "--title", "Closed too early",
+                       "--observed-state", "open", "--updated-at", live["updated_at"], "--comment-file", str(comment),
+                       "--by", "agent:helper", "--context-checkpoint", context["checkpoint"],
+                       "--evidence-gap", "Discussion not acquired")
+        self.run_cli("action-proposals", *args, "propose", *next_action, ok=False)
+        second = self.json_cli("action-proposals", *args, "propose", *next_action, "--replace-checkpoint", first["checkpoint"])
+        self.assertNotIn("decision_question", second)
+        self.assertNotIn("decision_resolution", second)
+        record = json.loads((self.root / "data/owner/repo/action-proposals/issue-1.json").read_text())
+        self.assertEqual(record["history"][-1]["status"], "executed")
+        self.assertEqual(record["history"][-1]["checksum"], first["checkpoint"])
+        second_review = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
+        self.assertNotEqual(second_review["approval"], review["approval"])
+        self.run_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1",
+                     "--publish", "--approve", review["approval"], ok=False)
+        closed = self.json_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1",
+                               "--publish", "--approve", second_review["approval"])
+        self.assertEqual(closed["outcome"]["state_change"]["state"], "closed")
+        self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "POST", "PATCH", "GET", "POST", "PATCH"])
 
     def test_earlier_ledger_based_question_resolution_remains_readable(self):
         timestamp = "2026-10-04T01:00:00Z"

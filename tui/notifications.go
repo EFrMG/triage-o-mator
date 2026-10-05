@@ -763,6 +763,15 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 				m.warn("Proposal changed; reopen Notifications before editing.")
 				return m, nil
 			}
+		case "r":
+			if len(m.notifications.review.Plan.Proposals) == 1 {
+				row := m.notifications.review.Plan.Proposals[0]
+				if row.Status == "pending" && row.DecisionQuestion != "" {
+					if choice, ok := m.notifications.proposalChoice(row.Number); ok && choice.proposal >= 0 && m.notifications.proposals.Rows[choice.proposal].Checkpoint == row.Checkpoint {
+						return m.openAnswerComposer(choice)
+					}
+				}
+			}
 		case "w":
 			if len(m.notifications.review.Plan.Proposals) == 1 {
 				row := m.notifications.review.Plan.Proposals[0]
@@ -834,6 +843,11 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 				return m, nil
 			}
 			if len(m.notifications.review.Plan.Proposals) == 1 && m.notifications.review.Plan.Proposals[0].Active {
+				row := m.notifications.review.Plan.Proposals[0]
+				if row.DecisionQuestion != "" && row.DecisionResolution == nil {
+					m.warn("Answer the PR action question before exact approval.")
+					return m, nil
+				}
 				if m.notifications.context == nil {
 					m.warn("Read current proposal context before approval.")
 					return m, nil
@@ -842,7 +856,7 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 					m.fail("Local context changed; prepare fresh review.")
 					return m, nil
 				}
-				return m.beginAutoCloseReview(false, true, []int{m.notifications.review.Plan.Proposals[0].Number})
+				return m.beginAutoCloseReview(false, row.DecisionQuestion == "", []int{row.Number})
 			}
 			return m, nil
 		case "m":
@@ -1180,7 +1194,7 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		}
 		fmt.Fprintf(&b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), textWidth)))
 		if row.DecisionQuestion != "" {
-			fmt.Fprintf(&b, "%s\n", inset(wrapText("Human decision required: "+sanitize(row.DecisionQuestion), textWidth)))
+			fmt.Fprintf(&b, "%s\n", inset(wrapText("Question for this action: "+sanitize(row.DecisionQuestion), textWidth)))
 		}
 		if row.DecisionResolution != nil {
 			resolution := row.DecisionResolution

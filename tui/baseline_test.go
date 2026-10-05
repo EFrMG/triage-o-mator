@@ -2168,11 +2168,20 @@ func TestStagedActionReviewChecksContextBeforeExactApproval(t *testing.T) {
 	script := `#!/usr/bin/env python3
 import json, pathlib, sys
 args = sys.argv[1:]
-row = dict(kind="issue", number=1, title="Needs reproduction", target="https://github.com/owner/repo/issues/1", action="comment-request-info", operation="comment", comment="Could you share steps to reproduce?", updated_at="2026-10-04T01:00:00Z", checkpoint="action-1", status="pending", active=True, inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Discussion not acquired"]))
+answer = pathlib.Path("answered-action").read_text() if pathlib.Path("answered-action").exists() else None
+row = dict(kind="issue", number=1, title="Needs reproduction", target="https://github.com/owner/repo/issues/1", action="comment-request-info", operation="comment", comment="Could you share steps to reproduce?", updated_at="2026-10-04T01:00:00Z", checkpoint="action-2" if answer else "action-1", status="pending", active=True, decision_question="Should this request be sent?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Discussion not acquired"]))
+if answer:
+    row["decision_resolution"] = dict(by="maintainer", at="2026-10-04T02:00:00Z", reason=answer, held_checkpoint="action-1")
 if "context" in args:
     stale = pathlib.Path("stale-action").exists()
     context = dict(repository="owner/repo", item=dict(kind="issue", number=1), checkpoint="ctx-a", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(action="comment-request-info", reason="Missing reproduction"))])
-    print(json.dumps(dict(repository="owner/repo", kind="issue", number=1, proposal_checkpoint="action-1", current=not stale, reason="local guidance changed" if stale else None, item_context=context, requests=0)))
+    print(json.dumps(dict(repository="owner/repo", kind="issue", number=1, proposal_checkpoint=row["checkpoint"], current=not stale, reason="local guidance changed" if stale else None, item_context=context, requests=0)))
+elif "answer" in args:
+    answer = args[args.index("--answer") + 1]
+    pathlib.Path("answered-action").write_text(answer)
+    row["checkpoint"] = "action-2"
+    row["decision_resolution"] = dict(by=args[args.index("--by") + 1], at="2026-10-04T02:00:00Z", reason=answer, held_checkpoint="action-1")
+    print(json.dumps(row))
 elif "review" in args:
     print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="exact-approval")))
 elif "execute" in args:
@@ -2184,8 +2193,9 @@ else:
 	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	row := actionProposalRow{Kind: "issue", Number: 1, Title: "Needs reproduction", Target: "https://github.com/owner/repo/issues/1", Action: "comment-request-info", Operation: "comment", Comment: "Could you share steps to reproduce?", UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "action-1", Status: "pending", Active: true, Needs: true, Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}, DecisionResolution: &actionDecisionResolution{By: "maintainer", At: "2026-10-04T00:00:00Z", Reason: "Send a focused request"}}
+	row := actionProposalRow{Kind: "issue", Number: 1, Title: "Needs reproduction", Target: "https://github.com/owner/repo/issues/1", Action: "comment-request-info", Operation: "comment", Comment: "Could you share steps to reproduce?", UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "action-1", Status: "pending", Active: true, Needs: true, Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}, DecisionQuestion: "Should this request be sent?"}
 	m := baselineModel(t, root)
+	m.reviewer = "maintainer"
 	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{row}}}
 	choice := m.notifications.choices()[0]
 	if choice.actionProposal != 0 || choice.key != (Key{Kind: "issue", Number: 1}) {
@@ -2208,8 +2218,36 @@ else:
 	}
 	next, cmd = m.openActionReview(choice)
 	m = baselineSend(next.(model), cmd().(actionReviewMsg))
+	if view := ansi.Strip(m.actionReviewView()); !strings.Contains(view, "Could you share steps to reproduce?") || !strings.Contains(view, "Should this request be sent?") {
+		t.Fatal("exact proposed comment or question was absent from the action review")
+	}
+	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if cmd != nil {
+		t.Fatal("unanswered action question offered approval")
+	}
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "r"})
+	m = next.(model)
+	if cmd == nil || !m.comment.open || m.comment.answerCheckpoint != "action-1" {
+		t.Fatal("r did not open the attributed answer composer")
+	}
+	m.comment.text.SetValue("Send a focused request")
+	next, cmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.comment.busy {
+		t.Fatal("answer composer did not save through the owning script")
+	}
+	answerMsg := cmd().(proposalAnswerDoneMsg)
+	if answerMsg.err != nil || !answerMsg.saved || answerMsg.row.DecisionResolution == nil || answerMsg.row.DecisionResolution.By != "maintainer" {
+		t.Fatalf("answer was not saved and attributed: %+v", answerMsg)
+	}
+	updated, _ := m.finishProposalAnswer(answerMsg)
+	m = updated.(model)
+	m.notifications.actions = actionProposalList{Rows: []actionProposalRow{answerMsg.row}}
+	choice = m.notifications.choices()[0]
+	next, cmd = m.openActionReview(choice)
+	m = baselineSend(next.(model), cmd().(actionReviewMsg))
 	if view := ansi.Strip(m.actionReviewView()); !strings.Contains(view, "Could you share steps to reproduce?") || !strings.Contains(view, "Send a focused request") {
-		t.Fatal("exact proposed comment was absent from the action review")
+		t.Fatal("exact comment and attributed answer were absent from the approval review")
 	}
 	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
 	m = baselineSend(next.(model), cmd().(actionReviewMsg))
@@ -2228,6 +2266,89 @@ else:
 	}
 	if _, err := os.Stat(filepath.Join(root, "published-action")); err != nil {
 		t.Fatal("approved action was not sent to its owning script")
+	}
+}
+
+func TestQuestionedClosureAnswerRequiresExactReviewBeforePublish(t *testing.T) {
+	root := baselineRoot(t)
+	script := `#!/usr/bin/env python3
+import json, pathlib, sys
+args = sys.argv[1:]
+answer = pathlib.Path("closure-answer").read_text() if pathlib.Path("closure-answer").exists() else None
+row = dict(number=3, title="Older change", target="https://github.com/owner/repo/pull/3", comment="This PR is superseded by #4.", head_sha="b" * 40, updated_at="2026-10-04T01:00:00Z", checkpoint="closure-2" if answer else "closure-1", status="pending", active=True, decision_question="Does #4 replace this PR?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Comparison pending"]))
+if answer:
+    row["decision_resolution"] = dict(by="maintainer", at="2026-10-04T02:00:00Z", reason=answer, held_checkpoint="closure-1")
+if "context" in args:
+    context = dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-a", requests=0, pagination=dict(offset=0, next_offset=None), rows=[])
+    print(json.dumps(dict(repository="owner/repo", number=3, proposal_checkpoint=row["checkpoint"], current=True, reason=None, item_context=context, requests=0)))
+elif "answer" in args:
+    text = args[args.index("--answer") + 1]
+    pathlib.Path("closure-answer").write_text(text)
+    row["checkpoint"] = "closure-2"
+    row["decision_resolution"] = dict(by=args[args.index("--by") + 1], at="2026-10-04T02:00:00Z", reason=text, held_checkpoint="closure-1")
+    print(json.dumps(row))
+elif "review" in args:
+    print(json.dumps(dict(plan=dict(repo="owner/repo", operation="comment-and-close-pr", proposals=[row]), approval="exact-closure-approval")))
+elif "execute" in args:
+    pathlib.Path("published-closure").write_text("yes")
+    print(json.dumps(dict(results=[dict(number=3, status="executed")])))
+else:
+    sys.exit("unexpected auto-close operation")
+`
+	if err := os.WriteFile(filepath.Join(root, "bin", "auto-close"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	row := autoCloseRow{Number: 3, Title: "Older change", Target: "https://github.com/owner/repo/pull/3", Comment: "This PR is superseded by #4.", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "closure-1", Status: "pending", Active: true, DecisionQuestion: "Does #4 replace this PR?", Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}}
+	m := baselineModel(t, root)
+	m.reviewer = "maintainer"
+	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{row}}}
+	choice := m.notifications.choices()[0]
+	next, cmd := m.openNotificationSource(choice, "proposal")
+	m = baselineSend(next.(model), cmd().(autoCloseContextMsg))
+	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if cmd != nil {
+		t.Fatal("unanswered PR closure question offered approval")
+	}
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "r"})
+	m = next.(model)
+	if cmd == nil || !m.comment.open || m.comment.answerCheckpoint != "closure-1" {
+		t.Fatal("r did not open the PR closure answer composer")
+	}
+	m.comment.text.SetValue("Yes, #4 retains the behavior")
+	next, cmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	answerMsg := cmd().(proposalAnswerDoneMsg)
+	if answerMsg.err != nil || !answerMsg.saved || answerMsg.action {
+		t.Fatalf("PR closure answer was not saved on the existing proposal path: %+v", answerMsg)
+	}
+	updated, _ := m.finishProposalAnswer(answerMsg)
+	m = updated.(model)
+	row.Checkpoint = "closure-2"
+	row.DecisionResolution = &actionDecisionResolution{By: "maintainer", At: "2026-10-04T02:00:00Z", Reason: "Yes, #4 retains the behavior", HeldCheckpoint: "closure-1"}
+	m.notifications.proposals = autoCloseList{Rows: []autoCloseRow{row}}
+	choice = m.notifications.choices()[0]
+	next, cmd = m.openNotificationSource(choice, "proposal")
+	m = baselineSend(next.(model), cmd().(autoCloseContextMsg))
+	if view := ansi.Strip(m.autoCloseReviewView()); !strings.Contains(view, row.Target) || !strings.Contains(view, row.Comment) || !strings.Contains(view, row.DecisionResolution.Reason) {
+		t.Fatal("PR closure review omitted exact target, public comment or answer")
+	}
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	m = baselineSend(next.(model), cmd().(autoCloseMsg))
+	if m.notifications.review == nil || m.notifications.review.Approval != "exact-closure-approval" {
+		t.Fatal("answered closure did not enter exact approval review")
+	}
+	if _, err := os.Stat(filepath.Join(root, "published-closure")); !os.IsNotExist(err) {
+		t.Fatal("first approval press published the closure")
+	}
+	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if cmd == nil {
+		t.Fatal("second approval press did not start the closure write")
+	}
+	if result := cmd().(autoCloseMsg); result.err != nil {
+		t.Fatal(result.err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "published-closure")); err != nil {
+		t.Fatal("approved closure was not sent to its owning script")
 	}
 }
 

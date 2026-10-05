@@ -22,6 +22,9 @@ type commentComposer struct {
 	open, busy, previewing, close, reopen bool
 	rejectionCheckpoint                   string
 	rejectionChoice                       notificationChoice
+	answerCheckpoint                      string
+	answerChoice                          notificationChoice
+	answerQuestion                        string
 	proposalEditCheckpoint                string
 	editOriginalComment                   string
 	key                                   Key
@@ -185,6 +188,43 @@ func (m model) openExternalRejectionComposer(choice notificationChoice) (tea.Mod
 	return m.startCommentEditor()
 }
 
+func (m model) openAnswerComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
+	if choice.kind != "item" || choice.proposal < 0 && choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
+		m.warn("Select one questioned proposal and set a reviewer name before answering.")
+		return m, nil
+	}
+
+	status, target, checkpoint, question, answer := "", "", "", "", ""
+	if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
+		row := m.notifications.actions.Rows[choice.actionProposal]
+		status, target, checkpoint, question = row.Status, row.Target, row.Checkpoint, row.DecisionQuestion
+		if row.DecisionResolution != nil {
+			answer = row.DecisionResolution.Reason
+		}
+	} else {
+		row := m.notifications.proposals.Rows[choice.proposal]
+		status, target, checkpoint, question = row.Status, row.Target, row.Checkpoint, row.DecisionQuestion
+		if row.DecisionResolution != nil {
+			answer = row.DecisionResolution.Reason
+		}
+	}
+	if status != "pending" || checkpoint == "" || question == "" {
+		m.warn("This proposal has no pending question to answer.")
+		return m, nil
+	}
+
+	next, cmd := m.openCommentComposer(commentTarget{key: choice.key, url: target}, false, false, nil)
+	m = next.(model)
+	m.comment.answerCheckpoint = checkpoint
+	m.comment.answerChoice = choice
+	m.comment.answerQuestion = question
+	m.comment.text.Placeholder = "Local answer for the exact action; this text is not published"
+	m.comment.text.CharLimit = 10000
+	m.comment.text.SetValue(answer)
+	m.layoutComment()
+	return m, cmd
+}
+
 func (m model) openProposalEdit(choice notificationChoice) (tea.Model, tea.Cmd) {
 	if choice.kind != "item" || choice.proposal < 0 && choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
 		m.warn("Select one pending proposal and set a reviewer name before editing.")
@@ -305,6 +345,15 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "ctrl+s":
+		if c.answerCheckpoint != "" {
+			if strings.TrimSpace(c.text.Value()) == "" {
+				m.warn("Write an attributed answer before saving it.")
+				return m, nil
+			}
+			c.busy = true
+			m.status = "Saving answer to the staged action question…"
+			return m, m.answerProposalCmd()
+		}
 		if c.proposalEditCheckpoint != "" {
 			if c.text.Value() == c.editOriginalComment {
 				c.open = false
@@ -589,6 +638,9 @@ func (m model) stopReopening(target commentTarget, err error, uncertain bool) (t
 
 func (m model) commentHeader(width int) string {
 	heading, preview := "Compose comment", "Preview Markdown"
+	if m.comment.answerCheckpoint != "" {
+		heading, preview = "Answer action question", "Review local answer"
+	}
 	if m.comment.proposalEditCheckpoint != "" {
 		heading, preview = "Edit closure proposal", "Review proposal edit"
 	}
@@ -633,6 +685,9 @@ func (m model) commentView() string {
 			}
 			content += "\n" + line
 		}
+	}
+	if m.comment.answerCheckpoint != "" {
+		content = wrapText("Question: "+sanitize(m.comment.answerQuestion), maxInt(m.commentWidth()-4, 1)) + "\n\n" + content
 	}
 
 	return m.composerPanel(m.commentHeader(m.commentWidth()-4), content)

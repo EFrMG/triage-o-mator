@@ -181,6 +181,10 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.warn("Current action context is required before approval.")
 			return m, nil
 		}
+		if row.DecisionQuestion != "" && row.DecisionResolution == nil {
+			m.warn("Answer the action question before exact approval.")
+			return m, nil
+		}
 		review.busy = true
 		if review.approval == "" {
 			return m, actionReviewCmd(m.installRoot, m.repo, m.notificationsGeneration, row, "review", "")
@@ -189,6 +193,12 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "e":
 		if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok {
 			return m.openProposalEdit(choice)
+		}
+	case "r":
+		if row.DecisionQuestion != "" {
+			if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok {
+				return m.openAnswerComposer(choice)
+			}
 		}
 	case "d", "D":
 		if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok {
@@ -220,7 +230,7 @@ func (m model) actionReviewView() string {
 	fmt.Fprintf(&b, "\n%s\n", inset(wrapText("Action: "+sanitize(row.Action)+" · "+sanitize(row.Operation), width)))
 	fmt.Fprintf(&b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), width)))
 	if row.DecisionQuestion != "" {
-		fmt.Fprintf(&b, "\n%s\n", inset(wrapText("Human decision required: "+sanitize(row.DecisionQuestion), width)))
+		fmt.Fprintf(&b, "\n%s\n", inset(wrapText("Question for this action: "+sanitize(row.DecisionQuestion), width)))
 	}
 	if row.DecisionResolution != nil {
 		resolution := row.DecisionResolution

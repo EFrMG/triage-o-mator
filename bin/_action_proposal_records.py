@@ -21,10 +21,22 @@ def valid_decision_hold(value):
         if not isinstance(question, str) or not question.strip() or len(question) > 2000:
             return False
         review = value.get("decision_review")
-        if not isinstance(review, dict) or type(review.get("reviewed")) is not bool or not isinstance(review.get("by"), str) or not isinstance(review.get("at"), str):
+        if review is not None and (not isinstance(review, dict) or type(review.get("reviewed")) is not bool or not isinstance(review.get("by"), str) or not isinstance(review.get("at"), str)):
             return False
 
-        return True
+        answer = value.get("decision_resolution")
+        if answer is None:
+            return True
+
+        history = value.get("history", [])
+        if not isinstance(answer, dict) or not isinstance(history, list):
+            return False
+        held = next((version for version in reversed(history) if isinstance(version, dict) and version.get("checksum") == answer.get("held_checkpoint")), None)
+        return (held is not None and held.get("decision_question") == question and held.get("target") == value.get("target") and
+                held.get("action") == value.get("action") and held.get("operation") == value.get("operation") and
+                isinstance(answer.get("by"), str) and bool(answer["by"].strip()) and len(answer["by"]) <= 200 and
+                isinstance(answer.get("at"), str) and bool(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", answer["at"])) and
+                isinstance(answer.get("reason"), str) and bool(answer["reason"].strip()) and len(answer["reason"]) <= 10000)
 
     history = value.get("history", [])
     if not isinstance(history, list):
@@ -91,7 +103,7 @@ def load(path, repo):
         raise ValueError("invalid action proposal history")
     versions = [*value.get("history", []), value]
     for index, version in enumerate(versions):
-        if not isinstance(version, dict) or any(version.get(field) != value[field] for field in ("repo", "kind", "number", "target")):
+        if not isinstance(version, dict) or any(version.get(field) != value[field] for field in ("repo", "kind", "number")) or version.get("target") != f"https://{version.get('host')}/{repo}/{'pull' if kind == 'pr' else 'issues'}/{number}":
             raise ValueError("invalid historical action proposal identity")
         try:
             if str(uuid.UUID(version["request_id"])) != version["request_id"]:

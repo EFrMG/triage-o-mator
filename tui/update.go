@@ -42,6 +42,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishNotificationItem(msg)
 	case notificationRejectionDoneMsg:
 		return m.finishNotificationRejection(msg)
+	case proposalAnswerDoneMsg:
+		return m.finishProposalAnswer(msg)
 	case proposalEditDoneMsg:
 		return m.finishProposalEdit(msg)
 	case actionHistoryMsg:

@@ -128,6 +128,9 @@ func (m model) startCommentEditor() (tea.Model, tea.Cmd) {
 	if m.comment.proposalEditCheckpoint != "" {
 		m.status = "Editing proposal " + field + " in $EDITOR…"
 	}
+	if m.comment.answerCheckpoint != "" {
+		m.status = "Editing action answer in $EDITOR…"
+	}
 
 	return m, tea.ExecProcess(command, func(err error) tea.Msg {
 		body, readErr := readCommentEditor(path, err, charLimit)
@@ -159,6 +162,9 @@ func (m model) finishCommentEditor(msg commentEditorMsg) (tea.Model, tea.Cmd) {
 	}
 	if c.rejectionCheckpoint != "" {
 		m.status = "Rejection reason loaded. Review it before dismissing."
+	}
+	if c.answerCheckpoint != "" {
+		m.status = "Action answer loaded. Review it before saving."
 	}
 	if c.close {
 		m.status = "Comment loaded. Review it before closing with a comment."

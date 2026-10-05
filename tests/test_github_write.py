@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import uuid
 
 from support import FAKE_GH, Workspace, item
 
@@ -194,6 +195,80 @@ class WriteTests(Workspace):
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "POST", "PATCH"])
         self.assertEqual(self.write_calls()[1]["body"]["body"], comment.read_text())
 
+    def test_earlier_ledger_based_question_resolution_remains_readable(self):
+        timestamp = "2026-10-04T01:00:00Z"
+        decision = dict(item(1, "Needs a reproduction"), action="comment-request-info", confidence="medium",
+                        reason="Missing steps", reviewed=False)
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
+        args = ("--expected-repo", "owner/repo")
+        context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
+        comment = self.root / "legacy-answer.md"
+        comment.write_text("Could you share reproduction steps?\n")
+        self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
+                      "--action", "comment-request-info", "--title", "Needs a reproduction", "--observed-state", "open",
+                      "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
+                      "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired",
+                      "--decision-question", "Should this request be sent?")
+        path = self.root / "data/owner/repo/action-proposals/issue-1.json"
+        previous = json.loads(path.read_text())
+        previous.pop("checksum")
+        previous["decision_review"] = dict(reviewed=False, by="", at="")
+        canonical = json.dumps(previous, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        previous["checksum"] = hashlib.sha256(canonical.encode()).hexdigest()
+        legacy = dict(previous)
+        legacy.pop("checksum")
+        legacy.pop("decision_question")
+        legacy.pop("decision_review")
+        legacy["history"] = [previous]
+        legacy["request_id"] = str(uuid.uuid4())
+        legacy["decision_resolution"] = dict(by="maintainer", at="2026-10-04T02:00:00Z", reason="Ask for steps",
+                                             held_checkpoint=previous["checksum"])
+        canonical = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        legacy["checksum"] = hashlib.sha256(canonical.encode()).hexdigest()
+        path.write_text(json.dumps(legacy))
+
+        listed = self.json_cli("action-proposals", *args, "list")["rows"][0]
+        self.assertEqual(listed["decision_resolution"]["reason"], "Ask for steps")
+        self.assertNotIn("decision_question", listed)
+        self.assertEqual(self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")["plan"]["proposals"][0]["checkpoint"], listed["checkpoint"])
+
+    def test_action_target_operation_and_comment_edits_invalidate_exact_approval(self):
+        timestamp = "2026-10-04T01:00:00Z"
+        decision = dict(item(1, "Needs feedback"), action="comment-feedback", confidence="medium", reason="A focused response is useful")
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
+        args = ("--expected-repo", "owner/repo")
+        context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
+        comment = self.root / "feedback.md"
+        comment.write_text("Please clarify the behavior.\n")
+        base = ("--kind", "issue", "--number", "1", "--action", "comment-feedback", "--title", "Needs feedback",
+                "--observed-state", "open", "--updated-at", timestamp, "--comment-file", str(comment),
+                "--by", "agent:helper", "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
+        self.json_cli("action-proposals", *args, "propose", *base)
+        first = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
+
+        comment.write_text("Please clarify which version shows the behavior.\n")
+        saved = self.json_cli("action-proposals", *args, "list")["rows"][0]
+        edited = self.json_cli("action-proposals", *args, "edit", "--kind", "issue", "--number", "1",
+                               "--checkpoint", saved["checkpoint"], "--comment-file", str(comment), "--by", "maintainer")
+        self.run_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1", "--publish", "--approve", first["approval"], ok=False)
+
+        self.json_cli("taxonomy-settings", "update-action", "--expected-repo", "owner/repo", "--action", "comment-feedback",
+                      "--expected", "", "--expected-operation", "comment", "--name", "comment-feedback",
+                      "--description", "", "--operation", "close")
+        changed = self.json_cli("action-proposals", *args, "propose", *base, "--replace-checkpoint", edited["checkpoint"])
+        second = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
+        self.assertEqual(second["plan"]["proposals"][0]["operation"], "close")
+        self.assertNotEqual(second["approval"], first["approval"])
+        self.run_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1", "--publish", "--approve", first["approval"], ok=False)
+
+        moved = self.json_cli("action-proposals", *args, "propose", *base, "--host", "enterprise.example",
+                              "--replace-checkpoint", changed["checkpoint"])
+        third = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
+        self.assertEqual(moved["target"], "https://enterprise.example/owner/repo/issues/1")
+        self.assertNotEqual(third["approval"], second["approval"])
+        self.run_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1", "--publish", "--approve", second["approval"], ok=False)
+        self.assertEqual(self.write_calls(), [])
+
     def test_comment_and_state_outcomes_are_separate(self):
         preview = self.call("--close")
         (self.mock / "fail-patch").touch()
@@ -262,21 +337,10 @@ class AutoCloseWriteTests(Workspace):
 
         rows[1].update(action="close-duplicate", confidence="high", reason="Also superseded")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        gap_close = self.propose(2, "--action", "close-duplicate")
+        self.propose(2, "--action", "close-duplicate")
         gap_review = self.auto_close("review", "--number", "2")
         self.auto_close("execute", "--number", "2", "--publish", "--approve", gap_review["approval"], "--automation", ok=False)
         self.assertEqual(self.write_calls(), [])
-        held_close = self.propose(2, "--action", "close-duplicate", "--decision-question", "Is this a true duplicate?",
-                                  "--replace-checkpoint", gap_close["checkpoint"])
-        self.propose(2, "--action", "close-duplicate", "--replace-checkpoint", held_close["checkpoint"],
-                     "--decision-resolution", "Maintainer agreed", ok=False)
-        rows[1].update(reviewed=True, reviewed_by="maintainer", reviewed_at="2026-10-04T05:00:00Z", reviewer_notes="Confirmed duplicate")
-        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        resolved_close = self.propose(2, "--action", "close-duplicate", "--replace-checkpoint", held_close["checkpoint"],
-                                      "--decision-resolution", "Maintainer confirmed the original report")
-        self.assertNotIn("decision_question", resolved_close)
-        self.assertEqual(resolved_close["decision_resolution"]["by"], "maintainer")
-        self.assertEqual(self.json_cli("action-pass", "preview", "--expected-repo", "owner/repo", "--number", "2")["plan"]["items"][0]["mode"], "stage")
 
         preview = self.json_cli("action-pass", "preview", *selected)
         self.assertEqual(preview["plan"]["items"][0]["mode"], "execute")
@@ -287,6 +351,76 @@ class AutoCloseWriteTests(Workspace):
         self.assertTrue(next(row for row in self.auto_close("list")["rows"] if row["number"] == 1)["needs_attention"])
         record = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
         self.assertEqual(record["outcome"]["authorization"]["source"], "repository-policy")
+
+    def test_questioned_pr_closure_stays_staged_until_human_answers_exact_action(self):
+        write_gh = (self.mock / "gh").read_text()
+        (self.mock / "gh").write_text(FAKE_GH)
+        self.seed_pr()
+        snapshot = self.json_cli("cache", "fetch", "--kind", "pr", "--number", "1", "--profile", "discussion",
+                                 "--mode", "refresh", "--request-budget", "100")["snapshot_id"]
+        (self.mock / "gh").write_text(write_gh)
+
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        rows[0].update(action="close-duplicate", confidence="high", reason="Possibly superseded by #2")
+        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        held = self.propose(1, "--action", "close-duplicate", "--evidence", f"pr:1:{snapshot}",
+                            "--decision-question", "Does #2 fully replace this PR?")
+        setting = ("--expected-repo", "owner/repo", "--action", "close-duplicate", "--mode", "execute")
+        policy = self.json_cli("action-policy", "set", *setting)
+        self.json_cli("action-policy", "set", *setting, "--apply", "--preview-sha256", policy["preview_sha256"])
+
+        selected = ("--expected-repo", "owner/repo", "--number", "1")
+        preview = self.json_cli("action-pass", "preview", *selected)
+        self.assertEqual(preview["plan"]["items"][0]["mode"], "stage")
+        self.assertEqual(self.json_cli("action-pass", "run", *selected, "--preview-sha256", preview["preview_sha256"])["results"][0]["status"], "staged")
+        self.auto_close("review", "--number", "1", ok=False)
+        self.assertEqual(self.write_calls(), [])
+
+        answered = self.auto_close("answer", "--number", "1", "--checkpoint", held["checkpoint"],
+                                    "--by", "maintainer", "--answer", "Yes, #2 covers the same behavior")
+        self.assertEqual(answered["decision_question"], "Does #2 fully replace this PR?")
+        self.assertEqual(answered["decision_resolution"]["by"], "maintainer")
+        self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
+        self.assertEqual(self.json_cli("action-pass", "preview", *selected)["plan"]["items"][0]["mode"], "stage")
+        reviewed = self.auto_close("review", "--number", "1")
+        exact = reviewed["plan"]["proposals"][0]
+        self.assertEqual(reviewed["plan"]["operation"], "comment-and-close-pr")
+        self.assertEqual(exact["target"], "https://github.com/owner/repo/pull/1")
+        self.assertEqual(exact["comment"], answered["comment"])
+        self.assertEqual(exact["decision_resolution"]["reason"], "Yes, #2 covers the same behavior")
+        self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], "--automation", ok=False)
+        self.assertEqual(self.write_calls(), [])
+
+        outcome = self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"])
+        self.assertEqual(outcome["results"][0]["status"], "executed")
+        self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
+        self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
+
+    def test_earlier_pr_closure_resolution_history_remains_readable(self):
+        self.propose(1, "--decision-question", "Does the replacement cover this PR?")
+        path = self.root / "data/owner/repo/auto-close/pr-1.json"
+        previous = json.loads(path.read_text())
+        previous.pop("checksum")
+        previous["decision_review"] = dict(reviewed=False, by="", at="")
+        canonical = json.dumps(previous, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        previous["checksum"] = hashlib.sha256(canonical.encode()).hexdigest()
+        legacy = dict(previous)
+        legacy.pop("checksum")
+        legacy.pop("decision_question")
+        legacy.pop("decision_review")
+        legacy["history"] = [previous]
+        legacy["request_id"] = str(uuid.uuid4())
+        legacy["decision_resolution"] = dict(by="maintainer", at="2026-10-04T02:00:00Z", reason="Replacement covers it",
+                                             held_checkpoint=previous["checksum"])
+        canonical = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        legacy["checksum"] = hashlib.sha256(canonical.encode()).hexdigest()
+        path.write_text(json.dumps(legacy))
+
+        listed = self.auto_close("list")["rows"][0]
+        self.assertEqual(listed["decision_resolution"]["reason"], "Replacement covers it")
+        self.assertNotIn("decision_question", listed)
+        self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["checkpoint"], listed["checkpoint"])
 
     def test_policy_routes_pr_comment_without_creating_a_closure_proposal(self):
         write_gh = (self.mock / "gh").read_text()
@@ -320,26 +454,44 @@ class AutoCloseWriteTests(Workspace):
         held_preview = self.json_cli("action-pass", "preview", *selection)
         self.assertEqual(held_preview["plan"]["items"][0]["mode"], "stage")
         self.assertEqual(held_preview["plan"]["items"][0]["decision_question"], "Should this feedback be sent now?")
+        self.assertEqual(self.json_cli("action-pass", "run", *selection, "--preview-sha256", held_preview["preview_sha256"])["results"][0]["status"], "staged")
         self.run_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1", ok=False)
-        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "propose", *proposal_args,
-                     "--context-checkpoint", context["checkpoint"], "--replace-checkpoint", held["checkpoint"],
-                     "--decision-resolution", "Send the feedback", ok=False)
         self.assertEqual(self.write_calls(), [])
 
-        rows[0].update(reviewed=True, reviewed_by="maintainer", reviewed_at="2026-10-04T04:00:00Z", reviewer_notes="Send the focused feedback")
-        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        decided = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
-        resolved = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "propose", *proposal_args,
-                                 "--context-checkpoint", decided["checkpoint"], "--replace-checkpoint", held["checkpoint"],
-                                 "--decision-resolution", "Maintainer confirmed that the focused feedback should be sent")
-        self.assertEqual(resolved["decision_resolution"]["by"], "maintainer")
+        answered = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "answer", "--kind", "pr", "--number", "1",
+                                 "--checkpoint", held["checkpoint"], "--by", "maintainer", "--answer", "Send focused feedback now")
+        self.assertEqual(answered["decision_resolution"]["by"], "maintainer")
+        self.assertEqual(answered["decision_question"], "Should this feedback be sent now?")
+        self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
         preview = self.json_cli("action-pass", "preview", *selection)
-        self.assertEqual(preview["plan"]["items"][0]["mode"], "execute")
-        result = self.json_cli("action-pass", "run", *selection, "--preview-sha256", preview["preview_sha256"])
-        self.assertEqual(result["results"][0]["status"], "executed")
+        self.assertEqual(preview["plan"]["items"][0]["mode"], "stage")
+        self.assertEqual(self.json_cli("action-pass", "run", *selection, "--preview-sha256", preview["preview_sha256"])["results"][0]["status"], "staged")
+        reviewed = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
+        exact = reviewed["plan"]["proposals"][0]
+        self.assertEqual(exact["target"], "https://github.com/owner/repo/pull/1")
+        self.assertEqual(exact["operation"], "comment")
+        self.assertEqual(exact["comment"], comment.read_text())
+        self.assertEqual(exact["decision_resolution"]["reason"], "Send focused feedback now")
+        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
+                     "--publish", "--approve", reviewed["approval"], "--automation", ok=False)
+        self.assertEqual(self.write_calls(), [])
+
+        comment.write_text("Please add a focused test for the changed behavior.\n")
+        edited = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "edit", "--kind", "pr", "--number", "1",
+                               "--checkpoint", answered["checkpoint"], "--comment-file", str(comment), "--by", "maintainer")
+        self.assertEqual(edited["decision_resolution"]["reason"], "Send focused feedback now")
+        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
+                     "--publish", "--approve", reviewed["approval"], ok=False)
+        self.assertEqual(self.write_calls(), [])
+        fresh = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
+        self.assertNotEqual(fresh["approval"], reviewed["approval"])
+        result = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
+                               "--publish", "--approve", fresh["approval"])
+        self.assertEqual(result["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST"])
         self.assertFalse((self.root / "data/owner/repo/auto-close/pr-1.json").exists())
         self.assertTrue(self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"][0]["needs_attention"])
+        self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
         self.assertEqual(self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")["feedback_count"], 1)
 
     def test_changed_guidance_requires_fresh_review_and_approval(self):

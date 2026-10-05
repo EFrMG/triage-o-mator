@@ -18,7 +18,7 @@ from _action_proposal_records import load as load_action_proposal, proposal_path
 from _item_context import ContextIndex, read as read_item_context
 from _groups import load_group
 from _storage import atomic_writer, locked
-from _triage import DATA_DIR, load_taxonomy, now_iso, read_repo
+from _triage import DATA_DIR, action_operation, load_taxonomy, now_iso, read_repo
 
 
 def state_path():
@@ -292,7 +292,7 @@ def propose(args, repo):
     inputs = declared_inputs(args, repo)
     if args.action is not None:
         taxonomy = load_taxonomy()
-        if args.action not in taxonomy.get("actions", []) or taxonomy.get("action_operations", {}).get(args.action) != "close":
+        if action_operation(taxonomy, args.action) != "close" or args.action not in taxonomy.get("actions", []) and not args.replace_checkpoint:
             raise ValueError("selected action is not a configured close type")
         guidance = ContextIndex().collect("pr", args.number, include_rows=False)["ledger_guidance"]
         if guidance is None or guidance["action"] != args.action:
@@ -321,6 +321,8 @@ def propose(args, repo):
             previous = load(path, repo)
             if args.replace_checkpoint != previous["checksum"] or previous["status"] not in ("pending", "rejected") or (DATA_DIR / "writes" / (previous["request_id"] + ".json")).exists():
                 raise ValueError("proposal exists or has a write attempt; inspect it before replacing")
+            if args.action not in load_taxonomy().get("actions", []) and previous.get("action") != args.action:
+                raise ValueError("a retired action can only edit its existing proposal")
             if previous.get("decision_question"):
                 question = args.decision_question or previous["decision_question"]
                 value["decision_question"] = question

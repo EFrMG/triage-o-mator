@@ -47,21 +47,18 @@ It is a living document. If a label or action stops being useful, or a new one i
 
 ## Actions
 
-The action is the _recommended conversation or state operation_; independent of proposed labels, since items with the same labels can warrant different actions. A title can give a specific reason, while `action_operations` identifies the write. These are recommendations only: selecting or reviewing one never performs the write. `comment`, `close`, and `reopen` currently need an exact `comment-plus` preview and approval. Close and reopen always publish an explanatory comment first. The separate labeling pass reads proposed labels without consulting the action.
+The action is the _recommended conversation or state operation_, independent of proposed labels. Select `none`, `comment`, `close`, or `reopen`. Use `reason` to state why and what the agent should ask or explain. For example, `comment` with reason “Ask how the reporter plans to reproduce this on a clean install” calls for a question; the exact public text is drafted and reviewed in the action proposal. Selecting or reviewing an action does not itself perform a write. Close and reopen publish an explanatory comment first. The separate labeling pass reads proposed labels without consulting the action.
 
-- `no-action-needed` (`none`): no supported conversation or state write is justified now; the labeling pass may still apply proposed labels.
-- `comment-request-info` (`comment`): ask the reporter for repro, logs, or version details.
-- `comment-feedback` (`comment`): leave a conversation comment with concrete feedback.
-- `close-duplicate` (`close`): explain the duplicate and name the original.
-- `close-stale` (`close`): explain why the item is inactive.
-- `close-out-of-scope` (`close`): explain why the request is outside this repository's scope.
-- `close-resolved` (`close`): point to the verified fix or answer that settled it.
-- `close-with-explanation` (`close`): explain another specific reason for closure.
-- `reopen-with-explanation` (`reopen`): explain why a closed item needs further work.
+- `none`: no conversation or state write is justified now; the labeling pass may still apply proposed labels.
+- `comment`: ask for details or give feedback, as specified in `reason`.
+- `close`: explain a checkable closure basis, including any duplicate target or verified fix in `reason`.
+- `reopen`: explain why a closed item needs further work.
+
+Older action names remain mapped to their GitHub operations for saved decisions and proposal history. Existing installs can preview and apply the local `bin/taxonomy-settings simplify-actions --expected-repo OWNER/REPO` migration; apply requires the preview's `--preview-sha256` value. It changes the active action choices while retaining legacy mappings and saved decisions. Repository automation modes for the new choices start at `stage`.
 
 ## Confidence
 
-`low` / `medium` / `high`: how sure the triager is about the proposed labels and action. **Use `low` liberally.** A wrong `high`-confidence call that a human rubber-stamps is worse than an honest `low` that gets a second look. When no observed label fits, leave the proposal empty and explain the gap in `reason`. When human judgment is needed, state the specific question in `agent_notes` and choose the concrete operation that would follow that judgment, or `no-action-needed` if no conversation or state write is justified yet.
+`low` / `medium` / `high`: how sure the triager is about the proposed labels and action. **Use `low` liberally.** A wrong `high`-confidence call that a human rubber-stamps is worse than an honest `low` that gets a second look. When no observed label fits, leave the proposal empty and explain the gap in `reason`. When human judgment is needed, state the specific question in `agent_notes` and choose the concrete operation that would follow that judgment, or `none` if no conversation or state write is justified yet.
 
 ## What good triage looks like
 

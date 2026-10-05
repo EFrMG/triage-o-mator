@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Edit local taxonomy action descriptions and legacy guidance; never write to GitHub."""
+"""Edit local taxonomy actions and guidance or migrate old defaults; never write to GitHub."""
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -11,9 +12,30 @@ from _storage import atomic_writer, locked
 from _triage import REPO, TAXONOMY_PATH
 
 
+SIMPLE_ACTIONS = ["none", "comment", "close", "reopen"]
+SIMPLE_GUIDANCE = {
+    "none": "No conversation or state change is justified now. Proposed labels remain independent.",
+    "comment": "Use Reason to say what to ask or explain. Draft the exact public comment during the action pass.",
+    "close": "Use Reason to name the checkable closure basis. Publish an explanation before closing.",
+    "reopen": "Use Reason to explain what remains unresolved. Publish an explanation before reopening.",
+}
+LEGACY_OPERATIONS = {
+    "no-action-needed": "none",
+    "comment-request-info": "comment",
+    "comment-feedback": "comment",
+    "close-duplicate": "close",
+    "close-stale": "close",
+    "close-out-of-scope": "close",
+    "close-resolved": "close",
+    "close-with-explanation": "close",
+    "reopen-with-explanation": "reopen",
+}
+RETIRED_DEFAULTS = set(LEGACY_OPERATIONS)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["set-guidance", "create-action", "update-action"])
+    parser.add_argument("command", choices=["set-guidance", "create-action", "update-action", "simplify-actions"])
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--label-id", type=int)
     target.add_argument("--action")
@@ -25,6 +47,8 @@ def main():
     parser.add_argument("--operation", choices=["comment", "close", "reopen", "none"], help="GitHub operation for this action")
     parser.add_argument("--expected-operation", help="the operation shown when editing began")
     parser.add_argument("--expected-repo", required=True)
+    parser.add_argument("--apply", action="store_true", help="apply the previewed action migration")
+    parser.add_argument("--preview-sha256", help="checksum returned by a migration preview")
     args = parser.parse_args()
     if args.expected_repo != REPO:
         parser.error("configured repository changed; reopen Settings")
@@ -33,7 +57,7 @@ def main():
             parser.error("set-guidance requires a target, --value and --expected")
         if len(args.value) > 4000 or "\x00" in args.value:
             parser.error("guidance must be at most 4000 characters and contain no NUL")
-    else:
+    elif args.command != "simplify-actions":
         if args.label_id is not None or args.name is None or args.description is None or args.operation is None:
             parser.error("action changes require --name, --description and --operation, without --label-id")
         if args.command == "update-action" and (args.action is None or args.expected is None or args.expected_operation is None):
@@ -44,15 +68,46 @@ def main():
             parser.error("action title must be a nonempty single line")
         if len(args.description) > 4000 or "\x00" in args.description:
             parser.error("action description must be at most 4000 characters and contain no NUL")
+    elif args.apply != bool(args.preview_sha256):
+        parser.error("simplify-actions requires both --apply and --preview-sha256 to write")
 
     with locked(TAXONOMY_PATH):
         try:
-            taxonomy = json.loads(TAXONOMY_PATH.read_text())
+            original = TAXONOMY_PATH.read_bytes()
+            taxonomy = json.loads(original)
         except (OSError, ValueError) as error:
             parser.exit(1, f"error: could not read {TAXONOMY_PATH}: {error}\n")
 
         if not isinstance(taxonomy, dict):
             parser.exit(1, "error: taxonomy must be a JSON object\n")
+
+        if args.command == "simplify-actions":
+            actions = taxonomy.get("actions")
+            guidance = taxonomy.get("action_guidance")
+            operations = taxonomy.get("action_operations")
+            if not isinstance(actions, list) or not all(isinstance(name, str) for name in actions) or len(set(actions)) != len(actions) or not isinstance(guidance, dict) or not isinstance(operations, dict):
+                parser.exit(1, "error: actions, descriptions or operations are malformed; repair taxonomy.json before migrating\n")
+            for name in SIMPLE_ACTIONS:
+                if name in operations and operations[name] != name:
+                    parser.exit(1, f"error: {name} has a conflicting operation; repair taxonomy.json before migrating\n")
+
+            before = list(actions)
+            taxonomy["actions"] = SIMPLE_ACTIONS + [name for name in actions if name not in RETIRED_DEFAULTS and name not in SIMPLE_ACTIONS]
+            for name, operation in {**{name: name for name in SIMPLE_ACTIONS}, **LEGACY_OPERATIONS}.items():
+                operations.setdefault(name, operation)
+            for name, description in SIMPLE_GUIDANCE.items():
+                guidance.setdefault(name, description)
+
+            preview_sha256 = hashlib.sha256(original).hexdigest()
+            if args.apply:
+                if args.preview_sha256 != preview_sha256:
+                    parser.exit(1, "error: taxonomy changed since preview; preview again\n")
+                if taxonomy["actions"] != before or taxonomy != json.loads(original):
+                    with atomic_writer(TAXONOMY_PATH) as out:
+                        out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
+
+            print(json.dumps({"before": before, "after": taxonomy["actions"], "retained_legacy_mappings": sorted(RETIRED_DEFAULTS & operations.keys()), "updated": taxonomy != json.loads(original), "applied": args.apply, "preview_sha256": preview_sha256}))
+            return
 
         if args.command != "set-guidance":
             actions = taxonomy.get("actions", [])

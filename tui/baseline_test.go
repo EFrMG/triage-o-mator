@@ -239,7 +239,7 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.settings.section != "action" || !strings.Contains(ansi.Strip(m.settingsView()), "No description") {
+	if m.settings.section != "action" || !strings.Contains(ansi.Strip(m.settingsView()), "No conversation or state change") {
 		t.Fatal("Actions did not open their own description list")
 	}
 
@@ -253,7 +253,7 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	if cmd == nil || !m.settings.busy {
 		t.Fatal("Ctrl-E did not open $EDITOR for the selected Settings field")
 	}
-	m = baselineSend(m, settingsEditorMsg{root: root, repo: m.repo, kind: "action", originalName: "no-action-needed", field: 1, request: m.settings.request, text: "No conversation or state write needed"})
+	m = baselineSend(m, settingsEditorMsg{root: root, repo: m.repo, kind: "action", originalName: "none", field: 1, request: m.settings.request, text: "No conversation or state write needed"})
 	if !m.settings.editor.previewing || m.settings.editor.description.Value() != "No conversation or state write needed" {
 		t.Fatal("$EDITOR result did not return to the Settings preview")
 	}
@@ -267,13 +267,13 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 		t.Fatalf("Settings script failed: %+v", message)
 	}
 	m = baselineSend(m, message)
-	if m.settings.editor != nil || m.taxonomy.ActionGuidance["no-action-needed"] != "No conversation or state write needed" {
+	if m.settings.editor != nil || m.taxonomy.ActionGuidance["none"] != "No conversation or state write needed" {
 		t.Fatal("Settings did not reload saved guidance")
 	}
 
 	stale := settingsDoneMsg{root: root, repo: "other/repo", request: m.settings.request, operation: "save", taxonomy: Taxonomy{}}
 	m = baselineSend(m, stale)
-	if m.taxonomy.ActionGuidance["no-action-needed"] != "No conversation or state write needed" {
+	if m.taxonomy.ActionGuidance["none"] != "No conversation or state write needed" {
 		t.Fatal("stale Settings reply replaced the selected repository's guidance")
 	}
 
@@ -354,10 +354,10 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	if m.settings.selected != 2 || m.settings.automations.actions[0].Name != "comment-request-info" {
+	if m.settings.selected != 2 || m.settings.automations.actions[0].Name != "comment" {
 		t.Fatal("first writing action did not appear after Scoring")
 	}
-	if prompt := m.actionPrompt(m.settings.automations.actions[0]); !strings.Contains(prompt, "prompts/automated-actions.md") || !strings.Contains(prompt, "comment-request-info") || !strings.Contains(prompt, m.repo) {
+	if prompt := m.actionPrompt(m.settings.automations.actions[0]); !strings.Contains(prompt, "prompts/automated-actions.md") || !strings.Contains(prompt, "comment") || !strings.Contains(prompt, m.repo) {
 		t.Fatal("action prompt lacked selected type, repository or playbook")
 	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -717,7 +717,7 @@ func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 			m := baselineModel(t, root)
 			m.activateTab(untriagedTab)
 			m.selectCurrentListItem()
-			m.form.ApplyProposal(proposal{Category: "bug", Action: "no-action-needed", Confidence: "medium", Reason: "Reviewed source", ProposedBy: "agent:triage"})
+			m.form.ApplyProposal(proposal{Category: "bug", Action: "none", Confidence: "medium", Reason: "Reviewed source", ProposedBy: "agent:triage"})
 			shortcut := "s"
 			if approve {
 				shortcut = "S"
@@ -812,7 +812,7 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	m.form.CycleValue(0)
 	m.commitDraftIfDirty()
 	m.loadForm(m.items[0])
-	if m.form.Category() != "retired" || m.form.Action() != "no-action-needed" || m.form.Confidence() != "obsolete" {
+	if m.form.Category() != "retired" || m.form.Action() != "none" || m.form.Confidence() != "obsolete" {
 		t.Fatal("draft lost corrected or unlisted values")
 	}
 	m.form.FocusField(fieldConfidence)
@@ -830,7 +830,7 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	if result := cmd().(applyDoneMsg); result.err != nil {
 		t.Fatal(result.err)
 	}
-	if got := baselineLedgerRow(t, root); got["category"] != "retired" || got["action"] != "no-action-needed" || got["confidence"] != "low" || got["reason"] != "Explicitly checked" {
+	if got := baselineLedgerRow(t, root); got["category"] != "retired" || got["action"] != "none" || got["confidence"] != "low" || got["reason"] != "Explicitly checked" {
 		t.Fatalf("corrected decision = %v", got)
 	}
 }
@@ -843,7 +843,7 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 	if err := json.Unmarshal([]byte(baselineRow(1)), &row); err != nil {
 		t.Fatal(err)
 	}
-	row["category"], row["action"], row["confidence"], row["reason"] = "bug", "no-action-needed", "", reason
+	row["category"], row["action"], row["confidence"], row["reason"] = "bug", "none", "", reason
 	row["reviewed"], row["reviewed_by"] = true, "tester"
 	data, err := json.Marshal(row)
 	if err != nil {
@@ -866,7 +866,7 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 	if m.form.Reason() != reason {
 		t.Fatal("draft reason was truncated")
 	}
-	m.form.ApplyProposal(proposal{Category: "bug", Action: "no-action-needed", Confidence: "", Reason: reason})
+	m.form.ApplyProposal(proposal{Category: "bug", Action: "none", Confidence: "", Reason: reason})
 	if m.form.Reason() != reason || m.form.Confidence() != "" {
 		t.Fatal("proposal reason or confidence changed")
 	}
@@ -906,7 +906,7 @@ func TestBaselinePendingSavePinsRepositoryAndReleasesSwitch(t *testing.T) {
 	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
 	m.detail.loading = false
-	m.form.ApplyProposal(proposal{Category: "bug", Action: "no-action-needed", Reason: "old repository decision"})
+	m.form.ApplyProposal(proposal{Category: "bug", Action: "none", Reason: "old repository decision"})
 	next, cmd := m.Update(tea.KeyPressMsg{Text: "s"})
 	m = next.(model)
 	if cmd == nil || m.switchBusy() == "" {

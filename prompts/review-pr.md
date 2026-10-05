@@ -72,10 +72,10 @@ Only ever GET requests, as the rest of this tooling does.
 
 Use only labels actually present in this repository's observed `label_catalog`, and actions in `config/taxonomy.json`. The following names are examples when the repository has them:
 
-- `merge-ready` + `no-action-needed`: you read the whole diff, found nothing blocking, the scope is focused and the checks above pass. Propose the available label separately; the labeling pass handles it whether or not it is already present. Put the merge recommendation in `agent_notes`; the TUI does not merge PRs. Use `high` only for small diffs with no safety-sensitive changes.
-- `trivial` + `no-action-needed`: typo-, formatting- or lint-only. Propose the available label separately.
-- `needs-revision` + `comment-feedback`: good direction, but it has blocking findings that can be stated in a conversation comment. The notes list them. This is not a formal GitHub review.
-- `needs-maintainer-call` + `no-action-needed`: the code may be fine, but it makes a design or scope decision (new default, new dependency, new user-facing behaviour). State the decision as one question in `agent_notes` before proposing any write.
+- `merge-ready` + `none`: you read the whole diff, found nothing blocking, the scope is focused and the checks above pass. Propose the available label separately; the labeling pass handles it whether or not it is already present. Put the merge recommendation in `agent_notes`; the TUI does not merge PRs. Use `high` only for small diffs with no safety-sensitive changes.
+- `trivial` + `none`: typo-, formatting- or lint-only. Propose the available label separately.
+- `needs-revision` + `comment`: good direction, but it has blocking findings that can be stated in a conversation comment. The notes list them. This is not a formal GitHub review.
+- `needs-maintainer-call` + `none`: the code may be fine, but it makes a design or scope decision (new default, new dependency, new user-facing behaviour). State the decision as one question in `agent_notes` before proposing any write.
 - `duplicate-pr`, `stale`, `out-of-scope`, `invalid`: as the taxonomy defines them.
 
 ## 6. Write the review into `agent_notes`

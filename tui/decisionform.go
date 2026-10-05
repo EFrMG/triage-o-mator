@@ -65,7 +65,7 @@ const (
 
 func newDecisionForm(tax Taxonomy, repo string) decisionForm {
 	ta := textarea.New()
-	ta.Placeholder = "one sentence a human can skim"
+	ta.Placeholder = "why this action; what to ask or explain"
 	ta.ShowLineNumbers = false
 	ta.Prompt = ""
 	ta.CharLimit = 0
@@ -187,7 +187,7 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 
 	act := -1
 	for i, a := range f.taxonomy.SelectableActions() {
-		if a == "close-duplicate" && f.taxonomy.OperationFor(a) == "close" {
+		if (a == "close" || a == "close-duplicate") && f.taxonomy.OperationFor(a) == "close" {
 			act = i
 		}
 	}

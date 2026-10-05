@@ -67,7 +67,7 @@ bin/batch 40 --order newest # newest first, to keep up with today's inflow
 bin/batch 10 --kind pr --diff # PRs with their full diffs, for code review
 ```
 
-Pick a batch size you can actually read carefully: 25–40 is usually right. A larger batch doesn't help anyone if it means skimming titles instead of reading bodies and comments. Quality of triage matters more than throughput; a wrong `close-duplicate` call erodes trust fast.
+Pick a batch size you can actually read carefully: 25–40 is usually right. A larger batch doesn't help anyone if it means skimming titles instead of reading bodies and comments. Quality of triage matters more than throughput; a wrong `close` call erodes trust fast.
 
 `bin/batch` writes two working files:
 

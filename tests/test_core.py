@@ -157,7 +157,7 @@ class InstallTests(unittest.TestCase):
             settings = [str(target / "triage-o-mator/bin/taxonomy-settings"), "set-guidance", "--expected-repo", "owner/repo"]
             guidance = subprocess.run([*settings, "--label-id", "2", "--expected-name", "old", "--expected", "", "--value", "Keep this history"], env=env, capture_output=True, text=True)
             self.assertEqual(guidance.returncode, 0, guidance.stderr)
-            action_guidance = subprocess.run([*settings, "--action", "no-action-needed", "--expected", "", "--value", "No conversation needed"], env=env, capture_output=True, text=True)
+            action_guidance = subprocess.run([*settings, "--action", "none", "--expected", "No conversation or state change is justified now. Proposed labels remain independent.", "--value", "No conversation needed"], env=env, capture_output=True, text=True)
             self.assertEqual(action_guidance.returncode, 0, action_guidance.stderr)
             stale = subprocess.run([*settings, "--label-id", "2", "--expected-name", "old", "--expected", "", "--value", "Overwrite"], env=env, capture_output=True, text=True)
             self.assertNotEqual(stale.returncode, 0)
@@ -178,7 +178,7 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(catalog["labels"][1]["previous_names"], ["old"])
             self.assertEqual([row["name"] for row in catalog["retired"]], ["bug"])
             self.assertTrue(catalog["retired"][0]["retired_at"])
-            self.assertEqual(json.loads(taxonomy_path.read_text())["action_guidance"]["no-action-needed"], "No conversation needed")
+            self.assertEqual(json.loads(taxonomy_path.read_text())["action_guidance"]["none"], "No conversation needed")
 
             responses[endpoint] = {"data": [{"name": "broken"}]}
             (mock / "responses.json").write_text(json.dumps(responses))
@@ -268,31 +268,62 @@ print(json.dumps(label))
 
 
 class LabelApplicationTests(Workspace):
+    def test_simplify_actions_preserves_saved_decisions_and_legacy_mappings(self):
+        taxonomy_path = self.root / "config/taxonomy.json"
+        taxonomy = json.loads(taxonomy_path.read_text())
+        taxonomy["actions"] = ["no-action-needed", "comment-request-info", "comment-feedback", "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved", "close-with-explanation", "reopen-with-explanation", "ask-review"]
+        taxonomy["action_operations"]["ask-review"] = "comment"
+        taxonomy["action_guidance"]["ask-review"] = "Custom action"
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        ledger_path = self.root / "data/owner/repo/ledger.jsonl"
+        ledger_path.write_text(json.dumps(dict(kind="issue", number=1, action="close-duplicate")) + "\n")
+        old_policy = self.json_cli("action-policy", "set", "--expected-repo", "owner/repo", "--action", "close-duplicate", "--mode", "execute")
+        self.json_cli("action-policy", "set", "--expected-repo", "owner/repo", "--action", "close-duplicate", "--mode", "execute", "--apply", "--preview-sha256", old_policy["preview_sha256"])
+        before = taxonomy_path.read_bytes()
+        ledger_before = ledger_path.read_bytes()
+
+        args = ("--expected-repo", "owner/repo")
+        preview = self.json_cli("taxonomy-settings", "simplify-actions", *args)
+        self.assertEqual(taxonomy_path.read_bytes(), before)
+        self.assertEqual(preview["after"], ["none", "comment", "close", "reopen", "ask-review"])
+        self.run_cli("taxonomy-settings", "simplify-actions", *args, "--apply", "--preview-sha256", "0" * 64, ok=False)
+        self.assertEqual(taxonomy_path.read_bytes(), before)
+
+        self.json_cli("taxonomy-settings", "simplify-actions", *args, "--apply", "--preview-sha256", preview["preview_sha256"])
+        saved = json.loads(taxonomy_path.read_text())
+        self.assertEqual(saved["actions"], preview["after"])
+        self.assertEqual(saved["action_operations"]["close-duplicate"], "close")
+        self.assertEqual(saved["action_guidance"]["ask-review"], "Custom action")
+        self.assertEqual(ledger_path.read_bytes(), ledger_before)
+        modes = {row["name"]: row["mode"] for row in self.json_cli("action-policy", "status", *args)["actions"]}
+        self.assertEqual({name: modes[name] for name in ("comment", "close", "reopen")}, {"comment": "stage", "close": "stage", "reopen": "stage"})
+        self.assertEqual(self.calls(), [])
+
     def test_action_modes_are_explicit_per_repository_and_reset_after_guidance_changes(self):
         args = ("--expected-repo", "owner/repo")
         initial = self.json_cli("action-policy", "status", *args)
         modes = {row["name"]: row for row in initial["actions"]}
-        self.assertFalse(modes["no-action-needed"]["writable"])
+        self.assertFalse(modes["none"]["writable"])
         self.assertTrue(all(row["mode"] == "stage" for row in modes.values()))
         self.assertFalse((self.root / "config/action-automation.json").exists())
 
-        proposal = self.json_cli("action-policy", "set", *args, "--action", "comment-request-info", "--mode", "execute")
+        proposal = self.json_cli("action-policy", "set", *args, "--action", "comment", "--mode", "execute")
         self.assertEqual(proposal["before"], "stage")
         self.assertFalse((self.root / "config/action-automation.json").exists())
-        self.run_cli("action-policy", "set", *args, "--action", "comment-feedback", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"], ok=False)
-        self.json_cli("action-policy", "set", *args, "--action", "comment-request-info", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"])
+        self.run_cli("action-policy", "set", *args, "--action", "close", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"], ok=False)
+        self.json_cli("action-policy", "set", *args, "--action", "comment", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"])
         modes = {row["name"]: row for row in self.json_cli("action-policy", "status", *args)["actions"]}
-        self.assertEqual(modes["comment-request-info"]["mode"], "execute")
-        self.assertEqual(modes["comment-feedback"]["mode"], "stage")
+        self.assertEqual(modes["comment"]["mode"], "execute")
+        self.assertEqual(modes["close"]["mode"], "stage")
 
         taxonomy_path = self.root / "config/taxonomy.json"
         taxonomy = json.loads(taxonomy_path.read_text())
-        taxonomy["action_guidance"]["comment-request-info"] = "Ask only for missing reproduction details"
+        taxonomy["action_guidance"]["comment"] = "Ask only for missing reproduction details"
         taxonomy_path.write_text(json.dumps(taxonomy))
         changed = {row["name"]: row for row in self.json_cli("action-policy", "status", *args)["actions"]}
-        self.assertEqual(changed["comment-request-info"]["mode"], "stage")
-        self.assertTrue(changed["comment-request-info"]["stale_setting"])
-        self.run_cli("action-policy", "set", *args, "--action", "comment-request-info", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"], ok=False)
+        self.assertEqual(changed["comment"]["mode"], "stage")
+        self.assertTrue(changed["comment"]["stale_setting"])
+        self.run_cli("action-policy", "set", *args, "--action", "comment", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"], ok=False)
 
         (self.root / "config/repo").write_text("other/repo\n")
         other = self.json_cli("action-policy", "status", "--expected-repo", "other/repo")

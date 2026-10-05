@@ -18,7 +18,7 @@ from _auto_close_records import load as load_closure, proposal_path as closure_p
 from _evidence import canonical, digest, validate_payload
 from _item_context import ContextIndex, read as read_item_context
 from _storage import atomic_writer, locked
-from _triage import DATA_DIR, load_taxonomy, now_iso, read_repo
+from _triage import DATA_DIR, action_operation, load_taxonomy, now_iso, read_repo
 
 
 def save(path, value):
@@ -180,8 +180,9 @@ def valid_short_text(text, limit):
 
 def propose(args, repo):
     taxonomy = load_taxonomy()
-    operation = taxonomy.get("action_operations", {}).get(args.action)
-    if args.action not in taxonomy.get("actions", []) or operation not in ("comment", "close", "reopen"):
+    operation = action_operation(taxonomy, args.action)
+    retired_action = args.action not in taxonomy.get("actions", [])
+    if operation not in ("comment", "close", "reopen") or retired_action and not args.replace_checkpoint:
         raise ValueError("selected action is not a configured writing type")
     if args.kind == "pr" and operation == "close":
         raise ValueError("PR closure proposals belong to bin/auto-close")
@@ -237,6 +238,8 @@ def propose(args, repo):
             receipt = DATA_DIR / "writes" / (previous["request_id"] + ".json")
             if args.replace_checkpoint != previous["checksum"] or previous["status"] not in ("pending", "rejected") or receipt.exists():
                 raise ValueError("action proposal exists or has a write attempt; inspect it before replacing")
+            if retired_action and previous["action"] != args.action:
+                raise ValueError("a retired action can only edit its existing proposal")
             if previous.get("decision_question"):
                 question = args.decision_question or previous["decision_question"]
                 value["decision_question"] = question

@@ -57,10 +57,12 @@ func (t Taxonomy) OperationFor(action string) string {
 
 	// Older installs own their taxonomy copy and have no action_operations map. These names already describe supported writes.
 	switch action {
-	case "comment-request-info":
+	case "comment-request-info", "comment-feedback":
 		return "comment"
-	case "comment-explain-close", "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved":
+	case "comment-explain-close", "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved", "close-with-explanation":
 		return "close"
+	case "reopen-with-explanation":
+		return "reopen"
 	case "no-action-needed":
 		return "none"
 	}

@@ -123,7 +123,7 @@ class WriteTests(Workspace):
         live = json.loads((self.mock / "item.json").read_text())
         live["updated_at"] = timestamp
         (self.mock / "item.json").write_text(json.dumps(live))
-        decision = dict(item(1, "Needs a reproduction"), action="comment-request-info", confidence="medium",
+        decision = dict(item(1, "Needs a reproduction"), action="comment", confidence="medium",
                         reason="The report lacks steps", reviewed=False)
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         ledger.write_text(json.dumps(decision) + "\n")
@@ -132,7 +132,7 @@ class WriteTests(Workspace):
         comment.write_text("Could you share steps to reproduce this issue?\n")
         args = ("--expected-repo", "owner/repo")
         saved = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
-                              "--action", "comment-request-info", "--title", "Needs a reproduction", "--observed-state", "open",
+                              "--action", "comment", "--title", "Needs a reproduction", "--observed-state", "open",
                               "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
                               "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
         self.assertTrue(saved["active"])
@@ -140,6 +140,16 @@ class WriteTests(Workspace):
         self.assertEqual(self.json_cli("action-proposals", *args, "list")["rows"][0]["comment"], comment.read_text())
         reviewed = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
         self.assertEqual(reviewed["plan"]["proposals"][0]["checkpoint"], saved["checkpoint"])
+
+        taxonomy_path = self.root / "config/taxonomy.json"
+        taxonomy = json.loads(taxonomy_path.read_text())
+        taxonomy["actions"].remove("comment")
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        legacy_preview = self.json_cli("action-pass", "preview", *args, "--item", "issue:1")
+        self.assertEqual(legacy_preview["plan"]["items"][0]["mode"], "stage")
+        self.assertEqual(self.json_cli("action-pass", "run", *args, "--item", "issue:1", "--preview-sha256", legacy_preview["preview_sha256"])["results"][0]["status"], "staged")
+        taxonomy["actions"].append("comment")
+        taxonomy_path.write_text(json.dumps(taxonomy))
 
         rejected = self.json_cli("action-proposals", *args, "reject", "--kind", "issue", "--number", "1",
                                  "--checkpoint", saved["checkpoint"], "--by", "maintainer", "--reason", "Ask for the version too")
@@ -150,7 +160,7 @@ class WriteTests(Workspace):
 
         refreshed = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
         reconsidered = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
-                                     "--action", "comment-request-info", "--title", "Needs a reproduction", "--observed-state", "open",
+                                     "--action", "comment", "--title", "Needs a reproduction", "--observed-state", "open",
                                      "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
                                      "--context-checkpoint", refreshed["checkpoint"], "--evidence-gap", "Discussion not acquired",
                                      "--replace-checkpoint", rejected["checkpoint"], "--reconsideration-reason", "Include the version in the request")
@@ -169,7 +179,7 @@ class WriteTests(Workspace):
         live = json.loads((self.mock / "item.json").read_text())
         live.update(state="closed", updated_at=timestamp)
         (self.mock / "item.json").write_text(json.dumps(live))
-        decision = dict(item(1, "Closed too early"), state="closed", action="reopen-with-explanation",
+        decision = dict(item(1, "Closed too early"), state="closed", action="reopen",
                         confidence="high", reason="The reported behavior still reproduces", reviewed=False)
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
         args = ("--expected-repo", "owner/repo")
@@ -177,11 +187,11 @@ class WriteTests(Workspace):
         comment = self.root / "reopen.md"
         comment.write_text("This still reproduces, so I am reopening it for investigation.\n")
         self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
-                      "--action", "reopen-with-explanation", "--title", "Closed too early", "--observed-state", "closed",
+                      "--action", "reopen", "--title", "Closed too early", "--observed-state", "closed",
                       "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
                       "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
         review = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
-        policy_args = (*args, "--action", "reopen-with-explanation", "--mode", "execute")
+        policy_args = (*args, "--action", "reopen", "--mode", "execute")
         policy = self.json_cli("action-policy", "set", *policy_args)
         self.json_cli("action-policy", "set", *policy_args, "--apply", "--preview-sha256", policy["preview_sha256"])
         self.run_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1", "--publish",
@@ -197,7 +207,7 @@ class WriteTests(Workspace):
 
     def test_earlier_ledger_based_question_resolution_remains_readable(self):
         timestamp = "2026-10-04T01:00:00Z"
-        decision = dict(item(1, "Needs a reproduction"), action="comment-request-info", confidence="medium",
+        decision = dict(item(1, "Needs a reproduction"), action="comment", confidence="medium",
                         reason="Missing steps", reviewed=False)
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
         args = ("--expected-repo", "owner/repo")
@@ -205,7 +215,7 @@ class WriteTests(Workspace):
         comment = self.root / "legacy-answer.md"
         comment.write_text("Could you share reproduction steps?\n")
         self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
-                      "--action", "comment-request-info", "--title", "Needs a reproduction", "--observed-state", "open",
+                      "--action", "comment", "--title", "Needs a reproduction", "--observed-state", "open",
                       "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
                       "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired",
                       "--decision-question", "Should this request be sent?")
@@ -234,13 +244,13 @@ class WriteTests(Workspace):
 
     def test_action_target_operation_and_comment_edits_invalidate_exact_approval(self):
         timestamp = "2026-10-04T01:00:00Z"
-        decision = dict(item(1, "Needs feedback"), action="comment-feedback", confidence="medium", reason="A focused response is useful")
+        decision = dict(item(1, "Needs feedback"), action="comment", confidence="medium", reason="A focused response is useful")
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
         args = ("--expected-repo", "owner/repo")
         context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
         comment = self.root / "feedback.md"
         comment.write_text("Please clarify the behavior.\n")
-        base = ("--kind", "issue", "--number", "1", "--action", "comment-feedback", "--title", "Needs feedback",
+        base = ("--kind", "issue", "--number", "1", "--action", "comment", "--title", "Needs feedback",
                 "--observed-state", "open", "--updated-at", timestamp, "--comment-file", str(comment),
                 "--by", "agent:helper", "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
         self.json_cli("action-proposals", *args, "propose", *base)
@@ -252,8 +262,8 @@ class WriteTests(Workspace):
                                "--checkpoint", saved["checkpoint"], "--comment-file", str(comment), "--by", "maintainer")
         self.run_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1", "--publish", "--approve", first["approval"], ok=False)
 
-        self.json_cli("taxonomy-settings", "update-action", "--expected-repo", "owner/repo", "--action", "comment-feedback",
-                      "--expected", "", "--expected-operation", "comment", "--name", "comment-feedback",
+        self.json_cli("taxonomy-settings", "update-action", "--expected-repo", "owner/repo", "--action", "comment",
+                      "--expected", "Use Reason to say what to ask or explain. Draft the exact public comment during the action pass.", "--expected-operation", "comment", "--name", "comment",
                       "--description", "", "--operation", "close")
         changed = self.json_cli("action-proposals", *args, "propose", *base, "--replace-checkpoint", edited["checkpoint"])
         second = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
@@ -319,9 +329,9 @@ class AutoCloseWriteTests(Workspace):
 
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[0].update(action="close-duplicate", confidence="high", reason="Superseded by #2")
+        rows[0].update(action="close", confidence="high", reason="Superseded by #2")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        self.propose(1, "--action", "close-duplicate", "--evidence", f"pr:1:{snapshot}")
+        self.propose(1, "--action", "close", "--evidence", f"pr:1:{snapshot}")
 
         selected = ("--expected-repo", "owner/repo", "--number", "1")
         staged = self.json_cli("action-pass", "preview", *selected)
@@ -329,15 +339,15 @@ class AutoCloseWriteTests(Workspace):
         self.assertEqual(self.json_cli("action-pass", "run", *selected, "--preview-sha256", staged["preview_sha256"])["results"][0]["status"], "staged")
         self.assertEqual(self.write_calls(), [])
 
-        setting = ("--expected-repo", "owner/repo", "--action", "close-duplicate", "--mode", "execute")
+        setting = ("--expected-repo", "owner/repo", "--action", "close", "--mode", "execute")
         policy = self.json_cli("action-policy", "set", *setting)
         self.json_cli("action-policy", "set", *setting, "--apply", "--preview-sha256", policy["preview_sha256"])
         self.run_cli("action-pass", "run", *selected, "--preview-sha256", staged["preview_sha256"], ok=False)
         self.assertEqual(self.write_calls(), [])
 
-        rows[1].update(action="close-duplicate", confidence="high", reason="Also superseded")
+        rows[1].update(action="close", confidence="high", reason="Also superseded")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        self.propose(2, "--action", "close-duplicate")
+        self.propose(2, "--action", "close")
         gap_review = self.auto_close("review", "--number", "2")
         self.auto_close("execute", "--number", "2", "--publish", "--approve", gap_review["approval"], "--automation", ok=False)
         self.assertEqual(self.write_calls(), [])
@@ -362,11 +372,11 @@ class AutoCloseWriteTests(Workspace):
 
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[0].update(action="close-duplicate", confidence="high", reason="Possibly superseded by #2")
+        rows[0].update(action="close", confidence="high", reason="Possibly superseded by #2")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        held = self.propose(1, "--action", "close-duplicate", "--evidence", f"pr:1:{snapshot}",
+        held = self.propose(1, "--action", "close", "--evidence", f"pr:1:{snapshot}",
                             "--decision-question", "Does #2 fully replace this PR?")
-        setting = ("--expected-repo", "owner/repo", "--action", "close-duplicate", "--mode", "execute")
+        setting = ("--expected-repo", "owner/repo", "--action", "close", "--mode", "execute")
         policy = self.json_cli("action-policy", "set", *setting)
         self.json_cli("action-policy", "set", *setting, "--apply", "--preview-sha256", policy["preview_sha256"])
 
@@ -432,12 +442,12 @@ class AutoCloseWriteTests(Workspace):
 
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[0].update(action="comment-feedback", confidence="high", reason="The change needs a focused follow-up")
+        rows[0].update(action="comment", confidence="high", reason="The change needs a focused follow-up")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
         comment = self.root / "feedback.md"
         comment.write_text("Please add coverage for the changed behavior.\n")
-        proposal_args = ("--kind", "pr", "--number", "1", "--action", "comment-feedback", "--title", "PR 1",
+        proposal_args = ("--kind", "pr", "--number", "1", "--action", "comment", "--title", "PR 1",
                          "--observed-state", "open", "--updated-at", "2026-09-29T00:00:00Z", "--head-sha", "b" * 40,
                          "--comment-file", str(comment), "--by", "agent:helper", "--evidence", f"pr:1:{snapshot}")
         held = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "propose", *proposal_args,
@@ -448,7 +458,7 @@ class AutoCloseWriteTests(Workspace):
         selection = ("--expected-repo", "owner/repo", "--item", "pr:1")
         self.assertEqual(self.json_cli("action-pass", "preview", *selection)["plan"]["items"][0]["mode"], "stage")
 
-        setting = ("--expected-repo", "owner/repo", "--action", "comment-feedback", "--mode", "execute")
+        setting = ("--expected-repo", "owner/repo", "--action", "comment", "--mode", "execute")
         policy = self.json_cli("action-policy", "set", *setting)
         self.json_cli("action-policy", "set", *setting, "--apply", "--preview-sha256", policy["preview_sha256"])
         held_preview = self.json_cli("action-pass", "preview", *selection)

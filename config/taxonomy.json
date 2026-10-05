@@ -30,17 +30,16 @@
     "invalid"
   ],
   "actions": [
-    "no-action-needed",
-    "comment-request-info",
-    "comment-feedback",
-    "close-duplicate",
-    "close-stale",
-    "close-out-of-scope",
-    "close-resolved",
-    "close-with-explanation",
-    "reopen-with-explanation"
+    "none",
+    "comment",
+    "close",
+    "reopen"
   ],
   "action_operations": {
+    "none": "none",
+    "comment": "comment",
+    "close": "close",
+    "reopen": "reopen",
     "no-action-needed": "none",
     "comment-request-info": "comment",
     "comment-feedback": "comment",
@@ -51,7 +50,12 @@
     "close-with-explanation": "close",
     "reopen-with-explanation": "reopen"
   },
-  "action_guidance": {},
+  "action_guidance": {
+    "none": "No conversation or state change is justified now. Proposed labels remain independent.",
+    "comment": "Use Reason to say what to ask or explain. Draft the exact public comment during the action pass.",
+    "close": "Use Reason to name the checkable closure basis. Publish an explanation before closing.",
+    "reopen": "Use Reason to explain what remains unresolved. Publish an explanation before reopening."
+  },
   "confidence": [
     "low",
     "medium",

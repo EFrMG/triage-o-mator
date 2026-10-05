@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _evidence import canonical, digest
-from _triage import REPO
+from _triage import REPO, action_operation, load_taxonomy
 
 
 def script(name, *args):
@@ -38,6 +38,7 @@ def select(keys):
 
     policy = script("action-policy", "status", "--expected-repo", REPO)
     settings = {row["name"]: row for row in policy["actions"]}
+    taxonomy = load_taxonomy()
     closures = {("pr", row["number"]): row for row in script("auto-close", "--expected-repo", REPO, "list")["rows"]}
     other = {(row["kind"], row["number"]): row for row in script("action-proposals", "--expected-repo", REPO, "list")["rows"]}
     chosen = []
@@ -54,6 +55,8 @@ def select(keys):
 
         setting = settings.get(row["action"])
         operation = "close" if source == "auto-close" else row["operation"]
+        if setting is None and row["action"] not in taxonomy.get("actions", []) and action_operation(taxonomy, row["action"]) == operation:
+            setting = dict(operation=operation, mode="stage", configured=False, definition_sha256="")
         if setting is None or setting["operation"] != operation:
             raise ValueError(f"{kind} #{number} no longer has the selected action operation")
 

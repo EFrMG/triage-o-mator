@@ -123,10 +123,12 @@ def action_operation(taxonomy, action):
         operation = operations[action]
         return operation if operation in ("comment", "close", "reopen", "none") else ""
 
-    if action == "comment-request-info":
+    if action in ("comment-request-info", "comment-feedback"):
         return "comment"
-    if action in ("comment-explain-close", "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved"):
+    if action in ("comment-explain-close", "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved", "close-with-explanation"):
         return "close"
+    if action == "reopen-with-explanation":
+        return "reopen"
     if action == "no-action-needed":
         return "none"
 

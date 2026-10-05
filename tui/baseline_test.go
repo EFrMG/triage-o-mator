@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "action-proposals"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -356,6 +356,9 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.settings.selected != 2 || m.settings.automations.actions[0].Name != "comment-request-info" {
 		t.Fatal("first writing action did not appear after Scoring")
+	}
+	if prompt := m.actionPrompt(m.settings.automations.actions[0]); !strings.Contains(prompt, "prompts/automated-actions.md") || !strings.Contains(prompt, "comment-request-info") || !strings.Contains(prompt, m.repo) {
+		t.Fatal("action prompt lacked selected type, repository or playbook")
 	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
@@ -1961,17 +1964,17 @@ func TestGroupContextScrollStopsAtVisibleBoundary(t *testing.T) {
 	}
 }
 
-func TestSettledProposalsLeaveNotificationsWithoutTracking(t *testing.T) {
+func TestCompletedOutcomesStayVisibleAndRejectedProposalsLeaveNotifications(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
 	rejected := autoCloseRow{Number: 5, Title: "Keep this PR", Status: "rejected", Checkpoint: "rejected-5", Rejection: &autoCloseRejection{By: "maintainer", At: "2026-09-29T00:00:00Z", Reason: "Compatibility work remains useful"}}
 	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Title: "Completed fixture", Status: "executed"}, {Number: 4, Title: "Needs inspection", Status: "uncertain"}, rejected}}}
 	choices := m.notifications.choices()
-	if len(choices) != 1 || choices[0].key != (Key{Kind: "pr", Number: 4}) {
-		t.Fatalf("completed or rejected closure remained a notification: %+v", choices)
+	if len(choices) != 2 || choices[0].key != (Key{Kind: "pr", Number: 3}) || choices[1].key != (Key{Kind: "pr", Number: 4}) {
+		t.Fatalf("completed outcome or uncertain closure was unavailable, or rejection remained: %+v", choices)
 	}
 	view := ansi.Strip(m.notificationsView())
-	if strings.Contains(view, "PR #3") || strings.Contains(view, "PR #5") {
-		t.Fatal("completed or rejected proposal appeared in Notifications")
+	if !strings.Contains(view, "PR #3") || strings.Contains(view, "PR #5") {
+		t.Fatal("completed outcome was hidden or rejected proposal appeared in Notifications")
 	}
 	m.notifications.review = &autoCloseReview{}
 	m.notifications.review.Plan.Proposals = []autoCloseRow{rejected}
@@ -2157,6 +2160,74 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	m = next.(model)
 	if approval != nil || len(m.drafts) != 1 || !m.statusIsError() {
 		t.Fatal("stale proposal gained approval, discarded a draft or failed to report the refusal")
+	}
+}
+
+func TestStagedActionReviewChecksContextBeforeExactApproval(t *testing.T) {
+	root := baselineRoot(t)
+	script := `#!/usr/bin/env python3
+import json, pathlib, sys
+args = sys.argv[1:]
+row = dict(kind="issue", number=1, title="Needs reproduction", target="https://github.com/owner/repo/issues/1", action="comment-request-info", operation="comment", comment="Could you share steps to reproduce?", updated_at="2026-10-04T01:00:00Z", checkpoint="action-1", status="pending", active=True, inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Discussion not acquired"]))
+if "context" in args:
+    stale = pathlib.Path("stale-action").exists()
+    context = dict(repository="owner/repo", item=dict(kind="issue", number=1), checkpoint="ctx-a", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(action="comment-request-info", reason="Missing reproduction"))])
+    print(json.dumps(dict(repository="owner/repo", kind="issue", number=1, proposal_checkpoint="action-1", current=not stale, reason="local guidance changed" if stale else None, item_context=context, requests=0)))
+elif "review" in args:
+    print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="exact-approval")))
+elif "execute" in args:
+    pathlib.Path("published-action").write_text("yes")
+    print(json.dumps(dict(kind="issue", number=1, status="executed")))
+else:
+    sys.exit("unexpected action command")
+`
+	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	row := actionProposalRow{Kind: "issue", Number: 1, Title: "Needs reproduction", Target: "https://github.com/owner/repo/issues/1", Action: "comment-request-info", Operation: "comment", Comment: "Could you share steps to reproduce?", UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "action-1", Status: "pending", Active: true, Needs: true, Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}, DecisionResolution: &actionDecisionResolution{By: "maintainer", At: "2026-10-04T00:00:00Z", Reason: "Send a focused request"}}
+	m := baselineModel(t, root)
+	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{row}}}
+	choice := m.notifications.choices()[0]
+	if choice.actionProposal != 0 || choice.key != (Key{Kind: "issue", Number: 1}) {
+		t.Fatal("staged issue action did not appear in Notifications")
+	}
+	if err := os.WriteFile(filepath.Join(root, "stale-action"), []byte("yes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	next, cmd := m.openActionReview(choice)
+	m = baselineSend(next.(model), cmd().(actionReviewMsg))
+	if m.notifications.actionReview == nil || m.notifications.actionReview.context == nil || m.notifications.actionReview.context.Current {
+		t.Fatal("stale action context was accepted")
+	}
+	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if cmd != nil {
+		t.Fatal("stale action context offered approval")
+	}
+	if err := os.Remove(filepath.Join(root, "stale-action")); err != nil {
+		t.Fatal(err)
+	}
+	next, cmd = m.openActionReview(choice)
+	m = baselineSend(next.(model), cmd().(actionReviewMsg))
+	if view := ansi.Strip(m.actionReviewView()); !strings.Contains(view, "Could you share steps to reproduce?") || !strings.Contains(view, "Send a focused request") {
+		t.Fatal("exact proposed comment was absent from the action review")
+	}
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	m = baselineSend(next.(model), cmd().(actionReviewMsg))
+	if m.notifications.actionReview.approval != "exact-approval" {
+		t.Fatal("exact action review did not retain its approval")
+	}
+	if _, err := os.Stat(filepath.Join(root, "published-action")); !os.IsNotExist(err) {
+		t.Fatal("first approval press published the action")
+	}
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if cmd == nil || !next.(model).notifications.actionReview.busy {
+		t.Fatal("second approval press did not start the selected write")
+	}
+	if result := cmd().(actionReviewMsg); result.err != nil {
+		t.Fatal(result.err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "published-action")); err != nil {
+		t.Fatal("approved action was not sent to its owning script")
 	}
 }
 

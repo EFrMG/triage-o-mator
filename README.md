@@ -132,17 +132,17 @@ bin/apply data/<owner>/<repo>/batches/<id>.decisions.jsonl --only-untriaged
 bin/report
 ```
 
-| Task                                      | Commands                                                                       |
-| ----------------------------------------- | ------------------------------------------------------------------------------ |
-| Install and refresh                       | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                 |
-| Prepare and review decisions              | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv` |
-| Compare and group                         | `bin/similar`, `bin/not-duplicate`, `bin/group`                                |
-| Read guidance and evidence                | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |
-| Edit action settings                      | `bin/taxonomy-settings`, `bin/action-policy`                                   |
-| Preview and edit GitHub label definitions | `bin/label-definitions`                                                        |
-| Preview and apply proposed labels         | `bin/item-labels`                                                              |
-| Propose and publish actions               | `bin/auto-close`, `bin/action-pass`, `bin/comment-plus`                        |
-| See progress and handoffs                 | `bin/stats`, `bin/next`, `bin/report`                                          |
+| Task                                      | Commands                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------------------- |
+| Install and refresh                       | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                  |
+| Prepare and review decisions              | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv`  |
+| Compare and group                         | `bin/similar`, `bin/not-duplicate`, `bin/group`                                 |
+| Read guidance and evidence                | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`         |
+| Edit action settings                      | `bin/taxonomy-settings`, `bin/action-policy`                                    |
+| Preview and edit GitHub label definitions | `bin/label-definitions`                                                         |
+| Preview and apply proposed labels         | `bin/item-labels`                                                               |
+| Propose and publish actions               | `bin/auto-close`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus` |
+| See progress and handoffs                 | `bin/stats`, `bin/next`, `bin/report`                                           |
 
 The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md) and [comment publishing guide](docs/comment-plus.md) cover the commands and their limits.
 
@@ -164,6 +164,7 @@ Turning automatic download ON installs the optional engine from the checked-in, 
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------- |
 | “triage 25 issues”                             | [Auto triage](prompts/auto-triage.md)                                                             | Unreviewed batch proposals                   |
 | “label the backlog”                            | [Label items](prompts/label-items.md)                                                             | Bounded proposed-label pass                  |
+| “run an action pass”                           | [Automated actions](prompts/automated-actions.md)                                                 | Staged proposals or recorded write outcomes  |
 | “prepare offline analysis”                     | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps             |
 | “is #N a duplicate?”                           | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal             |
 | “review PR #N”                                 | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and an unreviewed decision |

@@ -18,6 +18,8 @@ type notificationsUI struct {
 	attention         *attentionPage
 	closures          *actionHistoryPage
 	proposals         autoCloseList
+	actions           actionProposalList
+	actionReview      *actionReviewUI
 	ticked            map[int]bool
 	review            *autoCloseReview
 	reviewBusy        bool
@@ -39,6 +41,7 @@ type notificationsUI struct {
 	selectAfter       string
 	selectItem        Key
 	openProposalAfter Key
+	openActionAfter   Key
 	problem           string
 }
 
@@ -62,19 +65,55 @@ type notificationsMsg struct {
 	attention  attentionPage
 	closures   actionHistoryPage
 	proposals  autoCloseList
+	actions    actionProposalList
 	state      notificationState
 	unreadKeys []Key
 	err        error
 }
 
 type notificationChoice struct {
-	kind                                  string
-	key                                   Key
-	proposal, tracked, attention, closure int
+	kind                                                  string
+	key                                                   Key
+	proposal, actionProposal, tracked, attention, closure int
 }
 
 func itemChoice(key Key) notificationChoice {
-	return notificationChoice{kind: "item", key: key, proposal: -1, tracked: -1, attention: -1, closure: -1}
+	return notificationChoice{kind: "item", key: key, proposal: -1, actionProposal: -1, tracked: -1, attention: -1, closure: -1}
+}
+
+type actionProposalRow struct {
+	Kind               string                    `json:"kind"`
+	Title              string                    `json:"title"`
+	Target             string                    `json:"target"`
+	Action             string                    `json:"action"`
+	Operation          string                    `json:"operation"`
+	Comment            string                    `json:"comment"`
+	UpdatedAt          string                    `json:"updated_at"`
+	HeadSHA            string                    `json:"head_sha"`
+	Status             string                    `json:"status"`
+	Checkpoint         string                    `json:"checkpoint"`
+	DecisionQuestion   string                    `json:"decision_question"`
+	DecisionResolution *actionDecisionResolution `json:"decision_resolution"`
+	Number             int                       `json:"number"`
+	Active             bool                      `json:"active"`
+	Needs              bool                      `json:"needs_attention"`
+	Dismissed          bool                      `json:"dismissed"`
+	Inputs             *autoCloseInputs          `json:"inputs"`
+	Outcome            *struct {
+		RequestID string `json:"request_id"`
+		Comment   struct {
+			Status string `json:"status"`
+		} `json:"comment"`
+		StateChange struct {
+			Status string `json:"status"`
+		} `json:"state_change"`
+	} `json:"outcome"`
+}
+
+type actionProposalList struct {
+	Repository string              `json:"repository"`
+	Rows       []actionProposalRow `json:"rows"`
+	Requests   int                 `json:"requests"`
 }
 
 type autoCloseRow struct {
@@ -86,17 +125,19 @@ type autoCloseRow struct {
 		Kind   string `json:"kind"`
 		Number int    `json:"number"`
 	} `json:"reference"`
-	HeadSHA         string                    `json:"head_sha"`
-	UpdatedAt       string                    `json:"updated_at"`
-	Checkpoint      string                    `json:"checkpoint"`
-	Status          string                    `json:"status"`
-	Active          bool                      `json:"active"`
-	Needs           bool                      `json:"needs_attention"`
-	Dismissed       bool                      `json:"dismissed"`
-	Rejection       *autoCloseRejection       `json:"rejection"`
-	Reconsideration *autoCloseReconsideration `json:"reconsideration"`
-	Inputs          *autoCloseInputs          `json:"inputs"`
-	Outcome         *struct {
+	HeadSHA            string                    `json:"head_sha"`
+	UpdatedAt          string                    `json:"updated_at"`
+	Checkpoint         string                    `json:"checkpoint"`
+	DecisionQuestion   string                    `json:"decision_question"`
+	DecisionResolution *actionDecisionResolution `json:"decision_resolution"`
+	Status             string                    `json:"status"`
+	Active             bool                      `json:"active"`
+	Needs              bool                      `json:"needs_attention"`
+	Dismissed          bool                      `json:"dismissed"`
+	Rejection          *autoCloseRejection       `json:"rejection"`
+	Reconsideration    *autoCloseReconsideration `json:"reconsideration"`
+	Inputs             *autoCloseInputs          `json:"inputs"`
+	Outcome            *struct {
 		RequestID string `json:"request_id"`
 		Comment   struct {
 			Status string `json:"status"`
@@ -107,6 +148,13 @@ type autoCloseRow struct {
 			URL    string `json:"url"`
 		} `json:"state_change"`
 	} `json:"outcome"`
+}
+
+type actionDecisionResolution struct {
+	By             string `json:"by"`
+	At             string `json:"at"`
+	Reason         string `json:"reason"`
+	HeldCheckpoint string `json:"held_checkpoint"`
 }
 
 type autoCloseRejection struct {
@@ -351,6 +399,14 @@ func notificationsCommand(root, repo string, generation uint64, trackedAt, atten
 			msg.err = err
 			return msg
 		}
+		out, err = runReadScript(process, root, "action-proposals", "--expected-repo", repo, "list")
+		if err == nil {
+			err = json.Unmarshal([]byte(out), &msg.actions)
+		}
+		if err != nil {
+			msg.err = err
+			return msg
+		}
 		out, err = runReadScript(process, root, "cache", "--expected-repo", repo, "notification-state")
 		if err == nil {
 			err = json.Unmarshal([]byte(out), &msg.state)
@@ -363,6 +419,8 @@ func notificationsCommand(root, repo string, generation uint64, trackedAt, atten
 			msg.err = fmt.Errorf("tracked item response identity or bounds mismatch")
 		} else if msg.proposals.Repository != repo || msg.proposals.Requests != 0 {
 			msg.err = fmt.Errorf("proposal response identity mismatch")
+		} else if msg.actions.Repository != repo || msg.actions.Requests != 0 {
+			msg.err = fmt.Errorf("action proposal response identity mismatch")
 		} else if msg.state.Repository.Name != repo || msg.state.Requests != 0 {
 			msg.err = fmt.Errorf("notification state identity mismatch")
 		} else if err := validateAttentionPage(msg.attention, attentionLocation{section: "list", offset: attentionAt, checkpoint: attentionCheckpoint}, repo); err != nil {
@@ -432,9 +490,10 @@ func (m model) finishNotifications(msg notificationsMsg) (tea.Model, tea.Cmd) {
 	m.notifications.attention = &msg.attention
 	m.notifications.closures = &msg.closures
 	m.notifications.proposals = msg.proposals
+	m.notifications.actions = msg.actions
 	m.notifications.tracked = &msg.tracked
 	m.notifications.state = msg.state
-	m.sidebar.notificationCount = notificationCount(msg.unreadKeys, msg.proposals)
+	m.sidebar.notificationCount = notificationCount(msg.unreadKeys, msg.proposals, msg.actions)
 	if m.notifications.selectAfter != "" {
 		for i, choice := range m.notifications.choices() {
 			if choice.kind == m.notifications.selectAfter {
@@ -458,6 +517,13 @@ func (m model) finishNotifications(msg notificationsMsg) (tea.Model, tea.Cmd) {
 		m.notifications.openProposalAfter = Key{}
 		if choice, ok := m.notifications.proposalChoice(key.Number); ok && choice.proposal >= 0 {
 			return m.openNotificationSource(choice, "proposal")
+		}
+	}
+	if m.notifications.openActionAfter.Number > 0 {
+		key := m.notifications.openActionAfter
+		m.notifications.openActionAfter = Key{}
+		if choice, ok := m.notifications.actionProposalChoice(key); ok {
+			return m.openActionReview(choice)
 		}
 	}
 	return m, nil
@@ -485,6 +551,7 @@ func (n notificationsUI) choiceNeeds(choice notificationChoice) bool {
 	switch choice.kind {
 	case "item":
 		return choice.proposal >= 0 && n.proposals.Rows[choice.proposal].Needs ||
+			choice.actionProposal >= 0 && n.actions.Rows[choice.actionProposal].Needs ||
 			choice.tracked >= 0 && n.tracked.Rows[choice.tracked].NewCount > 0 ||
 			choice.attention >= 0 && n.watchNeeds(n.attention.Rows[choice.attention]) ||
 			choice.closure >= 0 && n.actionNeeds(n.closures.Rows[choice.closure])
@@ -508,6 +575,8 @@ func (n notificationsUI) choices() []notificationChoice {
 		switch source {
 		case "proposal":
 			items[index].proposal = row
+		case "action-proposal":
+			items[index].actionProposal = row
 		case "tracked":
 			items[index].tracked = row
 		case "attention":
@@ -517,8 +586,13 @@ func (n notificationsUI) choices() []notificationChoice {
 		}
 	}
 	for i, row := range n.proposals.Rows {
-		if !row.Dismissed && (row.Status == "pending" || row.Status == "uncertain") {
+		if !row.Dismissed && (row.Status == "pending" || row.Status == "executed" || row.Status == "uncertain") {
 			add(Key{Kind: "pr", Number: row.Number}, "proposal", i)
+		}
+	}
+	for i, row := range n.actions.Rows {
+		if !row.Dismissed && (row.Status == "pending" || row.Status == "executed" || row.Status == "uncertain") {
+			add(Key{Kind: row.Kind, Number: row.Number}, "action-proposal", i)
 		}
 	}
 	if n.tracked != nil {
@@ -588,7 +662,19 @@ func (n notificationsUI) proposalChoice(number int) (notificationChoice, bool) {
 	return notificationChoice{}, false
 }
 
+func (n notificationsUI) actionProposalChoice(key Key) (notificationChoice, bool) {
+	for _, choice := range n.choices() {
+		if choice.kind == "item" && choice.key == key && choice.actionProposal >= 0 {
+			return choice, true
+		}
+	}
+	return notificationChoice{}, false
+}
+
 func (m model) openNotificationChoice(choice notificationChoice) (tea.Model, tea.Cmd) {
+	if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
+		return m.openActionReview(choice)
+	}
 	if choice.proposal >= 0 {
 		return m.openNotificationSource(choice, "proposal")
 	}
@@ -597,6 +683,9 @@ func (m model) openNotificationChoice(choice notificationChoice) (tea.Model, tea
 }
 
 func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.notifications.actionReview != nil {
+		return m.handleActionReviewKey(msg)
+	}
 	if msg.String() == "f" && !m.notifications.notesOpen {
 		if m.notifications.reviewBusy && m.notifications.review != nil && m.notifications.review.Approval != "" {
 			return m, nil
@@ -856,6 +945,12 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		if m.trackingBusy || m.notifications.reviewBusy {
 			break
 		}
+		if msg.String() == "a" && len(choices) > 0 {
+			choice := choices[m.notifications.selected]
+			if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
+				return m.openActionReview(choice)
+			}
+		}
 		all := msg.String() == "A"
 		var numbers []int
 		if !all {
@@ -894,6 +989,12 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			break
 		}
 		choice := choices[m.notifications.selected]
+		if choice.kind == "item" && choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) && m.notifications.actions.Rows[choice.actionProposal].Status == "pending" {
+			if msg.String() == "D" {
+				return m.openExternalRejectionComposer(choice)
+			}
+			return m.openRejectionComposer(choice)
+		}
 		if choice.kind == "item" && choice.proposal >= 0 && m.notifications.proposals.Rows[choice.proposal].Status == "pending" {
 			if msg.String() == "D" {
 				return m.openExternalRejectionComposer(choice)
@@ -967,6 +1068,9 @@ func notificationAttentionSummary(row attentionRow) string {
 func (m model) notificationsView() string {
 	w := m.menuWidth()
 	n := m.notifications
+	if n.actionReview != nil {
+		return m.actionReviewView()
+	}
 	if n.review != nil {
 		return m.autoCloseReviewView()
 	}
@@ -1075,6 +1179,15 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 			fmt.Fprintf(&b, "%s\n", inset(action.Render("Publish the comment below, then close this PR.")))
 		}
 		fmt.Fprintf(&b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), textWidth)))
+		if row.DecisionQuestion != "" {
+			fmt.Fprintf(&b, "%s\n", inset(wrapText("Human decision required: "+sanitize(row.DecisionQuestion), textWidth)))
+		}
+		if row.DecisionResolution != nil {
+			resolution := row.DecisionResolution
+			fmt.Fprintf(&b, "\n%s\n", inset(section.Render("Human decision resolution")))
+			fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(resolution.By)+" · At: "+sanitize(resolution.At), textWidth)))
+			fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(resolution.Reason), textWidth)))
+		}
 		if row.Reference != nil {
 			fmt.Fprintf(&b, "%s\n", inset(muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))
 		}
@@ -1191,6 +1304,20 @@ func renderNotificationChoice(n notificationsUI, choice notificationChoice, card
 				parts = append(parts, "Closure outcome uncertain")
 			case "rejected":
 				parts = append(parts, "Closure proposal rejected")
+			}
+		}
+		if choice.actionProposal >= 0 {
+			row := n.actions.Rows[choice.actionProposal]
+			if title == "" {
+				title = row.Title
+			}
+			switch row.Status {
+			case "pending":
+				parts = append(parts, "Suggested "+row.Operation+" · "+row.Action)
+			case "executed":
+				parts = append(parts, "Action completed · "+row.Action)
+			case "uncertain":
+				parts = append(parts, "Action outcome uncertain")
 			}
 		}
 		if choice.tracked >= 0 {

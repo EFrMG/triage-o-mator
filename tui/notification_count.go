@@ -49,7 +49,7 @@ func unreadTrackedKeys(repo string, total int, read func(...string) (string, err
 	return keys, nil
 }
 
-func notificationCount(unreadTracked []Key, proposals autoCloseList) int {
+func notificationCount(unreadTracked []Key, proposals autoCloseList, additional ...actionProposalList) int {
 	items := make(map[Key]bool, len(unreadTracked)+len(proposals.Rows))
 	for _, key := range unreadTracked {
 		items[key] = true
@@ -57,6 +57,13 @@ func notificationCount(unreadTracked []Key, proposals autoCloseList) int {
 	for _, proposal := range proposals.Rows {
 		if proposal.Needs {
 			items[Key{Kind: "pr", Number: proposal.Number}] = true
+		}
+	}
+	for _, listing := range additional {
+		for _, proposal := range listing.Rows {
+			if proposal.Needs {
+				items[Key{Kind: proposal.Kind, Number: proposal.Number}] = true
+			}
 		}
 	}
 	return len(items)

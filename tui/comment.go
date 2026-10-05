@@ -149,20 +149,26 @@ func (m model) openCommentComposer(target commentTarget, close, reopen bool, tar
 }
 
 func (m model) openRejectionComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
-	if choice.proposal < 0 || strings.TrimSpace(m.reviewer) == "" {
+	if choice.proposal < 0 && choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
 		m.warn("A reviewer name is required to reject a proposal.")
 		return m, nil
 	}
 
-	row := m.notifications.proposals.Rows[choice.proposal]
-	if row.Status != "pending" {
+	status, target, checkpoint := "", "", ""
+	if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
+		row := m.notifications.actions.Rows[choice.actionProposal]
+		status, target, checkpoint = row.Status, row.Target, row.Checkpoint
+	} else {
+		row := m.notifications.proposals.Rows[choice.proposal]
+		status, target, checkpoint = row.Status, row.Target, row.Checkpoint
+	}
+	if status != "pending" {
 		return m.changeNotificationItem(choice, "dismiss")
 	}
 
-	target := commentTarget{key: choice.key, url: row.Target}
-	next, cmd := m.openCommentComposer(target, false, false, nil)
+	next, cmd := m.openCommentComposer(commentTarget{key: choice.key, url: target}, false, false, nil)
 	m = next.(model)
-	m.comment.rejectionCheckpoint = row.Checkpoint
+	m.comment.rejectionCheckpoint = checkpoint
 	m.comment.rejectionChoice = choice
 	m.comment.text.Placeholder = "Optional reason for rejecting this proposal"
 	m.comment.text.CharLimit = 10000
@@ -180,24 +186,31 @@ func (m model) openExternalRejectionComposer(choice notificationChoice) (tea.Mod
 }
 
 func (m model) openProposalEdit(choice notificationChoice) (tea.Model, tea.Cmd) {
-	if choice.kind != "item" || choice.proposal < 0 || strings.TrimSpace(m.reviewer) == "" {
+	if choice.kind != "item" || choice.proposal < 0 && choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
 		m.warn("Select one pending proposal and set a reviewer name before editing.")
 		return m, nil
 	}
 
-	row := m.notifications.proposals.Rows[choice.proposal]
-	if row.Status != "pending" || row.Checkpoint == "" || row.Inputs == nil {
+	status, checkpoint, target, comment := "", "", "", ""
+	var inputs *autoCloseInputs
+	if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
+		row := m.notifications.actions.Rows[choice.actionProposal]
+		status, checkpoint, target, comment, inputs = row.Status, row.Checkpoint, row.Target, row.Comment, row.Inputs
+	} else {
+		row := m.notifications.proposals.Rows[choice.proposal]
+		status, checkpoint, target, comment, inputs = row.Status, row.Checkpoint, row.Target, row.Comment, row.Inputs
+	}
+	if status != "pending" || checkpoint == "" || inputs == nil {
 		m.warn("This proposal cannot be edited; inspect its current context first.")
 		return m, nil
 	}
 
-	target := commentTarget{key: choice.key, url: row.Target}
-	next, cmd := m.openCommentComposer(target, false, false, nil)
+	next, cmd := m.openCommentComposer(commentTarget{key: choice.key, url: target}, false, false, nil)
 	m = next.(model)
-	m.comment.proposalEditCheckpoint = row.Checkpoint
-	m.comment.editOriginalComment = row.Comment
+	m.comment.proposalEditCheckpoint = checkpoint
+	m.comment.editOriginalComment = comment
 	m.comment.text.Placeholder = "Comment to publish"
-	m.comment.text.SetValue(row.Comment)
+	m.comment.text.SetValue(comment)
 	m.layoutComment()
 	return m, cmd
 }

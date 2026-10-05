@@ -15,6 +15,7 @@ type proposalEditDoneMsg struct {
 	key                    Key
 	comment                string
 	saved                  bool
+	action                 bool
 	row                    autoCloseRow
 	err                    error
 }
@@ -42,7 +43,14 @@ func (m model) editProposalCmd() tea.Cmd {
 			return msg
 		}
 
-		out, err := runScript(root, "auto-close", "--expected-repo", repo, "edit", "--number", strconv.Itoa(key.Number), "--checkpoint", checkpoint, "--comment-file", draft.Name(), "--by", by)
+		script := "auto-close"
+		args := []string{"--expected-repo", repo, "edit", "--number", strconv.Itoa(key.Number), "--checkpoint", checkpoint, "--comment-file", draft.Name(), "--by", by}
+		if choice, ok := m.notifications.actionProposalChoice(key); ok && choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
+			script = "action-proposals"
+			args = []string{"--expected-repo", repo, "edit", "--kind", key.Kind, "--number", strconv.Itoa(key.Number), "--checkpoint", checkpoint, "--comment-file", draft.Name(), "--by", by}
+			msg.action = true
+		}
+		out, err := runScript(root, script, args...)
 		if err != nil {
 			msg.err = err
 			return msg
@@ -72,13 +80,17 @@ func (m model) finishProposalEdit(msg proposalEditDoneMsg) (tea.Model, tea.Cmd) 
 		m.recordError("Proposal changed; inspect the saved version", msg.err)
 		m.status = "Proposal was saved but its response could not be checked. ! shows details."
 	} else {
-		m.status = fmt.Sprintf("Edited PR #%d proposal; review its new version before approval.", msg.key.Number)
+		m.status = fmt.Sprintf("Edited %s #%d proposal; review its new version before approval.", msg.key.Kind, msg.key.Number)
 	}
 	next, cmd := m.openNotifications()
 	updated := next.(model)
 	updated.notifications.selectItem = msg.key
 	if msg.err == nil {
-		updated.notifications.openProposalAfter = msg.key
+		if msg.action {
+			updated.notifications.openActionAfter = msg.key
+		} else {
+			updated.notifications.openProposalAfter = msg.key
+		}
 	}
 	return updated, cmd
 }

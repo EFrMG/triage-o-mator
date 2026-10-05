@@ -28,6 +28,7 @@ type notificationRejectionDoneMsg struct {
 	generation             uint64
 	key                    Key
 	rejected               bool
+	action                 bool
 	completed, total       int
 	err                    error
 }
@@ -40,7 +41,14 @@ func (m model) rejectNotificationCmd() tea.Cmd {
 
 	return func() tea.Msg {
 		msg := notificationRejectionDoneMsg{root: root, repo: repo, generation: generation, key: choice.key, checkpoint: checkpoint, total: len(operations)}
-		out, err := runScript(root, "auto-close", "--expected-repo", repo, "reject", "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--reason", reason)
+		script := "auto-close"
+		args := []string{"--expected-repo", repo, "reject", "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--reason", reason}
+		if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
+			script = "action-proposals"
+			args = []string{"--expected-repo", repo, "reject", "--kind", choice.key.Kind, "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--reason", reason}
+			msg.action = true
+		}
+		out, err := runScript(root, script, args...)
 		if err != nil {
 			msg.err = err
 			return msg
@@ -60,7 +68,7 @@ func (m model) rejectNotificationCmd() tea.Cmd {
 
 		for _, operation := range operations {
 			args := operation.args
-			if operation.source == "proposal" {
+			if msg.action && operation.source == "action proposal" || !msg.action && operation.source == "proposal" {
 				args = append([]string(nil), args...)
 				args[len(args)-1] = rejected.Checkpoint
 			}
@@ -90,7 +98,7 @@ func (m model) finishNotificationRejection(msg notificationRejectionDoneMsg) (te
 		m.recordError("Proposal rejected; notification dismissal was incomplete", msg.err)
 		m.status = fmt.Sprintf("Proposal rejected; dismissed %d of %d notification sources. ! shows details.", msg.completed, msg.total)
 	} else {
-		m.status = fmt.Sprintf("Rejected PR #%d and dismissed its notification.", msg.key.Number)
+		m.status = fmt.Sprintf("Rejected %s #%d and dismissed its notification.", msg.key.Kind, msg.key.Number)
 	}
 	next, cmd := m.openNotifications()
 	updated := next.(model)
@@ -104,6 +112,12 @@ func (n notificationsUI) itemOperations(repo string, choice notificationChoice, 
 		row := n.proposals.Rows[choice.proposal]
 		if action == "dismiss" || row.Needs {
 			operations = append(operations, notificationItemOperation{script: "auto-close", source: "proposal", args: []string{"--expected-repo", repo, action, "--number", strconv.Itoa(row.Number), "--checkpoint", row.Checkpoint}})
+		}
+	}
+	if choice.actionProposal >= 0 {
+		row := n.actions.Rows[choice.actionProposal]
+		if action == "dismiss" || row.Needs {
+			operations = append(operations, notificationItemOperation{script: "action-proposals", source: "action proposal", args: []string{"--expected-repo", repo, action, "--kind", row.Kind, "--number", strconv.Itoa(row.Number), "--checkpoint", row.Checkpoint}})
 		}
 	}
 	if choice.tracked >= 0 {

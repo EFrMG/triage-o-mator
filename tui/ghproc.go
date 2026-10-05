@@ -134,8 +134,19 @@ func fetchSyncCmdAtHost(installRoot, repo string, full bool, host string, items 
 		if proposalErr == nil && (listed.Repository != repo || listed.Requests != 0) {
 			proposalErr = fmt.Errorf("proposal count response identity mismatch")
 		}
+		var actions actionProposalList
+		if proposalErr == nil {
+			var saved string
+			saved, proposalErr = runScript(installRoot, "action-proposals", "--expected-repo", repo, "list")
+			if proposalErr == nil {
+				proposalErr = json.Unmarshal([]byte(saved), &actions)
+			}
+			if proposalErr == nil && (actions.Repository != repo || actions.Requests != 0) {
+				proposalErr = fmt.Errorf("action proposal count response identity mismatch")
+			}
+		}
 		message.summary, message.trackingErr, message.proposalErr = out, trackingErr, proposalErr
-		message.unreadTotal = notificationCount(unreadKeys, listed)
+		message.unreadTotal = notificationCount(unreadKeys, listed, actions)
 		return message
 	}
 }

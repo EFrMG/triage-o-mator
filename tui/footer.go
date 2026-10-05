@@ -160,7 +160,7 @@ func (m model) contextFooterGroups() []footerGroup {
 				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Scoring", "planned"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}
 			if m.settings.selected >= 2 {
-				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle action mode"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle action mode"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}
 			return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle Labeling"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}
@@ -189,6 +189,20 @@ func (m model) contextFooterGroups() []footerGroup {
 	case m.actionHistory.open:
 		return []footerGroup{group("Explanations", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
 	case m.notifications.open:
+		if m.notifications.actionReview != nil {
+			if m.notifications.actionReview.busy {
+				return []footerGroup{group("Action proposal", hint{"", "checking exact action…"})}
+			}
+			action := group("Action proposal", hint{"j/k Ctrl-D/U", "scroll"}, hint{"Enter", "view item"}, hint{"e", "edit"}, hint{"d", "reject or dismiss"})
+			if m.notifications.actionReview.row.Active && m.notifications.actionReview.context != nil && m.notifications.actionReview.context.Current {
+				label := "review exact action"
+				if m.notifications.actionReview.approval != "" {
+					label = "approve and publish"
+				}
+				action.hints = append(action.hints, hint{"a", label})
+			}
+			return []footerGroup{action, group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+		}
 		if m.notifications.review != nil {
 			if m.notifications.notesOpen {
 				return []footerGroup{group("Local notes", hint{"j/k Ctrl-D/U", "scroll"}, hint{"m or Esc", "close"}), group("Navigation", hint{"q", "quit"})}
@@ -248,6 +262,13 @@ func (m model) contextFooterGroups() []footerGroup {
 		if len(choices) > 0 && m.notifications.selected < len(choices) {
 			choice := choices[m.notifications.selected]
 			if choice.kind == "item" {
+				if choice.actionProposal >= 0 {
+					notifications.hints = append(notifications.hints, hint{"a", "review action"})
+					row := m.notifications.actions.Rows[choice.actionProposal]
+					if row.Status == "pending" {
+						notifications.hints = append(notifications.hints, hint{"e", "edit proposal"})
+					}
+				}
 				if choice.proposal >= 0 {
 					notifications.hints = append(notifications.hints, hint{"y", "copy for agent"})
 					row := m.notifications.proposals.Rows[choice.proposal]
@@ -272,7 +293,7 @@ func (m model) contextFooterGroups() []footerGroup {
 		dismiss := "dismiss"
 		if len(choices) > 0 && m.notifications.selected < len(choices) {
 			choice := choices[m.notifications.selected]
-			if choice.kind == "item" && choice.proposal >= 0 && m.notifications.proposals.Rows[choice.proposal].Status == "pending" {
+			if choice.kind == "item" && (choice.proposal >= 0 && m.notifications.proposals.Rows[choice.proposal].Status == "pending" || choice.actionProposal >= 0 && m.notifications.actions.Rows[choice.actionProposal].Status == "pending") {
 				dismiss = "reject & dismiss"
 				notifications.hints = append(notifications.hints, bind("", keys.RejectEditor))
 			}

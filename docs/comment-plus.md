@@ -1,6 +1,6 @@
 # Comment-plus: publishing comments and changing item state
 
-The [TUI tutorial](tutorial.md#12-hand-reviewed-work-to-maintainers) covers the controls for comments, closures and reopenings. The composer keeps the target URL visible; its optional Markdown preview renders locally, without contacting GitHub. An external editor pauses the TUI on a private temporary file and returns to the preview. Nothing is published until the exact target, text and any state change are approved.
+The [TUI tutorial](tutorial.md#12-hand-reviewed-work-to-maintainers) covers the controls for comments, closures and reopenings. The composer keeps the target URL visible; its optional Markdown preview renders locally, without contacting GitHub. An external editor pauses the TUI on a private temporary file and returns to the preview. TUI publication needs approval of the exact target, text and any state change. The separate [automated-actions pass](../prompts/automated-actions.md) may publish after an explicit repository and action-type policy, a bounded exact preview, and fresh checks.
 
 A comment on an issue or PR is a conversation comment, not an inline review. An explained closure publishes the comment first, then closes the item; the script checks for text but cannot judge the explanation. A merged PR cannot be reopened. Bulk reopening uses one shared comment but a separate exact plan and outcome for each target; it stops on the first uncertain outcome. After publication, the TUI refreshes the discussion and ledger, and the displayed state updates after the direct GitHub item read is synced.
 
@@ -45,7 +45,7 @@ For a named PR or [selected group members](groups.md#from-draft-to-maintainers),
 
 1. The agent reads current local guidance, earlier objections and selected evidence. It reports a justified keep-open outcome or saves an explained closure proposal.
 2. In **Notifications**, the reviewer checks the target, exact comment, human guidance and gaps. `e` edits a pending proposal; `d` rejects it with an optional reason and dismisses its notification. On other notifications, `d` only dismisses local presentation. Canceling a rejection records neither action.
-3. If guidance changed, prepare a replacement from current context and review it again. If a GitHub write was attempted, inspect its saved outcome before another action. Only the reviewer approves the exact final comment and close action with `a`; neither group readiness nor ledger review supplies that approval.
+3. If guidance changed, prepare a replacement from current context and review it again. If a GitHub write was attempted, inspect its saved outcome before another action. In the staged path, the reviewer approves the exact final comment and close action with `a`; neither group readiness nor ledger review supplies that approval. An action-bound PR closure can use direct execution only when Settings enables its type and the bounded action pass verifies complete selected evidence with no unresolved gap or earlier rejection.
 
 `bin/auto-close --expected-repo OWNER/REPO inspect --host HOSTNAME --number N` performs two read-only REST GETs. It returns the PR head SHA and the issue endpoint's `updated_at`, which `bin/comment-plus` checks again before publishing a proposed closure. The read does not create a proposal or grant approval.
 

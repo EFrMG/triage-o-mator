@@ -6,7 +6,7 @@ Usage:
     bin/next           numbered suggestions, most urgent first
     bin/next --json    the same, machine-readable, for agents
 
-Each suggestion says who should do it: [agent] steps prepare evidence or proposals within the requested scope and may run repository-enabled bounded labeling; [human] steps need a person for review, Settings changes, or exact write approval. A suggestion is not authorization for an unbounded download or an unconfigured write. It points at the exact command or prompts/<name>.md playbook to follow. This is the answer to "what could be done next?" in AGENTS.md.
+Each suggestion says who should do it: [agent] steps prepare evidence or proposals within the requested scope and may run repository-enabled bounded labeling or action passes; [human] steps need a person for review, Settings changes, or exact write approval. A suggestion is not authorization for an unbounded download or an unconfigured write. It points at the exact command or prompts/<name>.md playbook to follow. This is the answer to "what could be done next?" in AGENTS.md.
 """
 
 import argparse
@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never res
 from _groups import list_groups
 from _similar import TitleIndex
 from _notdupes import TitleVerdicts
-from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, has_decision, load_jsonl, load_ledger
+from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, has_decision, load_jsonl, load_ledger, load_taxonomy
 
 STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
@@ -98,6 +98,14 @@ def suggestions(ledger):
         add("agent", f"Assess a named PR for an explained closure proposal ({len(open_prs)} open PRs available)",
             "prompts/recommend-auto-close.md (ask for the PR and read budget)",
             "a scoped recommendation can keep the PR open; a saved proposal needs exact approval before any GitHub write")
+
+    operations = load_taxonomy().get("action_operations", {})
+    action_candidates = [r for r in ledger if operations.get(r.get("action")) in ("comment", "close", "reopen") and
+                         (operations[r["action"]] == "reopen" and r["state"] == "closed" or r["state"] == "open")]
+    if action_candidates:
+        add("agent", f"Prepare a bounded action pass for {len(action_candidates)} suggested item actions",
+            "prompts/automated-actions.md (ask for selected keys and read budget)",
+            "each action follows its repository policy; incomplete or disputed cases stay staged")
 
     pairs = [p for p in TitleVerdicts().pairs(TitleIndex(ledger), min_score=STRONG_PAIR)
              if not has_decision(by_key[(p["item"]["kind"], p["item"]["number"])])]

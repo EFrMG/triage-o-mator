@@ -556,8 +556,8 @@ func (n notificationsUI) actionNeeds(row actionHistoryRow) bool {
 func (n notificationsUI) choiceNeeds(choice notificationChoice) bool {
 	switch choice.kind {
 	case "item":
-		return choice.suggestion >= 0 || choice.proposal >= 0 && n.proposals.Rows[choice.proposal].Needs ||
-			choice.actionProposal >= 0 && n.actions.Rows[choice.actionProposal].Needs ||
+		return choice.suggestion >= 0 || choice.proposal >= 0 && n.proposals.Rows[choice.proposal].Needs && n.proposals.Rows[choice.proposal].Status != "executed" ||
+			choice.actionProposal >= 0 && n.actions.Rows[choice.actionProposal].Needs && n.actions.Rows[choice.actionProposal].Status != "executed" ||
 			choice.tracked >= 0 && n.tracked.Rows[choice.tracked].NewCount > 0 ||
 			choice.attention >= 0 && n.watchNeeds(n.attention.Rows[choice.attention]) ||
 			choice.closure >= 0 && n.actionNeeds(n.closures.Rows[choice.closure])
@@ -1159,7 +1159,7 @@ func (m model) notificationsView() string {
 		n.tracked = &trackedPage{}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\n", inset(titleBar("Notifications", m.repo+" · actions and updates", w)))
+	fmt.Fprintf(&b, "%s\n\n", inset(titleBar("Notifications", "Actions and updates", w)))
 	if n.busy {
 		return b.String() + inset("Reading retained notifications…")
 	}
@@ -1222,10 +1222,17 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 	title := "PR closure proposal"
 	if n.review.Approval != "" {
 		title = "Review PR closures"
-	} else if len(n.review.Plan.Proposals) == 1 && n.review.Plan.Proposals[0].Status == "rejected" {
-		title = "Rejected PR closure proposal"
+	} else if len(n.review.Plan.Proposals) == 1 {
+		switch n.review.Plan.Proposals[0].Status {
+		case "executed":
+			title = "Completed PR closure"
+		case "uncertain":
+			title = "PR closure outcome uncertain"
+		case "rejected":
+			title = "Rejected PR closure proposal"
+		}
 	}
-	fmt.Fprintf(&b, "%s\n\n", inset(titleBar(title, m.repo, m.menuWidth())))
+	fmt.Fprintf(&b, "%s\n\n", inset(titleBar(title, "", m.menuWidth())))
 	styles := newProposalReviewStyles()
 	textWidth := maxInt(m.menuWidth()-4, 1)
 	for i, row := range n.review.Plan.Proposals {
@@ -1237,15 +1244,15 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 		if len(n.review.Plan.Proposals) > 1 {
 			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render(fmt.Sprintf("%d of %d", i+1, len(n.review.Plan.Proposals)))))
 		}
-		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Proposed action")))
-		if row.Status == "rejected" {
-			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("This proposal was rejected; no GitHub action is available.")))
-		} else if context != nil && !context.Current || n.contextError != "" {
-			fmt.Fprintf(&b, "%s\n", inset(styles.danger.Render("Changed context: prepare a fresh proposal and review.")))
-		} else if row.Status != "pending" || !row.Active || context == nil || !context.Current || n.contextBusy || n.contextError != "" {
-			fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Approval unavailable until the saved local context is current.")))
-		} else {
-			fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Publish the comment below, then close this PR.")))
+		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render(proposalActionSection(row.Status))))
+		if !styles.writeSavedState(&b, row.Status, "close", "PR") {
+			if context != nil && !context.Current || n.contextError != "" {
+				fmt.Fprintf(&b, "%s\n", inset(styles.danger.Render("Changed context: prepare a fresh proposal and review.")))
+			} else if row.Status != "pending" || !row.Active || context == nil || !context.Current || n.contextBusy || n.contextError != "" {
+				fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Approval unavailable until the saved local context is current.")))
+			} else {
+				fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Publish the comment below, then close this PR.")))
+			}
 		}
 		fmt.Fprintf(&b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), textWidth)))
 		if row.DecisionQuestion != "" {
@@ -1298,7 +1305,7 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 			fmt.Fprintf(&b, "%s\n", inset(wrapText(orPlaceholder(sanitize(row.Rejection.Reason), "(no reason given)"), textWidth)))
 		}
 		if row.Outcome != nil {
-			fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Previous attempt")))
+			fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render(proposalOutcomeSection(row.Status))))
 			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Comment: "+sanitize(row.Outcome.Comment.Status))))
 			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Close: "+sanitize(row.Outcome.StateChange.Status))))
 			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Write request: "+sanitize(row.Outcome.RequestID))))

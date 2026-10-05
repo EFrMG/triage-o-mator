@@ -226,28 +226,33 @@ func (m model) actionReviewView() string {
 	width := maxInt(m.menuWidth()-4, 1)
 	var b strings.Builder
 	title := "Action proposal"
-	if row.Status == "rejected" {
+	switch row.Status {
+	case "executed":
+		title = "Completed action"
+	case "uncertain":
+		title = "Action outcome uncertain"
+	case "rejected":
 		title = "Rejected action proposal"
 	}
-	fmt.Fprintf(&b, "%s\n\n", inset(titleBar(title, m.repo, m.menuWidth())))
+	fmt.Fprintf(&b, "%s\n\n", inset(titleBar(title, "", m.menuWidth())))
 	kind := "Issue"
 	if row.Kind == "pr" {
 		kind = "PR"
 	}
 	styles.writeItemHeading(&b, kind, row.Number, row.Title)
-	fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Proposed action")))
-	if row.Status == "rejected" {
-		fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("This proposal was rejected; no GitHub action is available.")))
-	} else if review.context != nil && !review.context.Current || review.problem != "" {
-		fmt.Fprintf(&b, "%s\n", inset(styles.danger.Render("Changed context: prepare a fresh proposal and review.")))
-	} else if row.Status != "pending" || !row.Active || review.context == nil || !review.context.Current || review.busy {
-		fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Approval unavailable until the saved local context is current.")))
-	} else {
-		operation := "Publish the comment below."
-		if row.Operation == "close" || row.Operation == "reopen" {
-			operation = "Publish the comment below, then " + row.Operation + " this " + kind + "."
+	fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render(proposalActionSection(row.Status))))
+	if !styles.writeSavedState(&b, row.Status, row.Operation, kind) {
+		if review.context != nil && !review.context.Current || review.problem != "" {
+			fmt.Fprintf(&b, "%s\n", inset(styles.danger.Render("Changed context: prepare a fresh proposal and review.")))
+		} else if row.Status != "pending" || !row.Active || review.context == nil || !review.context.Current || review.busy {
+			fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Approval unavailable until the saved local context is current.")))
+		} else {
+			operation := "Publish the comment below."
+			if row.Operation == "close" || row.Operation == "reopen" {
+				operation = "Publish the comment below, then " + row.Operation + " this " + kind + "."
+			}
+			fmt.Fprintf(&b, "%s\n", inset(styles.action.Render(operation)))
 		}
-		fmt.Fprintf(&b, "%s\n", inset(styles.action.Render(operation)))
 	}
 	fmt.Fprintf(&b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), width)))
 	if row.DecisionQuestion != "" {
@@ -264,7 +269,7 @@ func (m model) actionReviewView() string {
 	if review.context == nil {
 		fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Local guidance has not been checked.")))
 	} else {
-		if !review.context.Current {
+		if !review.context.Current && row.Status == "pending" {
 			fmt.Fprintf(&b, "%s\n", inset(styles.action.Render(wrapText("Why: "+sanitize(review.context.Reason), width))))
 		}
 		context := autoCloseContext{ItemContext: review.context.ItemContext}
@@ -283,7 +288,7 @@ func (m model) actionReviewView() string {
 		fmt.Fprintf(&b, "\n%s\n", inset(styles.action.Render("Exact review is ready. Press a again to publish.")))
 	}
 	if row.Outcome != nil {
-		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Previous attempt")))
+		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render(proposalOutcomeSection(row.Status))))
 		fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Comment: "+sanitize(row.Outcome.Comment.Status))))
 		fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("State: "+sanitize(row.Outcome.StateChange.Status))))
 	}

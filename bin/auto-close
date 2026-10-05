@@ -77,7 +77,7 @@ def visible(proposal, state):
 def row(proposal, state):
     presentation = state["rows"].get(str(proposal["number"]), {})
     active = proposal["status"] == "pending" and "inputs" in proposal and visible(proposal, state)
-    needs = visible(proposal, state) and proposal["status"] in ("pending", "executed", "uncertain") and presentation.get("viewed_checkpoint") != proposal["checksum"]
+    needs = visible(proposal, state) and proposal["status"] in ("pending", "uncertain") and presentation.get("viewed_checkpoint") != proposal["checksum"]
     result = dict(number=proposal["number"], title=proposal["title"], target=proposal["target"], comment=proposal["comment"], reference=proposal["reference"], head_sha=proposal["head_sha"], updated_at=proposal["updated_at"], status=proposal["status"], checkpoint=proposal["checksum"], active=active, needs_attention=needs, dismissed=not visible(proposal, state), outcome=proposal.get("outcome"))
     if "rationale" in proposal:
         result["rationale"] = proposal["rationale"]

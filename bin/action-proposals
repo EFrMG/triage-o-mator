@@ -69,7 +69,7 @@ def row(value, state):
     result = dict(kind=value["kind"], number=value["number"], title=value["title"], target=value["target"],
                   action=value["action"], operation=value["operation"], comment=value["comment"],
                   updated_at=value["updated_at"], head_sha=value.get("head_sha"), status=value["status"],
-                  checkpoint=value["checksum"], active=active, needs_attention=visible and value["status"] in ("pending", "executed", "uncertain") and presentation.get("viewed_checkpoint") != value["checksum"],
+                  checkpoint=value["checksum"], active=active, needs_attention=visible and value["status"] in ("pending", "uncertain") and presentation.get("viewed_checkpoint") != value["checksum"],
                   dismissed=not visible, inputs=value["inputs"], outcome=value.get("outcome"))
     if "decision_question" in value:
         result["decision_question"] = value["decision_question"]

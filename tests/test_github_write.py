@@ -388,7 +388,7 @@ class AutoCloseWriteTests(Workspace):
         self.assertEqual(result["results"][0]["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
         self.assertEqual({row["number"]: row["status"] for row in self.auto_close("list")["rows"]}, {1: "executed", 2: "pending"})
-        self.assertTrue(next(row for row in self.auto_close("list")["rows"] if row["number"] == 1)["needs_attention"])
+        self.assertFalse(next(row for row in self.auto_close("list")["rows"] if row["number"] == 1)["needs_attention"])
         record = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
         self.assertEqual(record["outcome"]["authorization"]["source"], "repository-policy")
 
@@ -530,7 +530,7 @@ class AutoCloseWriteTests(Workspace):
         self.assertEqual(result["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST"])
         self.assertFalse((self.root / "data/owner/repo/auto-close/pr-1.json").exists())
-        self.assertTrue(self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"][0]["needs_attention"])
+        self.assertFalse(self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"][0]["needs_attention"])
         self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
         self.assertEqual(self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")["feedback_count"], 1)
 

@@ -2020,15 +2020,49 @@ func TestGroupContextScrollStopsAtVisibleBoundary(t *testing.T) {
 func TestCompletedOutcomesStayVisibleAndRejectedProposalsLeaveNotifications(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
 	rejected := autoCloseRow{Number: 5, Title: "Keep this PR", Status: "rejected", Checkpoint: "rejected-5", Rejection: &autoCloseRejection{By: "maintainer", At: "2026-09-29T00:00:00Z", Reason: "Compatibility work remains useful"}}
-	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Title: "Completed fixture", Status: "executed"}, {Number: 4, Title: "Needs inspection", Status: "uncertain"}, rejected}}}
+	var completed autoCloseRow
+	if err := json.Unmarshal([]byte(`{"number":3,"title":"Completed fixture","target":"https://github.com/owner/repo/pull/3","comment":"Published explanation","status":"executed","needs_attention":true,"outcome":{"comment":{"status":"succeeded"},"state_change":{"status":"succeeded"}}}`), &completed); err != nil {
+		t.Fatal(err)
+	}
+	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{completed, {Number: 4, Title: "Needs inspection", Status: "uncertain", Needs: true}, rejected}}}
 	choices := m.notifications.choices()
-	if len(choices) != 2 || choices[0].key != (Key{Kind: "pr", Number: 3}) || choices[1].key != (Key{Kind: "pr", Number: 4}) {
+	if len(choices) != 2 || choices[0].key != (Key{Kind: "pr", Number: 4}) || choices[1].key != (Key{Kind: "pr", Number: 3}) || m.notifications.choiceNeeds(choices[1]) || notificationCount(nil, m.notifications.proposals) != 1 {
 		t.Fatalf("completed outcome or uncertain closure was unavailable, or rejection remained: %+v", choices)
 	}
 	view := ansi.Strip(m.notificationsView())
-	if !strings.Contains(view, "PR #3") || strings.Contains(view, "PR #5") {
-		t.Fatal("completed outcome was hidden or rejected proposal appeared in Notifications")
+	if !strings.Contains(view, "PR #3") || strings.Contains(view, "PR #5") || strings.Index(view, "Past actions") > strings.Index(view, "PR #3") || strings.Contains(strings.Split(view, "\n")[0], "owner/repo") {
+		t.Fatal("completed outcome was not under Past actions or Notifications repeated the repository")
 	}
+	m.notifications.selected = 1
+	for _, action := range m.contextFooterGroups()[0].hints {
+		if action.keys == "a" || action.keys == "a/A" || action.keys == "Space" {
+			t.Fatal("completed closure card still offered approval")
+		}
+	}
+	m.notifications.review = &autoCloseReview{}
+	m.notifications.review.Plan.Proposals = []autoCloseRow{completed}
+	m.notifications.context = &autoCloseContext{Number: 3, Reason: "proposal is executed"}
+	view = ansi.Strip(m.autoCloseReviewView())
+	if !strings.Contains(view, "Published comment") || !strings.Contains(view, "Saved outcome") || strings.Contains(view, "Changed context") || strings.Contains(view, "Approval unavailable") || strings.Contains(strings.Split(view, "\n")[0], "owner/repo") {
+		t.Fatal("completed PR closure appeared stale or offered a new approval")
+	}
+	if groups := m.contextFooterGroups(); groups[0].name != "Action outcome" {
+		t.Fatal("completed PR closure kept proposal controls")
+	}
+	var completedAction actionProposalRow
+	if err := json.Unmarshal([]byte(`{"kind":"issue","number":2,"title":"Completed fixture","target":"https://github.com/owner/repo/issues/2","operation":"reopen","comment":"Published reopen explanation","status":"executed","outcome":{"comment":{"status":"succeeded"},"state_change":{"status":"succeeded"}}}`), &completedAction); err != nil {
+		t.Fatal(err)
+	}
+	m.notifications.review = nil
+	m.notifications.actionReview = &actionReviewUI{row: completedAction, context: &actionProposalContext{Reason: "proposal is executed"}}
+	view = ansi.Strip(m.actionReviewView())
+	if !strings.Contains(view, "Published comment") || !strings.Contains(view, "Saved outcome") || strings.Contains(view, "Changed context") || strings.Contains(view, "Why: proposal is executed") || strings.Contains(strings.Split(view, "\n")[0], "owner/repo") {
+		t.Fatal("completed issue action appeared stale or repeated the repository")
+	}
+	if groups := m.contextFooterGroups(); groups[0].name != "Action outcome" {
+		t.Fatal("completed issue action kept proposal controls")
+	}
+	m.notifications.actionReview = nil
 	m.notifications.review = &autoCloseReview{}
 	m.notifications.review.Plan.Proposals = []autoCloseRow{rejected}
 	context := autoCloseContext{Number: 5, ProposalCheckpoint: "rejected-5", Reason: "proposal is rejected", LatestRejection: rejected.Rejection}

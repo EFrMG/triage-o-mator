@@ -55,13 +55,13 @@ func notificationCount(unreadTracked []Key, proposals autoCloseList, additional 
 		items[key] = true
 	}
 	for _, proposal := range proposals.Rows {
-		if proposal.Needs {
+		if proposal.Needs && proposal.Status != "executed" {
 			items[Key{Kind: "pr", Number: proposal.Number}] = true
 		}
 	}
 	for _, listing := range additional {
 		for _, proposal := range listing.Rows {
-			if proposal.Needs {
+			if proposal.Needs && proposal.Status != "executed" {
 				items[Key{Kind: proposal.Kind, Number: proposal.Number}] = true
 			}
 		}

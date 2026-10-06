@@ -142,6 +142,7 @@ bin/report
 | Preview, initialize and reconcile GitHub labels | `bin/label-definitions`                                                        |
 | Preview and apply proposed labels               | `bin/item-labels`                                                              |
 | Propose and publish actions                     | `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus`                  |
+| Score selected issues and PRs                   | `bin/item-score`                                                               |
 | See progress and handoffs                       | `bin/stats`, `bin/next`, `bin/report`                                          |
 
 The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md) and [comment publishing guide](docs/comment-plus.md) cover the commands and their limits.
@@ -173,6 +174,7 @@ Turning automatic download ON installs the optional engine from the checked-in, 
 | “assess this edited group”                     | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons        |
 | “review an appeal”                             | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment             |
 | “brief the maintainers” or “polish the report” | [Maintainer brief](prompts/maintainer-brief.md)                                                   | A short overview or focused decision brief   |
+| “score these items” or “run a scoring pass”    | [Score selected items](prompts/score-items.md)                                                    | A bounded, source-bound quality score        |
 
 > [!IMPORTANT]
 > Agents propose; humans review.

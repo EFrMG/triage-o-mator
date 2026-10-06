@@ -544,6 +544,21 @@ func (m model) formPanel(width int) string {
 		appendMuted(triaged)
 		appendMuted(reviewed)
 	}
+	if it, ok := m.findItem(m.detail.key); ok {
+		appendMuted(it.ScoreLabel())
+		if it.ItemScore != nil {
+			appendMuted("Score by " + orPlaceholder(it.ItemScore.AssessedBy, "?") + " · " + shortDate(it.ItemScore.AssessedAt))
+			if it.ItemScore.Reason != "" {
+				appendMuted("Score reason: " + it.ItemScore.Reason)
+			}
+			if it.ItemScore.Suggestion != "" {
+				appendMuted("Suggested next check: " + it.ItemScore.Suggestion)
+			}
+			if it.ItemScore.SnapshotID != "" {
+				appendMuted("Score source: snapshot " + it.ItemScore.SnapshotID[:minInt(len(it.ItemScore.SnapshotID), 12)])
+			}
+		}
+	}
 
 	appendMuted("you: " + m.reviewer)
 	for i := range lines {
@@ -600,6 +615,11 @@ func (m model) itemView() string {
 
 		state := lipgloss.NewStyle().Foreground(lipgloss.Color(stateColor)).Render(singleLine(stateValue))
 		meta = append(meta, author, state, mutedText(singleLine(labels)), mutedText("updated "+singleLine(shortDate(it.UpdatedAt))))
+		if value, ok := it.ScoreValue(); ok {
+			meta = append(meta, lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true).Render(it.ScoreLabel()))
+		} else {
+			meta = append(meta, mutedText(it.ScoreLabel()))
+		}
 	}
 
 	if !m.notificationPR.open {

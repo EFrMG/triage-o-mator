@@ -66,7 +66,7 @@ The TUI's **Settings** menu has separate **Labels**, **Actions** and **Automatio
 
 ### Automations and item labeling
 
-**Settings → Automations** has a Labeling card and a planned Scoring card. Labeling is ON by default for the selected repository; Enter or Space turns it OFF or back ON. Press `y` on Labeling to copy a pinned prompt for an agent to follow `prompts/label-items.md`. Scoring is visible as a planned 0–5 item-merit pass and cannot be toggled or started yet. The automation setting grants permission for a pass when requested; opening the menu never starts one.
+**Settings → Automations** has Labeling and Scoring cards. Labeling is ON by default for the selected repository; Enter or Space turns it OFF or back ON. Press `y` on Labeling to copy a pinned prompt for an agent to follow `prompts/label-items.md`. Press `y` on Scoring to copy a bounded, offline quality/readiness pass prompt; [Item Score](item-score.md) is saved locally and has no GitHub write mode. Opening either card never starts a pass.
 
 `proposed_labels` in the ledger is a local decision, separate from the item's observed GitHub `labels`. The agent's labeling pass previews a dry-run list of current labels, proposals, exact additions and removals before running. The script checks the selected repository, current ledger proposals and live GitHub labels again before each write. The pass accepts unreviewed agent proposals and never marks a decision reviewed.
 

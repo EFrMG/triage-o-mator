@@ -13,33 +13,48 @@ import (
 )
 
 // Item mirrors one row of data/<owner>/<repo>/ledger.jsonl (bin/_triage.py's FIELDS).
-// Unknown/extra keys (e.g. state_reason) are preserved in Extra so nothing is lost if this struct is ever re-serialized (it currently is not, as the TUI only reads the ledger; bin/apply is the only writer).
+// The TUI only reads ledger records; owning scripts such as bin/apply and bin/item-score write them.
 type Item struct {
-	Number         int      `json:"number"`
-	Kind           string   `json:"kind"`
-	State          string   `json:"state"`
-	Title          string   `json:"title"`
-	URL            string   `json:"url"`
-	Author         string   `json:"author"`
-	CreatedAt      string   `json:"created_at"`
-	UpdatedAt      string   `json:"updated_at"`
-	Labels         []string `json:"labels"`
-	ProposedLabels []string `json:"proposed_labels"`
-	CommentsCount  int      `json:"comments_count"`
-	Category       string   `json:"category"`
-	Action         string   `json:"action"`
-	Confidence     string   `json:"confidence"`
-	Reason         string   `json:"reason"`
-	TriagedAt      string   `json:"triaged_at"`
-	TriagedBy      string   `json:"triaged_by"`
-	BatchID        string   `json:"batch_id"`
-	AgentNotes     string   `json:"agent_notes"`
-	Reviewed       bool     `json:"reviewed"`
-	ReviewedBy     string   `json:"reviewed_by"`
-	ReviewedAt     string   `json:"reviewed_at"`
-	ReviewerNotes  string   `json:"reviewer_notes"`
-	FirstSeenAt    string   `json:"first_seen_at"`
-	LastSyncedAt   string   `json:"last_synced_at"`
+	Number         int        `json:"number"`
+	Kind           string     `json:"kind"`
+	State          string     `json:"state"`
+	Title          string     `json:"title"`
+	URL            string     `json:"url"`
+	Author         string     `json:"author"`
+	CreatedAt      string     `json:"created_at"`
+	UpdatedAt      string     `json:"updated_at"`
+	Labels         []string   `json:"labels"`
+	ProposedLabels []string   `json:"proposed_labels"`
+	CommentsCount  int        `json:"comments_count"`
+	ItemScore      *ItemScore `json:"item_score"`
+	Category       string     `json:"category"`
+	Action         string     `json:"action"`
+	Confidence     string     `json:"confidence"`
+	Reason         string     `json:"reason"`
+	TriagedAt      string     `json:"triaged_at"`
+	TriagedBy      string     `json:"triaged_by"`
+	BatchID        string     `json:"batch_id"`
+	AgentNotes     string     `json:"agent_notes"`
+	Reviewed       bool       `json:"reviewed"`
+	ReviewedBy     string     `json:"reviewed_by"`
+	ReviewedAt     string     `json:"reviewed_at"`
+	ReviewerNotes  string     `json:"reviewer_notes"`
+	FirstSeenAt    string     `json:"first_seen_at"`
+	LastSyncedAt   string     `json:"last_synced_at"`
+}
+
+type ItemScore struct {
+	Rubric     string `json:"rubric"`
+	Value      *int   `json:"value"`
+	Reason     string `json:"reason"`
+	Suggestion string `json:"suggestion"`
+	SnapshotID string `json:"snapshot_id"`
+	Revision   struct {
+		UpdatedAt string `json:"updated_at"`
+		HeadSHA   string `json:"head_sha"`
+	} `json:"revision"`
+	AssessedAt string `json:"assessed_at"`
+	AssessedBy string `json:"assessed_by"`
 }
 
 // Key uniquely identifies an item by (kind, number), matching bin/_triage.py's ledger_key().
@@ -49,6 +64,27 @@ type Key struct {
 }
 
 func (i Item) Key() Key { return Key{Kind: i.Kind, Number: i.Number} }
+
+func (i Item) ScoreValue() (int, bool) {
+	if i.ItemScore == nil || i.ItemScore.Rubric != "item-quality-v1" || i.ItemScore.Value == nil ||
+		*i.ItemScore.Value < 0 || *i.ItemScore.Value > 5 || i.ItemScore.Revision.UpdatedAt == "" ||
+		i.ItemScore.Revision.UpdatedAt != i.UpdatedAt {
+		return 0, false
+	}
+
+	return *i.ItemScore.Value, true
+}
+
+func (i Item) ScoreLabel() string {
+	if value, ok := i.ScoreValue(); ok {
+		return fmt.Sprintf("Score %d/5", value)
+	}
+	if i.ItemScore != nil && i.ItemScore.Value != nil {
+		return "Score — (stale)"
+	}
+
+	return "Score —"
+}
 
 func (i Item) Untriaged() bool {
 	return i.Category == "" && len(i.ProposedLabels) == 0 && i.Action == ""

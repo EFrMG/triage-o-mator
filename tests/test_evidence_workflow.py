@@ -4,7 +4,7 @@ import json
 import subprocess
 import sys
 
-from support import Workspace, repository, summary
+from support import Workspace, item, repository, summary
 
 
 class EvidenceTests(Workspace):
@@ -40,6 +40,54 @@ class EvidenceTests(Workspace):
         self.assertEqual(fixed["data"]["summary"]["body"], "Useful source text")
         self.assertEqual(len(self.calls()), count)
         self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
+
+    def test_item_score_binds_numeric_assessment_to_verified_revision(self):
+        issue = summary(kind="issue", number=2)
+        self.responses["repos/owner/repo/issues/2"] = dict(data=issue)
+        self.responses["repos/owner/repo/issues/2/comments?per_page=100&page=1"] = dict(data=[])
+        row = item(2, issue["title"])
+        row["updated_at"] = issue["updated_at"]
+        row.update(action="", confidence="", reviewed=False)
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(row) + "\n")
+
+        selected = self.cache("fetch", "--kind", "issue", "--number", "2", "--profile", "discussion")
+        calls = len(self.calls())
+        args = ("--expected-repo", "owner/repo", "set", "--kind", "issue", "--number", "2")
+        scored = self.json_cli("item-score", *args, "--snapshot", selected["snapshot_id"], "--clarity", "2", "--support", "1",
+                               "--actionability", "1", "--reason", "Clear report with a missing check", "--by", "agent:tester")
+        self.assertEqual(scored["score"]["value"], 4)
+        self.assertEqual(scored["score"]["dimensions"], dict(clarity=2, support=1, actionability=1))
+        self.assertEqual(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")["current"], True)
+        self.assertEqual(len(self.calls()), calls)
+        self.assertFalse(self.ledger()["issue", 2]["reviewed"])
+
+        changed = self.ledger()["issue", 2]
+        changed["updated_at"] = "2026-09-23T01:00:00Z"
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(changed) + "\n")
+        self.assertFalse(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")["current"])
+
+        rejected = self.run_cli("item-score", *args, "--snapshot", selected["snapshot_id"], "--clarity", "2", "--support", "2",
+                                "--actionability", "1", "--reason", "Wrong revision", "--by", "agent:tester", ok=False)
+        self.assertIn("selected evidence revision differs", rejected.stderr)
+        self.assertEqual(self.ledger()["issue", 2]["item_score"]["value"], 4)
+
+        self.json_cli("item-score", *args, "--unassessed", "--reason", "Report needs fresh evidence", "--by", "agent:tester")
+        shown = self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")
+        self.assertIsNone(shown["score"]["value"])
+        self.assertFalse(shown["current"])
+        self.assertEqual(len(self.calls()), calls)
+
+        pr = item(1, "A contribution", kind="pr")
+        pr["updated_at"] = summary()["updated_at"]
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(changed) + "\n" + json.dumps(pr) + "\n")
+        partial = self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "discussion")
+        incomplete = self.run_cli("item-score", "--expected-repo", "owner/repo", "set", "--kind", "pr", "--number", "1",
+                                  "--snapshot", partial["snapshot_id"], "--correctness", "1", "--safeguards", "1", "--reviewability", "1",
+                                  "--reason", "Selected diff is missing", "--by", "agent:tester", ok=False)
+        self.assertIn("complete files, diff", incomplete.stderr)
+        self.assertIsNone(self.ledger()["pr", 1].get("item_score"))
+        wrong_repo = self.run_cli("item-score", "--expected-repo", "other/repo", "show", "--kind", "pr", "--number", "1", ok=False)
+        self.assertIn("selected repository changed", wrong_repo.stderr)
 
     def test_empty_graphql_cli_response_uses_bounded_budgeted_retry(self):
         (self.mock / "gh").write_text('''#!/usr/bin/env python3

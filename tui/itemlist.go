@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/paginator"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // listItem adapts Item to bubbles/list's item interface.
@@ -28,6 +29,11 @@ func (li listItem) Title() string {
 }
 
 func (li listItem) Description() string {
+	score := mutedText(li.ScoreLabel())
+	if value, ok := li.ScoreValue(); ok {
+		score = lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true).Render(li.ScoreLabel())
+	}
+
 	comments := "comments"
 	if li.CommentsCount == 1 {
 		comments = "comment"
@@ -35,7 +41,7 @@ func (li listItem) Description() string {
 
 	// An unsaved draft says so in its mark, in place of the decision it will replace.
 	if li.unsaved {
-		return fmt.Sprintf("%s · updated %s · %d %s", li.Kind, shortDate(li.UpdatedAt), li.CommentsCount, comments)
+		return fmt.Sprintf("%s · %s · updated %s · %d %s", score, li.Kind, shortDate(li.UpdatedAt), li.CommentsCount, comments)
 	}
 
 	status := "untriaged"
@@ -48,7 +54,18 @@ func (li listItem) Description() string {
 	}
 
 	// The decision comes first, after the card's [agent] / [human] mark, so a narrow pane cuts the dates rather than the call.
-	return fmt.Sprintf("%s · %s · updated %s · %d %s", status, li.Kind, shortDate(li.UpdatedAt), li.CommentsCount, comments)
+	return fmt.Sprintf("%s · %s · %s · updated %s · %d %s", score, status, li.Kind, shortDate(li.UpdatedAt), li.CommentsCount, comments)
+}
+
+func itemScoreColor(value int) string {
+	if value <= 2 {
+		return currentTheme.Error
+	}
+	if value == 3 {
+		return currentTheme.Warning
+	}
+
+	return currentTheme.Success
 }
 
 // Mark tags a decision with who made it: an agent's proposal applied to the ledger, in the warning color since nobody has checked it yet, or a person's own call, in the palette's blue (info). Untriaged items have no mark; a batch proposal says "proposed" instead. An unsaved draft is marked "unsaved", also in the warning color, whatever is saved.

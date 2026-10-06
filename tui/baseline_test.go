@@ -89,6 +89,36 @@ func baselineModel(t *testing.T, root string) model {
 	return baselineSend(m, fetchSyncDoneMsg{})
 }
 
+func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	it := m.items[0]
+	it.UpdatedAt = "2026-10-06T00:00:00Z"
+	for _, value := range []int{0, 2, 3, 4, 5} {
+		score := &ItemScore{Rubric: "item-quality-v1", Value: &value, Reason: "Clear symptom; one check remains", Suggestion: "Try the narrow terminal case", SnapshotID: strings.Repeat("a", 64)}
+		score.Revision.UpdatedAt = it.UpdatedAt
+		it.ItemScore = score
+		m.items[0] = it
+		m.detail.SetItem(it)
+
+		styled := lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true).Render(fmt.Sprintf("Score %d/5", value))
+		if !strings.Contains((listItem{Item: it}).Description(), styled) || !strings.Contains(markedCard("#1 first", (listItem{Item: it}).Description(), cardMark{}, false, 100), styled) {
+			t.Fatalf("score %d lost its card color", value)
+		}
+		if !strings.Contains(m.itemView(), fmt.Sprintf("Score %d/5", value)) || !strings.Contains(m.formPanel(60), "Score reason: Clear symptom") ||
+			!strings.Contains(m.formPanel(60), "Score source: snapshot") || !strings.Contains(m.itemFooter()[0].hints[0].desc, fmt.Sprintf("Score %d/5", value)) {
+			t.Fatalf("score %d or its reasoning was missing from the item", value)
+		}
+		if copied := m.itemBlock(it, EnrichedItem{}, false); !strings.Contains(copied, "Score reason: Clear symptom") || !strings.Contains(copied, score.SnapshotID) {
+			t.Fatal("copied item context omitted the score basis or source")
+		}
+	}
+
+	it.UpdatedAt = "2026-10-07T00:00:00Z"
+	if _, current := it.ScoreValue(); current || !strings.Contains(ansi.Strip((listItem{Item: it}).Description()), "Score — (stale)") {
+		t.Fatal("a later item revision kept displaying the old score as current")
+	}
+}
+
 func TestBaselineResizePromptCentered(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
 	check := func(width, height int) {
@@ -360,7 +390,7 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	}
 	m = baselineSend(m, cmd().(automationMsg))
 	if !m.settings.automations.loaded || !m.settings.automations.labelingEnabled || !strings.Contains(ansi.Strip(m.automationsView()), "Scoring") {
-		t.Fatal("Automations did not load default-on Labeling and planned Scoring cards")
+		t.Fatal("Automations did not load default-on Labeling and local Scoring cards")
 	}
 	if prompt := m.labelingPrompt(); !strings.Contains(prompt, "prompts/label-items.md") || !strings.Contains(prompt, m.repo) || !strings.Contains(prompt, m.installRoot) {
 		t.Fatal("Labeling prompt lacked the pinned install or agent instructions")
@@ -382,13 +412,16 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
-	if cmd != nil || m.settings.busy || !strings.Contains(m.status, "planned") {
-		t.Fatal("planned Scoring card acted like an available automation")
+	if cmd != nil || m.settings.busy || !strings.Contains(m.status, "copy the bounded local scoring prompt") {
+		t.Fatal("Scoring card changed automation settings")
+	}
+	if prompt := m.scoringPrompt(); !strings.Contains(prompt, "prompts/score-items.md") || !strings.Contains(prompt, m.repo) || !strings.Contains(prompt, m.installRoot) {
+		t.Fatal("Scoring prompt lacked the pinned install or agent instructions")
 	}
 	next, cmd = m.Update(tea.KeyPressMsg{Text: "y"})
 	m = next.(model)
-	if cmd != nil || !strings.Contains(m.status, "planned") {
-		t.Fatal("planned Scoring card copied a runnable agent prompt")
+	if cmd == nil || !strings.Contains(m.status, "Item scoring prompt") {
+		t.Fatal("Scoring card did not copy its bounded local prompt")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeySpace})

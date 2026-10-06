@@ -108,6 +108,13 @@ def suggestions(ledger):
             "prompts/automated-actions.md (select exact keys; reuse cached evidence first)",
             "each action follows its repository policy; incomplete or disputed cases stay staged")
 
+    unscored = [r for r in open_items if not isinstance(r.get("item_score"), dict) or
+                r["item_score"].get("value") is not None and (r["item_score"].get("revision") or {}).get("updated_at") != r.get("updated_at")]
+    if unscored:
+        add("agent", f"Score a bounded selection of {len(unscored)} new or stale items",
+            "prompts/score-items.md (select up to 20 exact item keys and saved snapshots)",
+            "quality/readiness scores remain separate from triage confidence, review and GitHub approval")
+
     pairs = [p for p in TitleVerdicts().pairs(TitleIndex(ledger), min_score=STRONG_PAIR)
              if not has_decision(by_key[(p["item"]["kind"], p["item"]["number"])])]
     if pairs:

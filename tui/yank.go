@@ -42,7 +42,7 @@ func truncate(text string, limit int) string {
 
 // itemLine is one item as a list entry: enough to recognise it and its decision, nothing more.
 func itemLine(item Item, proposal string) string {
-	line := fmt.Sprintf("- %s #%d — %s", item.Kind, item.Number, item.Title)
+	line := fmt.Sprintf("- %s #%d — %s [%s]", item.Kind, item.Number, item.Title, item.ScoreLabel())
 	switch {
 	case !item.Untriaged():
 		line += fmt.Sprintf(" [%s / %s, %s, by %s", item.DecisionLabel(), item.Action, item.Confidence, item.TriagedBy)
@@ -71,6 +71,17 @@ func (m model) itemBlock(item Item, enriched EnrichedItem, withBody bool) string
 
 	if item.URL != "" {
 		fmt.Fprintf(&b, "%s\n", item.URL)
+	}
+	fmt.Fprintf(&b, "Item quality/readiness: %s (separate from triage confidence and review).\n", item.ScoreLabel())
+	if item.ItemScore != nil {
+		fmt.Fprintf(&b, "Score reason: %s\n", item.ItemScore.Reason)
+		if item.ItemScore.Suggestion != "" {
+			fmt.Fprintf(&b, "Suggested next check: %s\n", item.ItemScore.Suggestion)
+		}
+		if item.ItemScore.SnapshotID != "" {
+			fmt.Fprintf(&b, "Score source: snapshot %s · updated %s · head %s\n", item.ItemScore.SnapshotID,
+				item.ItemScore.Revision.UpdatedAt, orPlaceholder(item.ItemScore.Revision.HeadSHA, "n/a"))
+		}
 	}
 
 	if !item.Untriaged() {

@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Record a source-bound 0–5 quality/readiness assessment without changing triage or approval."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _cache import EvidenceCache
+from _evidence import repository
+from _storage import locked
+from _triage import LEDGER_PATH, REPO, load_ledger, now_iso, save_ledger
+
+
+RUBRIC = "item-quality-v1"
+DIMENSIONS = {
+    "issue": (("clarity", 2), ("support", 2), ("actionability", 1)),
+    "pr": (("correctness", 2), ("safeguards", 2), ("reviewability", 1)),
+}
+
+
+def parser():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--expected-repo", required=True)
+    commands = ap.add_subparsers(dest="command", required=True)
+    for name in ("show", "set"):
+        command = commands.add_parser(name)
+        command.add_argument("--kind", choices=("issue", "pr"), required=True)
+        command.add_argument("--number", type=int, required=True)
+
+    setting = commands.choices["set"]
+    setting.add_argument("--snapshot")
+    setting.add_argument("--host", default="github.com")
+    setting.add_argument("--unassessed", action="store_true")
+    for dimensions in DIMENSIONS.values():
+        for name, _ in dimensions:
+            setting.add_argument("--" + name, type=int)
+    setting.add_argument("--reason", required=True)
+    setting.add_argument("--suggestion", default="")
+    setting.add_argument("--by", required=True)
+    return ap
+
+
+def selected_record(kind, number, snapshot, host):
+    cache = EvidenceCache(repository(REPO, host=host))
+    manifest = cache.load(snapshot)
+    record = next((row for row in manifest["items"] if (row["identity"]["kind"], row["identity"]["number"]) == (kind, number)), None)
+    if record is None:
+        raise ValueError(f"{kind} #{number} is not in selected snapshot")
+
+    required = ("summary",) if kind == "issue" else ("summary", "files", "diff")
+    missing = [name for name in required if (record["components"].get(name) or {}).get("status") != "complete"]
+    if missing:
+        raise ValueError("cannot assign a number without complete " + ", ".join(missing))
+
+    if kind == "issue":
+        summary = json.loads(cache.read_object(record["components"]["summary"]["object"]))
+        if not (summary.get("body") or "").strip():
+            raise ValueError("issue body is missing; record unassessed")
+    elif not cache.read_object(record["components"]["diff"]["object"]).strip():
+        raise ValueError("PR diff is empty; record unassessed")
+
+    return record, manifest["repository"]
+
+
+def dimensions_for(args):
+    expected = DIMENSIONS[args.kind]
+    other = DIMENSIONS["pr" if args.kind == "issue" else "issue"]
+    if any(getattr(args, name) is not None for name, _ in other):
+        raise ValueError("dimensions do not match item kind")
+
+    values = {}
+    for name, maximum in expected:
+        value = getattr(args, name)
+        if value is None or value < 0 or value > maximum:
+            raise ValueError(f"--{name} must be between 0 and {maximum}")
+
+        values[name] = value
+
+    if args.kind == "pr" and values["correctness"] == 0 and sum(values.values()) > 2:
+        raise ValueError("a PR with a central correctness defect cannot score above 2")
+
+    return values
+
+
+def main():
+    args = parser().parse_args()
+    if args.expected_repo != REPO:
+        sys.exit("error: selected repository changed")
+    if args.number < 1:
+        sys.exit("error: item number must be positive")
+
+    if args.command == "show":
+        row = next((row for row in load_ledger() if (row["kind"], row["number"]) == (args.kind, args.number)), None)
+        if row is None:
+            sys.exit("error: item is absent from the ledger")
+
+        score = row.get("item_score")
+        print(json.dumps(dict(repository=REPO, kind=args.kind, number=args.number, score=score,
+                              current=bool(isinstance(score, dict) and score.get("value") is not None and isinstance(score.get("revision"), dict) and
+                                           score["revision"].get("updated_at") == row.get("updated_at")),
+                              ledger_updated_at=row.get("updated_at")), ensure_ascii=False, indent=2))
+        return
+
+    if not args.by.strip() or not args.reason.strip():
+        sys.exit("error: assessor and reason are required")
+    if len(args.reason) > 500 or len(args.suggestion) > 250:
+        sys.exit("error: reason or suggestion is too long")
+
+    try:
+        if args.unassessed:
+            if args.snapshot or any(getattr(args, name) is not None for dimensions in DIMENSIONS.values() for name, _ in dimensions):
+                raise ValueError("unassessed entries have no numeric dimensions or snapshot")
+
+            score = dict(rubric=RUBRIC, value=None, dimensions={}, reason=args.reason.strip(), suggestion=args.suggestion.strip(),
+                         snapshot_id=None, source_repository=None, revision=None, coverage={}, assessed_at=now_iso(), assessed_by=args.by.strip())
+        else:
+            if not args.snapshot:
+                raise ValueError("a numeric score requires --snapshot")
+
+            dimensions = dimensions_for(args)
+            record, source_repository = selected_record(args.kind, args.number, args.snapshot, args.host)
+            score = dict(rubric=RUBRIC, value=sum(dimensions.values()), dimensions=dimensions, reason=args.reason.strip(),
+                         suggestion=args.suggestion.strip(), snapshot_id=args.snapshot, source_repository=source_repository,
+                         revision=record["revision"], coverage={name: component["status"] for name, component in record["components"].items()},
+                         assessed_at=now_iso(), assessed_by=args.by.strip())
+
+        with locked(LEDGER_PATH):
+            ledger = load_ledger()
+            row = next((row for row in ledger if (row["kind"], row["number"]) == (args.kind, args.number)), None)
+            if row is None:
+                raise ValueError("item is absent from the ledger")
+            if score["revision"] is not None and score["revision"]["updated_at"] != row.get("updated_at"):
+                raise ValueError("selected evidence revision differs from the ledger; sync or choose current evidence")
+
+            row["item_score"] = score
+            save_ledger(ledger)
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        sys.exit(f"error: {error}")
+
+    print(json.dumps(dict(repository=REPO, kind=args.kind, number=args.number, score=score), ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

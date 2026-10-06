@@ -162,7 +162,7 @@ func (m model) automationsView() string {
 	}
 	cards := [][2]string{
 		{"Labeling", labeling},
-		{"Scoring", "Planned · Individual merit score from 0 to 5"},
+		{"Scoring", "Local · 0–5 quality/readiness · y copies a bounded pass prompt"},
 	}
 	for _, action := range m.settings.automations.actions {
 		summary := "STAGE · Suggested " + action.Operation + " waits in Notifications"
@@ -189,6 +189,14 @@ Follow prompts/label-items.md. Start with open items lacking observed labels, in
 
 Item labeling is currently %s for this repository. If it is OFF, prepare proposals and stop before a GitHub write. If it is ON, preview the exact selected item keys and additions or removals, inspect that list, then run only that matching bounded plan. Revalidate, record outcomes, stop on an uncertain write, and respect later human corrections. Report item keys, labels changed, skipped items, and any gaps. Refresh the ledger before using applied labels to suggest actions.
 `, m.repo, m.installRoot, setting)
+}
+
+func (m model) scoringPrompt() string {
+	return m.yankHeader("Item scoring") + fmt.Sprintf(`
+Please score a bounded selection for %s from %s.
+
+Follow prompts/score-items.md. Use at most 20 named issues and PRs or the first 20 keys of one selected batch. Read selected immutable evidence offline, score quality/readiness with separate issue and PR dimensions, and record a reason and one suggested next check. Leave missing or unverifiable cases unassessed. Save each result through bin/item-score and report the score, source snapshot/revision and gaps. Do not change triage decisions, mark them reviewed, act on GitHub, or change code or PR diffs.
+`, m.repo, m.installRoot)
 }
 
 func (m model) actionPrompt(action automationAction) string {
@@ -224,7 +232,7 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, automationStatusCmd(m.installRoot, m.repo, m.settings.request)
 	case "enter", "l", "right", "space", "e":
 		if m.settings.selected == 1 {
-			m.status = "Scoring automation is planned and cannot be enabled yet."
+			m.status = "Press y to copy the bounded local scoring prompt."
 			return m, nil
 		}
 		if !m.settings.automations.loaded {
@@ -245,8 +253,8 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, automationToggleCmd(m.installRoot, m.repo, m.settings.request, before, !before)
 	case "y":
 		if m.settings.selected == 1 {
-			m.status = "The scoring pass and its agent prompt are planned."
-			return m, nil
+			m.status = "Taking Item scoring prompt…"
+			return m, yankCmd(m.installRoot, m.repo, "Item scoring prompt", m.scoringPrompt())
 		}
 		if m.settings.selected >= 2 {
 			if !m.settings.automations.loaded {

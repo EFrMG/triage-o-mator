@@ -28,7 +28,6 @@ type notificationRejectionDoneMsg struct {
 	generation             uint64
 	key                    Key
 	rejected               bool
-	action                 bool
 	completed, total       int
 	err                    error
 }
@@ -42,7 +41,6 @@ func (m model) rejectNotificationCmd() tea.Cmd {
 	return func() tea.Msg {
 		msg := notificationRejectionDoneMsg{root: root, repo: repo, generation: generation, key: choice.key, checkpoint: checkpoint, total: len(operations)}
 		args := []string{"--expected-repo", repo, "reject", "--kind", choice.key.Kind, "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--reason", reason}
-		msg.action = true
 		out, err := runScript(root, "action-proposals", args...)
 		if err != nil {
 			msg.err = err
@@ -63,7 +61,7 @@ func (m model) rejectNotificationCmd() tea.Cmd {
 
 		for _, operation := range operations {
 			args := operation.args
-			if msg.action && operation.source == "action proposal" || !msg.action && operation.source == "proposal" {
+			if operation.source == "action proposal" {
 				args = append([]string(nil), args...)
 				args[len(args)-1] = rejected.Checkpoint
 			}

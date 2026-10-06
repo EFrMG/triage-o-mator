@@ -12,7 +12,7 @@ type proposalAnswerDoneMsg struct {
 	root, repo, checkpoint, answer, by, target, comment string
 	generation                                          uint64
 	key                                                 Key
-	action, saved                                       bool
+	saved                                               bool
 	row                                                 actionProposalRow
 	err                                                 error
 }
@@ -27,7 +27,7 @@ func (m model) answerProposalCmd() tea.Cmd {
 
 	return func() tea.Msg {
 		msg := proposalAnswerDoneMsg{root: root, repo: repo, generation: generation, key: choice.key, checkpoint: checkpoint,
-			answer: answer, by: by, target: target, comment: comment, action: true}
+			answer: answer, by: by, target: target, comment: comment}
 		out, err := runScript(root, "action-proposals", args...)
 		if err != nil {
 			msg.err = err

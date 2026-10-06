@@ -1879,7 +1879,6 @@ func TestNotificationsReviewSelectionUsesSharedReaderForOneClosure(t *testing.T)
 		{Kind: "pr", Number: 2, Operation: "close", Status: "pending", Active: true, Checkpoint: "second"},
 		{Kind: "issue", Number: 3, Operation: "comment", Status: "pending", Active: true, Checkpoint: "issue"},
 	}}
-	m.notifications.proposals = closeProposals(m.notifications.actions)
 	for index, choice := range m.notifications.choices() {
 		if choice.key == (Key{Kind: "issue", Number: 3}) {
 			m.notifications.selected = index
@@ -1903,7 +1902,6 @@ func TestNotificationsReviewSelectionUsesSharedReaderForOneClosure(t *testing.T)
 	m.notifications.reviewBusy = false
 	m.notifications.ticked = map[int]bool{}
 	m.notifications.actions.Rows[1].Active = false
-	m.notifications.proposals = closeProposals(m.notifications.actions)
 	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "A"})
 	m = next.(model)
 	if cmd == nil || m.notifications.actionReview == nil || m.notifications.actionReview.row.Number != 1 || m.notifications.review != nil {
@@ -1975,7 +1973,7 @@ print(json.dumps(dict(kind='pr', number=3, operation='close', status='pending', 
 	m := baselineModel(t, root)
 	old := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Status: "pending", Active: true,
 		Checkpoint: strings.Repeat("a", 64), Comment: "Original comment", Inputs: &autoCloseInputs{ContextCheckpoint: "context"}}
-	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{old}}, actions: actionProposalList{Rows: []actionProposalRow{old}},
+	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{old}},
 		ticked: map[int]bool{3: true}, actionReview: &actionReviewUI{row: old}}
 	next, _ := m.handleNotificationsKey(tea.KeyPressMsg{Text: "e"})
 	m = next.(model)
@@ -2315,10 +2313,9 @@ func TestCompletedOutcomesStayVisibleAndRejectedProposalsLeaveNotifications(t *t
 	if err := json.Unmarshal([]byte(`{"number":3,"title":"Completed fixture","target":"https://github.com/owner/repo/pull/3","comment":"Published explanation","status":"executed","needs_attention":true,"outcome":{"comment":{"status":"succeeded"},"state_change":{"status":"succeeded"}}}`), &completed); err != nil {
 		t.Fatal(err)
 	}
-	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{completed, {Number: 4, Title: "Needs inspection", Status: "uncertain", Needs: true}, rejected}},
-		actions: actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Title: completed.Title, Target: completed.Target, Operation: "close", Comment: completed.Comment, Status: "executed", Needs: true},
-			{Kind: "pr", Number: 4, Title: "Needs inspection", Operation: "close", Status: "uncertain", Needs: true},
-			{Kind: "pr", Number: 5, Title: rejected.Title, Operation: "close", Status: "rejected"}}}}
+	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Title: completed.Title, Target: completed.Target, Operation: "close", Comment: completed.Comment, Status: "executed", Needs: true},
+		{Kind: "pr", Number: 4, Title: "Needs inspection", Operation: "close", Status: "uncertain", Needs: true},
+		{Kind: "pr", Number: 5, Title: rejected.Title, Operation: "close", Status: "rejected"}}}}
 	choices := m.notifications.choices()
 	if len(choices) != 2 || choices[0].key != (Key{Kind: "pr", Number: 4}) || choices[1].key != (Key{Kind: "pr", Number: 3}) || m.notifications.choiceNeeds(choices[1]) || notificationCount(nil, m.notifications.actions) != 1 {
 		t.Fatalf("completed outcome or uncertain closure was unavailable, or rejection remained: %+v", choices)
@@ -2520,7 +2517,7 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 
 	m := baselineModel(t, root)
 	m.drafts[Key{Kind: "issue", Number: 1}] = decisionSnapshot{}
-	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{row}}, actions: actionProposalList{Rows: []actionProposalRow{row}}}
+	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{row}}}
 	choice, ok := m.notifications.actionProposalChoice(Key{Kind: "pr", Number: 3})
 	if !ok {
 		t.Fatal("PR closure was missing from the unified proposal list")
@@ -2804,8 +2801,7 @@ else:
 	row := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Older change", Target: "https://github.com/owner/repo/pull/3", Comment: "This PR is superseded by #4.", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "closure-1", Status: "pending", Active: true, DecisionQuestion: "Does #4 replace this PR?", Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}}
 	m := baselineModel(t, root)
 	m.reviewer = "maintainer"
-	m.notifications = notificationsUI{open: true, proposals: closeProposals(actionProposalList{Rows: []actionProposalRow{row}}),
-		actions: actionProposalList{Rows: []actionProposalRow{row}}}
+	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{row}}}
 	choice, ok := m.notifications.actionProposalChoice(Key{Kind: "pr", Number: 3})
 	if !ok {
 		t.Fatal("questioned PR closure was missing from unified proposals")
@@ -2828,14 +2824,13 @@ else:
 	next, cmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	answerMsg := cmd().(proposalAnswerDoneMsg)
-	if answerMsg.err != nil || !answerMsg.saved || !answerMsg.action {
+	if answerMsg.err != nil || !answerMsg.saved {
 		t.Fatalf("PR closure answer was not saved on the unified proposal path: %+v", answerMsg)
 	}
 	updated, _ := m.finishProposalAnswer(answerMsg)
 	m = updated.(model)
 	row.Checkpoint = "closure-2"
 	row.DecisionResolution = &actionDecisionResolution{By: "maintainer", At: "2026-10-04T02:00:00Z", Reason: "Yes, #4 retains the behavior", HeldCheckpoint: "closure-1"}
-	m.notifications.proposals = closeProposals(actionProposalList{Rows: []actionProposalRow{row}})
 	m.notifications.actions = actionProposalList{Rows: []actionProposalRow{row}}
 	choice, ok = m.notifications.actionProposalChoice(Key{Kind: "pr", Number: 3})
 	if !ok {

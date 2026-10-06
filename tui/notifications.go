@@ -17,7 +17,6 @@ type notificationsUI struct {
 	tracked          *trackedPage
 	attention        *attentionPage
 	closures         *actionHistoryPage
-	proposals        autoCloseList
 	actions          actionProposalList
 	suggestions      []Item
 	suggestionOffset int
@@ -62,7 +61,6 @@ type notificationsMsg struct {
 	tracked    trackedPage
 	attention  attentionPage
 	closures   actionHistoryPage
-	proposals  autoCloseList
 	actions    actionProposalList
 	state      notificationState
 	unreadKeys []Key
@@ -70,13 +68,13 @@ type notificationsMsg struct {
 }
 
 type notificationChoice struct {
-	kind                                                              string
-	key                                                               Key
-	proposal, actionProposal, suggestion, tracked, attention, closure int
+	kind                                                    string
+	key                                                     Key
+	actionProposal, suggestion, tracked, attention, closure int
 }
 
 func itemChoice(key Key) notificationChoice {
-	return notificationChoice{kind: "item", key: key, proposal: -1, actionProposal: -1, suggestion: -1, tracked: -1, attention: -1, closure: -1}
+	return notificationChoice{kind: "item", key: key, actionProposal: -1, suggestion: -1, tracked: -1, attention: -1, closure: -1}
 }
 
 type actionProposalRow struct {
@@ -121,15 +119,15 @@ type actionProposalList struct {
 	Requests   int                 `json:"requests"`
 }
 
-func closeProposals(actions actionProposalList) autoCloseList {
-	result := autoCloseList{Repository: actions.Repository, Requests: actions.Requests}
-	for _, row := range actions.Rows {
-		if row.Kind != "pr" || row.Operation != "close" {
-			continue
+// closures lists the PR closure proposals, the only actions that can be ticked and reviewed as a batch.
+func (l actionProposalList) closures() []actionProposalRow {
+	var rows []actionProposalRow
+	for _, row := range l.Rows {
+		if row.Kind == "pr" && row.Operation == "close" {
+			rows = append(rows, row)
 		}
-		result.Rows = append(result.Rows, row)
 	}
-	return result
+	return rows
 }
 
 type autoCloseRow = actionProposalRow
@@ -265,7 +263,7 @@ func (m model) finishAutoClose(msg autoCloseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		current := make(map[int]autoCloseRow)
-		for _, row := range m.notifications.proposals.Rows {
+		for _, row := range m.notifications.actions.closures() {
 			current[row.Number] = row
 		}
 		if len(msg.review.Plan.Proposals) != len(msg.numbers) {
@@ -362,7 +360,6 @@ func notificationsCommand(root, repo string, generation uint64, trackedAt, atten
 			msg.err = err
 			return msg
 		}
-		msg.proposals = closeProposals(msg.actions)
 		out, err = runReadScript(process, root, "cache", "--expected-repo", repo, "notification-state")
 		if err == nil {
 			err = json.Unmarshal([]byte(out), &msg.state)
@@ -373,8 +370,6 @@ func notificationsCommand(root, repo string, generation uint64, trackedAt, atten
 		}
 		if msg.tracked.Repository.Name != repo || msg.tracked.Offset != trackedAt || len(msg.tracked.Rows) > notificationsPageSize {
 			msg.err = fmt.Errorf("tracked item response identity or bounds mismatch")
-		} else if msg.proposals.Repository != repo || msg.proposals.Requests != 0 {
-			msg.err = fmt.Errorf("proposal response identity mismatch")
 		} else if msg.actions.Repository != repo || msg.actions.Requests != 0 {
 			msg.err = fmt.Errorf("action proposal response identity mismatch")
 		} else if msg.state.Repository.Name != repo || msg.state.Requests != 0 {
@@ -445,7 +440,6 @@ func (m model) finishNotifications(msg notificationsMsg) (tea.Model, tea.Cmd) {
 	}
 	m.notifications.attention = &msg.attention
 	m.notifications.closures = &msg.closures
-	m.notifications.proposals = msg.proposals
 	m.notifications.actions = msg.actions
 	m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, msg.actions)
 	if m.notifications.suggestionOffset >= len(m.notifications.suggestions) {
@@ -545,8 +539,6 @@ func (n notificationsUI) choices() []notificationChoice {
 			items = append(items, itemChoice(key))
 		}
 		switch source {
-		case "proposal":
-			items[index].proposal = row
 		case "action-proposal":
 			items[index].actionProposal = row
 		case "suggestion":
@@ -788,7 +780,7 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 		all := msg.String() == "A"
 		var numbers []int
-		for _, row := range m.notifications.proposals.Rows {
+		for _, row := range m.notifications.actions.closures() {
 			if row.Active && (all || m.notifications.ticked[row.Number]) {
 				numbers = append(numbers, row.Number)
 			}

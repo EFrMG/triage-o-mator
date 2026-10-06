@@ -124,7 +124,7 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 		}
 		form := m.formPanel(60)
 		plain := ansi.Strip(form)
-		if !strings.Contains(plain, "you: tester") || strings.Index(plain, "you: tester") > strings.Index(plain, "Score by agent:tester") ||
+		if !strings.Contains(plain, "you: tester\n\nScore by agent:tester") ||
 			!strings.Contains(plain, "Score by agent:tester\n\nClarity:") ||
 			!strings.Contains(plain, "\n\nSupport:") || !strings.Contains(plain, "\n\nActionability:") || strings.Contains(plain, "Score reason:") ||
 			strings.Contains(plain, "Suggested next check") || strings.Contains(plain, "Score source:") || strings.Contains(plain, it.ScoreLabel()) {

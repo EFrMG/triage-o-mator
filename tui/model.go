@@ -595,6 +595,7 @@ func (m model) formPanel(width int) string {
 	}
 	appendMuted("you: " + m.reviewer)
 	if it, ok := m.findItem(m.detail.key); ok && it.ItemScore != nil {
+		lines = append(lines, "")
 		lines = append(lines, muted.Bold(true).Render("Score by "+singleLine(orPlaceholder(it.ItemScore.AssessedBy, "?"))), "")
 		label := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(true)
 		body := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(false)

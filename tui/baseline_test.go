@@ -1640,7 +1640,7 @@ func TestClosureReviewShowsTargetAndRefreshPinsHost(t *testing.T) {
 	m := baselineModel(t, root)
 	target := "https://ghe.example/owner/repo/pull/3"
 	m.notifications = notificationsUI{open: true, review: &closureReview{Approval: "exact-approval"}, reviewKey: "a"}
-	m.notifications.review.Plan.Proposals = []actionProposalRow{{Number: 3, Title: "Enterprise PR", Target: target, Comment: "Close with explanation"}, {Number: 4, Title: "Second PR", Target: "https://ghe.example/owner/repo/pull/4", Comment: "Close with explanation"}}
+	m.notifications.review.Plan.Proposals = []actionProposalRow{{Kind: "pr", Operation: "close", Number: 3, Title: "Enterprise PR", Target: target, Comment: "Close with explanation"}, {Kind: "pr", Operation: "close", Number: 4, Title: "Second PR", Target: "https://ghe.example/owner/repo/pull/4", Comment: "Close with explanation"}}
 	if !strings.Contains(ansi.Strip(m.closureReviewView()), target) {
 		t.Fatal("closure approval did not show the exact target URL")
 	}

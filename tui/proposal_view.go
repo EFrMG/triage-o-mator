@@ -109,3 +109,101 @@ func (s proposalReviewStyles) writeEvidence(b *strings.Builder, inputs *proposal
 		fmt.Fprintf(b, "%s\n", inset(ansi.Wrap(value, width, "")))
 	}
 }
+
+// proposalReviewState is what a reader knows beyond the saved proposal: its checked local context, any live problem, and where the proposal sits in a batch.
+type proposalReviewState struct {
+	context  *actionProposalContext
+	busy     bool
+	problem  string
+	approved bool
+	paging   bool
+	position string
+}
+
+// writeProposal renders one saved proposal the same way in the single action reader and in batch closure review: heading, state, target, comment, human context, evidence and outcome.
+func (s proposalReviewStyles) writeProposal(b *strings.Builder, row actionProposalRow, state proposalReviewState, width int) {
+	context := state.context
+	kind := "Issue"
+	if row.Kind == "pr" {
+		kind = "PR"
+	}
+	s.writeItemHeading(b, kind, row.Number, row.Title)
+	if state.position != "" {
+		fmt.Fprintf(b, "%s\n", inset(s.muted.Render(state.position)))
+	}
+
+	fmt.Fprintf(b, "\n%s\n", inset(s.section.Render(proposalActionSection(row.Status))))
+	if !s.writeSavedState(b, row.Status, row.Operation, kind) {
+		if context != nil && !context.Current || state.problem != "" {
+			fmt.Fprintf(b, "%s\n", inset(s.danger.Render("Changed context: prepare a fresh proposal and review.")))
+		} else if row.Status != "pending" || !row.Active || context == nil || state.busy {
+			fmt.Fprintf(b, "%s\n", inset(s.action.Render("Approval unavailable until the saved local context is current.")))
+		} else {
+			operation := "Publish the comment below."
+			if row.Operation == "close" || row.Operation == "reopen" {
+				operation = "Publish the comment below, then " + row.Operation + " this " + kind + "."
+			}
+			fmt.Fprintf(b, "%s\n", inset(s.action.Render(operation)))
+		}
+	}
+
+	fmt.Fprintf(b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), width)))
+	if row.DecisionQuestion != "" {
+		fmt.Fprintf(b, "%s\n", inset(wrapText("Question for this action: "+sanitize(row.DecisionQuestion), width)))
+	}
+	if row.DecisionResolution != nil {
+		resolution := row.DecisionResolution
+		fmt.Fprintf(b, "\n%s\n", inset(s.section.Render("Human decision resolution")))
+		fmt.Fprintf(b, "%s\n", inset(wrapText("By: "+sanitize(resolution.By)+" · At: "+sanitize(resolution.At), width)))
+		fmt.Fprintf(b, "%s\n", inset(wrapText(sanitize(resolution.Reason), width)))
+	}
+	if row.Reference != nil {
+		fmt.Fprintf(b, "%s\n", inset(s.muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))
+	}
+	s.writeComment(b, row.Comment, row.Status, width)
+
+	fmt.Fprintf(b, "\n%s\n", inset(s.section.Render("Human context")))
+	if context == nil {
+		fmt.Fprintf(b, "%s\n", inset(s.muted.Render("Local guidance has not been checked.")))
+	} else {
+		if !context.Current && row.Status == "pending" {
+			detail := strings.TrimSuffix(context.Reason, "; prepare a fresh proposal and review")
+			fmt.Fprintf(b, "%s\n", inset(s.action.Render(wrapText("Why: "+sanitize(detail), width))))
+		}
+		for _, block := range context.guidanceBlocks() {
+			fmt.Fprintf(b, "\n%s\n", inset(s.muted.Bold(true).Render(sanitize(block.title))))
+			for _, line := range block.lines {
+				fmt.Fprintf(b, "%s\n", inset(wrapText(sanitize(line), width)))
+			}
+		}
+		if context.LatestRejection != nil && row.Status != "rejected" {
+			fmt.Fprintf(b, "\n%s\n", inset(s.muted.Bold(true).Render("Earlier objection · By: "+sanitize(context.LatestRejection.By))))
+			fmt.Fprintf(b, "%s\n", inset(wrapText(sanitize(context.LatestRejection.Reason), width)))
+		}
+		if state.paging && (context.ItemContext.Pagination.Offset > 0 || context.ItemContext.Pagination.Next != nil) {
+			fmt.Fprintf(b, "%s\n", inset(s.muted.Render(fmt.Sprintf("Local context page %d · [ and ] move between pages", context.ItemContext.Pagination.Offset/10+1))))
+		}
+	}
+	if row.Reconsideration != nil {
+		fmt.Fprintf(b, "\n%s\n", inset(s.muted.Bold(true).Render("Reconsideration · "+sanitize(row.Reconsideration.By))))
+		fmt.Fprintf(b, "%s\n", inset(wrapText(sanitize(row.Reconsideration.Reason), width)))
+	}
+
+	s.writeEvidence(b, row.Inputs, width)
+	if row.Rejection != nil {
+		fmt.Fprintf(b, "\n%s\n", inset(s.section.Render("Rejection")))
+		fmt.Fprintf(b, "%s\n", inset(wrapText("By: "+sanitize(row.Rejection.By)+" · At: "+sanitize(row.Rejection.At), width)))
+		fmt.Fprintf(b, "%s\n", inset(wrapText(orPlaceholder(sanitize(row.Rejection.Reason), "(no reason given)"), width)))
+	}
+	if state.problem != "" {
+		fmt.Fprintf(b, "\n%s\n", inset(s.danger.Render(wrapText("Action unavailable: "+sanitize(state.problem), width))))
+	}
+	if state.approved {
+		fmt.Fprintf(b, "\n%s\n", inset(s.action.Render("Exact review is ready. Press a again to publish.")))
+	}
+	if row.Outcome != nil {
+		fmt.Fprintf(b, "\n%s\n", inset(s.section.Render(proposalOutcomeSection(row.Status))))
+		fmt.Fprintf(b, "%s\n", inset(s.muted.Render("Comment: "+sanitize(row.Outcome.Comment.Status))))
+		fmt.Fprintf(b, "%s\n", inset(s.muted.Render("State: "+sanitize(row.Outcome.StateChange.Status))))
+	}
+}

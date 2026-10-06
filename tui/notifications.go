@@ -970,73 +970,10 @@ func (m model) closureReviewViewport() viewport.Model {
 	styles := newProposalReviewStyles()
 	textWidth := maxInt(m.menuWidth()-4, 1)
 	for i, row := range n.review.Plan.Proposals {
-		context := n.proposalContext(row)
 		if i > 0 {
 			fmt.Fprintln(&b)
 		}
-		styles.writeItemHeading(&b, "PR", row.Number, row.Title)
-		fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render(fmt.Sprintf("%d of %d", i+1, len(n.review.Plan.Proposals)))))
-		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render(proposalActionSection(row.Status))))
-		if !styles.writeSavedState(&b, row.Status, "close", "PR") {
-			if context != nil && !context.Current {
-				fmt.Fprintf(&b, "%s\n", inset(styles.danger.Render("Changed context: prepare a fresh proposal and review.")))
-			} else if row.Status != "pending" || !row.Active || context == nil {
-				fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Approval unavailable until the saved local context is current.")))
-			} else {
-				fmt.Fprintf(&b, "%s\n", inset(styles.action.Render("Publish the comment below, then close this PR.")))
-			}
-		}
-		fmt.Fprintf(&b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), textWidth)))
-		if row.DecisionQuestion != "" {
-			fmt.Fprintf(&b, "%s\n", inset(wrapText("Question for this action: "+sanitize(row.DecisionQuestion), textWidth)))
-		}
-		if row.DecisionResolution != nil {
-			resolution := row.DecisionResolution
-			fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Human decision resolution")))
-			fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(resolution.By)+" · At: "+sanitize(resolution.At), textWidth)))
-			fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(resolution.Reason), textWidth)))
-		}
-		if row.Reference != nil {
-			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))
-		}
-		styles.writeComment(&b, row.Comment, row.Status, textWidth)
-		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Human context")))
-		if context == nil {
-			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Local guidance has not been checked.")))
-		} else {
-			if !context.Current && row.Status == "pending" {
-				detail := strings.TrimSuffix(context.Reason, "; prepare a fresh proposal and review")
-				fmt.Fprintf(&b, "%s\n", inset(styles.action.Render(wrapText("Why: "+sanitize(detail), textWidth))))
-			}
-			for _, block := range context.guidanceBlocks() {
-				fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Bold(true).Render(sanitize(block.title))))
-				for _, line := range block.lines {
-					fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(line), textWidth)))
-				}
-			}
-			if context.LatestRejection != nil && row.Status != "rejected" {
-				fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Bold(true).Render("Earlier objection · By: "+sanitize(context.LatestRejection.By))))
-				fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(context.LatestRejection.Reason), textWidth)))
-			}
-			if context.ItemContext.Pagination.Offset > 0 || context.ItemContext.Pagination.Next != nil {
-				fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render(fmt.Sprintf("Local context page %d · [ and ] move between pages", context.ItemContext.Pagination.Offset/10+1))))
-			}
-		}
-		if row.Reconsideration != nil {
-			fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Bold(true).Render("Reconsideration · "+sanitize(row.Reconsideration.By))))
-			fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(row.Reconsideration.Reason), textWidth)))
-		}
-		styles.writeEvidence(&b, row.Inputs, textWidth)
-		if row.Rejection != nil {
-			fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Rejection")))
-			fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(row.Rejection.By)+" · At: "+sanitize(row.Rejection.At), textWidth)))
-			fmt.Fprintf(&b, "%s\n", inset(wrapText(orPlaceholder(sanitize(row.Rejection.Reason), "(no reason given)"), textWidth)))
-		}
-		if row.Outcome != nil {
-			fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render(proposalOutcomeSection(row.Status))))
-			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Comment: "+sanitize(row.Outcome.Comment.Status))))
-			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Close: "+sanitize(row.Outcome.StateChange.Status))))
-		}
+		styles.writeProposal(&b, row, proposalReviewState{context: n.proposalContext(row), position: fmt.Sprintf("%d of %d", i+1, len(n.review.Plan.Proposals))}, textWidth)
 		fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Render(proposalRevisionFooter(row, textWidth))))
 	}
 	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(m.mainHeight()))

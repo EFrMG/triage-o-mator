@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _cache import EvidenceCache
-from _evidence import repository
+from _evidence import repository, validate_payload
 from _storage import locked
 from _triage import LEDGER_PATH, REPO, load_ledger, now_iso, save_ledger
 
@@ -44,10 +44,15 @@ def parser():
 
 def selected_record(kind, number, snapshot, host):
     cache = EvidenceCache(repository(REPO, host=host))
-    manifest = cache.load(snapshot)
+    manifest = cache.load_manifest(snapshot)
     record = next((row for row in manifest["items"] if (row["identity"]["kind"], row["identity"]["number"]) == (kind, number)), None)
     if record is None:
         raise ValueError(f"{kind} #{number} is not in selected snapshot")
+
+    # Verify only the scored item's payloads; a corpus snapshot can hold thousands of other items.
+    for name, component in record["components"].items():
+        if component["object"] is not None:
+            validate_payload(name, component, kind, cache.read_object(component["object"]))
 
     required = ("summary",) if kind == "issue" else ("summary", "files", "diff")
     missing = [name for name in required if (record["components"].get(name) or {}).get("status") != "complete"]

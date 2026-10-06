@@ -1962,8 +1962,6 @@ if 'edit' not in args:
 if pathlib.Path('edit-fail').exists():
     sys.exit('saved proposal changed')
 comment = pathlib.Path(args[args.index('--comment-file') + 1]).read_text()
-if '--rationale' in args:
-    sys.exit('unexpected rationale')
 print(json.dumps(dict(kind='pr', number=3, operation='close', status='pending', checkpoint='b' * 64, comment=comment)))
 `
 	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
@@ -1977,7 +1975,7 @@ print(json.dumps(dict(kind='pr', number=3, operation='close', status='pending', 
 		ticked: map[int]bool{3: true}, actionReview: &actionReviewUI{row: old}}
 	next, _ := m.handleNotificationsKey(tea.KeyPressMsg{Text: "e"})
 	m = next.(model)
-	if !m.comment.open || m.comment.text.Value() != old.Comment || strings.Contains(ansi.Strip(m.commentView()), "Rationale") {
+	if !m.comment.open || m.comment.text.Value() != old.Comment {
 		t.Fatal("proposal edit did not open a single comment draft")
 	}
 	next, editorCmd := m.handleCommentKey(tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl})
@@ -2486,7 +2484,7 @@ func TestProposalReaderShowsCurrentGuidanceAndBlocksStaleApproval(t *testing.T) 
 	script := `#!/usr/bin/env python3
 import json, pathlib, sys
 args = sys.argv[1:]
-row = dict(kind="pr", operation="close", number=3, title="Fixture PR", target="https://github.com/owner/repo/pull/3", rationale="Superseded", comment="Exact closure comment", checkpoint="proposal-1", status="pending", active=True, inputs=dict(context_checkpoint="ctx-1", evidence=[dict(kind="pr", number=3, snapshot_id="snapshot-1", components={"summary": {"status": "complete"}}), dict(kind="issue", number=4, snapshot_id="snapshot-2", components={"summary": {"status": "complete"}, "comments": {"status": "partial"}})], evidence_gaps=["Gap one", "Gap two", "Gap three", "Gap four", "Gap five"]))
+row = dict(kind="pr", operation="close", number=3, title="Fixture PR", target="https://github.com/owner/repo/pull/3", comment="Exact closure comment", checkpoint="proposal-1", status="pending", active=True, inputs=dict(context_checkpoint="ctx-1", evidence=[dict(kind="pr", number=3, snapshot_id="snapshot-1", components={"summary": {"status": "complete"}}), dict(kind="issue", number=4, snapshot_id="snapshot-2", components={"summary": {"status": "complete"}, "comments": {"status": "partial"}})], evidence_gaps=["Gap one", "Gap two", "Gap three", "Gap four", "Gap five"]))
 if "context" in args:
     stale = pathlib.Path("stale-context").exists()
     omitted = 30 if pathlib.Path("long-context").exists() else 0
@@ -2509,7 +2507,7 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 		t.Fatal(err)
 	}
 	var row actionProposalRow
-	if err := json.Unmarshal([]byte(`{"kind":"pr","operation":"close","number":3,"title":"Fixture PR","target":"https://github.com/owner/repo/pull/3","rationale":"Superseded","comment":"Exact closure comment","checkpoint":"proposal-1","status":"pending","active":true,"inputs":{"context_checkpoint":"ctx-1","evidence":[{"kind":"pr","number":3,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}},{"kind":"issue","number":4,"snapshot_id":"snapshot-2","components":{"summary":{"status":"complete"},"comments":{"status":"partial"}}}],"evidence_gaps":["Gap one","Gap two","Gap three","Gap four","Gap five"]}}`), &row); err != nil {
+	if err := json.Unmarshal([]byte(`{"kind":"pr","operation":"close","number":3,"title":"Fixture PR","target":"https://github.com/owner/repo/pull/3","comment":"Exact closure comment","checkpoint":"proposal-1","status":"pending","active":true,"inputs":{"context_checkpoint":"ctx-1","evidence":[{"kind":"pr","number":3,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}},{"kind":"issue","number":4,"snapshot_id":"snapshot-2","components":{"summary":{"status":"complete"},"comments":{"status":"partial"}}}],"evidence_gaps":["Gap one","Gap two","Gap three","Gap four","Gap five"]}}`), &row); err != nil {
 		t.Fatal(err)
 	}
 	row.HeadSHA = strings.Repeat("a", 40)
@@ -2565,9 +2563,6 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	}
 	if _, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "y"}); cmd == nil {
 		t.Fatal("y did not offer the proposal handoff from the reader")
-	}
-	if strings.Contains(view, "Superseded") {
-		t.Fatal("legacy rationale duplicated the proposed comment in review")
 	}
 	last := -1
 	for _, section := range []string{"Proposed action", "Comment to publish", "Human context", "Selected evidence"} {

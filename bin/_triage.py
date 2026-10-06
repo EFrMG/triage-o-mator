@@ -174,6 +174,11 @@ def ledger_key(rec):
 
 
 ITEM_KEY_RE = re.compile(r"(issue|pr):([1-9][0-9]*)")
+UTC_TIMESTAMP_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+
+
+def item_url(host, repo, kind, number):
+    return f"https://{host}/{repo}/{'pull' if kind == 'pr' else 'issues'}/{number}"
 
 
 def parse_key(text):

@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _action_proposal_records import direct_execution_eligible
 from _evidence import canonical, digest
 from _triage import REPO, action_operation, load_taxonomy, parse_key
 
@@ -59,11 +60,7 @@ def select(keys):
             if exact["checkpoint"] != row["checkpoint"] or exact["comment"] != row["comment"]:
                 raise ValueError(f"{kind} #{number} changed during action preview")
 
-        evidence = row["inputs"]["evidence"]
-        complete_target = any(selected["kind"] == kind and selected["number"] == number and
-                              all(component["status"] in ("complete", "not_applicable") for component in selected["components"].values())
-                              for selected in evidence)
-        eligible = complete_target and not row["inputs"]["evidence_gaps"] and not row.get("reconsideration") and not row.get("decision_question")
+        eligible = direct_execution_eligible(row)
         mode = "execute" if setting["mode"] == "execute" and setting["configured"] and eligible else "stage"
         chosen.append(dict(kind=kind, number=number, action=row["action"], operation=operation, mode=mode,
                            policy_mode=setting["mode"], eligible=eligible, target=row["target"], comment=row["comment"],

@@ -12,12 +12,12 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 
-from _action_proposal_records import feedback as proposal_feedback, load, proposal_path, valid_decision_hold
+from _action_proposal_records import direct_execution_eligible, feedback as proposal_feedback, has_control_characters, load, proposal_path, receipt_path, valid_decision_hold
 from _evidence import canonical, digest, validate_payload
 from _item_context import ContextIndex, read as read_item_context
 from _groups import load_group
 from _storage import atomic_writer, locked
-from _triage import DATA_DIR, action_operation, load_taxonomy, now_iso, parse_key, read_repo
+from _triage import DATA_DIR, UTC_TIMESTAMP_RE, action_operation, item_url, load_taxonomy, now_iso, parse_key, read_repo
 
 
 def save(path, value):
@@ -165,9 +165,9 @@ def inspect(repo, host, kind, number):
             raise ValueError(result.stderr.strip() or "GitHub read failed")
         return json.loads(result.stdout)
 
-    target = f"https://{host}/{repo}/{'pull' if kind == 'pr' else 'issues'}/{number}"
+    target = item_url(host, repo, kind, number)
     issue = get(f"repos/{repo}/issues/{number}")
-    if not isinstance(issue, dict) or issue.get("html_url") != target or issue.get("number") != number or issue.get("state") not in ("open", "closed") or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", issue.get("updated_at") or "") or ("pull_request" in issue) != (kind == "pr"):
+    if not isinstance(issue, dict) or issue.get("html_url") != target or issue.get("number") != number or issue.get("state") not in ("open", "closed") or not UTC_TIMESTAMP_RE.fullmatch(issue.get("updated_at") or "") or ("pull_request" in issue) != (kind == "pr"):
         raise ValueError("live item differs from the selected target")
 
     head = None
@@ -187,11 +187,11 @@ def inspect(repo, host, kind, number):
 
 
 def valid_comment(text):
-    return bool(text.strip()) and len(text) <= 65536 and not any((ord(char) < 32 and char not in "\n\t") or 127 <= ord(char) <= 159 for char in text)
+    return bool(text.strip()) and len(text) <= 65536 and not has_control_characters(text)
 
 
 def valid_short_text(text, limit):
-    return isinstance(text, str) and bool(text.strip()) and len(text) <= limit and not any((ord(char) < 32 and char not in "\n\t") or 127 <= ord(char) <= 159 for char in text)
+    return isinstance(text, str) and bool(text.strip()) and len(text) <= limit and not has_control_characters(text)
 
 
 def propose(args, repo):
@@ -202,7 +202,7 @@ def propose(args, repo):
         raise ValueError("selected action is not a configured writing type")
     if args.action is None and (args.kind != "pr" or operation != "close"):
         raise ValueError("only a PR closure recommendation may omit the saved ledger action")
-    if args.number < 1 or not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)*", args.host) or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", args.updated_at):
+    if args.number < 1 or not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)*", args.host) or not UTC_TIMESTAMP_RE.fullmatch(args.updated_at):
         raise ValueError("invalid action target or observed update time")
     if args.kind == "pr" and not re.fullmatch(r"[0-9a-f]{40}", args.head_sha or "") or args.kind == "issue" and args.head_sha:
         raise ValueError("PR actions require a head SHA; issue actions cannot have one")
@@ -271,7 +271,7 @@ def propose(args, repo):
     inputs = dict(context_checkpoint=context["checkpoint"], context_revision=context["context_revision"],
                   feedback_checkpoint=context["feedback_checkpoint"], group=group_input, evidence=evidence, evidence_gaps=args.evidence_gap)
     value = dict(schema_version=1, artifact="action-proposal", repo=repo, host=args.host, kind=args.kind, number=args.number,
-                 target=f"https://{args.host}/{repo}/{'pull' if args.kind == 'pr' else 'issues'}/{args.number}",
+                 target=item_url(args.host, repo, args.kind, args.number),
                  title=args.title, action=args.action, operation=operation, comment=comment, updated_at=args.updated_at,
                  observed_state=args.observed_state, proposed_by=args.by, proposed_at=now_iso(), request_id=str(uuid.uuid4()),
                  status="pending", inputs=inputs)
@@ -288,7 +288,7 @@ def propose(args, repo):
     with locked(path):
         if path.exists():
             previous = load(path, repo)
-            receipt = DATA_DIR / "writes" / (previous["request_id"] + ".json")
+            receipt = receipt_path(previous["request_id"])
             completed = previous["status"] == "executed"
             if args.replace_checkpoint != previous["checksum"] or previous["status"] not in ("pending", "rejected", "executed"):
                 raise ValueError("action proposal changed or has an unresolved write attempt; inspect it before replacing")
@@ -343,7 +343,7 @@ def edit(args, repo):
     previous = load(proposal_path(args.kind, args.number), repo)
     if previous["checksum"] != args.checkpoint or previous["status"] != "pending":
         raise ValueError("action proposal changed; reopen Notifications")
-    if (DATA_DIR / "writes" / (previous["request_id"] + ".json")).exists():
+    if receipt_path(previous["request_id"]).exists():
         raise ValueError("action proposal has a write attempt; reconcile it before editing")
 
     text = args.comment_file.read_text(encoding="utf-8")
@@ -373,7 +373,7 @@ def answer(repo, kind, number, checkpoint, by, text):
         value = load(path, repo)
         if value["checksum"] != checkpoint or value["status"] != "pending" or not value.get("decision_question"):
             raise ValueError("questioned action proposal changed or is no longer pending")
-        if (DATA_DIR / "writes" / (value["request_id"] + ".json")).exists():
+        if receipt_path(value["request_id"]).exists():
             raise ValueError("action proposal has a write attempt; reconcile it before answering")
 
         previous = {key: item for key, item in value.items() if key != "history"}
@@ -435,11 +435,7 @@ def automation_policy(repo, value):
     if value.get("decision_question"):
         raise ValueError("human decision question keeps this action staged")
 
-    inputs = value["inputs"]
-    complete_target = any(selected["kind"] == value["kind"] and selected["number"] == value["number"] and
-                          all(component["status"] in ("complete", "not_applicable") for component in selected["components"].values())
-                          for selected in inputs["evidence"])
-    if not complete_target or inputs["evidence_gaps"] or value.get("reconsideration"):
+    if not direct_execution_eligible(value):
         raise ValueError("direct action needs complete selected target evidence and no unresolved gap or rejection")
 
     result = subprocess.run([str(Path(__file__).absolute().with_name("action-policy")), "status", "--expected-repo", repo], capture_output=True, text=True)
@@ -470,7 +466,7 @@ def call_comment(repo, value):
         raise ValueError("comment plan differs from the action proposal")
 
     result = subprocess.run(base + ["--publish", "--approve", planned["approval"]], capture_output=True, text=True)
-    receipt = DATA_DIR / "writes" / (value["request_id"] + ".json")
+    receipt = receipt_path(value["request_id"])
     if receipt.exists():
         outcome = json.loads(receipt.read_text(encoding="utf-8"))
         if outcome.get("approval") != planned["approval"]:
@@ -495,7 +491,7 @@ def execute(repo, kind, number, items, all_pending, operation, approval, automat
             if value["checksum"] != selected["checkpoint"] or value["status"] != "pending":
                 raise ValueError("action proposal changed during execution")
 
-            receipt = DATA_DIR / "writes" / (value["request_id"] + ".json")
+            receipt = receipt_path(value["request_id"])
             new_attempt = not receipt.exists()
             definition = None
             if new_attempt:
@@ -521,13 +517,13 @@ def execute(repo, kind, number, items, all_pending, operation, approval, automat
 
 
 def reject(repo, kind, number, checkpoint, by, reason):
-    if not valid_short_text(by, 200) or len(reason) > 10000 or any((ord(char) < 32 and char not in "\n\t") or 127 <= ord(char) <= 159 for char in reason):
+    if not valid_short_text(by, 200) or len(reason) > 10000 or has_control_characters(reason):
         raise ValueError("rejection needs an author and a short reason")
 
     path = proposal_path(kind, number)
     with locked(path):
         value = load(path, repo)
-        if value["checksum"] != checkpoint or value["status"] != "pending" or (DATA_DIR / "writes" / (value["request_id"] + ".json")).exists():
+        if value["checksum"] != checkpoint or value["status"] != "pending" or receipt_path(value["request_id"]).exists():
             raise ValueError("action proposal changed or has a write attempt")
 
         previous = {key: item for key, item in value.items() if key != "history"}

@@ -14,7 +14,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 
 from _storage import atomic_writer, locked
-from _triage import DATA_DIR, now_iso, read_repo
+from _triage import DATA_DIR, UTC_TIMESTAMP_RE, item_url, now_iso, read_repo
 
 
 def api(host, method, endpoint, payload=None):
@@ -71,7 +71,7 @@ def main():
         raise ValueError("head revision checks require a pull request")
     if args.expected_head and not re.fullmatch(r"[0-9a-f]{40}", args.expected_head):
         raise ValueError("expected head must be a 40-character lowercase SHA")
-    if args.expected_updated_at and not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", args.expected_updated_at):
+    if args.expected_updated_at and not UTC_TIMESTAMP_RE.fullmatch(args.expected_updated_at):
         raise ValueError("expected update time must be a UTC GitHub timestamp")
 
     text = args.body if args.body is not None else args.body_file.read_text(encoding="utf-8")
@@ -82,7 +82,7 @@ def main():
     if str(uuid.UUID(request_id)) != request_id:
         raise ValueError("request ID must be a canonical UUID")
 
-    target = f"https://{args.host}/{repo}/{'pull' if args.kind == 'pr' else 'issues'}/{args.number}"
+    target = item_url(args.host, repo, args.kind, args.number)
     operation = "close" if args.close else "reopen" if args.reopen else "comment"
     target_state = "closed" if args.close else "open" if args.reopen else "none"
     plan = dict(version=1, request_id=request_id, operation=operation, host=args.host, repo=repo, kind=args.kind, number=args.number, target=target, body=text, state_change=target_state)

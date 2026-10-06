@@ -5,7 +5,7 @@ import re
 import uuid
 
 from _evidence import canonical, digest
-from _triage import DATA_DIR
+from _triage import DATA_DIR, UTC_TIMESTAMP_RE, item_url
 
 
 def proposal_path(kind, number):
@@ -13,6 +13,23 @@ def proposal_path(kind, number):
         raise ValueError("invalid action proposal item")
 
     return DATA_DIR / "action-proposals" / f"{kind}-{number}.json"
+
+
+def receipt_path(request_id):
+    """Where comment-plus saves the outcome of one write request."""
+    return DATA_DIR / "writes" / f"{request_id}.json"
+
+
+def has_control_characters(text):
+    return any((ord(char) < 32 and char not in "\n\t") or 127 <= ord(char) <= 159 for char in text)
+
+
+def attributed(entry, reason_required=True):
+    """A person's saved answer, rejection or reconsideration: who, when and why, within the stored size limits."""
+    by, at, reason = entry.get("by"), entry.get("at"), entry.get("reason")
+    return (isinstance(by, str) and bool(by.strip()) and len(by) <= 200 and
+            isinstance(at, str) and bool(UTC_TIMESTAMP_RE.fullmatch(at)) and
+            isinstance(reason, str) and len(reason) <= 10000 and (bool(reason.strip()) or not reason_required))
 
 
 def current_cycle(history):
@@ -37,10 +54,7 @@ def valid_decision_hold(value):
 
     held = next((version for version in reversed(history) if isinstance(version, dict) and version.get("checksum") == answer.get("held_checkpoint")), None)
     return (held is not None and held.get("decision_question") == question and held.get("target") == value.get("target") and
-            held.get("action") == value.get("action") and held.get("operation") == value.get("operation") and
-            isinstance(answer.get("by"), str) and bool(answer["by"].strip()) and len(answer["by"]) <= 200 and
-            isinstance(answer.get("at"), str) and bool(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", answer["at"])) and
-            isinstance(answer.get("reason"), str) and bool(answer["reason"].strip()) and len(answer["reason"]) <= 10000)
+            held.get("action") == value.get("action") and held.get("operation") == value.get("operation") and attributed(answer))
 
 
 def valid_reconsideration(versions):
@@ -57,10 +71,7 @@ def valid_reconsideration(versions):
     previous = versions[index - 1] if index else None
     return (isinstance(previous, dict) and previous.get("status") == "pending" and
             rejected.get("rejection", {}).get("proposal_checkpoint") == previous.get("checksum") and
-            explanation.get("rejected_checkpoint") == rejected.get("checksum") and
-            isinstance(explanation.get("by"), str) and bool(explanation["by"].strip()) and len(explanation["by"]) <= 200 and
-            isinstance(explanation.get("reason"), str) and bool(explanation["reason"].strip()) and len(explanation["reason"]) <= 10000 and
-            isinstance(explanation.get("at"), str) and bool(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", explanation["at"])))
+            explanation.get("rejected_checkpoint") == rejected.get("checksum") and attributed(explanation))
 
 
 def load(path, repo):
@@ -78,7 +89,7 @@ def load(path, repo):
             kind not in ("issue", "pr") or type(number) is not int or number < 1 or path.name != f"{kind}-{number}.json" or
             value.get("operation") not in ("comment", "close", "reopen") or value.get("status") not in ("pending", "rejected", "executed", "uncertain")):
         raise ValueError(f"invalid action proposal identity or status: {path.name}")
-    if value.get("target") != f"https://{value.get('host')}/{repo}/{'pull' if kind == 'pr' else 'issues'}/{number}":
+    if value.get("target") != item_url(value.get("host"), repo, kind, number):
         raise ValueError(f"invalid action proposal target: {path.name}")
     action = value.get("action")
     if (action is None and (kind != "pr" or value["operation"] != "close") or
@@ -92,7 +103,7 @@ def load(path, repo):
         raise ValueError("invalid action proposal history")
     versions = [*value.get("history", []), value]
     for index, version in enumerate(versions):
-        if not isinstance(version, dict) or any(version.get(field) != value[field] for field in ("repo", "kind", "number")) or version.get("target") != f"https://{version.get('host')}/{repo}/{'pull' if kind == 'pr' else 'issues'}/{number}":
+        if not isinstance(version, dict) or any(version.get(field) != value[field] for field in ("repo", "kind", "number")) or version.get("target") != item_url(version.get("host"), repo, kind, number):
             raise ValueError("invalid historical action proposal identity")
         try:
             if str(uuid.UUID(version["request_id"])) != version["request_id"]:
@@ -105,9 +116,7 @@ def load(path, repo):
             if (not isinstance(rejection, dict) or not isinstance(previous, dict) or previous.get("status") != "pending" or
                     rejection.get("proposal_checkpoint") != previous.get("checksum") or not isinstance(rejection.get("proposal_checkpoint"), str) or
                     not re.fullmatch(r"[0-9a-f]{64}", rejection["proposal_checkpoint"]) or version.get("request_id") != previous.get("request_id") or
-                    not isinstance(rejection.get("by"), str) or not rejection["by"].strip() or len(rejection["by"]) > 200 or
-                    not isinstance(rejection.get("reason"), str) or len(rejection["reason"]) > 10000 or
-                    not isinstance(rejection.get("at"), str) or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", rejection["at"])):
+                    not attributed(rejection, reason_required=False)):
                 raise ValueError("invalid action proposal rejection")
         elif version.get("rejection") is not None:
             raise ValueError("rejection on non-rejected action proposal")
@@ -122,6 +131,16 @@ def load(path, repo):
         raise ValueError("invalid action proposal reconsideration")
 
     return value
+
+
+def direct_execution_eligible(value):
+    """A saved proposal or its listed row may run without a person only with complete evidence for its own item, no declared gap, no reconsidered rejection and no open question."""
+    inputs = value["inputs"]
+    complete_target = any(selected["kind"] == value["kind"] and selected["number"] == value["number"] and
+                          all(component["status"] in ("complete", "not_applicable") for component in selected["components"].values())
+                          for selected in inputs["evidence"])
+
+    return complete_target and not inputs["evidence_gaps"] and not value.get("reconsideration") and not value.get("decision_question")
 
 
 def feedback(kind, number, repo, completed_batch=None):
@@ -145,7 +164,7 @@ def feedback(kind, number, repo, completed_batch=None):
                                state_error=outcome["state_change"].get("error")))
 
     if record["status"] == "pending":
-        receipt = DATA_DIR / "writes" / (record["request_id"] + ".json")
+        receipt = receipt_path(record["request_id"])
         if receipt.parent.is_symlink() or receipt.is_symlink():
             raise ValueError("invalid action write outcome path")
         if receipt.exists():

@@ -41,7 +41,7 @@ from _groups import load_group
 from _storage import atomic_writer
 from _similar import TitleIndex
 from _evidence import DEFAULT_MAX_AGE
-from _triage import BATCHES_DIR, enrich_item, has_decision, here, load_ledger, new_batch_id
+from _triage import BATCHES_DIR, enrich_item, has_decision, here, load_ledger, new_batch_id, parse_key
 
 # Enough for a triager (or prompts/auto-triage.md) to spot and name a duplicate without drowning each item in noise.
 CANDIDATES_PER_ITEM = 3
@@ -57,11 +57,11 @@ def remove_items(batch_id, keys):
 
     wanted = set()
     for value in keys:
-        kind, _, number = value.partition(":")
-        if kind not in ("issue", "pr") or not number.isdigit():
+        key = parse_key(value)
+        if key is None:
             sys.exit(f"error: --key {value!r} should look like issue:12 or pr:34")
 
-        wanted.add((kind, int(number)))
+        wanted.add(key)
 
     items_path = BATCHES_DIR / f"{batch_id}.items.jsonl"
     if not items_path.exists():

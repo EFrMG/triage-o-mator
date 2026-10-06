@@ -2,18 +2,17 @@
 """Preview and run bounded, repository-enabled GitHub item labeling from local proposals."""
 
 import argparse
-import hashlib
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _evidence import value_digest
 from _storage import atomic_writer, locked
-from _triage import CONFIG_DIR, DATA_DIR, REPO, load_ledger, load_taxonomy, now_iso
+from _triage import CONFIG_DIR, DATA_DIR, REPO, load_ledger, load_taxonomy, now_iso, parse_key
 
 
 POLICY_PATH = CONFIG_DIR / "label-application.json"
@@ -24,11 +23,6 @@ PASS_LOCK = DATA_DIR / "item-labels"
 
 def fail(parser, message):
     parser.exit(1, f"error: {message}\n")
-
-
-def digest(value):
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def read_json(path, fallback):
@@ -71,7 +65,7 @@ def state():
         raise ValueError("item-label state is malformed or belongs to another repository")
 
     for key, row in value["items"].items():
-        if not isinstance(key, str) or not re.fullmatch(r"(issue|pr):[1-9][0-9]*", key) or not isinstance(row, dict):
+        if parse_key(key) is None or not isinstance(row, dict):
             raise ValueError("item-label state has an invalid item identity")
 
         for field in ("last_labels", "managed"):
@@ -101,7 +95,7 @@ def status():
 def policy_plan(enable):
     before = enabled()
     plan = {"repository": REPO, "operation": "enable" if enable else "disable", "before": before, "after": enable}
-    plan["preview_sha256"] = digest(plan)
+    plan["preview_sha256"] = value_digest(plan)
     return plan
 
 
@@ -115,7 +109,7 @@ def reset_plan(saved, kind, number, transport):
     plan = {"repository": REPO, "operation": "reset-item", "key": key, "before": prior,
             "current_state": live_state, "current_labels": live_labels,
             "after": {"last_labels": live_labels, "managed": [], "pending": False, "paused": False}}
-    plan["preview_sha256"] = digest(plan)
+    plan["preview_sha256"] = value_digest(plan)
     return plan
 
 
@@ -169,7 +163,7 @@ class Transport:
 
 
 def decision_digest(row):
-    return digest({key: row.get(key) for key in ("kind", "number", "state", "proposed_labels")})
+    return value_digest({key: row.get(key) for key in ("kind", "number", "state", "proposed_labels")})
 
 
 def candidates(saved, limit, selected_keys=()):
@@ -256,7 +250,7 @@ def build_plan(saved, limit, transport, selected_keys=()):
 
     plan = {"repository": REPO, "enabled": enabled(), "limit": limit, "request_budget": transport.budget, "requests": transport.used,
             "selected_keys": list(selected_keys), "items": rows}
-    plan["preview_sha256"] = digest(plan)
+    plan["preview_sha256"] = value_digest(plan)
     return plan
 
 
@@ -380,7 +374,7 @@ def main():
     if args.key and args.command not in ("preview", "run"):
         parser.error("--key is only for preview and run")
 
-    if len(set(args.key)) != len(args.key) or any(not re.fullmatch(r"(issue|pr):[1-9][0-9]*", key) for key in args.key):
+    if len(set(args.key)) != len(args.key) or any(parse_key(key) is None for key in args.key):
         parser.error("--key requires distinct KIND:NUMBER values")
 
     if len(args.key) > args.limit:

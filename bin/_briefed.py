@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from _storage import atomic_writer, locked
-from _triage import BRIEFED_DIR, REPO, REPORTS_DIR, WORK_ROOT, now_iso
+from _triage import BRIEFED_DIR, REPO, REPORTS_DIR, WORK_ROOT, now_iso, parse_key
 
 
 # Only IDs new_batch_id() can produce, so a batch ID can never reach a path outside its own directory.
@@ -59,13 +59,8 @@ def load_records():
             raise ValueError(f"invalid briefed batch record: {path}")
 
         keys = record.get("member_keys")
-        if not isinstance(keys, list) or not keys or not all(isinstance(key, str) for key in keys) or len(keys) != len(set(keys)):
+        if not isinstance(keys, list) or not keys or any(parse_key(key) is None for key in keys) or len(keys) != len(set(keys)):
             raise ValueError(f"invalid briefed batch members: {path}")
-
-        for key in keys:
-            kind, _, number = key.partition(":")
-            if kind not in ("issue", "pr") or not number.isdigit() or int(number) < 1:
-                raise ValueError(f"invalid briefed batch member: {path}")
 
         brief = record.get("brief")
         if not isinstance(brief, str) or Path(brief).parent != Path("reports") / REPO or not is_batch_brief(Path(brief).name, batch_id):

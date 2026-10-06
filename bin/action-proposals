@@ -17,7 +17,7 @@ from _evidence import canonical, digest, validate_payload
 from _item_context import ContextIndex, read as read_item_context
 from _groups import load_group
 from _storage import atomic_writer, locked
-from _triage import DATA_DIR, action_operation, load_taxonomy, now_iso, read_repo
+from _triage import DATA_DIR, action_operation, load_taxonomy, now_iso, parse_key, read_repo
 
 
 def save(path, value):
@@ -401,10 +401,11 @@ def choose(repo, kind=None, number=None, items=(), all_pending=False, operation=
                 raise ValueError("--number requires --kind")
             keys.append((kind, number))
         for token in items:
-            parts = token.split(":", 1)
-            if len(parts) != 2 or parts[0] not in ("issue", "pr") or not parts[1].isdigit() or int(parts[1]) < 1:
+            key = parse_key(token)
+            if key is None:
                 raise ValueError("select items as issue:NUMBER or pr:NUMBER")
-            keys.append((parts[0], int(parts[1])))
+
+            keys.append(key)
         if not keys or len(keys) != len(set(keys)):
             raise ValueError("select one or more distinct items")
         values = [load(proposal_path(selected_kind, selected_number), repo) for selected_kind, selected_number in keys]

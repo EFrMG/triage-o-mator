@@ -2,23 +2,18 @@
 """Read or explicitly change repository-scoped automated-action modes."""
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _evidence import value_digest
 from _storage import atomic_writer, locked
 from _triage import CONFIG_DIR, REPO, action_operation, load_taxonomy
 
 
 POLICY_PATH = CONFIG_DIR / "action-automation.json"
 OPERATIONS = {"comment", "close", "reopen"}
-
-
-def digest(value):
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def policy():
@@ -54,7 +49,7 @@ def definitions():
         if not isinstance(action, str) or not action or operation not in OPERATIONS | {"none"} or not isinstance(guidance.get(action, ""), str):
             raise ValueError("action taxonomy is malformed")
 
-        rows.append({"name": action, "operation": operation, "definition_sha256": digest([action, operation, guidance.get(action, "")])})
+        rows.append({"name": action, "operation": operation, "definition_sha256": value_digest([action, operation, guidance.get(action, "")])})
 
     return rows
 
@@ -80,7 +75,7 @@ def plan(action, mode):
 
     result = {"repository": REPO, "action": action, "operation": row["operation"], "definition_sha256": row["definition_sha256"],
               "before": row["mode"], "after": mode}
-    result["preview_sha256"] = digest(result)
+    result["preview_sha256"] = value_digest(result)
     return result
 
 

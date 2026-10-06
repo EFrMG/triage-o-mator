@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _briefed import BATCH_BRIEF_RE, BRIEF_DATE, ITEM_BRIEF_RE, READ_SUFFIX, active_name, read_name, visible_batch_briefs
+from _evidence import value_digest
 from _storage import locked
 from _triage import DATA_DIR, REPO, REPORTS_DIR, WORK_ROOT
 
@@ -182,8 +183,7 @@ def mark_read_preview(names):
         renames.append(dict(source=name, target=target.name, content_sha256=digest.hexdigest()))
 
     payload = dict(repository=REPO, renames=renames)
-    token = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    return dict(renames=renames, preview_sha256=token)
+    return dict(renames=renames, preview_sha256=value_digest(payload))
 
 
 def mark_read(names, apply, preview_sha256):

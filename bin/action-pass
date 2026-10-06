@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _evidence import canonical, digest
-from _triage import REPO, action_operation, load_taxonomy
+from _triage import REPO, action_operation, load_taxonomy, parse_key
 
 
 def script(name, *args):
@@ -23,10 +23,11 @@ def script(name, *args):
 def selection(numbers, items):
     keys = [("pr", number) for number in numbers]
     for token in items:
-        parts = token.split(":", 1)
-        if len(parts) != 2 or parts[0] not in ("issue", "pr") or not parts[1].isdigit() or int(parts[1]) < 1:
+        key = parse_key(token)
+        if key is None:
             raise ValueError("select items as issue:NUMBER or pr:NUMBER")
-        keys.append((parts[0], int(parts[1])))
+
+        keys.append(key)
 
     if not keys or len(keys) > 20 or len(keys) != len(set(keys)) or any(number < 1 for _, number in keys):
         raise ValueError("select one to twenty distinct item keys")

@@ -173,6 +173,15 @@ def ledger_key(rec):
     return (rec.get("kind"), rec.get("number"))
 
 
+ITEM_KEY_RE = re.compile(r"(issue|pr):([1-9][0-9]*)")
+
+
+def parse_key(text):
+    """Read an item key written as issue:NUMBER or pr:NUMBER; None for anything else."""
+    match = ITEM_KEY_RE.fullmatch(text) if isinstance(text, str) else None
+    return (match.group(1), int(match.group(2))) if match else None
+
+
 def has_decision(rec):
     """Proposed labels or an action identify a saved local decision."""
     return bool(rec.get("proposed_labels") or rec.get("action"))

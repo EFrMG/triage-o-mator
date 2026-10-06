@@ -132,6 +132,11 @@ def digest(payload):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def value_digest(value):
+    """SHA-256 of a JSON value's canonical text: the form preview and approval hashes share."""
+    return digest(canonical(value))
+
+
 def artifact_ref(payload, format="json"):
     if not isinstance(format, str) or format not in FORMATS or not isinstance(payload, str):
         raise ValueError("evidence payload must be UTF-8 text in a supported format")

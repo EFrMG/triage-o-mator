@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _evidence import value_digest
 from _install import now_iso, read_github_labels, reconcile_label_catalog
 from _storage import atomic_writer, locked
 from _triage import REPO, TAXONOMY_PATH
@@ -54,20 +55,15 @@ def plan_change(parser, args, labels):
 
     plan = {"repository": REPO, "operation": "create" if current is None else "edit", "method": method,
             "endpoint": endpoint, "current": current, "proposed": proposed}
-    plan["preview_sha256"] = plan_hash(plan)
+    plan["preview_sha256"] = value_digest(plan)
     return plan
-
-
-def plan_hash(plan):
-    encoded = json.dumps(plan, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def plan_defaults(labels):
     existing = {row["name"].casefold() for row in labels}
     plan = {"repository": REPO, "operation": "initialize-defaults", "current": labels,
             "create": [row for row in STARTER_LABELS if row["name"].casefold() not in existing]}
-    plan["preview_sha256"] = plan_hash(plan)
+    plan["preview_sha256"] = value_digest(plan)
     return plan
 
 
@@ -126,7 +122,7 @@ def plan_local(parser, labels):
 
     plan = {"repository": REPO, "operation": "reconcile-local", "local_sha256": local_sha256, "current": labels,
             "create": create, "update": update, "delete": [row for row in labels if row["id"] not in matched]}
-    plan["preview_sha256"] = plan_hash(plan)
+    plan["preview_sha256"] = value_digest(plan)
     return plan
 
 

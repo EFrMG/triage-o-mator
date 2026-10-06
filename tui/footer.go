@@ -168,7 +168,7 @@ func (m model) contextFooterGroups() []footerGroup {
 		}
 		if m.settings.section == "automations" {
 			if m.settings.selected == 1 {
-				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Scoring", "planned"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}
 			if m.settings.selected >= 2 {
 				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle action mode"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}

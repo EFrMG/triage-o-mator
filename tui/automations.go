@@ -144,7 +144,7 @@ func (m model) automationsView() string {
 	state := "Loading…"
 	labeling := "Reading repository setting…"
 	if m.settings.automations.loaded {
-		state = fmt.Sprintf("%d available · 1 planned", 1+len(m.settings.automations.actions))
+		state = fmt.Sprintf("%d available", 2+len(m.settings.automations.actions))
 		labeling = "OFF · Agent label writes disabled"
 		if m.settings.automations.labelingEnabled {
 			labeling = "ON · Agent may apply proposed labels to GitHub"

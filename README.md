@@ -152,7 +152,7 @@ After screening a whole batch, save its dated batch brief and use `bin/batch --m
 | Score selected issues and PRs                   | `bin/item-score`                                                               |
 | See progress and handoffs                       | `bin/stats`, `bin/next`, `bin/report`, `bin/briefs`                            |
 
-The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md) and [comment publishing guide](docs/comment-plus.md) cover the commands and their limits.
+The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md), [comment publishing guide](docs/comment-plus.md) and [item score guide](docs/item-score.md) cover the commands and their limits.
 
 Closed-PR [watches](docs/appeal-evidence.md) and [external closure records](docs/external-closures.md) have separate guides.
 

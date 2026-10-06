@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pull the next batch of open items and enrich them with full body text (and, for PRs, diff stats) so an agent has enough context to categorize them without re-fetching anything by hand. By default only untriaged items are selected.
+Pull the next batch of open items and enrich them with full body text (and, for PRs, diff stats) so an agent has enough context to categorize them without re-fetching anything by hand. By default only untriaged items are selected; --include-triaged widens that, also within --group.
 
 Usage:
     bin/batch [N] [--kind issue|pr] [--order oldest|newest|updated] [--unlabeled-first] [--include-triaged] [--group ID] [--diff]
@@ -8,7 +8,7 @@ Usage:
     bin/batch --remove BATCH_ID --key issue:N [--key pr:M ...]
     bin/batch --mark-briefed BATCH_ID --brief reports/<owner>/<repo>/<date>-batch-BATCH_ID-brief.md
     bin/batch [N] --cache-mode offline|cache-preferred|refresh [--snapshot ID]
-    bin/batch [N] --include-triaged --unbriefed
+    bin/batch [N] --include-triaged --unbriefed [--order updated]
 
 Writes:
     data/<owner>/<repo>/batches/<batch_id>.items.jsonl       full context, one item per line, including `duplicate_candidates` (the top title matches from bin/similar, minus pairs already ruled out; leads to check, not proof)
@@ -24,7 +24,7 @@ The template has proposed_labels/action/confidence/reason blanked out; choose on
 
 --delete removes a batch's two working files. Decisions already applied from it stay in the ledger (still stamped with its batch_id); only unapplied proposals in its decisions file are lost.
 
---mark-briefed records that every member of a batch was screened for a dated batch brief; the brief may contain no highlighted decision. --unbriefed skips members of marked batches, even after their disposable batch files are deleted, and makes the new batch a briefing pass rather than a triage proposal pass. The checkpoint does not review ledger decisions or approve GitHub writes.
+--mark-briefed records that every member of a batch was screened for a dated batch brief; the brief may contain no highlighted decision. --unbriefed skips members of marked batches, even after their disposable batch files are deleted, and makes the new batch a briefing pass rather than a triage proposal pass: each of its items carries `briefing_batch: true`, which is how bin/next tells it apart and suggests a brief instead of proposals. The checkpoint does not review ledger decisions or approve GitHub writes.
 
 The triage-o-mator TUI runs this same script from its Batches screen (n creates, d deletes) and reads both files back, so batches made either way appear in the same list.
 """
@@ -121,13 +121,13 @@ def main():
     )
     ap.add_argument("--unlabeled-first", action="store_true", help="select items with no observed GitHub labels before labeled items")
     ap.add_argument("--include-triaged", action="store_true", help="include open items that already have a decision, for a label-first pass")
-    ap.add_argument("--group", help="only untriaged open members of this group")
+    ap.add_argument("--group", help="only open members of this group; untriaged ones unless --include-triaged is given")
     ap.add_argument("--diff", action="store_true", help="include each PR's full diff (one more GitHub call per PR)")
     ap.add_argument("--delete", metavar="BATCH_ID", help="delete a batch's items and decisions files instead of creating one")
     ap.add_argument("--remove", metavar="BATCH_ID", help="drop the --key items from this batch instead of creating one")
     ap.add_argument("--mark-briefed", metavar="BATCH_ID", help="record that a complete batch was screened into a brief")
     ap.add_argument("--brief", help="path to the dated batch brief, required with --mark-briefed")
-    ap.add_argument("--unbriefed", action="store_true", help="exclude members of batches already screened into briefs")
+    ap.add_argument("--unbriefed", action="store_true", help="exclude members of batches already screened into briefs and mark the new batch as a briefing pass")
     ap.add_argument("--key", action="append", default=[], metavar="KIND:NUMBER", help="with --remove: an item to drop, e.g. issue:12 (repeatable)")
     ap.add_argument("--cache-mode", choices=("offline", "cache-preferred", "refresh"), help="opt into cached evidence; omitted keeps direct GitHub enrichment")
     ap.add_argument("--snapshot", help="use one fixed snapshot; requires --cache-mode offline and every selected item in that snapshot")

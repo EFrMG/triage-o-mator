@@ -25,7 +25,9 @@ from _triage import here, BATCHES_DIR, DATA_DIR, MERGE_READY_CATEGORY, RAW_DIR, 
 
 STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
+# Legacy category names as older ledger rows saved them, and the proposed labels that ask for the same code review.
 CODE_REVIEW_CATEGORIES = (MERGE_READY_CATEGORY, "trivial", "needs-revision", "needs-maintainer-call")
+CODE_REVIEW_LABELS = ("trivial", "needs-revision")
 ITEM_BRIEF_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-(issue|pr)-([1-9]\d*)-brief\.md$")
 
 
@@ -128,7 +130,7 @@ def suggestions(ledger):
                 f"prompts/item-brief.md (selected {target['kind']} #{target['number']})",
                 "a focused case can help a maintainer resolve an unreviewed call")
 
-    unreviewed_code = [r for r in open_items if r["kind"] == "pr" and (merge_ready(r) or r.get("category") in CODE_REVIEW_CATEGORIES or any(name in CODE_REVIEW_CATEGORIES for name in r.get("proposed_labels") or []))
+    unreviewed_code = [r for r in open_items if r["kind"] == "pr" and (merge_ready(r) or r.get("category") in CODE_REVIEW_CATEGORIES or any(name in CODE_REVIEW_LABELS for name in r.get("proposed_labels") or []))
                        and not r["reviewed"] and not (r.get("agent_notes") or "").strip()]
     if unreviewed_code:
         marked = sum(1 for r in unreviewed_code if merge_ready(r))

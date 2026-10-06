@@ -7,7 +7,7 @@
 ## 1. Pick the PRs
 
 - **Named PRs:** review those.
-- **Otherwise:** take what `bin/next` lists: triaged PRs proposed as `ready`, or with matching legacy categories or proposed labels such as `merge-ready`, `trivial`, `needs-revision` or `needs-maintainer-call`, that have no `agent_notes` yet, starting with the ones marked ready to merge.
+- **Otherwise:** take what `bin/next` lists: triaged PRs proposed as `ready`, `trivial` or `needs-revision`, or saved under an older code-review category, that have no `agent_notes` yet, starting with the ones marked ready to merge.
 - **Several untriaged PRs at once:** `bin/batch 10 --kind pr --diff` and follow this checklist per item, inside `prompts/auto-triage.md`.
 
 Your attribution is `agent:<contributor>` (`git config user.name`). Today's date: `date -u +%F`.
@@ -44,7 +44,7 @@ What the tree answers, that a diff cannot:
 
 - **Conventions.** Read the neighbours of every file the PR touches. A change that doesn't fit the directory's patterns is expensive to accept even when it works.
 - **The surrounding code.** Read the whole function a hunk sits in, and its callers (`git -C "$repo" grep -n "<symbol>" <remote>/<base>`), before calling a change correct.
-- **Already landed.** `git -C "$repo" log <remote>/<base> --oneline -20 -- <path>`, `log <remote>/<base> -S"<symbol>"`, or `log <remote>/<base> --grep "<keywords>"`: if the change (or an equivalent) is already in the PR's base, the PR is `duplicate-pr` or `stale`, and the notes name the commit.
+- **Already landed.** `git -C "$repo" log <remote>/<base> --oneline -20 -- <path>`, `log <remote>/<base> -S"<symbol>"`, or `log <remote>/<base> --grep "<keywords>"`: if the change (or an equivalent) is already in the PR's base, the PR is a `duplicate` or stale, and the notes name the commit.
 - **Claims with a version in them.** "Fixed in 1.4", "this file was removed": check the base ref with `git -C "$repo" log`, `show`, `blame`, `describe --tags`.
 - **Conflicts in practice.** Does the hunk's context still exist on the PR's base? If not, the PR is behind and that belongs in the review.
 
@@ -64,9 +64,9 @@ Only ever GET requests, as the rest of this tooling does.
 3. **Safety:** anything that touches install/upgrade paths, system files, `sudo`, `curl | sh`, network downloads, credentials or user data, or deletes things. These always need a human even when they look right.
 4. **Conventions:** compare with the neighbouring files you read in the tree (naming, structure, how similar features are wired up). A PR that fits the project's patterns is far cheaper to accept.
 5. **Tests and verification:** tests added or updated? Did testers in the comments confirm it works, on which versions?
-6. **Feedback addressed:** were earlier review comments dealt with? Unanswered maintainer requests mean `needs-revision` or `stale`.
-7. **Overlap:** `bin/similar --kind pr --number N`, plus what the tree's history showed. Competing PRs for the same change are `duplicate-pr` candidates (see `prompts/find-duplicates.md`) or belong in a group together.
-8. **State:** a draft, `mergeable: CONFLICTING`, or an author silent since feedback points to `needs-revision` / `stale`.
+6. **Feedback addressed:** were earlier review comments dealt with? Unanswered maintainer requests mean it needs revision or has gone stale.
+7. **Overlap:** `bin/similar --kind pr --number N`, plus what the tree's history showed. Competing PRs for the same change are `duplicate` candidates (see `prompts/find-duplicates.md`) or belong in a group together.
+8. **State:** a draft, `mergeable: CONFLICTING`, or an author silent since feedback points to a needed revision or a stale PR.
 
 ## 5. Decide
 
@@ -75,8 +75,8 @@ Use only labels actually present in this repository's observed `label_catalog`, 
 - `ready` + `none`: you read the whole diff, found nothing blocking, the scope is focused and the checks above pass. Propose the available label separately; the labeling pass handles it whether or not it is already present. Put the merge recommendation in `agent_notes`; the TUI does not merge PRs. Use `high` only for small diffs with no safety-sensitive changes.
 - `trivial` + `none`: typo-, formatting- or lint-only. Propose the available label separately.
 - `needs-revision` + `comment`: good direction, but it has blocking findings that can be stated in a conversation comment. The notes list them. This is not a formal GitHub review.
-- `needs-maintainer-call` + `none`: the code may be fine, but it makes a design or scope decision (new default, new dependency, new user-facing behaviour). State the decision as one question in `agent_notes` before proposing any write.
-- `duplicate-pr`, `stale`, `out-of-scope`, `invalid`: as the taxonomy defines them.
+- No further label + `none`: the code may be fine, but it makes a design or scope decision (new default, new dependency, new user-facing behaviour). State the decision as one question in `agent_notes` before proposing any write.
+- `duplicate`, or a label the repository has for stale, unwanted or invalid work: use it as its description and local guidance say.
 
 ## 6. Write the review into `agent_notes`
 

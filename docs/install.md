@@ -158,7 +158,7 @@ To move or back up an install, preserve its `config/`, `data/` and `reports/`; `
 
 ## Making it yours
 
-`config/taxonomy.json` is committed with your repository. The installer reconciles its label catalog from GitHub on each online run while preserving local label guidance and the existing category/action lists. General guidance lives in the linked [taxonomy guide](taxonomy.md). Local label guidance can be edited in JSON until Settings provides an editor for it.
+`config/taxonomy.json` is committed with your repository. The installer reconciles its label catalog from GitHub on each online run while preserving local label guidance and the existing action list. General guidance lives in the linked [taxonomy guide](taxonomy.md). Local label guidance can be edited in JSON until Settings provides an editor for it.
 
 Prompts are symlinked one file at a time, so you can make them yours without touching the checkout. A directory symlink would put edits into the shared tool checkout and affect every install. The installer regenerates the ignored-symlink list between managed markers while leaving your own files visible to Git:
 

@@ -6,29 +6,6 @@
     "labels": [],
     "retired": []
   },
-  "issue_categories": [
-    "bug",
-    "hardware-specific",
-    "support-question",
-    "feature-request",
-    "duplicate",
-    "docs",
-    "needs-info",
-    "resolved",
-    "stale",
-    "out-of-scope",
-    "invalid"
-  ],
-  "pr_categories": [
-    "merge-ready",
-    "trivial",
-    "needs-revision",
-    "duplicate-pr",
-    "out-of-scope",
-    "needs-maintainer-call",
-    "stale",
-    "invalid"
-  ],
   "actions": [
     "none",
     "comment",

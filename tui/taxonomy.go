@@ -10,10 +10,8 @@ import (
 
 var actionOperations = []string{"comment", "close", "reopen", "none"}
 
-// Taxonomy mirrors config/taxonomy.json exactly.
+// Taxonomy holds the parts of config/taxonomy.json the TUI reads.
 type Taxonomy struct {
-	IssueCategories  []string          `json:"issue_categories"`
-	PRCategories     []string          `json:"pr_categories"`
 	Actions          []string          `json:"actions"`
 	ActionGuidance   map[string]string `json:"action_guidance"`
 	ActionOperations map[string]string `json:"action_operations"`
@@ -35,15 +33,6 @@ type GitHubLabel struct {
 	Description string   `json:"description"`
 	Guidance    string   `json:"guidance"`
 	Previous    []string `json:"previous_names"`
-}
-
-// CategoriesFor returns the valid category list for the given item kind.
-func (t Taxonomy) CategoriesFor(kind string) []string {
-	if kind == "pr" {
-		return t.PRCategories
-	}
-
-	return t.IssueCategories
 }
 
 func (t Taxonomy) OperationFor(action string) string {

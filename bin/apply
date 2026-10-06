@@ -206,9 +206,6 @@ def main():
         sys.exit("error: pass a decisions file or --number/--kind")
 
     taxonomy = load_taxonomy()
-    valid_categories = set(taxonomy["issue_categories"]) | set(
-        taxonomy["pr_categories"]
-    )
     valid_actions = set(taxonomy["actions"])
     catalog = taxonomy.get("label_catalog", {})
     catalog_names = []
@@ -283,9 +280,6 @@ def main():
                 kept.append((d["kind"], d["number"]))
 
                 continue
-
-            if d.get("category") and d["category"] not in valid_categories:
-                warnings.append(f"#{d['number']}: unrecognized category {d['category']!r}")
 
             if d["action"] and d["action"] not in valid_actions:
                 warnings.append(f"#{d['number']}: unrecognized action {d['action']!r}")

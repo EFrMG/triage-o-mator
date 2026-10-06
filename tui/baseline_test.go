@@ -23,7 +23,7 @@ func baselineItems() []Item {
 }
 
 func baselineTaxonomy() Taxonomy {
-	return Taxonomy{IssueCategories: []string{"bug"}, PRCategories: []string{"merge-ready"}, Actions: []string{"none"}, ActionOperations: map[string]string{"none": "none"}, Confidence: []string{"low", "medium", "high"}}
+	return Taxonomy{Actions: []string{"none"}, ActionOperations: map[string]string{"none": "none"}, Confidence: []string{"low", "medium", "high"}}
 }
 
 func baselineSend(m model, msg tea.Msg) model {

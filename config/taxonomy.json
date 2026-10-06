@@ -43,6 +43,7 @@
     "no-action-needed": "none",
     "comment-request-info": "comment",
     "comment-feedback": "comment",
+    "comment-explain-close": "close",
     "close-duplicate": "close",
     "close-stale": "close",
     "close-out-of-scope": "close",

@@ -21,7 +21,7 @@ from _groups import list_groups
 from _briefed import briefed_keys, load_records
 from _similar import TitleIndex
 from _notdupes import TitleVerdicts
-from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, has_decision, load_jsonl, load_ledger, load_taxonomy
+from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, action_operation, has_decision, load_jsonl, load_ledger, load_taxonomy
 
 STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
@@ -70,6 +70,7 @@ def suggestions(ledger):
     by_key = {(r["kind"], r["number"]): r for r in ledger}
     open_items = [r for r in ledger if r["state"] == "open"]
     briefed_batches = load_records()
+    taxonomy = load_taxonomy()
     covered_keys = briefed_keys(briefed_batches)
     out = []
 
@@ -115,7 +116,7 @@ def suggestions(ledger):
 
     pending = [r for r in open_items if has_decision(r) and not r["reviewed"]]
     if pending:
-        closes = sum(1 for r in pending if r["action"] == "close" or r["action"].startswith("close-"))
+        closes = sum(1 for r in pending if action_operation(taxonomy, r["action"]) == "close")
         sample = ", ".join(f"{r['kind']} #{r['number']}" for r in pending[:3])
         add("human", f"Review {len(pending)} triaged decisions ({closes} suggest closing)",
             f"TUI: All Items (search {sample}, a confirms a saved call); or bin/export-csv --pending-review, edit, bin/import-csv --by <you>",
@@ -141,9 +142,8 @@ def suggestions(ledger):
             "prompts/recommend-auto-close.md (select the PR; reuse cached evidence first)",
             "a scoped recommendation can keep the PR open; a saved proposal needs exact approval before any GitHub write")
 
-    operations = load_taxonomy().get("action_operations", {})
-    action_candidates = [r for r in ledger if operations.get(r.get("action")) in ("comment", "close", "reopen") and
-                         (operations[r["action"]] == "reopen" and r["state"] == "closed" or r["state"] == "open")]
+    action_candidates = [r for r in ledger if action_operation(taxonomy, r.get("action")) in ("comment", "close", "reopen") and
+                         (action_operation(taxonomy, r["action"]) == "reopen" and r["state"] == "closed" or r["state"] == "open")]
     if action_candidates:
         add("agent", f"Prepare a bounded action pass for {len(action_candidates)} suggested item actions",
             "prompts/automated-actions.md (select exact keys; reuse cached evidence first)",

@@ -55,7 +55,7 @@ func (t Taxonomy) OperationFor(action string) string {
 		return ""
 	}
 
-	// Older installs own their taxonomy copy and have no action_operations map. These names already describe supported writes.
+	// Older installs own their taxonomy copy and have no action_operations map. These names already describe supported writes; they mirror LEGACY_ACTION_OPERATIONS in bin/_triage.py.
 	switch action {
 	case "comment-request-info", "comment-feedback":
 		return "comment"

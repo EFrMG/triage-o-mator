@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _storage import atomic_writer, locked
-from _triage import REPO, TAXONOMY_PATH
+from _triage import LEGACY_ACTION_OPERATIONS, REPO, TAXONOMY_PATH
 
 
 SIMPLE_ACTIONS = ["none", "comment", "close", "reopen"]
@@ -19,18 +19,7 @@ SIMPLE_GUIDANCE = {
     "close": "Use Reason to name the checkable closure basis. Publish an explanation before closing.",
     "reopen": "Use Reason to explain what remains unresolved. Publish an explanation before reopening.",
 }
-LEGACY_OPERATIONS = {
-    "no-action-needed": "none",
-    "comment-request-info": "comment",
-    "comment-feedback": "comment",
-    "close-duplicate": "close",
-    "close-stale": "close",
-    "close-out-of-scope": "close",
-    "close-resolved": "close",
-    "close-with-explanation": "close",
-    "reopen-with-explanation": "reopen",
-}
-RETIRED_DEFAULTS = set(LEGACY_OPERATIONS)
+RETIRED_DEFAULTS = set(LEGACY_ACTION_OPERATIONS)
 
 
 def main():
@@ -93,7 +82,7 @@ def main():
 
             before = list(actions)
             taxonomy["actions"] = SIMPLE_ACTIONS + [name for name in actions if name not in RETIRED_DEFAULTS and name not in SIMPLE_ACTIONS]
-            for name, operation in {**{name: name for name in SIMPLE_ACTIONS}, **LEGACY_OPERATIONS}.items():
+            for name, operation in {**{name: name for name in SIMPLE_ACTIONS}, **LEGACY_ACTION_OPERATIONS}.items():
                 operations.setdefault(name, operation)
             for name, description in SIMPLE_GUIDANCE.items():
                 guidance.setdefault(name, description)

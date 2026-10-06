@@ -116,6 +116,21 @@ def load_taxonomy():
     return json.loads(TAXONOMY_PATH.read_text())
 
 
+# Default action titles from before actions were named after their GitHub operation. Older installs own a taxonomy copy without action_operations, so these stay resolvable; tui/taxonomy.go mirrors this table.
+LEGACY_ACTION_OPERATIONS = {
+    "no-action-needed": "none",
+    "comment-request-info": "comment",
+    "comment-feedback": "comment",
+    "comment-explain-close": "close",
+    "close-duplicate": "close",
+    "close-stale": "close",
+    "close-out-of-scope": "close",
+    "close-resolved": "close",
+    "close-with-explanation": "close",
+    "reopen-with-explanation": "reopen",
+}
+
+
 def action_operation(taxonomy, action):
     """Resolve a local action title to a GitHub write type, including older install defaults."""
     operations = taxonomy.get("action_operations", {})
@@ -123,16 +138,7 @@ def action_operation(taxonomy, action):
         operation = operations[action]
         return operation if operation in ("comment", "close", "reopen", "none") else ""
 
-    if action in ("comment-request-info", "comment-feedback"):
-        return "comment"
-    if action in ("comment-explain-close", "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved", "close-with-explanation"):
-        return "close"
-    if action == "reopen-with-explanation":
-        return "reopen"
-    if action == "no-action-needed":
-        return "none"
-
-    return ""
+    return LEGACY_ACTION_OPERATIONS.get(action, "")
 
 
 def load_jsonl(path):

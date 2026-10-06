@@ -345,11 +345,21 @@ class AutoCloseWriteTests(Workspace):
                                "--by", "agent:helper", "--context-checkpoint", context["checkpoint"],
                                *gap, *extra, ok=ok)
 
+    def propose_action_close(self, number, *extra, ok=True):
+        context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", str(number))
+        comment = self.root / f"comment-{number}.md"
+        comment.write_text(f"PR #{number} is superseded.\n")
+        gap = () if "--evidence" in extra else ("--evidence-gap", "No selected snapshot")
+        return self.json_cli("action-proposals", "--expected-repo", "owner/repo", "propose", "--kind", "pr", "--number", str(number),
+                             "--operation", "close", "--title", f"PR {number}", "--observed-state", "open",
+                             "--head-sha", "b" * 40, "--updated-at", "2026-09-29T00:00:00Z", "--comment-file", str(comment),
+                             "--by", "agent:helper", "--context-checkpoint", context["checkpoint"], *gap, *extra, ok=ok)
+
     def write_calls(self):
         path = self.mock / "write-calls.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
-    def test_repository_policy_routes_bound_pr_closure_through_existing_proposal(self):
+    def test_repository_policy_routes_bound_pr_closure_through_action_proposal(self):
         write_gh = (self.mock / "gh").read_text()
         (self.mock / "gh").write_text(FAKE_GH)
         self.seed_pr()
@@ -361,7 +371,7 @@ class AutoCloseWriteTests(Workspace):
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
         rows[0].update(action="close", confidence="high", reason="Superseded by #2")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        self.propose(1, "--action", "close", "--evidence", f"pr:1:{snapshot}")
+        self.propose_action_close(1, "--action", "close", "--evidence", f"pr:1:{snapshot}")
 
         selected = ("--expected-repo", "owner/repo", "--number", "1")
         staged = self.json_cli("action-pass", "preview", *selected)
@@ -377,9 +387,10 @@ class AutoCloseWriteTests(Workspace):
 
         rows[1].update(action="close", confidence="high", reason="Also superseded")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        self.propose(2, "--action", "close")
-        gap_review = self.auto_close("review", "--number", "2")
-        self.auto_close("execute", "--number", "2", "--publish", "--approve", gap_review["approval"], "--automation", ok=False)
+        self.propose_action_close(2, "--action", "close")
+        gap_review = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "2")
+        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "2",
+                     "--publish", "--approve", gap_review["approval"], "--automation", ok=False)
         self.assertEqual(self.write_calls(), [])
 
         preview = self.json_cli("action-pass", "preview", *selected)
@@ -387,9 +398,9 @@ class AutoCloseWriteTests(Workspace):
         result = self.json_cli("action-pass", "run", *selected, "--preview-sha256", preview["preview_sha256"])
         self.assertEqual(result["results"][0]["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
-        self.assertEqual({row["number"]: row["status"] for row in self.auto_close("list")["rows"]}, {1: "executed", 2: "pending"})
-        self.assertFalse(next(row for row in self.auto_close("list")["rows"] if row["number"] == 1)["needs_attention"])
-        record = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
+        self.assertEqual({row["number"]: row["status"] for row in self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"]}, {1: "executed", 2: "pending"})
+        self.assertFalse(next(row for row in self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"] if row["number"] == 1)["needs_attention"])
+        record = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         self.assertEqual(record["outcome"]["authorization"]["source"], "repository-policy")
 
     def test_questioned_pr_closure_stays_staged_until_human_answers_exact_action(self):
@@ -404,8 +415,8 @@ class AutoCloseWriteTests(Workspace):
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
         rows[0].update(action="close", confidence="high", reason="Possibly superseded by #2")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        held = self.propose(1, "--action", "close", "--evidence", f"pr:1:{snapshot}",
-                            "--decision-question", "Does #2 fully replace this PR?")
+        held = self.propose_action_close(1, "--action", "close", "--evidence", f"pr:1:{snapshot}",
+                                         "--decision-question", "Does #2 fully replace this PR?")
         setting = ("--expected-repo", "owner/repo", "--action", "close", "--mode", "execute")
         policy = self.json_cli("action-policy", "set", *setting)
         self.json_cli("action-policy", "set", *setting, "--apply", "--preview-sha256", policy["preview_sha256"])
@@ -414,26 +425,28 @@ class AutoCloseWriteTests(Workspace):
         preview = self.json_cli("action-pass", "preview", *selected)
         self.assertEqual(preview["plan"]["items"][0]["mode"], "stage")
         self.assertEqual(self.json_cli("action-pass", "run", *selected, "--preview-sha256", preview["preview_sha256"])["results"][0]["status"], "staged")
-        self.auto_close("review", "--number", "1", ok=False)
+        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1", ok=False)
         self.assertEqual(self.write_calls(), [])
 
-        answered = self.auto_close("answer", "--number", "1", "--checkpoint", held["checkpoint"],
-                                    "--by", "maintainer", "--answer", "Yes, #2 covers the same behavior")
+        answered = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "answer", "--kind", "pr", "--number", "1",
+                                  "--checkpoint", held["checkpoint"], "--by", "maintainer", "--answer", "Yes, #2 covers the same behavior")
         self.assertEqual(answered["decision_question"], "Does #2 fully replace this PR?")
         self.assertEqual(answered["decision_resolution"]["by"], "maintainer")
         self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
         self.assertEqual(self.json_cli("action-pass", "preview", *selected)["plan"]["items"][0]["mode"], "stage")
-        reviewed = self.auto_close("review", "--number", "1")
+        reviewed = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
         exact = reviewed["plan"]["proposals"][0]
-        self.assertEqual(reviewed["plan"]["operation"], "comment-and-close-pr")
+        self.assertEqual(reviewed["plan"]["operation"], "conversation-or-state-action")
         self.assertEqual(exact["target"], "https://github.com/owner/repo/pull/1")
         self.assertEqual(exact["comment"], answered["comment"])
         self.assertEqual(exact["decision_resolution"]["reason"], "Yes, #2 covers the same behavior")
-        self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], "--automation", ok=False)
+        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
+                     "--publish", "--approve", reviewed["approval"], "--automation", ok=False)
         self.assertEqual(self.write_calls(), [])
 
-        outcome = self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"])
-        self.assertEqual(outcome["results"][0]["status"], "executed")
+        outcome = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
+                                "--publish", "--approve", reviewed["approval"])
+        self.assertEqual(outcome["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
         self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
 
@@ -640,14 +653,16 @@ class AutoCloseWriteTests(Workspace):
         packet = self.json_cli("group", "export", group["id"], "--format", "json")
         handoff = ("--group-id", group["id"], *[part for member in packet["items"] for part in
                                                ("--member-context", f"{member['kind']}:{member['number']}:{member['local_context']['checkpoint']}")])
-        self.propose(1, *handoff)
-        self.propose(2, *handoff)
-        approved = self.auto_close("review", "--number", "1", "--number", "2")
-        result = self.auto_close("execute", "--number", "1", "--number", "2", "--publish", "--approve", approved["approval"])
+        self.propose_action_close(1, *handoff)
+        self.propose_action_close(2, *handoff)
+        selected = ("--item", "pr:1", "--item", "pr:2")
+        approved = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", *selected)
+        result = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "execute", *selected,
+                               "--publish", "--approve", approved["approval"])
 
         self.assertEqual([row["status"] for row in result["results"]], ["executed", "executed"])
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"] * 2)
-        self.assertEqual({row["number"]: row["status"] for row in self.auto_close("list")["rows"]}, {1: "executed", 2: "executed"})
+        self.assertEqual({row["number"]: row["status"] for row in self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"]}, {1: "executed", 2: "executed"})
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
         self.assertEqual(next(row for row in context["rows"] if row["kind"] == "feedback")["fields"]["kind"]["preview"], "write_outcome")
 

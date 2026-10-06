@@ -39,30 +39,22 @@ def select(keys):
     policy = script("action-policy", "status", "--expected-repo", REPO)
     settings = {row["name"]: row for row in policy["actions"]}
     taxonomy = load_taxonomy()
-    closures = {("pr", row["number"]): row for row in script("auto-close", "--expected-repo", REPO, "list")["rows"]}
-    other = {(row["kind"], row["number"]): row for row in script("action-proposals", "--expected-repo", REPO, "list")["rows"]}
+    proposals = {(row["kind"], row["number"]): row for row in script("action-proposals", "--expected-repo", REPO, "list")["rows"]}
     chosen = []
     for kind, number in keys:
-        key = (kind, number)
-        closure = closures.get(key)
-        proposal = other.get(key)
-        if closure and closure["active"] and proposal and proposal["active"]:
-            raise ValueError(f"{kind} #{number} has competing active action proposals")
-        source = "auto-close" if closure and closure["active"] else "action-proposals"
-        row = closure if source == "auto-close" else proposal
+        row = proposals.get((kind, number))
         if row is None or not row["active"] or not row.get("action"):
             raise ValueError(f"{kind} #{number} has no active action-bound proposal")
 
         setting = settings.get(row["action"])
-        operation = "close" if source == "auto-close" else row["operation"]
+        operation = row["operation"]
         if setting is None and row["action"] not in taxonomy.get("actions", []) and action_operation(taxonomy, row["action"]) == operation:
             setting = dict(operation=operation, mode="stage", configured=False, definition_sha256="")
         if setting is None or setting["operation"] != operation:
             raise ValueError(f"{kind} #{number} no longer has the selected action operation")
 
         if not row.get("decision_question"):
-            target_args = ("--number", str(number)) if source == "auto-close" else ("--kind", kind, "--number", str(number))
-            reviewed = script(source, "--expected-repo", REPO, "review", *target_args)
+            reviewed = script("action-proposals", "--expected-repo", REPO, "review", "--kind", kind, "--number", str(number))
             exact = reviewed["plan"]["proposals"][0]
             if exact["checkpoint"] != row["checkpoint"] or exact["comment"] != row["comment"]:
                 raise ValueError(f"{kind} #{number} changed during action preview")
@@ -73,7 +65,7 @@ def select(keys):
                               for selected in evidence)
         eligible = complete_target and not row["inputs"].get("evidence_gaps") and not row.get("reconsideration") and not row.get("decision_question")
         mode = "execute" if setting["mode"] == "execute" and setting["configured"] and eligible else "stage"
-        chosen.append(dict(kind=kind, number=number, source=source, action=row["action"], operation=operation, mode=mode,
+        chosen.append(dict(kind=kind, number=number, action=row["action"], operation=operation, mode=mode,
                            policy_mode=setting["mode"], eligible=eligible, target=row["target"], comment=row["comment"],
                            proposal_checkpoint=row["checkpoint"], definition_sha256=setting["definition_sha256"],
                            evidence_gaps=row["inputs"].get("evidence_gaps", []), decision_question=row.get("decision_question")))
@@ -93,15 +85,13 @@ def run(keys, preview_sha256):
             results.append(dict(kind=item["kind"], number=item["number"], status="staged"))
             continue
 
-        source = item["source"]
-        target_args = ("--number", str(item["number"])) if source == "auto-close" else ("--kind", item["kind"], "--number", str(item["number"]))
-        reviewed = script(source, "--expected-repo", REPO, "review", *target_args)
+        target_args = ("--kind", item["kind"], "--number", str(item["number"]))
+        reviewed = script("action-proposals", "--expected-repo", REPO, "review", *target_args)
         row = reviewed["plan"]["proposals"][0]
         if row["checkpoint"] != item["proposal_checkpoint"] or row["comment"] != item["comment"] or row.get("action") != item["action"]:
             raise ValueError("action proposal changed after the selected preview; stop before writing")
 
-        executed = script(source, "--expected-repo", REPO, "execute", *target_args, "--publish", "--approve", reviewed["approval"], "--automation")
-        outcome = executed["results"][0] if source == "auto-close" else executed
+        outcome = script("action-proposals", "--expected-repo", REPO, "execute", *target_args, "--publish", "--approve", reviewed["approval"], "--automation")
         results.append({**outcome, "kind": item["kind"]})
 
     return dict(repository=REPO, results=results)

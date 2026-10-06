@@ -1,4 +1,4 @@
-"""Validate saved non-PR-closure action proposals and expose their feedback."""
+"""Validate saved action proposals and expose their feedback."""
 
 import json
 import re
@@ -98,11 +98,12 @@ def load(path, repo):
             kind not in ("issue", "pr") or type(number) is not int or number < 1 or path.name != f"{kind}-{number}.json" or
             value.get("operation") not in ("comment", "close", "reopen") or value.get("status") not in ("pending", "rejected", "executed", "uncertain")):
         raise ValueError(f"invalid action proposal identity or status: {path.name}")
-    if kind == "pr" and value["operation"] == "close":
-        raise ValueError("PR closure belongs to auto-close")
     if value.get("target") != f"https://{value.get('host')}/{repo}/{'pull' if kind == 'pr' else 'issues'}/{number}":
         raise ValueError(f"invalid action proposal target: {path.name}")
-    if not isinstance(value.get("action"), str) or not value["action"] or not isinstance(value.get("comment"), str) or not value["comment"].strip():
+    action = value.get("action")
+    if (action is None and (kind != "pr" or value["operation"] != "close") or
+            action is not None and (not isinstance(action, str) or not action) or
+            not isinstance(value.get("comment"), str) or not value["comment"].strip()):
         raise ValueError(f"invalid action proposal content: {path.name}")
     if not valid_decision_hold(value):
         raise ValueError(f"invalid human decision question: {path.name}")
@@ -143,7 +144,7 @@ def load(path, repo):
     return value
 
 
-def feedback(kind, number, repo):
+def feedback(kind, number, repo, completed_batch=None):
     path = proposal_path(kind, number)
     if not path.exists() and not path.is_symlink():
         return dict(checkpoint=None, events=[])
@@ -169,6 +170,11 @@ def feedback(kind, number, repo):
         if receipt.exists():
             events.append(dict(kind="unreconciled_attempt", request_id=record["request_id"], target=record["target"],
                                status="write receipt exists; inspect and reconcile before another action"))
+
+    if completed_batch:
+        events = [event for event in events if not (event["kind"] == "write_outcome" and event["status"] == "executed" and
+                  event["comment_status"] == "succeeded" and event["state_status"] in ("succeeded", "not_requested") and
+                  completed_batch.get(event["request_id"]) == event["target"])]
 
     checkpoint = "v1:" + digest(canonical(["action-proposal-feedback-v1", repo, kind, number, events])) if events else None
     return dict(checkpoint=checkpoint, events=events)

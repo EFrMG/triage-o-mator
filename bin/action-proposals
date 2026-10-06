@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Save and execute exact issue actions and non-closing PR actions through comment-plus."""
+"""Save and execute exact issue and PR actions through comment-plus."""
 
 import argparse
 import json
@@ -13,10 +13,10 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 
-from _action_proposal_records import load, proposal_path, valid_decision_hold
-from _auto_close_records import load as load_closure, proposal_path as closure_path
+from _action_proposal_records import feedback as proposal_feedback, load, proposal_path, valid_decision_hold
 from _evidence import canonical, digest, validate_payload
 from _item_context import ContextIndex, read as read_item_context
+from _groups import load_group
 from _storage import atomic_writer, locked
 from _triage import DATA_DIR, action_operation, load_taxonomy, now_iso, read_repo
 
@@ -67,10 +67,10 @@ def row(value, state):
     visible = presentation.get("dismissed_checkpoint") != value["checksum"]
     active = value["status"] == "pending" and visible
     result = dict(kind=value["kind"], number=value["number"], title=value["title"], target=value["target"],
-                  action=value["action"], operation=value["operation"], comment=value["comment"],
+                  action=value.get("action"), operation=value["operation"], comment=value["comment"],
                   updated_at=value["updated_at"], head_sha=value.get("head_sha"), status=value["status"],
                   checkpoint=value["checksum"], active=active, needs_attention=visible and value["status"] in ("pending", "uncertain") and presentation.get("viewed_checkpoint") != value["checksum"],
-                  dismissed=not visible, inputs=value["inputs"], outcome=value.get("outcome"))
+                  dismissed=not visible, inputs=value["inputs"], outcome=value.get("outcome"), reference=value.get("reference"))
     if "decision_question" in value:
         result["decision_question"] = value["decision_question"]
     if "decision_resolution" in value:
@@ -120,10 +120,27 @@ def evidence_selection(repo, host, tokens):
     return selected
 
 
-def check_current(value):
-    current = ContextIndex().collect(value["kind"], value["number"], include_rows=False)
+def check_current(value, completed_batch=None):
+    index = ContextIndex(completed_batch=completed_batch)
+    current = index.collect(value["kind"], value["number"], include_rows=False)
     if current["checkpoint"] != value["inputs"]["context_checkpoint"]:
         raise ValueError("local item guidance changed; prepare a fresh action proposal")
+
+    handoff = value["inputs"].get("group")
+    if handoff is not None:
+        group = load_group(handoff["id"])
+        if group["status"] == "archived" or group["revision"] != handoff["revision"]:
+            raise ValueError("group handoff changed; export it and review again")
+
+        members = [(member["kind"], member["number"]) for member in group["members"]]
+        declared = [(member["kind"], member["number"]) for member in handoff["members"]]
+        if members != declared or (value["kind"], value["number"]) not in members:
+            raise ValueError("group handoff members changed; export and review again")
+
+        for member in handoff["members"]:
+            observed = index.collect(member["kind"], member["number"], include_rows=False)
+            if observed["checkpoint"] != member["checkpoint"]:
+                raise ValueError(f"group member context changed for {member['kind']} #{member['number']}; prepare a fresh proposal")
 
     if value["inputs"]["evidence"]:
         from _cache import EvidenceCache
@@ -180,12 +197,12 @@ def valid_short_text(text, limit):
 
 def propose(args, repo):
     taxonomy = load_taxonomy()
-    operation = action_operation(taxonomy, args.action)
-    retired_action = args.action not in taxonomy.get("actions", [])
-    if operation not in ("comment", "close", "reopen") or retired_action and not args.replace_checkpoint:
+    operation = action_operation(taxonomy, args.action) if args.action else args.operation
+    retired_action = args.action is not None and args.action not in taxonomy.get("actions", [])
+    if operation not in ("comment", "close", "reopen") or args.operation and args.operation != operation or retired_action and not args.replace_checkpoint:
         raise ValueError("selected action is not a configured writing type")
-    if args.kind == "pr" and operation == "close":
-        raise ValueError("PR closure proposals belong to bin/auto-close")
+    if args.action is None and (args.kind != "pr" or operation != "close"):
+        raise ValueError("only a PR closure recommendation may omit the saved ledger action")
     if args.number < 1 or not re.fullmatch(r"[a-z0-9]+(?:[.-][a-z0-9]+)*", args.host) or not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", args.updated_at):
         raise ValueError("invalid action target or observed update time")
     if args.kind == "pr" and not re.fullmatch(r"[0-9a-f]{40}", args.head_sha or "") or args.kind == "issue" and args.head_sha:
@@ -204,8 +221,47 @@ def propose(args, repo):
         raise ValueError("action comment must contain valid text of at most 65536 characters")
 
     context = ContextIndex().collect(args.kind, args.number, include_rows=False)
-    if context["checkpoint"] != args.context_checkpoint or context["ledger_guidance"] is None or context["ledger_guidance"]["action"] != args.action:
+    if context["checkpoint"] != args.context_checkpoint or args.action is not None and (context["ledger_guidance"] is None or context["ledger_guidance"]["action"] != args.action):
         raise ValueError("saved action or local guidance changed; read item-context again")
+
+    reference = None
+    if bool(args.reference_kind) != bool(args.reference_number) or args.reference_number is not None and args.reference_number < 1:
+        raise ValueError("reference kind and positive number must be supplied together")
+    if args.reference_kind:
+        if args.kind != "pr" or operation != "close":
+            raise ValueError("a reference belongs to a PR closure proposal")
+        reference = dict(kind=args.reference_kind, number=args.reference_number)
+
+    group_input = None
+    if args.group_id is not None:
+        if args.kind != "pr" or operation != "close":
+            raise ValueError("a group handoff belongs to a PR closure proposal")
+        group = load_group(args.group_id)
+        if group["status"] == "archived" or not any(member["kind"] == "pr" and member["number"] == args.number for member in group["members"]):
+            raise ValueError("selected PR is not in an active handoff group")
+
+        declared = {}
+        for token in args.member_context:
+            parts = token.split(":", 2)
+            if len(parts) != 3 or parts[0] not in ("pr", "issue") or not parts[1].isdigit() or int(parts[1]) < 1 or (parts[0], int(parts[1])) in declared:
+                raise ValueError("invalid or repeated --member-context; expected KIND:NUMBER:CHECKPOINT")
+            declared[(parts[0], int(parts[1]))] = parts[2]
+
+        members = {(member["kind"], member["number"]) for member in group["members"]}
+        if set(declared) != members:
+            raise ValueError("declared group members differ from the current handoff")
+
+        contexts = []
+        for member in group["members"]:
+            selected = ContextIndex().collect(member["kind"], member["number"], include_rows=False)
+            if declared[(member["kind"], member["number"])] != selected["checkpoint"]:
+                raise ValueError("group member context changed; export the group again")
+            contexts.append(dict(kind=member["kind"], number=member["number"], context_revision=selected["context_revision"],
+                                 feedback_checkpoint=selected["feedback_checkpoint"], checkpoint=selected["checkpoint"]))
+
+        group_input = dict(id=group["id"], revision=group["revision"], members=contexts)
+    elif args.member_context:
+        raise ValueError("--member-context requires --group-id")
 
     evidence = evidence_selection(repo, args.host, args.evidence)
     if not evidence and not args.evidence_gap:
@@ -214,7 +270,7 @@ def propose(args, repo):
         raise ValueError("evidence gaps must be nonempty text of at most 2000 characters")
 
     inputs = dict(context_checkpoint=context["checkpoint"], context_revision=context["context_revision"],
-                  feedback_checkpoint=context["feedback_checkpoint"], evidence=evidence, evidence_gaps=args.evidence_gap)
+                  feedback_checkpoint=context["feedback_checkpoint"], group=group_input, evidence=evidence, evidence_gaps=args.evidence_gap)
     value = dict(schema_version=1, artifact="action-proposal", repo=repo, host=args.host, kind=args.kind, number=args.number,
                  target=f"https://{args.host}/{repo}/{'pull' if args.kind == 'pr' else 'issues'}/{args.number}",
                  title=args.title, action=args.action, operation=operation, comment=comment, updated_at=args.updated_at,
@@ -222,6 +278,8 @@ def propose(args, repo):
                  status="pending", inputs=inputs)
     if args.kind == "pr":
         value["head_sha"] = args.head_sha
+    if reference is not None:
+        value["reference"] = reference
     if args.decision_question is not None:
         value["decision_question"] = args.decision_question
 
@@ -230,9 +288,6 @@ def propose(args, repo):
         raise ValueError("invalid action proposal directory")
     guard = DATA_DIR / "action-proposals" / f"pr-{args.number}-selection" if args.kind == "pr" else path
     with (locked(guard) if args.kind == "pr" else nullcontext()), locked(path):
-        if args.kind == "pr" and closure_path(args.number).exists() and load_closure(closure_path(args.number), repo)["status"] == "pending":
-            raise ValueError("this PR already has a pending auto-close proposal; resolve it before another action")
-
         if path.exists():
             previous = load(path, repo)
             receipt = DATA_DIR / "writes" / (previous["request_id"] + ".json")
@@ -254,7 +309,7 @@ def propose(args, repo):
                     raise ValueError("completed action differs from its saved write receipt")
             elif receipt.exists() or receipt.is_symlink():
                 raise ValueError("action proposal has a write attempt; inspect it before replacing")
-            if retired_action and previous["action"] != args.action:
+            if retired_action and previous.get("action") != args.action:
                 raise ValueError("a retired action can only edit its existing proposal")
             if completed:
                 if args.reconsideration_reason:
@@ -307,7 +362,11 @@ def edit(args, repo):
                                      context_checkpoint=previous["inputs"]["context_checkpoint"],
                                      evidence=[f"{item['kind']}:{item['number']}:{item['snapshot_id']}" for item in previous["inputs"]["evidence"]],
                                      evidence_gap=previous["inputs"]["evidence_gaps"], replace_checkpoint=args.checkpoint,
-                                     reconsideration_reason=None, decision_question=previous.get("decision_question"))
+                                     reconsideration_reason=None, decision_question=previous.get("decision_question"),
+                                     operation=previous["operation"], reference_kind=(previous.get("reference") or {}).get("kind"),
+                                     reference_number=(previous.get("reference") or {}).get("number"),
+                                     group_id=(previous["inputs"].get("group") or {}).get("id"),
+                                     member_context=[f"{member['kind']}:{member['number']}:{member['checkpoint']}" for member in (previous["inputs"].get("group") or {}).get("members", [])])
     return propose(replacement, repo)
 
 
@@ -334,22 +393,50 @@ def answer(repo, kind, number, checkpoint, by, text):
     return row(value, local_state(repo))
 
 
-def review(repo, kind, number, check=True):
-    value = load(proposal_path(kind, number), repo)
+def choose(repo, kind=None, number=None, items=(), all_pending=False, operation=None):
     state = local_state(repo)
-    selected = row(value, state)
-    if not selected["active"]:
-        raise ValueError("no actionable pending proposal for this item")
-    if value.get("decision_question") and not value.get("decision_resolution"):
-        raise ValueError("answer the staged action question before exact approval")
-    if check:
-        check_current(value)
+    if all_pending:
+        if number is not None or items:
+            raise ValueError("--all cannot be combined with selected item numbers")
+        values = [value for value in all_proposals(repo) if (kind is None or value["kind"] == kind) and
+                  (operation is None or value["operation"] == operation) and row(value, state)["active"]]
+    else:
+        keys = []
+        if number is not None:
+            if kind is None:
+                raise ValueError("--number requires --kind")
+            keys.append((kind, number))
+        for token in items:
+            parts = token.split(":", 1)
+            if len(parts) != 2 or parts[0] not in ("issue", "pr") or not parts[1].isdigit() or int(parts[1]) < 1:
+                raise ValueError("select items as issue:NUMBER or pr:NUMBER")
+            keys.append((parts[0], int(parts[1])))
+        if not keys or len(keys) != len(set(keys)):
+            raise ValueError("select one or more distinct items")
+        values = [load(proposal_path(selected_kind, selected_number), repo) for selected_kind, selected_number in keys]
+        if any(not row(value, state)["active"] or operation is not None and value["operation"] != operation for value in values):
+            raise ValueError("selected item has no actionable proposal")
 
-    plan = dict(version=1, repo=repo, operation="conversation-or-state-action", proposals=[selected])
+    if not values or len(values) > 20:
+        raise ValueError("select one to twenty actionable proposals")
+    return values, state
+
+
+def review(repo, kind=None, number=None, items=(), all_pending=False, operation=None, check=True):
+    values, state = choose(repo, kind, number, items, all_pending, operation)
+    for value in values:
+        if value.get("decision_question") and not value.get("decision_resolution"):
+            raise ValueError("answer the staged action question before exact approval")
+        if check:
+            check_current(value)
+
+    plan = dict(version=1, repo=repo, operation="conversation-or-state-action", proposals=[row(value, state) for value in values])
     return dict(plan=plan, approval=digest(canonical(plan)))
 
 
 def automation_policy(repo, value):
+    if not value.get("action"):
+        raise ValueError("a recommendation without a saved ledger action requires human approval")
     if value.get("decision_question"):
         raise ValueError("human decision question keeps this action staged")
 
@@ -400,39 +487,43 @@ def call_comment(repo, value):
     raise ValueError("comment reported success without a saved write outcome")
 
 
-def execute(repo, kind, number, approval, automation):
-    prepared = review(repo, kind, number, check=False)
+def execute(repo, kind, number, items, all_pending, operation, approval, automation):
+    prepared = review(repo, kind, number, items, all_pending, operation, check=False)
     if prepared["approval"] != approval:
         raise ValueError("action proposal changed or approval does not match exact review")
 
-    path = proposal_path(kind, number)
-    with locked(path):
-        value = load(path, repo)
-        selected = prepared["plan"]["proposals"][0]
-        if value["checksum"] != selected["checkpoint"] or value["status"] != "pending":
-            raise ValueError("action proposal changed during execution")
+    results, completed_batch = [], {}
+    for selected in prepared["plan"]["proposals"]:
+        path = proposal_path(selected["kind"], selected["number"])
+        with locked(path):
+            value = load(path, repo)
+            if value["checksum"] != selected["checkpoint"] or value["status"] != "pending":
+                raise ValueError("action proposal changed during execution")
 
-        receipt = DATA_DIR / "writes" / (value["request_id"] + ".json")
-        new_attempt = not receipt.exists()
-        definition = None
-        if new_attempt:
-            check_current(value)
-            if automation:
-                definition = automation_policy(repo, value)
+            receipt = DATA_DIR / "writes" / (value["request_id"] + ".json")
+            new_attempt = not receipt.exists()
+            definition = None
+            if new_attempt:
+                check_current(value, completed_batch)
+                if automation:
+                    definition = automation_policy(repo, value)
 
-        outcome, ok = call_comment(repo, value)
-        value["outcome"] = dict(request_id=value["request_id"], comment=outcome["comment"], state_change=outcome["state_change"])
-        if automation and new_attempt:
-            value["outcome"]["authorization"] = dict(source="repository-policy", action=value["action"], definition_sha256=definition)
-        state_ok = value["operation"] == "comment" or outcome["state_change"]["status"] == "succeeded"
-        value["status"] = "executed" if ok and outcome["comment"]["status"] == "succeeded" and state_ok else "uncertain"
-        save(path, value)
-        result = dict(kind=kind, number=number, status=value["status"], outcome=value["outcome"])
-        if value["status"] != "executed":
-            print(canonical(result))
-            raise ValueError("write outcome uncertain; inspect GitHub and the saved record")
+            outcome, ok = call_comment(repo, value)
+            value["outcome"] = dict(request_id=value["request_id"], comment=outcome["comment"], state_change=outcome["state_change"])
+            if automation and new_attempt:
+                value["outcome"]["authorization"] = dict(source="repository-policy", action=value["action"], definition_sha256=definition)
+            state_ok = value["operation"] == "comment" or outcome["state_change"]["status"] == "succeeded"
+            value["status"] = "executed" if ok and outcome["comment"]["status"] == "succeeded" and state_ok else "uncertain"
+            save(path, value)
+            result = dict(kind=value["kind"], number=value["number"], status=value["status"], outcome=value["outcome"])
+            results.append(result)
+            if value["status"] != "executed":
+                print(canonical(dict(results=results)))
+                raise ValueError("write outcome uncertain; inspect GitHub and the saved record")
+            if new_attempt:
+                completed_batch[value["request_id"]] = value["target"]
 
-        return result
+    return dict(results=results) if all_pending or items else results[0]
 
 
 def reject(repo, kind, number, checkpoint, by, reason):
@@ -470,7 +561,7 @@ def change(repo, action, kind, number, checkpoint):
     return row(value, state)
 
 
-def context(repo, kind, number, checkpoint):
+def context(repo, kind, number, checkpoint, offset=0, context_checkpoint=None):
     value = load(proposal_path(kind, number), repo)
     if value["checksum"] != checkpoint:
         raise ValueError("action proposal changed; reopen Notifications")
@@ -485,8 +576,10 @@ def context(repo, kind, number, checkpoint):
     else:
         reason = f"proposal is {value['status']}"
 
+    item = read_item_context(kind, number, offset=offset, limit=10, checkpoint=context_checkpoint)
+    rejection = next((event for event in reversed(proposal_feedback(kind, number, repo)["events"]) if event["kind"] == "rejection"), None)
     return dict(repository=repo, kind=kind, number=number, proposal_checkpoint=checkpoint,
-                current=current, reason=reason, item_context=read_item_context(kind, number), requests=0)
+                current=current, reason=reason, item_context=item, latest_rejection=rejection, requests=0)
 
 
 def main():
@@ -496,7 +589,8 @@ def main():
     add = commands.add_parser("propose")
     add.add_argument("--kind", choices=("issue", "pr"), required=True)
     add.add_argument("--number", type=int, required=True)
-    add.add_argument("--action", required=True)
+    add.add_argument("--action")
+    add.add_argument("--operation", choices=("comment", "close", "reopen"), help="for a PR closure recommendation without a saved ledger action")
     add.add_argument("--title", required=True)
     add.add_argument("--host", default="github.com")
     add.add_argument("--observed-state", choices=("open", "closed"), required=True)
@@ -510,6 +604,10 @@ def main():
     add.add_argument("--replace-checkpoint")
     add.add_argument("--reconsideration-reason")
     add.add_argument("--decision-question", help="hold this proposal until a person resolves a specific decision")
+    add.add_argument("--reference-kind", choices=("issue", "pr"))
+    add.add_argument("--reference-number", type=int)
+    add.add_argument("--group-id")
+    add.add_argument("--member-context", action="append", default=[])
     edit_text = commands.add_parser("edit")
     edit_text.add_argument("--kind", choices=("issue", "pr"), required=True)
     edit_text.add_argument("--number", type=int, required=True)
@@ -529,10 +627,17 @@ def main():
     commands.add_parser("list")
     for command in ("review", "execute", "context", "view", "dismiss", "reject"):
         selected = commands.add_parser(command)
-        selected.add_argument("--kind", choices=("issue", "pr"), required=True)
-        selected.add_argument("--number", type=int, required=True)
+        selected.add_argument("--kind", choices=("issue", "pr"), required=command not in ("review", "execute"))
+        selected.add_argument("--number", type=int, required=command not in ("review", "execute"))
+        if command in ("review", "execute"):
+            selected.add_argument("--item", action="append", default=[])
+            selected.add_argument("--all", action="store_true")
+            selected.add_argument("--operation", choices=("comment", "close", "reopen"))
         if command in ("context", "view", "dismiss", "reject"):
             selected.add_argument("--checkpoint", required=True)
+        if command == "context":
+            selected.add_argument("--offset", type=int, default=0)
+            selected.add_argument("--context-checkpoint")
         if command == "reject":
             selected.add_argument("--by", required=True)
             selected.add_argument("--reason", default="")
@@ -558,17 +663,17 @@ def main():
         state = local_state(repo)
         result = dict(repository=repo, rows=[row(value, state) for value in all_proposals(repo)], requests=0)
     elif args.command == "review" or args.command == "execute" and not args.publish:
-        result = review(repo, args.kind, args.number)
+        result = review(repo, args.kind, args.number, args.item, args.all, args.operation)
     elif args.command == "execute":
         if not args.approve:
             raise ValueError("publishing needs the exact reviewed proposal approval")
-        result = execute(repo, args.kind, args.number, args.approve, args.automation)
+        result = execute(repo, args.kind, args.number, args.item, args.all, args.operation, args.approve, args.automation)
     elif args.command == "reject":
         result = reject(repo, args.kind, args.number, args.checkpoint, args.by, args.reason)
     elif args.command in ("view", "dismiss"):
         result = change(repo, args.command, args.kind, args.number, args.checkpoint)
     else:
-        result = context(repo, args.kind, args.number, args.checkpoint)
+        result = context(repo, args.kind, args.number, args.checkpoint, args.offset, args.context_checkpoint)
 
     print(json.dumps(result, ensure_ascii=False))
 

@@ -62,7 +62,7 @@ class ContextIndex:
         checkpoint = "v1:" + digest(canonical([POLICY, revision, [(group["id"], group["revision"]) for group, _ in groups]]))
         if (kind, number) not in self.feedback:
             earlier = proposal_feedback(number, REPO, self.completed_batch) if kind == "pr" else dict(checkpoint=None, events=[])
-            additional = action_feedback(kind, number, REPO)
+            additional = action_feedback(kind, number, REPO, self.completed_batch)
             if additional["checkpoint"] is not None:
                 combined = "v1:" + digest(canonical([earlier["checkpoint"], additional["checkpoint"]]))
                 self.feedback[(kind, number)] = dict(checkpoint=combined, events=earlier["events"] + additional["events"])

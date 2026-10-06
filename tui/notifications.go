@@ -1006,6 +1006,10 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 				return m, nil
 			}
 			if choice.actionProposal >= 0 {
+				if m.notifications.actions.Rows[choice.actionProposal].Status == "executed" {
+					m.status = "This action already ran."
+					return m, nil
+				}
 				return m.openActionReview(choice)
 			}
 		}
@@ -1136,7 +1140,7 @@ func (m model) notificationsView() string {
 		}
 	}
 	if !hasNeeds {
-		fmt.Fprintf(&b, "%s\n", inset(mutedText("Nothing needs attention.")))
+		fmt.Fprintf(&b, "%s\n", inset(mutedText("No new Notifications.")))
 	}
 	for _, choice := range choices {
 		if n.choiceNeeds(choice) {
@@ -1312,6 +1316,19 @@ func proposalStatusSummary(operation, status string) string {
 	return name + " proposal"
 }
 
+func actionOperationMark(operation string) cardMark {
+	switch operation {
+	case "reopen":
+		return cardMark{text: "Reopen", color: currentTheme.Success}
+	case "comment":
+		return cardMark{text: "Comment", color: currentTheme.Info}
+	case "close":
+		return cardMark{text: "Close", color: currentTheme.Error}
+	default:
+		return cardMark{text: "Action", color: currentTheme.Warning}
+	}
+}
+
 func renderNotificationChoice(n notificationsUI, choice notificationChoice, card func(string, string, cardMark)) {
 	switch choice.kind {
 	case "item":
@@ -1386,7 +1403,7 @@ func renderNotificationChoice(n notificationsUI, choice notificationChoice, card
 		} else if n.choiceNeeds(choice) {
 			mark = cardMark{text: "NEW", color: currentTheme.Info}
 		} else if choice.actionProposal >= 0 {
-			mark = cardMark{text: "ACTION", color: currentTheme.Warning}
+			mark = actionOperationMark(n.actions.Rows[choice.actionProposal].Operation)
 		}
 		card(label, strings.Join(parts, " · "), mark)
 	case "tracked-prev", "attention-prev", "closure-prev":

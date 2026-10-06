@@ -248,6 +248,10 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.openNotificationSource(choice, "action")
 		}
 	case "a":
+		if row.Status == "executed" {
+			m.status = "This action already ran."
+			return m, nil
+		}
 		if row.Status != "pending" || !row.Active || review.context == nil || !review.context.Current || review.problem != "" {
 			m.warn("Current action context is required before approval.")
 			return m, nil

@@ -2089,6 +2089,10 @@ func TestCompletedOutcomesStayVisibleAndRejectedProposalsLeaveNotifications(t *t
 			t.Fatal("completed closure card still offered approval")
 		}
 	}
+	pressed, approvalCmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if approvalCmd != nil || pressed.(model).status != "This action already ran." || pressed.(model).statusIsError() || pressed.(model).status == pressed.(model).statusWarning {
+		t.Fatal("completed action card did not show a green already-ran status")
+	}
 	m.notifications.review = &autoCloseReview{}
 	m.notifications.review.Plan.Proposals = []autoCloseRow{completed}
 	m.notifications.context = &autoCloseContext{Number: 3, Reason: "proposal is executed"}
@@ -2111,6 +2115,10 @@ func TestCompletedOutcomesStayVisibleAndRejectedProposalsLeaveNotifications(t *t
 	}
 	if groups := m.contextFooterGroups(); groups[0].name != "Action outcome" {
 		t.Fatal("completed issue action kept proposal controls")
+	}
+	pressed, approvalCmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	if approvalCmd != nil || pressed.(model).status != "This action already ran." || pressed.(model).statusIsError() || pressed.(model).status == pressed.(model).statusWarning {
+		t.Fatal("completed action reader did not show a green already-ran status")
 	}
 	m.notifications.actionReview = nil
 	m.notifications.review = &autoCloseReview{}
@@ -2208,8 +2216,26 @@ func TestSuggestedActionsLiveInNotificationsWithoutSeparateReviewTabs(t *testing
 	for _, choice := range proposalList.choices() {
 		renderNotificationChoice(proposalList, choice, func(_, _ string, mark cardMark) { marks = append(marks, mark.text) })
 	}
-	if len(marks) != 2 || marks[0] != "ACTION" || marks[1] != "ACTION" {
+	if len(marks) != 2 || marks[0] != "Close" || marks[1] != "Close" {
 		t.Fatalf("viewed issue and PR proposals had different card marks: %v", marks)
+	}
+	actionCards := notificationsUI{actions: actionProposalList{Rows: []actionProposalRow{
+		{Kind: "issue", Number: 1, Operation: "reopen", Status: "executed"},
+		{Kind: "issue", Number: 2, Operation: "comment", Status: "executed"},
+		{Kind: "issue", Number: 3, Operation: "close", Status: "executed"},
+	}}}
+	var actionMarks []cardMark
+	for _, choice := range actionCards.choices() {
+		renderNotificationChoice(actionCards, choice, func(_, _ string, mark cardMark) { actionMarks = append(actionMarks, mark) })
+	}
+	if len(actionMarks) != 3 || actionMarks[0] != (cardMark{"Reopen", currentTheme.Success}) ||
+		actionMarks[1] != (cardMark{"Comment", currentTheme.Info}) || actionMarks[2] != (cardMark{"Close", currentTheme.Error}) {
+		t.Fatalf("past action cards did not show the operation in its color: %+v", actionMarks)
+	}
+	empty := baselineModel(t, baselineRoot(t))
+	empty.notifications = notificationsUI{open: true}
+	if view := ansi.Strip(empty.notificationsView()); !strings.Contains(view, "No new Notifications.") || strings.Contains(view, "Nothing needs attention.") {
+		t.Fatal("empty Notifications message was not updated")
 	}
 }
 

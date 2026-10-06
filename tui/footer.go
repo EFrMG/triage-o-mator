@@ -389,13 +389,26 @@ func (m model) contextFooterGroups() []footerGroup {
 	case m.groups.open:
 		return m.groupFooter()
 	case m.briefs.open:
+		if m.briefs.markPreview != nil {
+			if m.briefs.busy {
+				return []footerGroup{group("Briefs", hint{"", "marking read…"})}
+			}
+			return []footerGroup{group("Briefs", hint{"d", "confirm renames"}, hint{"j/k", "scroll"}), group("Navigation", hint{"Esc", "cancel"})}
+		}
 		if m.briefs.busy {
-			return []footerGroup{group("Briefs", hint{"", "reading…"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+			status := "reading…"
+			if len(m.briefs.markIDs) > 0 {
+				status = "checking renames…"
+			}
+			return []footerGroup{group("Briefs", hint{"", status}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}
 		if m.briefs.reading {
-			return []footerGroup{group("Brief", hint{"j/k", "scroll"}, hint{"Ctrl-D/U", "page"}, hint{"r", "reload"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+			if m.briefs.cards {
+				return []footerGroup{group("Brief items", hint{"j/k", "select"}, hint{"Enter/l", "open"}), group("Navigation", hint{"Esc/h", "brief"}, hint{"q", "quit"})}
+			}
+			return []footerGroup{group("Brief", hint{"j/k", "scroll"}, hint{"Ctrl-D/U", "page"}, hint{"Enter/l", "items"}, hint{"r", "reload"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
 		}
-		return []footerGroup{group("Briefs", hint{"H/L", "section"}, hint{"j/k", "select"}, hint{"Enter", "read"}, hint{"r", "reload"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+		return []footerGroup{group("Briefs", hint{"H/L", "section"}, hint{"j/k", "select"}, hint{"Enter", "read"}, hint{"Space", "tick"}, hint{"d", "mark read"}, hint{"r", "reload"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
 	case m.dups.open:
 		return []footerGroup{
 			group("Duplicate", bind("mark as duplicate", keys.MarkDup), bind("", keys.SwapDup), bind("", keys.Tick), bind("group ticked", keys.Group)),

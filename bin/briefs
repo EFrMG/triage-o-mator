@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""List and read this install's saved maintainer briefs without a GitHub request."""
+"""Plan, list, read, and mark this install's maintainer briefs without a GitHub request."""
 
 import argparse
+import hashlib
 import json
+import math
+import os
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import REPO, REPORTS_DIR, WORK_ROOT
+from _storage import locked
+from _triage import DATA_DIR, REPO, REPORTS_DIR, WORK_ROOT
 
 
 DATE = r"\d{4}-\d{2}-\d{2}"
@@ -18,6 +22,21 @@ GROUP = re.compile(rf"^({DATE})-(?:ready-groups|group-[A-Za-z0-9_-]+)-brief\.md$
 BATCH = re.compile(rf"^({DATE})-batch-b\d{{8}}-\d{{6}}(?:-\d+)?-brief\.md$")
 MAX_BRIEFS = 5000
 MAX_BRIEF_BYTES = 1024 * 1024
+READ_MARKER = "_READ"
+
+
+def active_name(name):
+    if name.endswith("_READ.md"):
+        return name.removesuffix("_READ.md") + ".md"
+
+    if name.endswith(".md_READ"):
+        return name.removesuffix("_READ")
+
+    return name
+
+
+def read_name(name):
+    return name.removesuffix(".md") + READ_MARKER + ".md"
 
 
 def category(name):
@@ -103,6 +122,119 @@ def read_brief(name):
     return dict(record=row, content=content)
 
 
+def planned_path(value):
+    requested = Path(value)
+    directory = reports_dir()
+    relative = Path("reports") / REPO / requested.name
+    if requested.is_absolute():
+        if requested.parent != directory:
+            raise ValueError("brief is outside this repository's reports directory")
+    elif requested != Path(requested.name) and requested != relative:
+        raise ValueError("brief is outside this repository's reports directory")
+
+    name = requested.name
+    base = active_name(name)
+    kind = category(base)
+    path = directory / name
+    if kind is None or kind[1] not in ("batch", "group", "issue", "pr") or path.is_symlink() or not path.is_file():
+        raise ValueError(f"not a supported source brief: {value}")
+
+    return path, kind, name != base
+
+
+def plan_briefs(names, all_briefs, include_read, limit):
+    if names and (all_briefs or include_read or limit != 10):
+        raise ValueError("--brief cannot be combined with --all, --include-read, or --limit")
+
+    if not 1 <= limit <= MAX_BRIEFS:
+        raise ValueError(f"--limit must be between 1 and {MAX_BRIEFS}")
+
+    if all_briefs and limit != 10:
+        raise ValueError("--all cannot be combined with --limit")
+
+    if names:
+        selected = [planned_path(name) for name in names]
+    else:
+        directory = reports_dir()
+        selected = []
+        if directory.is_dir():
+            for path in directory.iterdir():
+                if active_name(path.name) != path.name and not include_read:
+                    continue
+
+                base = active_name(path.name)
+                kind = category(base)
+                if kind is None or kind[1] != "batch":
+                    continue
+
+                selected.append(planned_path(path.name))
+
+        selected.sort(key=lambda source: (source[1][2], source[0].name), reverse=True)
+        if not all_briefs:
+            selected = selected[:limit]
+
+    if len(selected) > MAX_BRIEFS or len({active_name(path.name) for path, _, _ in selected}) != len(selected):
+        raise ValueError("brief selection is too large or contains duplicates")
+
+    rows = [dict(id=path.name, path=(Path("reports") / REPO / path.name).as_posix(), type=kind[1], date=kind[2], read=is_read)
+            for path, kind, is_read in selected]
+    count = len(rows)
+    target = math.ceil(2 + 2 * math.log2(count)) if count else 0
+    return dict(selection="explicit" if names else "all" if all_briefs else "recent", source_count=count, target_decisions=target, briefs=rows)
+
+
+def mark_read_preview(names):
+    if not names or len(names) > MAX_BRIEFS or len(set(names)) != len(names):
+        raise ValueError("select one or more distinct brief IDs")
+
+    directory = reports_dir()
+    renames = []
+    for name in names:
+        base = active_name(name)
+        legacy = name.endswith(".md_READ") and category(base) is not None
+        if Path(name).name != name or (category(name) is None and not legacy):
+            raise ValueError(f"invalid brief ID: {name}")
+
+        source = directory / name
+        target = directory / read_name(base)
+        if source.is_symlink() or not source.is_file() or target.exists() or target.is_symlink():
+            raise ValueError(f"brief changed or read destination already exists: {name}")
+
+        competing_copy = directory / (base if legacy else base + READ_MARKER)
+        if competing_copy.exists() or competing_copy.is_symlink():
+            raise ValueError(f"brief changed or read destination already exists: {name}")
+
+        digest = hashlib.sha256()
+        with source.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+
+        renames.append(dict(source=name, target=target.name, content_sha256=digest.hexdigest()))
+
+    payload = dict(repository=REPO, renames=renames)
+    token = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return dict(renames=renames, preview_sha256=token)
+
+
+def mark_read(names, apply, preview_sha256):
+    if not apply:
+        return dict(applied=False, **mark_read_preview(names))
+
+    if not re.fullmatch(r"[0-9a-f]{64}", preview_sha256 or ""):
+        raise ValueError("--apply requires the exact --preview-sha256 from a dry run")
+
+    with locked(DATA_DIR / "briefs"):
+        preview = mark_read_preview(names)
+        if preview["preview_sha256"] != preview_sha256:
+            raise ValueError("brief selection or content changed since preview; preview again")
+
+        directory = reports_dir()
+        for row in preview["renames"]:
+            os.rename(directory / row["source"], directory / row["target"])
+
+    return dict(applied=True, **preview)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected-repo", help="refuse a changed install target")
@@ -110,14 +242,27 @@ def main():
     commands.add_parser("list", help="list supported master, item, group and batch briefs")
     read = commands.add_parser("read", help="read one supported brief by filename")
     read.add_argument("id")
+    plan = commands.add_parser("plan", help="select source briefs and calculate a master-brief size target")
+    plan.add_argument("--brief", action="append", default=[], help="use this exact source brief ID or reports path; repeat for a named set")
+    plan.add_argument("--all", action="store_true", help="select every visible batch brief")
+    plan.add_argument("--include-read", action="store_true", help="include _READ.md and older .md_READ batch briefs in an automatic selection")
+    plan.add_argument("--limit", type=int, default=10, help="newest visible batch briefs for an ordinary plan (default: 10)")
+    mark = commands.add_parser("mark-read", help="preview exact _READ.md renames; --apply needs the preview checksum")
+    mark.add_argument("ids", nargs="+", help="supported brief filenames shown in the menu")
+    mark.add_argument("--apply", action="store_true")
+    mark.add_argument("--preview-sha256")
     args = parser.parse_args()
     if args.expected_repo is not None and args.expected_repo != REPO:
         parser.error("configured repository does not match --expected-repo")
 
     if args.command == "list":
         result = dict(schema_version=1, repository=REPO, records=list_briefs())
-    else:
+    elif args.command == "read":
         result = dict(schema_version=1, repository=REPO, **read_brief(args.id))
+    elif args.command == "plan":
+        result = dict(schema_version=1, repository=REPO, **plan_briefs(args.brief, args.all, args.include_read, args.limit))
+    else:
+        result = dict(schema_version=1, repository=REPO, **mark_read(args.ids, args.apply, args.preview_sha256))
 
     print(json.dumps(result, ensure_ascii=False))
 

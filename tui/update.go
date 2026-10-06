@@ -82,6 +82,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.onBatchesLoaded(msg)
 	case briefsMsg:
 		return m.finishBriefs(msg)
+	case briefMarkMsg:
+		return m.finishBriefMark(msg)
 	case similarLoadedMsg:
 		return m.onSimilarLoaded(msg)
 	case pairsLoadedMsg:
@@ -1340,7 +1342,7 @@ func (m *model) leaveSavedItem() {
 		return
 	}
 
-	fromList := !m.dups.returnToDups && !m.groups.returnToGroup && m.listReady
+	fromList := !m.dups.returnToDups && !m.groups.returnToGroup && !m.briefs.returnToBrief && m.listReady
 	m.goBack()
 	if !fromList {
 		return
@@ -1355,6 +1357,12 @@ func (m *model) goBack() {
 	switch m.focus {
 	case FocusDetail:
 		m.commitDraftIfDirty()
+		if m.briefs.returnToBrief {
+			m.briefs.open = true
+			m.briefs.cards = false
+			m.briefs.returnToBrief = false
+			return
+		}
 		if m.dups.returnToDups {
 			m.dups.open = true
 			m.dups.returnToDups = false

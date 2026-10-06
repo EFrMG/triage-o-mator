@@ -569,6 +569,61 @@ class LedgerTests(Workspace):
                          [("master", "master"), ("item", "pr"), ("work", "group"), ("work", "batch")])
         brief = self.json_cli("briefs", "--expected-repo", "owner/repo", "read", "2026-10-06-pr-42-brief.md")
         self.assertIn("```go\nreturn true\n```", brief["content"])
+        named = self.json_cli("briefs", "plan", "--brief", "2026-10-06-pr-42-brief.md", "--brief", "2026-10-05-group-related-brief.md", "--brief", "2026-10-06-batch-b20261006-000001-brief.md")
+        self.assertEqual((named["source_count"], named["target_decisions"]), (3, 6))
+        self.assertEqual(self.json_cli("briefs", "plan", "--brief", "reports/owner/repo/2026-10-06-pr-42-brief.md")["source_count"], 1)
+        self.run_cli("briefs", "plan", "--brief", "reports/other/repo/2026-10-06-pr-42-brief.md", ok=False)
+        for index in range(2, 5):
+            (reports / f"2026-10-06-batch-b20261006-{index:06d}-brief.md").write_text(f"# Batch {index}\n")
+        all_batches = self.json_cli("briefs", "plan", "--all")
+        self.assertEqual((all_batches["source_count"], all_batches["target_decisions"]), (4, 6))
+        self.assertEqual(self.json_cli("briefs", "plan", "--limit", "2")["target_decisions"], 4)
+        for index in range(5, 17):
+            (reports / f"2026-10-06-batch-b20261006-{index:06d}-brief.md").write_text(f"# Batch {index}\n")
+        large = self.json_cli("briefs", "plan", "--all")
+        self.assertEqual((large["source_count"], large["target_decisions"]), (16, 10))
+        batch_name = "2026-10-06-batch-b20261006-000016-brief.md"
+        batch_preview = self.json_cli("briefs", "mark-read", batch_name)
+        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", batch_preview["preview_sha256"], batch_name)
+        self.assertEqual(self.json_cli("briefs", "plan", "--all")["source_count"], 15)
+        self.assertEqual(self.json_cli("briefs", "plan", "--all", "--include-read")["source_count"], 16)
+        (reports / (Path(batch_name).stem + "_READ.md")).rename(reports / (batch_name + "_READ"))
+        self.assertEqual(self.json_cli("briefs", "plan", "--all", "--include-read")["source_count"], 16)
+        legacy_preview = self.json_cli("briefs", "mark-read", batch_name + "_READ")
+        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", legacy_preview["preview_sha256"], batch_name + "_READ")
+        self.assertTrue((reports / (Path(batch_name).stem + "_READ.md")).exists())
+
+        pr_name = "2026-10-06-pr-42-brief.md"
+        preview = self.json_cli("briefs", "mark-read", pr_name)
+        self.assertFalse(preview["applied"])
+        self.assertEqual(preview["renames"][0]["target"], Path(pr_name).stem + "_READ.md")
+        self.assertTrue((reports / pr_name).exists())
+        (reports / pr_name).write_text(brief["content"] + "Changed after preview.\n")
+        self.run_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], pr_name, ok=False)
+        self.assertTrue((reports / pr_name).exists())
+        preview = self.json_cli("briefs", "mark-read", pr_name)
+        self.run_cli("briefs", "--expected-repo", "other/repo", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], pr_name, ok=False)
+        applied = self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], pr_name)
+        self.assertTrue(applied["applied"])
+        self.assertFalse((reports / pr_name).exists())
+        self.assertIn("Changed after preview.", (reports / (Path(pr_name).stem + "_READ.md")).read_text())
+        self.assertFalse(any(row["id"] == pr_name for row in self.json_cli("briefs", "list")["records"]))
+        self.assertEqual(self.json_cli("briefs", "plan", "--brief", Path(pr_name).stem + "_READ.md")["source_count"], 1)
+        self.run_cli("briefs", "read", Path(pr_name).stem + "_READ.md", ok=False)
+
+        group_name = "2026-10-05-group-related-brief.md"
+        (reports / (Path(group_name).stem + "_READ.md")).write_text("already marked\n")
+        self.run_cli("briefs", "mark-read", group_name, ok=False)
+        self.run_cli("briefs", "plan", "--brief", group_name, "--brief", Path(group_name).stem + "_READ.md", ok=False)
+        self.assertTrue((reports / group_name).exists())
+        legacy_name = "2026-10-04-group-legacy-brief.md_READ"
+        (reports / legacy_name).write_text("# Legacy archive\n")
+        self.assertEqual(self.json_cli("briefs", "plan", "--brief", legacy_name)["source_count"], 1)
+        preview = self.json_cli("briefs", "mark-read", legacy_name)
+        self.assertEqual(preview["renames"][0]["target"], "2026-10-04-group-legacy-brief_READ.md")
+        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], legacy_name)
+        self.assertFalse((reports / legacy_name).exists())
+        self.assertTrue((reports / "2026-10-04-group-legacy-brief_READ.md").exists())
         self.assertEqual(len(self.calls()), calls_before)
         self.run_cli("briefs", "--expected-repo", "other/repo", "list", ok=False)
         self.run_cli("briefs", "read", "2026-10-06-issue-99-brief.md", ok=False)
@@ -578,6 +633,11 @@ class LedgerTests(Workspace):
         (reports / "2026-10-06-issue-1-brief.md").write_text("# Issue 1\n")
         after = self.json_cli("next", "--json")["suggestions"]
         self.assertFalse(any("Write a detailed brief for issue #1" in row["what"] for row in after))
+        issue_name = "2026-10-06-issue-1-brief.md"
+        preview = self.json_cli("briefs", "mark-read", issue_name)
+        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], issue_name)
+        archived = self.json_cli("next", "--json")["suggestions"]
+        self.assertFalse(any("Write a detailed brief for issue #1" in row["what"] for row in archived))
 
     def test_fetch_sync_and_agent_proposal(self):
         self.sync()
@@ -669,6 +729,16 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.assertTrue(any("Delete finished batch b20261006-000001" in row["what"] for row in second))
         self.assertTrue(any("Polish selected batch briefs (2 available)" in row["what"] for row in second))
         self.assertFalse(any("Write today's maintainer report" in row["what"] for row in second))
+        batch_name = "2026-10-06-batch-b20261006-000001-brief.md"
+        preview = self.json_cli("briefs", "mark-read", batch_name)
+        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], batch_name)
+        self.assertTrue(any("Delete finished batch b20261006-000001" in row["what"] for row in self.json_cli("next", "--json")["suggestions"]))
+
+        master_name = f"{datetime.now(timezone.utc).date().isoformat()}-master-brief.md"
+        (reports / master_name).write_text("# Master brief\n")
+        preview = self.json_cli("briefs", "mark-read", master_name)
+        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], master_name)
+        self.assertFalse(any("Polish selected batch briefs" in row["what"] for row in self.json_cli("next", "--json")["suggestions"]))
 
     def test_sync_preserves_proposals(self):
         self.sync()

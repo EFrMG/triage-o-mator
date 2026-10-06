@@ -97,7 +97,7 @@ func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
 	}
 	for name, content := range map[string]string{
 		"2026-10-06-master-brief.md":                 "# Master decisions\n\n**Recommendation:** Review the current cases.\n",
-		"2026-10-06-pr-42-brief.md":                  "# PR 42\n\n## Recommendation\n\n```go\nreturn true\n```\n",
+		"2026-10-06-pr-42-brief.md":                  "# PR 42\n\n[PR #42](https://github.com/owner/repo/pull/42) and [issue #1](https://github.com/owner/repo/issues/1) need review. [issue #1](https://github.com/owner/repo/issues/1) appears twice. Bare #2 is not a link. [other issue](https://github.com/elsewhere/repo/issues/3) and [source](https://example.com/note) stay external.\n\n```md\n[issue #9](https://github.com/owner/repo/issues/9)\nreturn true\n```\n" + strings.Repeat("\nMore context for scrolling.\n", 35),
 		"2026-10-05-group-related-brief.md":          "# Related reports\n",
 		"2026-10-06-batch-b20261006-000001-brief.md": "# Recent batch\n",
 	} {
@@ -148,16 +148,99 @@ func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
 	if !strings.Contains(ansi.Strip(m.briefsView()), "PR 42") {
 		t.Fatal("Briefs reader lost the item heading")
 	}
+	view := ansi.Strip(m.briefs.viewport.View())
+	if strings.Contains(view, "https://github.com/owner/repo/pull/42") || strings.Contains(view, "https://github.com/owner/repo/issues/1") || !strings.Contains(view, "https://example.com/note") || !strings.Contains(view, "https://github.com/owner/repo/issues/9") {
+		t.Fatalf("Briefs link display changed source or code links: %q", view)
+	}
+	if len(m.briefs.items) != 2 || m.briefs.items[0] != (Key{Kind: "pr", Number: 42}) || m.briefs.items[1] != (Key{Kind: "issue", Number: 1}) || !strings.Contains(m.briefs.document.Content, "https://github.com/owner/repo/pull/42") {
+		t.Fatalf("Brief item references lost order, deduplication, or source: %+v", m.briefs.items)
+	}
+	m.briefs.viewport.SetYOffset(3)
+	offset := m.briefs.viewport.YOffset()
+	m = baselineSend(m, mouseKey("enter"))
+	if !m.briefs.cards || !strings.Contains(ansi.Strip(m.briefsView()), "Unavailable in the local ledger") {
+		t.Fatal("Brief item cards omitted a missing ledger item")
+	}
+	m = baselineSend(m, mouseKey("enter"))
+	if !m.briefs.cards || m.focus == FocusDetail {
+		t.Fatal("Missing brief item opened an item detail")
+	}
+	m = baselineSend(m, mouseKey("esc"))
+	if m.briefs.cards || m.briefs.viewport.YOffset() != offset {
+		t.Fatal("Returning from brief cards lost the brief scroll position")
+	}
+	m = baselineSend(m, mouseKey("l"))
+	m = baselineSend(m, mouseKey("down"))
+	next, _ = m.Update(mouseKey("enter"))
+	m = next.(model)
+	if m.briefs.open || !m.briefs.returnToBrief || m.focus != FocusDetail || m.detail.key != (Key{Kind: "issue", Number: 1}) {
+		t.Fatal("Brief card did not open its local item")
+	}
+	m = baselineSend(m, mouseKey("esc"))
+	if !m.briefs.open || m.briefs.cards || m.briefs.viewport.YOffset() != offset {
+		t.Fatal("Returning to the brief lost its scroll position")
+	}
+	m = baselineSend(m, mouseKey("esc"))
+	m = baselineSend(m, mouseKey("space"))
+	m = baselineSend(m, mouseKey("1"))
+	m = baselineSend(m, mouseKey("space"))
+	if len(m.briefs.ticked) != 2 || !strings.Contains(ansi.Strip(m.briefsView()), "2 ticked") {
+		t.Fatal("Brief ticks did not survive a section change")
+	}
+	next, cmd = m.Update(mouseKey("d"))
+	m = next.(model)
+	if cmd == nil || !m.briefs.busy {
+		t.Fatal("Mark read did not request an exact preview")
+	}
+	m = baselineSend(m, cmd())
+	if m.briefs.markPreview == nil || len(m.briefs.markPreview.Renames) != 2 || !strings.Contains(ansi.Strip(m.briefsView()), "_READ") {
+		t.Fatal("Brief rename preview omitted exact targets")
+	}
+	m = baselineSend(m, mouseKey("esc"))
+	if m.briefs.markPreview != nil || len(m.briefs.ticked) != 2 {
+		t.Fatal("Cancelling a brief rename discarded the selection")
+	}
+	next, cmd = m.Update(mouseKey("d"))
+	m = baselineSend(next.(model), cmd())
+	next, cmd = m.Update(mouseKey("d"))
+	m = next.(model)
+	if cmd == nil || !m.briefs.busy {
+		t.Fatal("Confirmed brief rename did not call the owning script")
+	}
+	next, reload := m.Update(cmd())
+	m = next.(model)
+	if reload == nil {
+		t.Fatal("Brief rename did not reload the menu")
+	}
+	m = baselineSend(m, reload())
+	if len(m.briefs.records) != 2 || len(m.briefs.ticked) != 0 {
+		t.Fatalf("Marked briefs remain in the menu: %+v", m.briefs.records)
+	}
+	for _, name := range []string{"2026-10-06-master-brief.md", "2026-10-06-pr-42-brief.md"} {
+		if _, err := os.Stat(filepath.Join(reports, strings.TrimSuffix(name, ".md")+"_READ.md")); err != nil {
+			t.Fatalf("Brief was not preserved with _READ suffix: %v", err)
+		}
+	}
+	m = baselineSend(m, mouseKey("3"))
+	next, cmd = m.Update(mouseKey("d"))
+	m = baselineSend(next.(model), cmd())
+	if m.briefs.markPreview == nil || len(m.briefs.markPreview.Renames) != 1 || m.briefs.markPreview.Renames[0].Source != "2026-10-05-group-related-brief.md" {
+		t.Fatal("d without ticks did not select the hovered brief")
+	}
+	m = baselineSend(m, mouseKey("esc"))
 
 	stale := briefsMsg{root: root, repo: "owner/repo", generation: m.briefsGeneration, read: m.briefs.document}
+	staleMark := briefMarkMsg{root: root, repo: "owner/repo", generation: m.briefsGeneration, reply: &briefMarkReply{}}
 	m.briefsGeneration++
 	m.briefs.document = nil
 	m = baselineSend(m, stale)
+	m = baselineSend(m, staleMark)
 	if m.briefs.document != nil {
 		t.Fatal("late brief content replaced a newer read")
 	}
 	m.switchRepo("other/repo")
 	m = baselineSend(m, stale)
+	m = baselineSend(m, staleMark)
 	if m.briefs.open || m.briefs.document != nil {
 		t.Fatal("late brief content crossed the repository switch")
 	}

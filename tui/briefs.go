@@ -40,6 +40,25 @@ type briefReadReply struct {
 	Content    string      `json:"content"`
 }
 
+type briefMarkReply struct {
+	Schema        int    `json:"schema_version"`
+	Repository    string `json:"repository"`
+	Applied       bool   `json:"applied"`
+	PreviewSHA256 string `json:"preview_sha256"`
+	Renames       []struct {
+		Source string `json:"source"`
+		Target string `json:"target"`
+	} `json:"renames"`
+}
+
+type briefMarkMsg struct {
+	root, repo string
+	generation uint64
+	apply      bool
+	reply      *briefMarkReply
+	err        error
+}
+
 type briefsMsg struct {
 	root, repo string
 	generation uint64
@@ -50,18 +69,55 @@ type briefsMsg struct {
 }
 
 type briefsUI struct {
-	open, busy, reading bool
-	originFocus         Focus
-	section             int
-	selected            [3]int
-	records             []briefRecord
-	document            *briefReadReply
-	requestedID         string
-	viewport            viewport.Model
-	renderedID          string
-	renderedWidth       int
-	renderedTheme       string
-	problem             string
+	open, busy, reading  bool
+	cards, returnToBrief bool
+	originFocus          Focus
+	section              int
+	selected             [3]int
+	cardSelected         int
+	records              []briefRecord
+	ticked               map[string]bool
+	document             *briefReadReply
+	items                []Key
+	markIDs              []string
+	markPreview          *briefMarkReply
+	markViewport         viewport.Model
+	requestedID          string
+	viewport             viewport.Model
+	renderedID           string
+	renderedWidth        int
+	renderedTheme        string
+	problem              string
+}
+
+func briefMarkCommand(root, repo string, generation uint64, ids []string, apply bool, token string) tea.Cmd {
+	return func() tea.Msg {
+		msg := briefMarkMsg{root: root, repo: repo, generation: generation, apply: apply}
+		args := []string{"--expected-repo", repo, "mark-read"}
+		if apply {
+			args = append(args, "--apply", "--preview-sha256", token)
+		}
+		args = append(args, ids...)
+		out, err := runScript(root, "briefs", args...)
+		if err == nil {
+			var reply briefMarkReply
+			err = json.Unmarshal([]byte(out), &reply)
+			if err == nil && (reply.Schema != 1 || reply.Repository != repo || reply.Applied != apply || len(reply.Renames) != len(ids) || len(reply.PreviewSHA256) != 64) {
+				err = fmt.Errorf("brief rename preview changed repository or selection")
+			}
+			if err == nil {
+				for i, row := range reply.Renames {
+					if row.Source != ids[i] || row.Target != strings.TrimSuffix(ids[i], ".md")+"_READ.md" {
+						err = fmt.Errorf("brief rename preview changed target")
+						break
+					}
+				}
+			}
+			msg.reply = &reply
+		}
+		msg.err = err
+		return msg
+	}
 }
 
 func briefsCommand(root, repo string, generation uint64, id string, process *readProcess) tea.Cmd {
@@ -139,9 +195,14 @@ func (m model) startBriefsRead(id string) (tea.Model, tea.Cmd) {
 	m.briefs.problem = ""
 	if id != "" {
 		m.briefs.reading = true
+		m.briefs.cards = false
 		m.briefs.document = nil
+		m.briefs.items = nil
 		m.briefs.requestedID = id
 		m.briefs.renderedID = ""
+	} else {
+		m.briefs.markIDs = nil
+		m.briefs.markPreview = nil
 	}
 	if m.briefsLifecycle == nil {
 		m.briefsLifecycle = &readLifecycle{}
@@ -151,7 +212,7 @@ func (m model) startBriefsRead(id string) (tea.Model, tea.Cmd) {
 }
 
 func (m model) openBriefs() (tea.Model, tea.Cmd) {
-	m.briefs = briefsUI{open: true, originFocus: m.focus, viewport: viewport.New()}
+	m.briefs = briefsUI{open: true, originFocus: m.focus, viewport: viewport.New(), markViewport: viewport.New(), ticked: map[string]bool{}}
 	m.sidebar.selected = briefsIndex
 	return m.startBriefsRead("")
 }
@@ -168,6 +229,15 @@ func (m model) finishBriefs(msg briefsMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.list != nil {
 		m.briefs.records = msg.list.Records
+		present := map[string]bool{}
+		for _, row := range m.briefs.records {
+			present[row.ID] = true
+		}
+		for id := range m.briefs.ticked {
+			if !present[id] {
+				delete(m.briefs.ticked, id)
+			}
+		}
 		for section := range m.briefs.selected {
 			count := len(m.briefsRows(section))
 			m.briefs.selected[section] = minInt(m.briefs.selected[section], maxInt(count-1, 0))
@@ -178,6 +248,62 @@ func (m model) finishBriefs(msg briefsMsg) (tea.Model, tea.Cmd) {
 		m.layoutBriefs()
 	}
 	return m, nil
+}
+
+func (m model) briefMarkTargets() []string {
+	var ids []string
+	for _, row := range m.briefs.records {
+		if m.briefs.ticked[row.ID] {
+			ids = append(ids, row.ID)
+		}
+	}
+	if len(ids) > 0 {
+		return ids
+	}
+
+	rows := m.briefsRows(m.briefs.section)
+	if len(rows) > 0 {
+		return []string{rows[m.briefs.selected[m.briefs.section]].ID}
+	}
+	return nil
+}
+
+func (m model) startBriefMark(ids []string, apply bool, token string) (tea.Model, tea.Cmd) {
+	m.briefsGeneration++
+	m.briefs.busy = true
+	if !apply {
+		m.briefs.markIDs = ids
+	}
+	return m, briefMarkCommand(m.installRoot, m.repo, m.briefsGeneration, ids, apply, token)
+}
+
+func (m model) finishBriefMark(msg briefMarkMsg) (tea.Model, tea.Cmd) {
+	if !m.briefs.open || msg.root != m.installRoot || msg.repo != m.repo || msg.generation != m.briefsGeneration {
+		return m, nil
+	}
+	m.briefs.busy = false
+	if msg.err != nil {
+		m.recordError("Brief rename unavailable", msg.err)
+		m.status = "Couldn't mark briefs read. Press ! for details; reload the list before retrying."
+		m.briefs.markPreview = nil
+		m.briefs.markIDs = nil
+		if msg.apply {
+			m.briefs.ticked = map[string]bool{}
+			return m.startBriefsRead("")
+		}
+		return m, nil
+	}
+	if !msg.apply {
+		m.briefs.markPreview = msg.reply
+		m.layoutBriefs()
+		return m, nil
+	}
+
+	m.status = fmt.Sprintf("Marked %s read.", pluralize(len(msg.reply.Renames), "brief", "briefs"))
+	m.briefs.markPreview = nil
+	m.briefs.markIDs = nil
+	m.briefs.ticked = map[string]bool{}
+	return m.startBriefsRead("")
 }
 
 func (m model) briefsRows(section int) []briefRecord {
@@ -194,6 +320,17 @@ func (m model) briefsRows(section int) []briefRecord {
 }
 
 func (m *model) layoutBriefs() {
+	if m.briefs.open && m.briefs.markPreview != nil {
+		width := m.cardWidth()
+		m.briefs.markViewport.SetWidth(width)
+		m.briefs.markViewport.SetHeight(maxInt(m.mainHeight()-3, 1))
+		lines := make([]string, len(m.briefs.markPreview.Renames))
+		for i, row := range m.briefs.markPreview.Renames {
+			lines[i] = fmt.Sprintf("%s → %s", row.Source, row.Target)
+		}
+		m.briefs.markViewport.SetContent(wrapText(strings.Join(lines, "\n"), width))
+		return
+	}
 	if !m.briefs.open || m.briefs.document == nil {
 		return
 	}
@@ -203,7 +340,9 @@ func (m *model) layoutBriefs() {
 	m.briefs.viewport.SetWidth(width)
 	m.briefs.viewport.SetHeight(height)
 	if m.briefs.renderedID != m.briefs.document.Record.ID || m.briefs.renderedWidth != width || m.briefs.renderedTheme != currentTheme.Name {
-		m.briefs.viewport.SetContent(renderMarkdown(m.briefs.document.Content, width))
+		content, items := renderBriefMarkdown(m.briefs.document.Content, m.repo, width)
+		m.briefs.viewport.SetContent(content)
+		m.briefs.items = items
 		m.briefs.viewport.SetYOffset(offset)
 		m.briefs.renderedID = m.briefs.document.Record.ID
 		m.briefs.renderedWidth = width
@@ -213,10 +352,29 @@ func (m *model) layoutBriefs() {
 
 func (m model) briefsView() string {
 	width, height := m.menuWidth(), m.mainHeight()
+	if m.briefs.markPreview != nil {
+		body := inset(titleBar("Mark briefs read", fmt.Sprintf("%d exact renames", len(m.briefs.markPreview.Renames)), width)) + "\n\n"
+		body += inset(m.briefs.markViewport.View())
+		return m.withSidebar(body, true)
+	}
 	if m.briefs.reading {
 		title := "Reading brief…"
 		if m.briefs.document != nil {
 			title = singleLine(sanitize(m.briefs.document.Record.Title))
+		}
+		if m.briefs.cards {
+			body := inset(titleBar("Brief items", title, width)) + "\n\n"
+			cards := make([][2]string, len(m.briefs.items))
+			for i, key := range m.briefs.items {
+				name := fmt.Sprintf("%s #%d", strings.ToUpper(key.Kind[:1])+key.Kind[1:], key.Number)
+				if it, ok := m.findItem(key); ok {
+					cards[i] = [2]string{name + " · " + singleLine(sanitize(it.Title)), it.State}
+				} else {
+					cards[i] = [2]string{name, "Unavailable in the local ledger"}
+				}
+			}
+			body += cardList(cards, m.briefs.cardSelected, m.cardWidth(), height-2)
+			return m.withSidebar(body, true)
 		}
 		body := inset(titleBar("Briefs", title, width)) + "\n\n"
 		switch {
@@ -248,13 +406,21 @@ func (m model) briefsView() string {
 		}
 		tabs[i] = label
 	}
-	body := inset(titleBar("Briefs", "saved for "+m.repo, width)) + "\n" + inset(strings.Join(tabs, "  ")) + "\n\n"
+	subtitle := "saved for " + m.repo
+	if len(m.briefs.ticked) > 0 {
+		subtitle += fmt.Sprintf(" · %d ticked", len(m.briefs.ticked))
+	}
+	body := inset(titleBar("Briefs", subtitle, width)) + "\n" + inset(strings.Join(tabs, "  ")) + "\n\n"
 	if m.briefs.problem != "" {
 		body += inset(m.briefs.problem)
 		return m.withSidebar(body, true)
 	}
 	if m.briefs.busy {
-		body += inset("Reading saved briefs…")
+		message := "Reading saved briefs…"
+		if len(m.briefs.markIDs) > 0 {
+			message = "Checking exact rename targets…"
+		}
+		body += inset(message)
 		return m.withSidebar(body, true)
 	}
 	rows := m.briefsRows(m.briefs.section)
@@ -266,13 +432,38 @@ func (m model) briefsView() string {
 	cards := make([][2]string, len(rows))
 	for i, row := range rows {
 		label := strings.ToUpper(row.Type[:1]) + row.Type[1:]
-		cards[i] = [2]string{singleLine(sanitize(row.Title)), row.Date + " · " + label}
+		title := singleLine(sanitize(row.Title))
+		if m.briefs.ticked[row.ID] {
+			title = "✓ " + title
+		}
+		cards[i] = [2]string{title, row.Date + " · " + label}
 	}
 	body += cardList(cards, m.briefs.selected[m.briefs.section], m.cardWidth(), height-3)
 	return m.withSidebar(body, true)
 }
 
 func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.briefs.markPreview != nil {
+		if m.briefs.busy {
+			return m, nil
+		}
+		switch msg.String() {
+		case "esc", "h", "left":
+			m.briefs.markPreview = nil
+			m.briefs.markIDs = nil
+		case "j", "down":
+			m.briefs.markViewport.ScrollDown(1)
+		case "k", "up":
+			m.briefs.markViewport.ScrollUp(1)
+		case "ctrl+d":
+			m.briefs.markViewport.ScrollDown(maxInt(m.briefs.markViewport.Height()/2, 1))
+		case "ctrl+u":
+			m.briefs.markViewport.ScrollUp(maxInt(m.briefs.markViewport.Height()/2, 1))
+		case "d":
+			return m.startBriefMark(m.briefs.markIDs, true, m.briefs.markPreview.PreviewSHA256)
+		}
+		return m, nil
+	}
 	switch msg.String() {
 	case "q":
 		return m.requestQuit()
@@ -281,6 +472,10 @@ func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "esc", "h", "left":
 		if m.briefs.reading {
+			if m.briefs.cards {
+				m.briefs.cards = false
+				return m, nil
+			}
 			m.briefs.reading = false
 			m.briefs.busy = false
 			m.briefs.requestedID = ""
@@ -311,6 +506,35 @@ func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.briefs.reading {
+		if m.briefs.cards {
+			switch msg.String() {
+			case "j", "down":
+				m.briefs.cardSelected = minInt(m.briefs.cardSelected+1, maxInt(len(m.briefs.items)-1, 0))
+			case "k", "up":
+				m.briefs.cardSelected = maxInt(m.briefs.cardSelected-1, 0)
+			case "g", "home":
+				m.briefs.cardSelected = 0
+			case "G", "end":
+				m.briefs.cardSelected = maxInt(len(m.briefs.items)-1, 0)
+			case "enter", "l", "right":
+				key := m.briefs.items[m.briefs.cardSelected]
+				it, ok := m.findItem(key)
+				if !ok {
+					m.status = "Item unavailable in the local ledger; refresh the repository first."
+					return m, nil
+				}
+
+				m.commitDraftIfDirty()
+				cmd := m.openItem(it)
+				m.focus = FocusDetail
+				m.briefs.open = false
+				m.briefs.returnToBrief = true
+				m.layout()
+				return m, cmd
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "j", "down":
 			m.briefs.viewport.ScrollDown(1)
@@ -324,6 +548,13 @@ func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.briefs.viewport.SetYOffset(0)
 		case "G", "end":
 			m.briefs.viewport.SetYOffset(1 << 30)
+		case "enter", "l", "right":
+			if len(m.briefs.items) == 0 {
+				m.status = "This brief has no linked issues or PRs in the selected repository."
+				return m, nil
+			}
+			m.briefs.cards = true
+			m.briefs.cardSelected = 0
 		}
 		return m, nil
 	}
@@ -342,6 +573,21 @@ func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.briefs.selected[m.briefs.section] = 0
 	case "G", "end":
 		m.briefs.selected[m.briefs.section] = maxInt(len(m.briefsRows(m.briefs.section))-1, 0)
+	case "space":
+		rows := m.briefsRows(m.briefs.section)
+		if len(rows) > 0 {
+			id := rows[m.briefs.selected[m.briefs.section]].ID
+			m.briefs.ticked[id] = !m.briefs.ticked[id]
+			if !m.briefs.ticked[id] {
+				delete(m.briefs.ticked, id)
+			}
+			m.briefs.selected[m.briefs.section] = minInt(m.briefs.selected[m.briefs.section]+1, len(rows)-1)
+		}
+	case "d":
+		ids := m.briefMarkTargets()
+		if len(ids) > 0 {
+			return m.startBriefMark(ids, false, "")
+		}
 	case "enter", "l", "right":
 		rows := m.briefsRows(m.briefs.section)
 		if len(rows) > 0 {
@@ -352,7 +598,25 @@ func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) clickBriefs(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
-	if m.briefs.reading || m.briefs.busy || m.briefs.problem != "" {
+	if m.briefs.markPreview != nil {
+		return m, nil
+	}
+	if m.briefs.reading {
+		if !m.briefs.cards {
+			return m, nil
+		}
+		index := mouseCardIndex(event.Y, 2, m.briefs.cardSelected, len(m.briefs.items), m.mainHeight()-2)
+		if index < 0 {
+			return m, nil
+		}
+		repeat = m.mouseTargetRepeat(fmt.Sprintf("brief-item:%s:%d", m.briefs.items[index].Kind, m.briefs.items[index].Number))
+		if m.briefs.cardSelected == index && repeat {
+			return m.handleBriefsKey(mouseKey("enter"))
+		}
+		m.briefs.cardSelected = index
+		return m, nil
+	}
+	if m.briefs.busy || m.briefs.problem != "" {
 		return m, nil
 	}
 	if event.Y == 2 {
@@ -374,9 +638,17 @@ func (m model) clickBriefs(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	repeat = m.mouseTargetRepeat("brief:" + rows[index].ID)
+	if m.briefs.selected[m.briefs.section] != index {
+		m.briefs.selected[m.briefs.section] = index
+		if event.Button != tea.MouseRight {
+			return m, nil
+		}
+	}
+	if event.Button == tea.MouseRight {
+		return m.handleBriefsKey(mouseKey("space"))
+	}
 	if m.briefs.selected[m.briefs.section] == index && repeat {
 		return m.handleBriefsKey(mouseKey("enter"))
 	}
-	m.briefs.selected[m.briefs.section] = index
 	return m, nil
 }

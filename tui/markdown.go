@@ -161,6 +161,10 @@ func renderMarkdownWithLineBreaks(src string, width int, preserveNewLines bool) 
 		return wrapText(clean, width)
 	}
 
+	return finishMarkdownRender(out, width)
+}
+
+func finishMarkdownRender(out string, width int) string {
 	lines := strings.Split(out, "\n")
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(strings.TrimRight(line, " "), width, "")

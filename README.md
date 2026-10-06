@@ -132,9 +132,12 @@ bin/batch 25 --include-triaged --unbriefed --order updated
 bin/apply data/<owner>/<repo>/batches/<id>.decisions.jsonl --only-untriaged
 bin/report
 bin/briefs list
+bin/briefs plan --all
 ```
 
 After screening a whole batch, save its dated batch brief and use `bin/batch --mark-briefed ID --brief PATH`. The checkpoint lets the next `--unbriefed` pass skip every member of that batch, including members the brief did not feature. A brief can say that no maintainer call surfaced. `bin/next` suggests the next pass or [polishing selected briefs](prompts/polish-briefs.md); it does not run either step automatically.
+
+`bin/briefs plan` returns the selected batch brief paths and a calculated master-brief size target. Use `--all` for every visible batch brief, `--all --include-read` to include briefs archived from the TUI, or repeat `--brief FILENAME` for an exact set. `bin/briefs mark-read NAME.md` previews a rename to `NAME_READ.md`; applying it requires `--apply --preview-sha256 HASH` from that preview. The same command can move an older `NAME.md_READ` archive to `NAME_READ.md`. The rename leaves the Markdown intact and removes the brief from the TUI menus. It does not change ledger review or GitHub state.
 
 | Task                                            | Commands                                                                       |
 | ----------------------------------------------- | ------------------------------------------------------------------------------ |

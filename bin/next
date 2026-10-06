@@ -29,6 +29,17 @@ CODE_REVIEW_CATEGORIES = ("merge-ready", "trivial", "needs-revision", "needs-mai
 ITEM_BRIEF_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-(issue|pr)-([1-9]\d*)-brief\.md$")
 
 
+def active_brief_name(name):
+    if name.endswith("_READ.md"):
+        return name.removesuffix("_READ.md") + ".md"
+
+    return name.removesuffix("_READ") if name.endswith(".md_READ") else name
+
+
+def saved_brief_exists(path):
+    return path.exists() or path.with_name(path.stem + "_READ.md").exists() or Path(str(path) + "_READ").exists()
+
+
 def hours_since(iso):
     try:
         then = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -109,7 +120,7 @@ def suggestions(ledger):
         add("human", f"Review {len(pending)} triaged decisions ({closes} suggest closing)",
             f"TUI: All Items (search {sample}, a confirms a saved call); or bin/export-csv --pending-review, edit, bin/import-csv --by <you>",
             "review remains separate from repository-enabled label automation and action-write approval")
-        item_briefs = {match.group(1, 2) for path in REPORTS_DIR.glob("*-brief.md") if (match := ITEM_BRIEF_RE.fullmatch(path.name))}
+        item_briefs = {match.group(1, 2) for path in REPORTS_DIR.glob("*-brief*") if (match := ITEM_BRIEF_RE.fullmatch(active_brief_name(path.name)))}
         target = next((row for row in pending if (row["kind"], str(row["number"])) not in item_briefs), None)
         if target is not None:
             add("agent", f"Write a detailed brief for {target['kind']} #{target['number']}",
@@ -168,7 +179,7 @@ def suggestions(ledger):
 
     group_brief = REPORTS_DIR / f"{date.today().isoformat()}-ready-groups-brief.md"
     legacy_polished = REPORTS_DIR / f"{date.today().isoformat()}-polished.md"
-    if ready and not group_brief.exists() and not legacy_polished.exists():
+    if ready and not saved_brief_exists(group_brief) and not saved_brief_exists(legacy_polished):
         titles = ", ".join(f'"{g["title"]}"' for g in ready[:2])
         add("agent", f"Make the case for {len(ready)} ready group{'' if len(ready) == 1 else 's'}: {titles}", "prompts/maintainer-brief.md (focused brief for ready groups)",
             "the report lists ready groups; it doesn't argue them, and a maintainer has to decide")
@@ -204,9 +215,9 @@ def suggestions(ledger):
             "each completed batch gets one concise brief, then its members leave the briefing queue")
 
     master_brief = REPORTS_DIR / f"{date.today().isoformat()}-master-brief.md"
-    if len(briefed_batches) >= 2 and not master_brief.exists():
+    if len(briefed_batches) >= 2 and not saved_brief_exists(master_brief):
         add("agent", f"Polish selected batch briefs ({len(briefed_batches)} available)",
-            "prompts/polish-briefs.md (select two to ten batch briefs)",
+            "bin/briefs plan; prompts/polish-briefs.md",
             "surface the most relevant decisions from completed batch passes")
 
     report = REPORTS_DIR / f"{date.today().isoformat()}.md"

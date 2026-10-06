@@ -35,7 +35,6 @@ def selection(numbers, items):
 
 
 def select(keys):
-
     policy = script("action-policy", "status", "--expected-repo", REPO)
     settings = {row["name"]: row for row in policy["actions"]}
     taxonomy = load_taxonomy()
@@ -101,7 +100,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("preview", "run"))
     parser.add_argument("--expected-repo", required=True)
-    parser.add_argument("--number", type=int, action="append", default=[], help="PR number for the existing closure path")
+    parser.add_argument("--number", type=int, action="append", default=[], help="PR number (alias for --item pr:NUMBER)")
     parser.add_argument("--item", action="append", default=[], help="explicit KIND:NUMBER item key")
     parser.add_argument("--preview-sha256")
     args = parser.parse_args()

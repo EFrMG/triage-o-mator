@@ -18,6 +18,7 @@ type proposalNote struct {
 
 type autoCloseNotesMsg struct {
 	root, repo, proposalCheckpoint, contextCheckpoint string
+	kind                                              string
 	generation, request                               uint64
 	number                                            int
 	text                                              string
@@ -74,15 +75,15 @@ func hasExpandableProposalNotes(context *autoCloseContext) bool {
 	return false
 }
 
-func autoCloseNotesCmd(root, repo string, generation, request uint64, number int, proposalCheckpoint, contextCheckpoint string, notes []proposalNote) tea.Cmd {
+func autoCloseNotesCmd(root, repo, kind string, generation, request uint64, number int, proposalCheckpoint, contextCheckpoint string, notes []proposalNote) tea.Cmd {
 	return func() tea.Msg {
-		msg := autoCloseNotesMsg{root: root, repo: repo, generation: generation, request: request, number: number,
+		msg := autoCloseNotesMsg{root: root, repo: repo, kind: kind, generation: generation, request: request, number: number,
 			proposalCheckpoint: proposalCheckpoint, contextCheckpoint: contextCheckpoint}
 		var output strings.Builder
 		for _, note := range notes {
 			content := note.preview
 			if note.omitted > 0 {
-				args := []string{"--expected-repo", repo, "source", "--kind", "pr", "--number", strconv.Itoa(number),
+				args := []string{"--expected-repo", repo, "source", "--kind", kind, "--number", strconv.Itoa(number),
 					"--row", note.row, "--field", note.field, "--checkpoint", contextCheckpoint,
 					"--max-bytes", "65536"}
 				out, err := runScript(root, "item-context", args...)
@@ -109,7 +110,7 @@ func autoCloseNotesCmd(root, repo string, generation, request uint64, number int
 					} `json:"continuation"`
 					Requests int `json:"requests"`
 				}
-				if json.Unmarshal([]byte(out), &source) != nil || source.Repository != repo || source.Item.Kind != "pr" || source.Item.Number != number ||
+				if json.Unmarshal([]byte(out), &source) != nil || source.Repository != repo || source.Item.Kind != kind || source.Item.Number != number ||
 					source.Checkpoint != contextCheckpoint || source.Row != note.row || source.Field != note.field || source.Requests != 0 ||
 					source.Bytes.Offset != 0 || source.Bytes.Returned != len([]byte(source.Text)) || source.Bytes.Returned > 65536 ||
 					source.Continuation != nil && source.Continuation.ByteOffset != source.Bytes.Returned {
@@ -154,19 +155,56 @@ func (m model) toggleAutoCloseNotes(row autoCloseRow) (tea.Model, tea.Cmd) {
 	m.notifications.notesError = ""
 	m.notifications.notesScroll = 0
 	m.notifications.notesRequest++
-	return m, autoCloseNotesCmd(m.installRoot, m.repo, m.notificationsGeneration, m.notifications.notesRequest,
+	return m, autoCloseNotesCmd(m.installRoot, m.repo, "pr", m.notificationsGeneration, m.notifications.notesRequest,
+		row.Number, row.Checkpoint, context.ItemContext.Checkpoint, proposalNotes(context))
+}
+
+func (m model) toggleActionNotes(row actionProposalRow) (tea.Model, tea.Cmd) {
+	if m.notifications.notesOpen {
+		m.notifications.notesOpen = false
+		m.notifications.notesRequest++
+		return m, nil
+	}
+	if m.notifications.actionReview == nil || m.notifications.actionReview.context == nil || m.notifications.actionReview.busy {
+		m.status = "Read local context before opening its notes."
+		return m, nil
+	}
+	context := &autoCloseContext{ItemContext: m.notifications.actionReview.context.ItemContext}
+	if !hasExpandableProposalNotes(context) {
+		m.status = "Full local notes are already shown in the proposal."
+		return m, nil
+	}
+	m.notifications.notesOpen = true
+	m.notifications.notesBusy = true
+	m.notifications.notesError = ""
+	m.notifications.notesScroll = 0
+	m.notifications.notesRequest++
+	return m, autoCloseNotesCmd(m.installRoot, m.repo, row.Kind, m.notificationsGeneration, m.notifications.notesRequest,
 		row.Number, row.Checkpoint, context.ItemContext.Checkpoint, proposalNotes(context))
 }
 
 func (m model) finishAutoCloseNotes(msg autoCloseNotesMsg) (tea.Model, tea.Cmd) {
-	if !m.notifications.open || !m.notifications.notesOpen || m.notifications.review == nil || msg.root != m.installRoot || msg.repo != m.repo ||
-		msg.generation != m.notificationsGeneration || msg.request != m.notifications.notesRequest ||
-		len(m.notifications.review.Plan.Proposals) != 1 || m.notifications.review.Plan.Proposals[0].Number != msg.number ||
-		m.notifications.review.Plan.Proposals[0].Checkpoint != msg.proposalCheckpoint {
+	if !m.notifications.open || !m.notifications.notesOpen || msg.root != m.installRoot || msg.repo != m.repo ||
+		msg.generation != m.notificationsGeneration || msg.request != m.notifications.notesRequest {
 		return m, nil
 	}
-	context := m.notifications.proposalContext(m.notifications.review.Plan.Proposals[0])
-	if context == nil || context.ItemContext.Checkpoint != msg.contextCheckpoint {
+	contextCheckpoint := ""
+	if m.notifications.actionReview != nil {
+		review := m.notifications.actionReview
+		if msg.kind != review.row.Kind || msg.number != review.row.Number || msg.proposalCheckpoint != review.row.Checkpoint || review.context == nil {
+			return m, nil
+		}
+		contextCheckpoint = review.context.ItemContext.Checkpoint
+	} else if m.notifications.review != nil && len(m.notifications.review.Plan.Proposals) == 1 {
+		row := m.notifications.review.Plan.Proposals[0]
+		if msg.kind != "pr" || msg.number != row.Number || msg.proposalCheckpoint != row.Checkpoint {
+			return m, nil
+		}
+		if context := m.notifications.proposalContext(row); context != nil {
+			contextCheckpoint = context.ItemContext.Checkpoint
+		}
+	}
+	if contextCheckpoint == "" || contextCheckpoint != msg.contextCheckpoint {
 		return m, nil
 	}
 	m.notifications.notesBusy = false

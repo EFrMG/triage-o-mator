@@ -21,24 +21,14 @@ func (m model) answerProposalCmd() tea.Cmd {
 	root, repo, generation := m.installRoot, m.repo, m.notificationsGeneration
 	choice, checkpoint := m.comment.answerChoice, m.comment.answerCheckpoint
 	answer, by := m.comment.text.Value(), m.reviewer
-	script := "auto-close"
-	args := []string{"--expected-repo", repo, "answer", "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--answer", answer}
-	action := choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active)
-	target, comment := "", ""
-	if action {
-		script = "action-proposals"
-		args = []string{"--expected-repo", repo, "answer", "--kind", choice.key.Kind, "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--answer", answer}
-		row := m.notifications.actions.Rows[choice.actionProposal]
-		target, comment = row.Target, row.Comment
-	} else {
-		row := m.notifications.proposals.Rows[choice.proposal]
-		target, comment = row.Target, row.Comment
-	}
+	args := []string{"--expected-repo", repo, "answer", "--kind", choice.key.Kind, "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--answer", answer}
+	row := m.notifications.actions.Rows[choice.actionProposal]
+	target, comment := row.Target, row.Comment
 
 	return func() tea.Msg {
 		msg := proposalAnswerDoneMsg{root: root, repo: repo, generation: generation, key: choice.key, checkpoint: checkpoint,
-			answer: answer, by: by, target: target, comment: comment, action: action}
-		out, err := runScript(root, script, args...)
+			answer: answer, by: by, target: target, comment: comment, action: true}
+		out, err := runScript(root, "action-proposals", args...)
 		if err != nil {
 			msg.err = err
 			return msg
@@ -51,7 +41,7 @@ func (m model) answerProposalCmd() tea.Cmd {
 		if msg.row.Number != choice.key.Number || msg.row.Status != "pending" || msg.row.Checkpoint == "" || msg.row.Checkpoint == checkpoint ||
 			msg.row.Target != target || msg.row.Comment != comment || msg.row.DecisionQuestion == "" || msg.row.DecisionResolution == nil ||
 			msg.row.DecisionResolution.By != by || msg.row.DecisionResolution.Reason != answer || msg.row.DecisionResolution.HeldCheckpoint != checkpoint ||
-			action && msg.row.Kind != choice.key.Kind {
+			msg.row.Kind != choice.key.Kind {
 			msg.err = fmt.Errorf("saved answer differs from the displayed action proposal")
 		}
 		return msg
@@ -80,11 +70,7 @@ func (m model) finishProposalAnswer(msg proposalAnswerDoneMsg) (tea.Model, tea.C
 	updated := next.(model)
 	updated.notifications.selectItem = msg.key
 	if msg.err == nil {
-		if msg.action {
-			updated.notifications.openActionAfter = msg.key
-		} else {
-			updated.notifications.openProposalAfter = msg.key
-		}
+		updated.notifications.openActionAfter = msg.key
 	}
 	return updated, cmd
 }

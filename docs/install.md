@@ -39,7 +39,7 @@ target-repo/
     config/theme.local                                 ignored
     data/<owner>/<repo>/ledger.jsonl                   tracked
     data/<owner>/<repo>/groups/, not-duplicates.jsonl  tracked
-    data/<owner>/<repo>/auto-close/                  tracked proposals
+    data/<owner>/<repo>/action-proposals/            tracked proposals
     data/<owner>/<repo>/raw|batches|exports/           ignored
     data/<owner>/<repo>/cache|local/                   ignored (includes the per-repo automatic download preference)
     reports/<owner>/<repo>/<date>.md                   tracked

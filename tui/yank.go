@@ -162,13 +162,13 @@ func (m model) yankText(all bool) (string, string) {
 	}
 }
 
-func (m model) yankNotificationProposal(row autoCloseRow) (string, string) {
-	what := fmt.Sprintf("PR #%d closure proposal", row.Number)
+func (m model) yankActionProposal(row actionProposalRow) (string, string) {
+	what := fmt.Sprintf("%s #%d %s proposal", strings.ToUpper(row.Kind), row.Number, row.Operation)
 	var b strings.Builder
 	b.WriteString(m.yankHeader(what))
-	fmt.Fprintf(&b, "\nPR #%d · %s\nTarget: %s\n", row.Number, row.Status, sanitize(row.Target))
-	fmt.Fprintf(&b, "Saved proposal: bin/auto-close --expected-repo %s view --number %d --checkpoint %s\n", m.repo, row.Number, row.Checkpoint)
-	fmt.Fprintf(&b, "Current guidance and feedback: bin/auto-close --expected-repo %s context --number %d --checkpoint %s\n", m.repo, row.Number, row.Checkpoint)
+	fmt.Fprintf(&b, "\n%s #%d · %s\nTarget: %s\n", strings.ToUpper(row.Kind), row.Number, row.Status, sanitize(row.Target))
+	fmt.Fprintf(&b, "Saved proposal: bin/action-proposals --expected-repo %s view --kind %s --number %d --checkpoint %s\n", m.repo, row.Kind, row.Number, row.Checkpoint)
+	fmt.Fprintf(&b, "Current guidance and feedback: bin/action-proposals --expected-repo %s context --kind %s --number %d --checkpoint %s\n", m.repo, row.Kind, row.Number, row.Checkpoint)
 	if row.Inputs != nil {
 		if len(row.Inputs.Evidence) > 0 {
 			b.WriteString("\nSelected snapshots:\n")
@@ -181,7 +181,7 @@ func (m model) yankNotificationProposal(row autoCloseRow) (string, string) {
 			}
 		}
 		var incomplete []proposalEvidenceLine
-		for _, line := range proposalEvidenceLines(row) {
+		for _, line := range proposalEvidenceLines(autoCloseRow{Inputs: row.Inputs}) {
 			if line.item != "Gap" && line.missing != "" {
 				incomplete = append(incomplete, line)
 			}
@@ -209,6 +209,11 @@ func (m model) yankNotificationProposal(row autoCloseRow) (string, string) {
 	}
 	b.WriteString("\nRead the saved proposal and current guidance before recommending or acting. This copy grants no approval.\n")
 	return b.String(), what
+}
+
+func (m model) yankNotificationProposal(row autoCloseRow) (string, string) {
+	return m.yankActionProposal(actionProposalRow{Kind: "pr", Number: row.Number, Operation: "close", Status: row.Status,
+		Target: row.Target, Checkpoint: row.Checkpoint, Inputs: row.Inputs})
 }
 
 func (m model) yankActionSuggestion(item Item) (string, string) {

@@ -151,7 +151,7 @@ def check_current(value, completed_batch=None):
             try:
                 verified = selected_evidence(cache, selected["kind"], selected["number"], selected["snapshot_id"])
             except (OSError, ValueError, KeyError, TypeError) as error:
-                raise ValueError("selected action evidence is unavailable; restore it or replace the proposal") from error
+                raise ValueError("selected evidence is unavailable; restore it or replace the proposal") from error
             if verified != selected:
                 raise ValueError("selected action evidence changed; replace the proposal")
 

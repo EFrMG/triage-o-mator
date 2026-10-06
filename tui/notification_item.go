@@ -41,14 +41,9 @@ func (m model) rejectNotificationCmd() tea.Cmd {
 
 	return func() tea.Msg {
 		msg := notificationRejectionDoneMsg{root: root, repo: repo, generation: generation, key: choice.key, checkpoint: checkpoint, total: len(operations)}
-		script := "auto-close"
-		args := []string{"--expected-repo", repo, "reject", "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--reason", reason}
-		if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
-			script = "action-proposals"
-			args = []string{"--expected-repo", repo, "reject", "--kind", choice.key.Kind, "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--reason", reason}
-			msg.action = true
-		}
-		out, err := runScript(root, script, args...)
+		args := []string{"--expected-repo", repo, "reject", "--kind", choice.key.Kind, "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--reason", reason}
+		msg.action = true
+		out, err := runScript(root, "action-proposals", args...)
 		if err != nil {
 			msg.err = err
 			return msg
@@ -108,12 +103,6 @@ func (m model) finishNotificationRejection(msg notificationRejectionDoneMsg) (te
 
 func (n notificationsUI) itemOperations(repo string, choice notificationChoice, action string) []notificationItemOperation {
 	var operations []notificationItemOperation
-	if choice.proposal >= 0 {
-		row := n.proposals.Rows[choice.proposal]
-		if action == "dismiss" || row.Needs {
-			operations = append(operations, notificationItemOperation{script: "auto-close", source: "proposal", args: []string{"--expected-repo", repo, action, "--number", strconv.Itoa(row.Number), "--checkpoint", row.Checkpoint}})
-		}
-	}
 	if choice.actionProposal >= 0 {
 		row := n.actions.Rows[choice.actionProposal]
 		if action == "dismiss" || row.Needs {

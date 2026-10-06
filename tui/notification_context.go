@@ -12,6 +12,7 @@ import (
 
 type autoCloseContext struct {
 	Repository         string               `json:"repository"`
+	Kind               string               `json:"kind"`
 	Number             int                  `json:"number"`
 	ProposalCheckpoint string               `json:"proposal_checkpoint"`
 	Current            bool                 `json:"current"`
@@ -52,11 +53,11 @@ type autoCloseContextMsg struct {
 }
 
 func readAutoCloseContext(root, repo string, number int, checkpoint string, offset int, contextCheckpoint string) (autoCloseContext, error) {
-	args := []string{"--expected-repo", repo, "context", "--number", strconv.Itoa(number), "--checkpoint", checkpoint, "--offset", strconv.Itoa(offset)}
+	args := []string{"--expected-repo", repo, "context", "--kind", "pr", "--number", strconv.Itoa(number), "--checkpoint", checkpoint, "--offset", strconv.Itoa(offset)}
 	if contextCheckpoint != "" {
 		args = append(args, "--context-checkpoint", contextCheckpoint)
 	}
-	out, err := runScript(root, "auto-close", args...)
+	out, err := runScript(root, "action-proposals", args...)
 	if err != nil {
 		return autoCloseContext{}, err
 	}
@@ -64,7 +65,7 @@ func readAutoCloseContext(root, repo string, number int, checkpoint string, offs
 	if err := json.Unmarshal([]byte(out), &context); err != nil {
 		return autoCloseContext{}, err
 	}
-	if context.Repository != repo || context.Number != number || context.ProposalCheckpoint != checkpoint || context.Requests != 0 ||
+	if context.Repository != repo || context.Kind != "pr" || context.Number != number || context.ProposalCheckpoint != checkpoint || context.Requests != 0 ||
 		context.ItemContext.Repository != repo || context.ItemContext.Item.Kind != "pr" || context.ItemContext.Item.Number != number ||
 		context.ItemContext.Requests != 0 || context.ItemContext.Checkpoint == "" || context.ItemContext.Pagination.Offset != offset || len(context.ItemContext.Rows) > 10 ||
 		context.Current && context.Reason != "" || !context.Current && context.Reason == "" {
@@ -160,7 +161,7 @@ func (c autoCloseContext) guidanceBlocks() []guidanceBlock {
 		case "ledger":
 			block := guidanceBlock{title: "Local decision"}
 			if len(row.Fields) == 0 {
-				block.lines = append(block.lines, "No local ledger row for this PR")
+				block.lines = append(block.lines, "No local ledger row for this item")
 			} else {
 				call := strings.Trim(strings.Join([]string{contextField(row.Fields, "category"), contextField(row.Fields, "action"), contextField(row.Fields, "confidence")}, " · "), " ·")
 				if call == "" {

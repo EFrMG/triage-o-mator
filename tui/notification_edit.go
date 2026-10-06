@@ -43,14 +43,8 @@ func (m model) editProposalCmd() tea.Cmd {
 			return msg
 		}
 
-		script := "auto-close"
-		args := []string{"--expected-repo", repo, "edit", "--number", strconv.Itoa(key.Number), "--checkpoint", checkpoint, "--comment-file", draft.Name(), "--by", by}
-		if choice, ok := m.notifications.actionProposalChoice(key); ok && choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
-			script = "action-proposals"
-			args = []string{"--expected-repo", repo, "edit", "--kind", key.Kind, "--number", strconv.Itoa(key.Number), "--checkpoint", checkpoint, "--comment-file", draft.Name(), "--by", by}
-			msg.action = true
-		}
-		out, err := runScript(root, script, args...)
+		args := []string{"--expected-repo", repo, "edit", "--kind", key.Kind, "--number", strconv.Itoa(key.Number), "--checkpoint", checkpoint, "--comment-file", draft.Name(), "--by", by}
+		out, err := runScript(root, "action-proposals", args...)
 		if err != nil {
 			msg.err = err
 			return msg
@@ -86,11 +80,7 @@ func (m model) finishProposalEdit(msg proposalEditDoneMsg) (tea.Model, tea.Cmd) 
 	updated := next.(model)
 	updated.notifications.selectItem = msg.key
 	if msg.err == nil {
-		if msg.action {
-			updated.notifications.openActionAfter = msg.key
-		} else {
-			updated.notifications.openProposalAfter = msg.key
-		}
+		updated.notifications.openActionAfter = msg.key
 	}
 	return updated, cmd
 }

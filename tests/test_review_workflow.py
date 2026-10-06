@@ -205,14 +205,17 @@ class ItemContextTests(Workspace):
 
 class ProposalFeedbackTests(Workspace):
     def auto_close(self, *args, ok=True):
-        return self.json_cli("auto-close", "--expected-repo", "owner/repo", *args, ok=ok)
+        command, *rest = args
+        if command in ("review", "execute", "context", "edit", "answer", "reject", "view", "dismiss"):
+            rest = ["--kind", "pr", *rest]
+        return self.json_cli("action-proposals", "--expected-repo", "owner/repo", command, *rest, ok=ok)
 
     def propose(self, number, *extra, ok=True):
         comment = self.root / "comment.md"
         comment.write_text("Thanks for the work; this PR is superseded.\n")
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", str(number))
 
-        return self.auto_close("propose", "--number", str(number), "--title", "An older fix",
+        return self.auto_close("propose", "--kind", "pr", "--number", str(number), "--operation", "close", "--observed-state", "open", "--title", "An older fix",
                                "--head-sha", "b" * 40, "--updated-at", "2026-09-29T00:00:00Z",
                                "--comment-file", str(comment), "--by", "agent:helper",
                                "--context-checkpoint", context["checkpoint"], *extra, ok=ok)
@@ -261,15 +264,13 @@ class ProposalFeedbackTests(Workspace):
         self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["checkpoint"], edited["checkpoint"])
         self.assertEqual(len(self.calls()), before)
 
-        path = self.root / "data/owner/repo/auto-close/pr-1.json"
+        path = self.root / "data/owner/repo/action-proposals/pr-1.json"
         legacy = json.loads(path.read_text())
         legacy.pop("checksum")
         legacy.pop("inputs")
         legacy["checksum"] = hashlib.sha256(json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         path.write_text(json.dumps(legacy) + "\n")
-        listed = self.auto_close("list")["rows"][0]
-        self.assertTrue(listed["legacy_unbound"])
-        self.assertIsNone(listed["inputs"])
+        self.auto_close("list", ok=False)
         self.auto_close("review", "--number", "1", ok=False)
         self.assertEqual(len(self.calls()), before)
 
@@ -284,7 +285,7 @@ class ProposalFeedbackTests(Workspace):
 
         rejected = self.auto_close("reject", "--number", "1", "--checkpoint", pending["checkpoint"],
                                    "--by", "maintainer", "--reason", "Keep the compatibility work open")
-        record = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
+        record = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         self.assertEqual(rejected["status"], "rejected")
         self.assertFalse(rejected["active"])
         self.assertFalse(rejected["dismissed"])
@@ -303,7 +304,7 @@ class ProposalFeedbackTests(Workspace):
         self.assertTrue(self.auto_close("list")["rows"][0]["dismissed"])
 
         attempted = self.propose(2, "--evidence-gap", "No selected cache snapshot")
-        saved = self.root / "data/owner/repo/auto-close/pr-2.json"
+        saved = self.root / "data/owner/repo/action-proposals/pr-2.json"
         before = saved.read_bytes()
         writes = self.root / "data/owner/repo/writes"
         writes.mkdir()
@@ -353,7 +354,7 @@ class ProposalFeedbackTests(Workspace):
         self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", "1",
                      "--notes", "Old API no longer needed; closure may proceed", "--by", "maintainer")
 
-        path = self.root / "data/owner/repo/auto-close/pr-1.json"
+        path = self.root / "data/owner/repo/action-proposals/pr-1.json"
         unchanged = path.read_bytes()
         self.propose(1, *handoff(), "--evidence-gap", "No selected snapshot", "--replace-checkpoint", rejected["checkpoint"], ok=False)
         self.propose(1, *handoff(), "--evidence-gap", "No selected snapshot", "--replace-checkpoint", initial["checkpoint"],
@@ -412,7 +413,7 @@ class ProposalFeedbackTests(Workspace):
         self.assertEqual(fragment["text"], "éé")
 
         self.propose(2, "--evidence-gap", "No selected cache snapshot")
-        path = self.root / "data/owner/repo/auto-close/pr-2.json"
+        path = self.root / "data/owner/repo/action-proposals/pr-2.json"
         saved = json.loads(path.read_text())
         writes = self.root / "data/owner/repo/writes"
         writes.mkdir()

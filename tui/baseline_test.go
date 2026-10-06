@@ -1356,9 +1356,9 @@ func TestBaselineAttentionDropsForeignReply(t *testing.T) {
 func TestNotificationCountIncludesProposalsAfterSync(t *testing.T) {
 	root := baselineRoot(t)
 	for name, output := range map[string]string{
-		"fetch":      "{}",
-		"sync":       "{}",
-		"auto-close": `{"repository":"owner/repo","requests":0,"rows":[{"number":3,"needs_attention":true},{"number":4,"needs_attention":true},{"number":5,"needs_attention":false}]}`,
+		"fetch":            "{}",
+		"sync":             "{}",
+		"action-proposals": `{"repository":"owner/repo","requests":0,"rows":[{"kind":"pr","number":3,"operation":"close","status":"pending","needs_attention":true},{"kind":"pr","number":4,"operation":"close","status":"pending","needs_attention":true},{"kind":"pr","number":5,"operation":"close","status":"executed","needs_attention":false}]}`,
 	} {
 		script := "#!/usr/bin/env python3\nprint('" + output + "')\n"
 		if err := os.WriteFile(filepath.Join(root, "bin", name), []byte(script), 0o755); err != nil {
@@ -1398,10 +1398,10 @@ func TestClosureReviewShowsTargetAndRefreshPinsHost(t *testing.T) {
 	}
 
 	for name, script := range map[string]string{
-		"fetch":      "#!/usr/bin/env python3\nimport json, pathlib, sys\npathlib.Path('fetch-args.json').write_text(json.dumps(sys.argv[1:]))\n",
-		"sync":       "#!/usr/bin/env python3\nprint('{}')\n",
-		"cache":      "#!/usr/bin/env python3\nprint('{\"unread_total\":0}')\n",
-		"auto-close": "#!/usr/bin/env python3\nprint('{\"repository\":\"owner/repo\",\"requests\":0,\"rows\":[]}')\n",
+		"fetch":            "#!/usr/bin/env python3\nimport json, pathlib, sys\npathlib.Path('fetch-args.json').write_text(json.dumps(sys.argv[1:]))\n",
+		"sync":             "#!/usr/bin/env python3\nprint('{}')\n",
+		"cache":            "#!/usr/bin/env python3\nprint('{\"unread_total\":0}')\n",
+		"action-proposals": "#!/usr/bin/env python3\nprint('{\"repository\":\"owner/repo\",\"requests\":0,\"rows\":[]}')\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, "bin", name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
@@ -1464,7 +1464,7 @@ if 'reject' in args:
 else:
     print('{}')
 `
-	for _, name := range []string{"cache", "auto-close"} {
+	for _, name := range []string{"cache", "action-proposals"} {
 		if err := os.WriteFile(filepath.Join(root, "bin", name), []byte(logScript), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -1476,7 +1476,7 @@ else:
 	m.notifications = notificationsUI{
 		open:      true,
 		tracked:   &trackedPage{Rows: []trackedRow{tracked}, Total: 1, UnreadTotal: 1},
-		proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Title: "Fixture", Status: "pending", Active: true, Needs: true, Checkpoint: strings.Repeat("a", 64)}}},
+		actions:   actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Comment: "Publish this explanation", Operation: "close", Status: "pending", Active: true, Needs: true, Checkpoint: strings.Repeat("a", 64), Inputs: &autoCloseInputs{ContextCheckpoint: "context"}}}},
 		attention: &attentionPage{Rows: []attentionRow{{Number: 3, Selectable: true, Attention: true, WatchCheckpoint: strings.Repeat("b", 64)}}},
 		closures:  &actionHistoryPage{Rows: []actionHistoryRow{{Number: 3, Selectable: true, HistoryCheckpoint: strings.Repeat("c", 64)}}},
 	}
@@ -1488,11 +1488,12 @@ else:
 		t.Fatal("PR appears more than once in Notifications")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Text: "1"})
-	if m.notifications.review != nil || m.notificationPR.open {
+	if m.notifications.actionReview != nil || m.notificationPR.open {
 		t.Fatal("number key unexpectedly opened the notification")
 	}
-	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.notifications.review == nil || !strings.Contains(m.notificationsView(), "Comment to publish") {
+	next, openCmd := m.handleNotificationsKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = baselineSend(next.(model), openCmd().(actionReviewMsg))
+	if m.notifications.actionReview == nil || !strings.Contains(m.notificationsView(), "Comment to publish") {
 		t.Fatal("Enter did not open the closure proposal directly")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Text: "t"})
@@ -1510,15 +1511,15 @@ else:
 		t.Fatal("l on the proposal did not open the PR")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if m.notifications.review == nil || m.notificationPR.open {
+	if m.notifications.actionReview == nil || m.notificationPR.open {
 		t.Fatal("returning from the PR did not restore its proposal")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Text: "d"})
-	if !m.comment.open || m.notifications.review == nil {
+	if !m.comment.open || m.notifications.actionReview == nil {
 		t.Fatal("d in proposal review did not open the rejection composer")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if m.comment.open || m.notifications.review == nil {
+	if m.comment.open || m.notifications.actionReview == nil {
 		t.Fatal("canceling rejection did not restore proposal review")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -1527,7 +1528,7 @@ else:
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if m.notifications.review != nil || !m.notifications.open {
+	if m.notifications.actionReview != nil || !m.notifications.open {
 		t.Fatal("Esc did not return from proposal to Notifications")
 	}
 	t.Setenv("TMPDIR", t.TempDir())
@@ -1541,7 +1542,7 @@ else:
 		t.Fatal("edited rejection reason did not return to proposal preview")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if m.comment.open || m.notifications.review != nil {
+	if m.comment.open || m.notifications.actionReview != nil {
 		t.Fatal("canceling the edited rejection left a modal open")
 	}
 
@@ -1593,7 +1594,7 @@ else:
 		t.Fatalf("d did not reject and dismiss every source: %+v", dismissed)
 	}
 	finished, _ := next.(model).finishNotificationRejection(dismissed)
-	if finished.(model).comment.open || finished.(model).notifications.review != nil {
+	if finished.(model).comment.open || finished.(model).notifications.actionReview != nil {
 		t.Fatal("completed rejection left the composer or exact review open")
 	}
 	data, err = os.ReadFile(filepath.Join(root, "notification-calls.jsonl"))
@@ -1607,7 +1608,7 @@ else:
 	}
 
 	m.comment.open = false
-	m.notifications.proposals.Rows = nil
+	m.notifications.actions.Rows = nil
 	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
 	if cmd == nil {
 		t.Fatal("d did not dismiss a notification without a pending proposal")
@@ -1617,7 +1618,7 @@ else:
 		t.Fatalf("presentation-only dismissal changed: %+v", plainDismissal)
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !m.notificationPR.open || m.notifications.review != nil {
+	if !m.notificationPR.open || m.notifications.actionReview != nil {
 		t.Fatal("notification without a closure proposal did not open the item directly")
 	}
 }
@@ -1671,22 +1672,25 @@ func TestPendingProposalEditKeepsDraftAndReturnsToNewReview(t *testing.T) {
 import json, pathlib, sys
 args = sys.argv[1:]
 if 'edit' not in args:
-    sys.exit('unexpected auto-close operation')
+    sys.exit('unexpected action proposal operation')
 if pathlib.Path('edit-fail').exists():
     sys.exit('saved proposal changed')
 comment = pathlib.Path(args[args.index('--comment-file') + 1]).read_text()
 if '--rationale' in args:
     sys.exit('unexpected rationale')
-print(json.dumps(dict(number=3, status='pending', checkpoint='b' * 64, comment=comment)))
+print(json.dumps(dict(kind='pr', number=3, operation='close', status='pending', checkpoint='b' * 64, comment=comment)))
 `
-	if err := os.WriteFile(filepath.Join(root, "bin", "auto-close"), []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	m := baselineModel(t, root)
 	old := autoCloseRow{Number: 3, Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Status: "pending", Active: true,
 		Checkpoint: strings.Repeat("a", 64), Comment: "Original comment", Inputs: &autoCloseInputs{ContextCheckpoint: "context"}}
-	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{old}}, ticked: map[int]bool{3: true}, review: &autoCloseReview{}}
+	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{old}},
+		actions: actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Operation: "close", Title: old.Title, Target: old.Target,
+			Status: old.Status, Active: old.Active, Checkpoint: old.Checkpoint, Comment: old.Comment, Inputs: old.Inputs}}},
+		ticked: map[int]bool{3: true}, review: &autoCloseReview{}}
 	m.notifications.review.Plan.Proposals = []autoCloseRow{old}
 	next, _ := m.handleNotificationsKey(tea.KeyPressMsg{Text: "e"})
 	m = next.(model)
@@ -1726,15 +1730,18 @@ print(json.dumps(dict(number=3, status='pending', checkpoint='b' * 64, comment=c
 	}
 	next, reloadCmd := m.finishProposalEdit(saved)
 	m = next.(model)
-	if reloadCmd == nil || m.comment.open || m.notifications.review != nil || len(m.notifications.ticked) != 0 || m.notifications.openProposalAfter != (Key{Kind: "pr", Number: 3}) {
+	if reloadCmd == nil || m.comment.open || m.notifications.review != nil || len(m.notifications.ticked) != 0 || m.notifications.openActionAfter != (Key{Kind: "pr", Number: 3}) {
 		t.Fatal("saved proposal edit kept an old review or selected-set plan")
 	}
 	fresh := old
 	fresh.Checkpoint, fresh.Comment = strings.Repeat("b", 64), "Edited exact comment"
-	loaded := notificationsMsg{root: root, repo: m.repo, generation: m.notificationsGeneration, proposals: autoCloseList{Rows: []autoCloseRow{fresh}}, tracked: trackedPage{}, attention: attentionPage{}, closures: actionHistoryPage{}}
+	loaded := notificationsMsg{root: root, repo: m.repo, generation: m.notificationsGeneration,
+		actions: actionProposalList{Repository: m.repo, Rows: []actionProposalRow{{Kind: "pr", Number: 3, Operation: "close", Title: fresh.Title,
+			Target: fresh.Target, Status: fresh.Status, Active: fresh.Active, Checkpoint: fresh.Checkpoint, Comment: fresh.Comment, Inputs: fresh.Inputs}}},
+		tracked: trackedPage{}, attention: attentionPage{}, closures: actionHistoryPage{}}
 	next, contextCmd := m.finishNotifications(loaded)
 	m = next.(model)
-	if contextCmd == nil || m.notifications.review == nil || m.notifications.review.Plan.Proposals[0].Checkpoint != fresh.Checkpoint {
+	if contextCmd == nil || m.notifications.actionReview == nil || m.notifications.actionReview.row.Checkpoint != fresh.Checkpoint {
 		t.Fatal("edited proposal did not return to its new review")
 	}
 }
@@ -2024,9 +2031,12 @@ func TestCompletedOutcomesStayVisibleAndRejectedProposalsLeaveNotifications(t *t
 	if err := json.Unmarshal([]byte(`{"number":3,"title":"Completed fixture","target":"https://github.com/owner/repo/pull/3","comment":"Published explanation","status":"executed","needs_attention":true,"outcome":{"comment":{"status":"succeeded"},"state_change":{"status":"succeeded"}}}`), &completed); err != nil {
 		t.Fatal(err)
 	}
-	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{completed, {Number: 4, Title: "Needs inspection", Status: "uncertain", Needs: true}, rejected}}}
+	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{completed, {Number: 4, Title: "Needs inspection", Status: "uncertain", Needs: true}, rejected}},
+		actions: actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Title: completed.Title, Target: completed.Target, Operation: "close", Comment: completed.Comment, Status: "executed", Needs: true},
+			{Kind: "pr", Number: 4, Title: "Needs inspection", Operation: "close", Status: "uncertain", Needs: true},
+			{Kind: "pr", Number: 5, Title: rejected.Title, Operation: "close", Status: "rejected"}}}}
 	choices := m.notifications.choices()
-	if len(choices) != 2 || choices[0].key != (Key{Kind: "pr", Number: 4}) || choices[1].key != (Key{Kind: "pr", Number: 3}) || m.notifications.choiceNeeds(choices[1]) || notificationCount(nil, m.notifications.proposals) != 1 {
+	if len(choices) != 2 || choices[0].key != (Key{Kind: "pr", Number: 4}) || choices[1].key != (Key{Kind: "pr", Number: 3}) || m.notifications.choiceNeeds(choices[1]) || notificationCount(nil, m.notifications.actions) != 1 {
 		t.Fatalf("completed outcome or uncertain closure was unavailable, or rejection remained: %+v", choices)
 	}
 	view := ansi.Strip(m.notificationsView())
@@ -2094,7 +2104,7 @@ func TestSuggestedActionsLiveInNotificationsWithoutSeparateReviewTabs(t *testing
 	m.items = append(m.items, Item{Kind: "issue", Number: 24, State: "closed", Action: "reopen", Title: "Reopen fixture"})
 	m.items = append(m.items, Item{Kind: "issue", Number: 25, State: "closed", Action: "close", Title: "Already closed"})
 	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{{Kind: "issue", Number: 1, Status: "pending", Active: true}}}}
-	m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, m.notifications.proposals, m.notifications.actions)
+	m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, m.notifications.actions)
 	if len(m.notifications.suggestions) != 23 {
 		t.Fatalf("saved action suggestions were lost or duplicated: %d", len(m.notifications.suggestions))
 	}
@@ -2104,7 +2114,7 @@ func TestSuggestedActionsLiveInNotificationsWithoutSeparateReviewTabs(t *testing
 		t.Fatalf("Notifications kept suggestions from an older ledger: %d", len(m.notifications.suggestions))
 	}
 	m.items = allItems
-	m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, m.notifications.proposals, m.notifications.actions)
+	m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, m.notifications.actions)
 	choices := m.notifications.choices()
 	suggestionIndex, moreIndex := -1, -1
 	for i, choice := range choices {
@@ -2139,7 +2149,8 @@ func TestSuggestedActionsLiveInNotificationsWithoutSeparateReviewTabs(t *testing
 		t.Fatal("suggested action page did not advance to the next bounded set")
 	}
 
-	proposalList := notificationsUI{proposals: autoCloseList{Rows: []autoCloseRow{{Number: 3, Status: "pending", Active: true, Needs: true}}}, actions: actionProposalList{Rows: []actionProposalRow{{Kind: "issue", Number: 2, Action: "close", Operation: "close", Status: "pending", Active: true, Needs: true}}}}
+	proposalList := notificationsUI{actions: actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Action: "close", Operation: "close", Status: "pending", Active: true, Needs: true},
+		{Kind: "issue", Number: 2, Action: "close", Operation: "close", Status: "pending", Active: true, Needs: true}}}}
 	var summaries []string
 	var marks []string
 	for _, choice := range proposalList.choices() {
@@ -2151,8 +2162,8 @@ func TestSuggestedActionsLiveInNotificationsWithoutSeparateReviewTabs(t *testing
 	if len(summaries) != 2 || summaries[0] != "Close proposed" || summaries[1] != "Close proposed" || marks[0] != marks[1] {
 		t.Fatalf("issue and PR closures had different notification cards: %v, %v", summaries, marks)
 	}
-	proposalList.proposals.Rows[0].Needs = false
 	proposalList.actions.Rows[0].Needs = false
+	proposalList.actions.Rows[1].Needs = false
 	marks = nil
 	for _, choice := range proposalList.choices() {
 		renderNotificationChoice(proposalList, choice, func(_, _ string, mark cardMark) { marks = append(marks, mark.text) })
@@ -2172,13 +2183,13 @@ if "context" in args:
     stale = pathlib.Path("stale-context").exists()
     omitted = 30 if pathlib.Path("long-context").exists() else 0
     item = dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-2" if stale else "ctx-1", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(category=dict(preview="enhancement", omitted_bytes=0), action=dict(preview="keep-open", omitted_bytes=0), reviewer_notes=dict(preview="Check compatibility", omitted_bytes=omitted), reviewed=True)), dict(kind="group", id="group:g1", fields=dict(title=dict(preview="Compatibility review", omitted_bytes=0), status=dict(preview="draft", omitted_bytes=0), description=dict(preview="Compare alternatives", omitted_bytes=0))), dict(kind="member", id="member:g1:pr:3", selected=True, fields=dict(notes=dict(preview="Keep the old API", omitted_bytes=0)))])
-    print(json.dumps(dict(repository="owner/repo", number=3, proposal_checkpoint="proposal-1", current=not stale, reason="local context changed" if stale else None, item_context=item, latest_rejection=dict(by="maintainer", at="2026-09-29T00:00:00Z", reason="Earlier objection", proposal_checkpoint="older"), requests=0)))
+    print(json.dumps(dict(repository="owner/repo", kind="pr", number=3, proposal_checkpoint="proposal-1", current=not stale, reason="local context changed" if stale else None, item_context=item, latest_rejection=dict(by="maintainer", at="2026-09-29T00:00:00Z", reason="Earlier objection", proposal_checkpoint="older"), requests=0)))
 elif "review" in args:
-    print(json.dumps(dict(plan=dict(repo="owner/repo", operation="comment-and-close-pr", proposals=[row]), approval="fresh-approval")))
+    print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="fresh-approval")))
 else:
-    sys.exit("unexpected auto-close command")
+    sys.exit("unexpected action proposal command")
 `
-	if err := os.WriteFile(filepath.Join(root, "bin", "auto-close"), []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	sourceScript := `#!/usr/bin/env python3
@@ -2198,8 +2209,13 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 
 	m := baselineModel(t, root)
 	m.drafts[Key{Kind: "issue", Number: 1}] = decisionSnapshot{}
-	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{row}}}
-	choice := m.notifications.choices()[0]
+	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{row}},
+		actions: actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Operation: "close", Title: row.Title, Target: row.Target,
+			Status: row.Status, Active: row.Active, Checkpoint: row.Checkpoint, Comment: row.Comment, Inputs: row.Inputs}}}}
+	choice, ok := m.notifications.proposalChoice(3)
+	if !ok {
+		t.Fatal("PR closure was missing from the unified proposal list")
+	}
 	next, cmd := m.openNotificationSource(choice, "proposal")
 	m = next.(model)
 	if cmd == nil || !m.notifications.contextBusy {
@@ -2451,12 +2467,12 @@ func TestQuestionedClosureAnswerRequiresExactReviewBeforePublish(t *testing.T) {
 import json, pathlib, sys
 args = sys.argv[1:]
 answer = pathlib.Path("closure-answer").read_text() if pathlib.Path("closure-answer").exists() else None
-row = dict(number=3, title="Older change", target="https://github.com/owner/repo/pull/3", comment="This PR is superseded by #4.", head_sha="b" * 40, updated_at="2026-10-04T01:00:00Z", checkpoint="closure-2" if answer else "closure-1", status="pending", active=True, decision_question="Does #4 replace this PR?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Comparison pending"]))
+row = dict(kind="pr", number=3, operation="close", title="Older change", target="https://github.com/owner/repo/pull/3", comment="This PR is superseded by #4.", head_sha="b" * 40, updated_at="2026-10-04T01:00:00Z", checkpoint="closure-2" if answer else "closure-1", status="pending", active=True, decision_question="Does #4 replace this PR?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Comparison pending"]))
 if answer:
     row["decision_resolution"] = dict(by="maintainer", at="2026-10-04T02:00:00Z", reason=answer, held_checkpoint="closure-1")
 if "context" in args:
     context = dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-a", requests=0, pagination=dict(offset=0, next_offset=None), rows=[])
-    print(json.dumps(dict(repository="owner/repo", number=3, proposal_checkpoint=row["checkpoint"], current=True, reason=None, item_context=context, requests=0)))
+    print(json.dumps(dict(repository="owner/repo", kind="pr", number=3, proposal_checkpoint=row["checkpoint"], current=True, reason=None, item_context=context, requests=0)))
 elif "answer" in args:
     text = args[args.index("--answer") + 1]
     pathlib.Path("closure-answer").write_text(text)
@@ -2464,23 +2480,30 @@ elif "answer" in args:
     row["decision_resolution"] = dict(by=args[args.index("--by") + 1], at="2026-10-04T02:00:00Z", reason=text, held_checkpoint="closure-1")
     print(json.dumps(row))
 elif "review" in args:
-    print(json.dumps(dict(plan=dict(repo="owner/repo", operation="comment-and-close-pr", proposals=[row]), approval="exact-closure-approval")))
+    print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="exact-closure-approval")))
 elif "execute" in args:
     pathlib.Path("published-closure").write_text("yes")
-    print(json.dumps(dict(results=[dict(number=3, status="executed")])))
+    print(json.dumps(dict(kind="pr", number=3, status="executed")))
 else:
-    sys.exit("unexpected auto-close operation")
+    sys.exit("unexpected action proposal operation")
 `
-	if err := os.WriteFile(filepath.Join(root, "bin", "auto-close"), []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	row := autoCloseRow{Number: 3, Title: "Older change", Target: "https://github.com/owner/repo/pull/3", Comment: "This PR is superseded by #4.", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "closure-1", Status: "pending", Active: true, DecisionQuestion: "Does #4 replace this PR?", Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}}
+	row := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Older change", Target: "https://github.com/owner/repo/pull/3", Comment: "This PR is superseded by #4.", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "closure-1", Status: "pending", Active: true, DecisionQuestion: "Does #4 replace this PR?", Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}}
 	m := baselineModel(t, root)
 	m.reviewer = "maintainer"
-	m.notifications = notificationsUI{open: true, proposals: autoCloseList{Rows: []autoCloseRow{row}}}
-	choice := m.notifications.choices()[0]
-	next, cmd := m.openNotificationSource(choice, "proposal")
-	m = baselineSend(next.(model), cmd().(autoCloseContextMsg))
+	m.notifications = notificationsUI{open: true, proposals: closeProposals(actionProposalList{Rows: []actionProposalRow{row}}),
+		actions: actionProposalList{Rows: []actionProposalRow{row}}}
+	choice, ok := m.notifications.proposalChoice(3)
+	if !ok {
+		t.Fatal("questioned PR closure was missing from unified proposals")
+	}
+	next, cmd := m.openActionReview(choice)
+	m = baselineSend(next.(model), cmd().(actionReviewMsg))
+	if m.notifications.actionReview == nil || m.notifications.actionReview.context == nil {
+		t.Fatal("PR closure did not open the shared action reader")
+	}
 	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
 	if cmd != nil {
 		t.Fatal("unanswered PR closure question offered approval")
@@ -2494,23 +2517,27 @@ else:
 	next, cmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	m = next.(model)
 	answerMsg := cmd().(proposalAnswerDoneMsg)
-	if answerMsg.err != nil || !answerMsg.saved || answerMsg.action {
-		t.Fatalf("PR closure answer was not saved on the existing proposal path: %+v", answerMsg)
+	if answerMsg.err != nil || !answerMsg.saved || !answerMsg.action {
+		t.Fatalf("PR closure answer was not saved on the unified proposal path: %+v", answerMsg)
 	}
 	updated, _ := m.finishProposalAnswer(answerMsg)
 	m = updated.(model)
 	row.Checkpoint = "closure-2"
 	row.DecisionResolution = &actionDecisionResolution{By: "maintainer", At: "2026-10-04T02:00:00Z", Reason: "Yes, #4 retains the behavior", HeldCheckpoint: "closure-1"}
-	m.notifications.proposals = autoCloseList{Rows: []autoCloseRow{row}}
-	choice = m.notifications.choices()[0]
-	next, cmd = m.openNotificationSource(choice, "proposal")
-	m = baselineSend(next.(model), cmd().(autoCloseContextMsg))
-	if view := ansi.Strip(m.autoCloseReviewView()); !strings.Contains(view, row.Target) || !strings.Contains(view, row.Comment) || !strings.Contains(view, row.DecisionResolution.Reason) {
+	m.notifications.proposals = closeProposals(actionProposalList{Rows: []actionProposalRow{row}})
+	m.notifications.actions = actionProposalList{Rows: []actionProposalRow{row}}
+	choice, ok = m.notifications.proposalChoice(3)
+	if !ok {
+		t.Fatal("answered PR closure was missing from unified proposals")
+	}
+	next, cmd = m.openActionReview(choice)
+	m = baselineSend(next.(model), cmd().(actionReviewMsg))
+	if view := ansi.Strip(m.actionReviewView()); !strings.Contains(view, row.Target) || !strings.Contains(view, row.Comment) || !strings.Contains(view, row.DecisionResolution.Reason) {
 		t.Fatal("PR closure review omitted exact target, public comment or answer")
 	}
 	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	m = baselineSend(next.(model), cmd().(autoCloseMsg))
-	if m.notifications.review == nil || m.notifications.review.Approval != "exact-closure-approval" {
+	m = baselineSend(next.(model), cmd().(actionReviewMsg))
+	if m.notifications.actionReview == nil || m.notifications.actionReview.approval != "exact-closure-approval" {
 		t.Fatal("answered closure did not enter exact approval review")
 	}
 	if _, err := os.Stat(filepath.Join(root, "published-closure")); !os.IsNotExist(err) {
@@ -2520,7 +2547,7 @@ else:
 	if cmd == nil {
 		t.Fatal("second approval press did not start the closure write")
 	}
-	if result := cmd().(autoCloseMsg); result.err != nil {
+	if result := cmd().(actionReviewMsg); result.err != nil {
 		t.Fatal(result.err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "published-closure")); err != nil {

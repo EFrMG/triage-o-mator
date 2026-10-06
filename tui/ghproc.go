@@ -126,27 +126,17 @@ func fetchSyncCmdAtHost(installRoot, repo string, full bool, host string, items 
 			})
 		}
 
-		proposals, proposalErr := runScript(installRoot, "auto-close", "--expected-repo", repo, "list")
-		var listed autoCloseList
-		if proposalErr == nil {
-			proposalErr = json.Unmarshal([]byte(proposals), &listed)
-		}
-		if proposalErr == nil && (listed.Repository != repo || listed.Requests != 0) {
-			proposalErr = fmt.Errorf("proposal count response identity mismatch")
-		}
+		var proposalErr error
 		var actions actionProposalList
+		saved, proposalErr := runScript(installRoot, "action-proposals", "--expected-repo", repo, "list")
 		if proposalErr == nil {
-			var saved string
-			saved, proposalErr = runScript(installRoot, "action-proposals", "--expected-repo", repo, "list")
-			if proposalErr == nil {
-				proposalErr = json.Unmarshal([]byte(saved), &actions)
-			}
-			if proposalErr == nil && (actions.Repository != repo || actions.Requests != 0) {
-				proposalErr = fmt.Errorf("action proposal count response identity mismatch")
-			}
+			proposalErr = json.Unmarshal([]byte(saved), &actions)
+		}
+		if proposalErr == nil && (actions.Repository != repo || actions.Requests != 0) {
+			proposalErr = fmt.Errorf("action proposal count response identity mismatch")
 		}
 		message.summary, message.trackingErr, message.proposalErr = out, trackingErr, proposalErr
-		message.unreadTotal = notificationCount(unreadKeys, listed, actions)
+		message.unreadTotal = notificationCount(unreadKeys, actions)
 		return message
 	}
 }

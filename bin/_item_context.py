@@ -1,8 +1,7 @@
 """Offline, bounded views of the local guidance relevant to one issue or PR."""
 
 from _chunks import page, window
-from _auto_close_records import feedback as proposal_feedback
-from _action_proposal_records import feedback as action_feedback
+from _action_proposal_records import feedback as proposal_feedback
 from _evidence import canonical, digest
 from _groups import list_groups
 from _triage import REPO, TRIAGE_DEFAULTS, load_ledger
@@ -61,13 +60,7 @@ class ContextIndex:
         revision = "v1:" + digest(canonical([POLICY, projection]))
         checkpoint = "v1:" + digest(canonical([POLICY, revision, [(group["id"], group["revision"]) for group, _ in groups]]))
         if (kind, number) not in self.feedback:
-            earlier = proposal_feedback(number, REPO, self.completed_batch) if kind == "pr" else dict(checkpoint=None, events=[])
-            additional = action_feedback(kind, number, REPO, self.completed_batch)
-            if additional["checkpoint"] is not None:
-                combined = "v1:" + digest(canonical([earlier["checkpoint"], additional["checkpoint"]]))
-                self.feedback[(kind, number)] = dict(checkpoint=combined, events=earlier["events"] + additional["events"])
-            else:
-                self.feedback[(kind, number)] = earlier
+            self.feedback[(kind, number)] = proposal_feedback(kind, number, REPO, self.completed_batch)
 
         feedback = self.feedback[(kind, number)]
         if feedback["checkpoint"] is not None:

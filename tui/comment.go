@@ -152,19 +152,13 @@ func (m model) openCommentComposer(target commentTarget, close, reopen bool, tar
 }
 
 func (m model) openRejectionComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
-	if choice.proposal < 0 && choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
+	if choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
 		m.warn("A reviewer name is required to reject a proposal.")
 		return m, nil
 	}
 
-	status, target, checkpoint := "", "", ""
-	if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
-		row := m.notifications.actions.Rows[choice.actionProposal]
-		status, target, checkpoint = row.Status, row.Target, row.Checkpoint
-	} else {
-		row := m.notifications.proposals.Rows[choice.proposal]
-		status, target, checkpoint = row.Status, row.Target, row.Checkpoint
-	}
+	row := m.notifications.actions.Rows[choice.actionProposal]
+	status, target, checkpoint := row.Status, row.Target, row.Checkpoint
 	if status != "pending" {
 		return m.changeNotificationItem(choice, "dismiss")
 	}
@@ -189,24 +183,15 @@ func (m model) openExternalRejectionComposer(choice notificationChoice) (tea.Mod
 }
 
 func (m model) openAnswerComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
-	if choice.kind != "item" || choice.proposal < 0 && choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
+	if choice.kind != "item" || choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
 		m.warn("Select one questioned proposal and set a reviewer name before answering.")
 		return m, nil
 	}
 
-	status, target, checkpoint, question, answer := "", "", "", "", ""
-	if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
-		row := m.notifications.actions.Rows[choice.actionProposal]
-		status, target, checkpoint, question = row.Status, row.Target, row.Checkpoint, row.DecisionQuestion
-		if row.DecisionResolution != nil {
-			answer = row.DecisionResolution.Reason
-		}
-	} else {
-		row := m.notifications.proposals.Rows[choice.proposal]
-		status, target, checkpoint, question = row.Status, row.Target, row.Checkpoint, row.DecisionQuestion
-		if row.DecisionResolution != nil {
-			answer = row.DecisionResolution.Reason
-		}
+	row := m.notifications.actions.Rows[choice.actionProposal]
+	status, target, checkpoint, question, answer := row.Status, row.Target, row.Checkpoint, row.DecisionQuestion, ""
+	if row.DecisionResolution != nil {
+		answer = row.DecisionResolution.Reason
 	}
 	if status != "pending" || checkpoint == "" || question == "" {
 		m.warn("This proposal has no pending question to answer.")
@@ -226,20 +211,13 @@ func (m model) openAnswerComposer(choice notificationChoice) (tea.Model, tea.Cmd
 }
 
 func (m model) openProposalEdit(choice notificationChoice) (tea.Model, tea.Cmd) {
-	if choice.kind != "item" || choice.proposal < 0 && choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
+	if choice.kind != "item" || choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
 		m.warn("Select one pending proposal and set a reviewer name before editing.")
 		return m, nil
 	}
 
-	status, checkpoint, target, comment := "", "", "", ""
-	var inputs *autoCloseInputs
-	if choice.actionProposal >= 0 && (choice.proposal < 0 || !m.notifications.proposals.Rows[choice.proposal].Active) {
-		row := m.notifications.actions.Rows[choice.actionProposal]
-		status, checkpoint, target, comment, inputs = row.Status, row.Checkpoint, row.Target, row.Comment, row.Inputs
-	} else {
-		row := m.notifications.proposals.Rows[choice.proposal]
-		status, checkpoint, target, comment, inputs = row.Status, row.Checkpoint, row.Target, row.Comment, row.Inputs
-	}
+	row := m.notifications.actions.Rows[choice.actionProposal]
+	status, checkpoint, target, comment, inputs := row.Status, row.Checkpoint, row.Target, row.Comment, row.Inputs
 	if status != "pending" || checkpoint == "" || inputs == nil {
 		m.warn("This proposal cannot be edited; inspect its current context first.")
 		return m, nil

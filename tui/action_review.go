@@ -18,6 +18,7 @@ type actionProposalContext struct {
 	Current            bool                 `json:"current"`
 	Reason             string               `json:"reason"`
 	ItemContext        autoCloseItemContext `json:"item_context"`
+	LatestRejection    *autoCloseRejection  `json:"latest_rejection"`
 	Requests           int                  `json:"requests"`
 }
 
@@ -35,6 +36,7 @@ type actionReviewMsg struct {
 	generation                    uint64
 	key                           Key
 	context                       actionProposalContext
+	offset                        int
 	approval                      string
 	row                           actionProposalRow
 	err                           error
@@ -44,9 +46,7 @@ func actionReviewCmd(root, repo string, generation uint64, row actionProposalRow
 	return func() tea.Msg {
 		msg := actionReviewMsg{root: root, repo: repo, generation: generation, key: Key{Kind: row.Kind, Number: row.Number}, checkpoint: row.Checkpoint, phase: phase}
 		args := []string{"--expected-repo", repo, phase, "--kind", row.Kind, "--number", strconv.Itoa(row.Number)}
-		if phase == "context" {
-			args = append(args, "--checkpoint", row.Checkpoint)
-		} else if phase == "execute" {
+		if phase == "execute" {
 			args = append(args, "--publish", "--approve", approval)
 		}
 		out, err := runScript(root, "action-proposals", args...)
@@ -54,9 +54,7 @@ func actionReviewCmd(root, repo string, generation uint64, row actionProposalRow
 			msg.err = err
 			return msg
 		}
-		if phase == "context" {
-			msg.err = json.Unmarshal([]byte(out), &msg.context)
-		} else if phase == "review" {
+		if phase == "review" {
 			var reviewed struct {
 				Plan struct {
 					Repository string              `json:"repo"`
@@ -87,6 +85,22 @@ func actionReviewCmd(root, repo string, generation uint64, row actionProposalRow
 	}
 }
 
+func actionReviewContextCmd(root, repo string, generation uint64, row actionProposalRow, offset int, contextCheckpoint string) tea.Cmd {
+	return func() tea.Msg {
+		msg := actionReviewMsg{root: root, repo: repo, generation: generation, key: Key{Kind: row.Kind, Number: row.Number}, checkpoint: row.Checkpoint, phase: "context", offset: offset}
+		args := []string{"--expected-repo", repo, "context", "--kind", row.Kind, "--number", strconv.Itoa(row.Number), "--checkpoint", row.Checkpoint, "--offset", strconv.Itoa(offset)}
+		if contextCheckpoint != "" {
+			args = append(args, "--context-checkpoint", contextCheckpoint)
+		}
+		out, err := runScript(root, "action-proposals", args...)
+		if err == nil {
+			err = json.Unmarshal([]byte(out), &msg.context)
+		}
+		msg.err = err
+		return msg
+	}
+}
+
 func (m model) openActionReview(choice notificationChoice) (tea.Model, tea.Cmd) {
 	if choice.actionProposal < 0 || choice.actionProposal >= len(m.notifications.actions.Rows) {
 		return m, nil
@@ -97,7 +111,12 @@ func (m model) openActionReview(choice notificationChoice) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	m.notifications.actionReview = &actionReviewUI{row: row, busy: true}
-	return m, actionReviewCmd(m.installRoot, m.repo, m.notificationsGeneration, row, "context", "")
+	m.notifications.notesOpen = false
+	m.notifications.notesBusy = false
+	m.notifications.notesText = ""
+	m.notifications.notesError = ""
+	m.notifications.notesRequest++
+	return m, actionReviewContextCmd(m.installRoot, m.repo, m.notificationsGeneration, row, 0, "")
 }
 
 func (m model) finishActionReview(msg actionReviewMsg) (tea.Model, tea.Cmd) {
@@ -120,6 +139,7 @@ func (m model) finishActionReview(msg actionReviewMsg) (tea.Model, tea.Cmd) {
 			msg.context.ProposalCheckpoint != current.row.Checkpoint || msg.context.Requests != 0 ||
 			msg.context.ItemContext.Repository != m.repo || msg.context.ItemContext.Item.Kind != current.row.Kind ||
 			msg.context.ItemContext.Item.Number != current.row.Number || msg.context.ItemContext.Requests != 0 ||
+			msg.context.ItemContext.Pagination.Offset != msg.offset || len(msg.context.ItemContext.Rows) > 10 ||
 			current.row.Inputs == nil || current.row.Status == "pending" && msg.context.ItemContext.Checkpoint != current.row.Inputs.ContextCheckpoint {
 			current.problem = "Saved action context differs from the selected proposal."
 			return m, nil
@@ -158,6 +178,26 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if review.busy && msg.String() != "?" {
 		return m, nil
 	}
+	if m.notifications.notesOpen && msg.String() != "q" {
+		switch msg.String() {
+		case "m", "esc", "x", "h", "left":
+			m.notifications.notesOpen = false
+			m.notifications.notesRequest++
+		case "j", "down":
+			m.notifications.notesScroll++
+		case "k", "up":
+			m.notifications.notesScroll--
+		case "ctrl+d":
+			m.notifications.notesScroll += maxInt(m.commentHeight()/2, 1)
+		case "ctrl+u":
+			m.notifications.notesScroll -= maxInt(m.commentHeight()/2, 1)
+		}
+		if m.notifications.notesOpen {
+			vp := m.proposalNotesViewport()
+			m.notifications.notesScroll = vp.YOffset()
+		}
+		return m, nil
+	}
 	switch msg.String() {
 	case "?":
 		m.showHelp = !m.showHelp
@@ -173,8 +213,40 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		review.scroll += maxInt(m.mainHeight()/2, 1)
 	case "ctrl+u":
 		review.scroll = maxInt(review.scroll-maxInt(m.mainHeight()/2, 1), 0)
+	case "[", "]":
+		if review.context == nil {
+			return m, nil
+		}
+		offset := maxInt(0, review.context.ItemContext.Pagination.Offset-10)
+		if msg.String() == "]" {
+			if review.context.ItemContext.Pagination.Next == nil {
+				return m, nil
+			}
+			offset = *review.context.ItemContext.Pagination.Next
+		}
+		review.busy = true
+		return m, actionReviewContextCmd(m.installRoot, m.repo, m.notificationsGeneration, row, offset, review.context.ItemContext.Checkpoint)
 	case "enter", "l", "right":
 		return m.openNotificationItemAt(Key{Kind: row.Kind, Number: row.Number}, 0)
+	case "y":
+		text, what := m.yankActionProposal(row)
+		m.status = "Taking " + what + "…"
+		return m, yankCmd(m.installRoot, m.repo, what, text)
+	case "m":
+		return m.toggleActionNotes(row)
+	case "w":
+		if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok && choice.tracked >= 0 {
+			m.status = fmt.Sprintf("Already tracking %s #%d comments.", strings.ToUpper(row.Kind), row.Number)
+			return m, nil
+		}
+		return m.startTracking(Key{Kind: row.Kind, Number: row.Number})
+	case "t", "i":
+		if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok {
+			if msg.String() == "t" {
+				return m.openNotificationSource(choice, "watch")
+			}
+			return m.openNotificationSource(choice, "action")
+		}
 	case "a":
 		if row.Status != "pending" || !row.Active || review.context == nil || !review.context.Current || review.problem != "" {
 			m.warn("Current action context is required before approval.")
@@ -264,6 +336,9 @@ func (m model) actionReviewView() string {
 		fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(resolution.By)+" · At: "+sanitize(resolution.At), width)))
 		fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(resolution.Reason), width)))
 	}
+	if row.Reference != nil {
+		fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))
+	}
 	styles.writeComment(&b, row.Comment, row.Status, width)
 	fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Human context")))
 	if review.context == nil {
@@ -279,8 +354,24 @@ func (m model) actionReviewView() string {
 				fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(line), width)))
 			}
 		}
+		if review.context.LatestRejection != nil && row.Status != "rejected" {
+			fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Bold(true).Render("Earlier objection · By: "+sanitize(review.context.LatestRejection.By))))
+			fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(review.context.LatestRejection.Reason), width)))
+		}
+		if review.context.ItemContext.Pagination.Offset > 0 || review.context.ItemContext.Pagination.Next != nil {
+			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render(fmt.Sprintf("Local context page %d · [ and ] move between pages", review.context.ItemContext.Pagination.Offset/10+1))))
+		}
+	}
+	if row.Reconsideration != nil {
+		fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Bold(true).Render("Reconsideration · "+sanitize(row.Reconsideration.By))))
+		fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(row.Reconsideration.Reason), width)))
 	}
 	styles.writeEvidence(&b, row.Inputs, width)
+	if row.Rejection != nil {
+		fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render("Rejection")))
+		fmt.Fprintf(&b, "%s\n", inset(wrapText("By: "+sanitize(row.Rejection.By)+" · At: "+sanitize(row.Rejection.At), width)))
+		fmt.Fprintf(&b, "%s\n", inset(wrapText(orPlaceholder(sanitize(row.Rejection.Reason), "(no reason given)"), width)))
+	}
 	if review.problem != "" {
 		fmt.Fprintf(&b, "\n%s\n", inset(styles.danger.Render(wrapText("Action unavailable: "+sanitize(review.problem), width))))
 	}

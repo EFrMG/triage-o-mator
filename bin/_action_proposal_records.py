@@ -161,7 +161,8 @@ def feedback(kind, number, repo, completed_batch=None):
             events.append(dict(kind="write_outcome", status=version["status"], request_id=version["request_id"],
                                target=version["target"], comment_status=outcome["comment"]["status"],
                                state_status=outcome["state_change"]["status"], comment_url=outcome["comment"].get("url"),
-                               state_url=outcome["state_change"].get("url")))
+                               state_url=outcome["state_change"].get("url"), comment_error=outcome["comment"].get("error"),
+                               state_error=outcome["state_change"].get("error")))
 
     if record["status"] == "pending":
         receipt = DATA_DIR / "writes" / (record["request_id"] + ".json")

@@ -333,7 +333,25 @@ class AutoCloseWriteTests(Workspace):
             (self.mock / f"pulls-{number}.json").write_text(json.dumps(dict(number=number, html_url=target, head=dict(sha="b" * 40))))
 
     def auto_close(self, *args, ok=True):
-        return self.json_cli("auto-close", "--expected-repo", "owner/repo", *args, ok=ok)
+        command, *rest = args
+        if command == "propose":
+            rest = ["--kind", "pr", "--operation", "close", "--observed-state", "open", *rest]
+        elif command in ("review", "execute"):
+            numbers = []
+            while "--number" in rest:
+                index = rest.index("--number")
+                numbers.append(rest[index + 1])
+                del rest[index:index + 2]
+            if len(numbers) > 1:
+                rest = [*[part for number in numbers for part in ("--item", f"pr:{number}")], *rest]
+            elif numbers:
+                rest = ["--kind", "pr", "--number", numbers[0], *rest]
+            elif "--all" in rest:
+                rest = ["--kind", "pr", "--operation", "close", *rest]
+        elif command in ("context", "edit", "answer", "reject", "view", "dismiss", "inspect"):
+            rest = ["--kind", "pr", *rest]
+        result = self.json_cli("action-proposals", "--expected-repo", "owner/repo", command, *rest, ok=ok)
+        return {"results": [result]} if command == "execute" and ok and result is not None and "results" not in result else result
 
     def propose(self, number, *extra, ok=True):
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", str(number))
@@ -358,6 +376,19 @@ class AutoCloseWriteTests(Workspace):
     def write_calls(self):
         path = self.mock / "write-calls.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def test_unbound_pr_closure_requires_exact_human_approval(self):
+        proposal = self.propose(1)
+        listed = self.auto_close("list")["rows"][0]
+        self.assertIsNone(listed["action"])
+        self.assertEqual(listed["operation"], "close")
+        self.assertEqual(listed["checkpoint"], proposal["checkpoint"])
+
+        reviewed = self.auto_close("review", "--number", "1")
+        self.assertEqual(reviewed["plan"]["proposals"][0]["checkpoint"], proposal["checkpoint"])
+        self.json_cli("action-pass", "preview", "--expected-repo", "owner/repo", "--item", "pr:1", ok=False)
+        self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], "--automation", ok=False)
+        self.assertEqual(self.write_calls(), [])
 
     def test_repository_policy_routes_bound_pr_closure_through_action_proposal(self):
         write_gh = (self.mock / "gh").read_text()
@@ -452,7 +483,7 @@ class AutoCloseWriteTests(Workspace):
 
     def test_earlier_pr_closure_resolution_history_remains_readable(self):
         self.propose(1, "--decision-question", "Does the replacement cover this PR?")
-        path = self.root / "data/owner/repo/auto-close/pr-1.json"
+        path = self.root / "data/owner/repo/action-proposals/pr-1.json"
         previous = json.loads(path.read_text())
         previous.pop("checksum")
         previous["decision_review"] = dict(reviewed=False, by="", at="")
@@ -595,7 +626,7 @@ class AutoCloseWriteTests(Workspace):
         self.assertEqual(self.write_calls()[2]["body"]["body"], fresh["comment"])
 
     def test_pending_edit_retains_history_and_invalidates_selected_plan(self):
-        first = self.propose(1, "--rationale", "Legacy assessment")
+        first = self.propose(1, "--reference-kind", "issue", "--reference-number", "2")
         self.propose(2)
         old = self.auto_close("review", "--number", "1", "--number", "2")
         comment = self.root / "edited-comment.md"
@@ -603,10 +634,10 @@ class AutoCloseWriteTests(Workspace):
 
         edited = self.auto_close("edit", "--number", "1", "--checkpoint", first["checkpoint"],
                                  "--comment-file", str(comment), "--by", "maintainer")
-        record = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
+        record = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         self.assertEqual(edited["comment"], comment.read_text())
-        self.assertNotIn("rationale", edited)
-        self.assertEqual(record["history"][-1]["rationale"], "Legacy assessment")
+        self.assertEqual(edited["reference"], {"kind": "issue", "number": 2})
+        self.assertEqual(record["history"][-1]["reference"], edited["reference"])
         self.assertEqual(record["proposed_by"], "maintainer")
         self.assertEqual(record["history"][-1]["checksum"], first["checkpoint"])
         self.assertEqual(record["inputs"], record["history"][-1]["inputs"])
@@ -621,7 +652,7 @@ class AutoCloseWriteTests(Workspace):
         receipt.write_text("{}\n")
         self.auto_close("edit", "--number", "1", "--checkpoint", edited["checkpoint"],
                         "--comment-file", str(comment), "--by", "maintainer", ok=False)
-        self.assertEqual(json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text()), record)
+        self.assertEqual(json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text()), record)
         receipt.unlink()
 
         fresh = self.auto_close("review", "--number", "1", "--number", "2")
@@ -669,7 +700,7 @@ class AutoCloseWriteTests(Workspace):
     def test_stale_context_does_not_block_uncertain_write_reconciliation(self):
         proposal = self.propose(1)
         reviewed = self.auto_close("review", "--number", "1")
-        saved = json.loads((self.root / "data/owner/repo/auto-close/pr-1.json").read_text())
+        saved = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         base = ("--expected-repo", "owner/repo", "--host", "github.com", "--kind", "pr", "--number", "1",
                 "--body", proposal["comment"], "--close", "--request-id", saved["request_id"],
                 "--expected-head", saved["head_sha"], "--expected-updated-at", saved["updated_at"])

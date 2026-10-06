@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import uuid
 
 from support import FAKE_GH, Workspace, item
 
@@ -145,9 +144,9 @@ class WriteTests(Workspace):
         taxonomy = json.loads(taxonomy_path.read_text())
         taxonomy["actions"].remove("comment")
         taxonomy_path.write_text(json.dumps(taxonomy))
-        legacy_preview = self.json_cli("action-pass", "preview", *args, "--item", "issue:1")
-        self.assertEqual(legacy_preview["plan"]["items"][0]["mode"], "stage")
-        self.assertEqual(self.json_cli("action-pass", "run", *args, "--item", "issue:1", "--preview-sha256", legacy_preview["preview_sha256"])["results"][0]["status"], "staged")
+        retired_preview = self.json_cli("action-pass", "preview", *args, "--item", "issue:1")
+        self.assertEqual(retired_preview["plan"]["items"][0]["mode"], "stage")
+        self.assertEqual(self.json_cli("action-pass", "run", *args, "--item", "issue:1", "--preview-sha256", retired_preview["preview_sha256"])["results"][0]["status"], "staged")
         taxonomy["actions"].append("comment")
         taxonomy_path.write_text(json.dumps(taxonomy))
 
@@ -234,43 +233,6 @@ class WriteTests(Workspace):
                                "--publish", "--approve", second_review["approval"])["results"][0]
         self.assertEqual(closed["outcome"]["state_change"]["state"], "closed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "POST", "PATCH", "GET", "POST", "PATCH"])
-
-    def test_earlier_ledger_based_question_resolution_remains_readable(self):
-        timestamp = "2026-10-04T01:00:00Z"
-        decision = dict(item(1, "Needs a reproduction"), action="comment", confidence="medium",
-                        reason="Missing steps", reviewed=False)
-        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
-        args = ("--expected-repo", "owner/repo")
-        context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
-        comment = self.root / "legacy-answer.md"
-        comment.write_text("Could you share reproduction steps?\n")
-        self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
-                      "--action", "comment", "--title", "Needs a reproduction", "--observed-state", "open",
-                      "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
-                      "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired",
-                      "--decision-question", "Should this request be sent?")
-        path = self.root / "data/owner/repo/action-proposals/issue-1.json"
-        previous = json.loads(path.read_text())
-        previous.pop("checksum")
-        previous["decision_review"] = dict(reviewed=False, by="", at="")
-        canonical = json.dumps(previous, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-        previous["checksum"] = hashlib.sha256(canonical.encode()).hexdigest()
-        legacy = dict(previous)
-        legacy.pop("checksum")
-        legacy.pop("decision_question")
-        legacy.pop("decision_review")
-        legacy["history"] = [previous]
-        legacy["request_id"] = str(uuid.uuid4())
-        legacy["decision_resolution"] = dict(by="maintainer", at="2026-10-04T02:00:00Z", reason="Ask for steps",
-                                             held_checkpoint=previous["checksum"])
-        canonical = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-        legacy["checksum"] = hashlib.sha256(canonical.encode()).hexdigest()
-        path.write_text(json.dumps(legacy))
-
-        listed = self.json_cli("action-proposals", *args, "list")["rows"][0]
-        self.assertEqual(listed["decision_resolution"]["reason"], "Ask for steps")
-        self.assertNotIn("decision_question", listed)
-        self.assertEqual(self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")["plan"]["proposals"][0]["checkpoint"], listed["checkpoint"])
 
     def test_action_target_operation_and_comment_edits_invalidate_exact_approval(self):
         timestamp = "2026-10-04T01:00:00Z"
@@ -480,31 +442,6 @@ class ClosureWriteTests(Workspace):
         self.assertEqual(outcome["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
         self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
-
-    def test_earlier_pr_closure_resolution_history_remains_readable(self):
-        self.propose(1, "--decision-question", "Does the replacement cover this PR?")
-        path = self.root / "data/owner/repo/action-proposals/pr-1.json"
-        previous = json.loads(path.read_text())
-        previous.pop("checksum")
-        previous["decision_review"] = dict(reviewed=False, by="", at="")
-        canonical = json.dumps(previous, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-        previous["checksum"] = hashlib.sha256(canonical.encode()).hexdigest()
-        legacy = dict(previous)
-        legacy.pop("checksum")
-        legacy.pop("decision_question")
-        legacy.pop("decision_review")
-        legacy["history"] = [previous]
-        legacy["request_id"] = str(uuid.uuid4())
-        legacy["decision_resolution"] = dict(by="maintainer", at="2026-10-04T02:00:00Z", reason="Replacement covers it",
-                                             held_checkpoint=previous["checksum"])
-        canonical = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-        legacy["checksum"] = hashlib.sha256(canonical.encode()).hexdigest()
-        path.write_text(json.dumps(legacy))
-
-        listed = self.closure("list")["rows"][0]
-        self.assertEqual(listed["decision_resolution"]["reason"], "Replacement covers it")
-        self.assertNotIn("decision_question", listed)
-        self.assertEqual(self.closure("review", "--number", "1")["plan"]["proposals"][0]["checkpoint"], listed["checkpoint"])
 
     def test_policy_routes_pr_comment_without_creating_a_closure_proposal(self):
         write_gh = (self.mock / "gh").read_text()

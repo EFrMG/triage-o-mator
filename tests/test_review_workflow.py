@@ -265,11 +265,11 @@ class ProposalFeedbackTests(Workspace):
         self.assertEqual(len(self.calls()), before)
 
         path = self.root / "data/owner/repo/action-proposals/pr-1.json"
-        legacy = json.loads(path.read_text())
-        legacy.pop("checksum")
-        legacy.pop("inputs")
-        legacy["checksum"] = hashlib.sha256(json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        path.write_text(json.dumps(legacy) + "\n")
+        stripped = json.loads(path.read_text())
+        stripped.pop("checksum")
+        stripped.pop("inputs")
+        stripped["checksum"] = hashlib.sha256(json.dumps(stripped, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        path.write_text(json.dumps(stripped) + "\n")
         self.closure("list", ok=False)
         self.closure("review", "--number", "1", ok=False)
         self.assertEqual(len(self.calls()), before)

@@ -28,39 +28,19 @@ def valid_decision_hold(value):
     history = current_cycle(history)
 
     question = value.get("decision_question")
-    if question is not None:
-        if not isinstance(question, str) or not question.strip() or len(question) > 2000:
-            return False
-        review = value.get("decision_review")
-        if review is not None and (not isinstance(review, dict) or type(review.get("reviewed")) is not bool or not isinstance(review.get("by"), str) or not isinstance(review.get("at"), str)):
-            return False
+    answer = value.get("decision_resolution")
+    if question is None or answer is None:
+        return answer is None and (question is None or isinstance(question, str) and bool(question.strip()) and len(question) <= 2000)
 
-        answer = value.get("decision_resolution")
-        if answer is None:
-            return True
-
-        if not isinstance(answer, dict):
-            return False
-        held = next((version for version in reversed(history) if isinstance(version, dict) and version.get("checksum") == answer.get("held_checkpoint")), None)
-        return (held is not None and held.get("decision_question") == question and held.get("target") == value.get("target") and
-                held.get("action") == value.get("action") and held.get("operation") == value.get("operation") and
-                isinstance(answer.get("by"), str) and bool(answer["by"].strip()) and len(answer["by"]) <= 200 and
-                isinstance(answer.get("at"), str) and bool(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", answer["at"])) and
-                isinstance(answer.get("reason"), str) and bool(answer["reason"].strip()) and len(answer["reason"]) <= 10000)
-
-    held = next((version for version in reversed(history) if isinstance(version, dict) and version.get("decision_question")), None)
-    resolution = value.get("decision_resolution")
-    if held is None:
-        return resolution is None
-    if not isinstance(resolution, dict):
+    if not isinstance(question, str) or not question.strip() or len(question) > 2000 or not isinstance(answer, dict):
         return False
 
-    prior = held.get("decision_review") or {}
-    return (resolution.get("held_checkpoint") == held.get("checksum") and
-            isinstance(resolution.get("by"), str) and bool(resolution["by"].strip()) and len(resolution["by"]) <= 200 and
-            isinstance(resolution.get("at"), str) and bool(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", resolution["at"])) and
-            resolution["at"] != prior.get("at") and
-            isinstance(resolution.get("reason"), str) and bool(resolution["reason"].strip()) and len(resolution["reason"]) <= 10000)
+    held = next((version for version in reversed(history) if isinstance(version, dict) and version.get("checksum") == answer.get("held_checkpoint")), None)
+    return (held is not None and held.get("decision_question") == question and held.get("target") == value.get("target") and
+            held.get("action") == value.get("action") and held.get("operation") == value.get("operation") and
+            isinstance(answer.get("by"), str) and bool(answer["by"].strip()) and len(answer["by"]) <= 200 and
+            isinstance(answer.get("at"), str) and bool(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", answer["at"])) and
+            isinstance(answer.get("reason"), str) and bool(answer["reason"].strip()) and len(answer["reason"]) <= 10000)
 
 
 def valid_reconsideration(versions):

@@ -100,7 +100,7 @@ type actionProposalRow struct {
 	Active             bool                      `json:"active"`
 	Needs              bool                      `json:"needs_attention"`
 	Dismissed          bool                      `json:"dismissed"`
-	Inputs             *proposalInputs           `json:"inputs"`
+	Inputs             proposalInputs            `json:"inputs"`
 	Outcome            *struct {
 		Comment struct {
 			Status string `json:"status"`
@@ -273,7 +273,7 @@ func (m model) finishClosureReview(msg closureReviewMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			context, ok := msg.review.Contexts[row.Number]
-			if !ok || row.Inputs == nil || !context.Current || context.ProposalCheckpoint != row.Checkpoint || context.ItemContext.Checkpoint != row.Inputs.ContextCheckpoint {
+			if !ok || !context.Current || context.ProposalCheckpoint != row.Checkpoint || context.ItemContext.Checkpoint != row.Inputs.ContextCheckpoint {
 				m.fail("Proposal context changed; reopen Notifications before approving.")
 				return m, nil
 			}

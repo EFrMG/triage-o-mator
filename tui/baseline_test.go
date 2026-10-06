@@ -1724,7 +1724,7 @@ else:
 	m.notifications = notificationsUI{
 		open:      true,
 		tracked:   &trackedPage{Rows: []trackedRow{tracked}, Total: 1, UnreadTotal: 1},
-		actions:   actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Comment: "Publish this explanation", Operation: "close", Status: "pending", Active: true, Needs: true, Checkpoint: strings.Repeat("a", 64), Inputs: &proposalInputs{ContextCheckpoint: "context"}}}},
+		actions:   actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Comment: "Publish this explanation", Operation: "close", Status: "pending", Active: true, Needs: true, Checkpoint: strings.Repeat("a", 64), Inputs: proposalInputs{ContextCheckpoint: "context"}}}},
 		attention: &attentionPage{Rows: []attentionRow{{Number: 3, Selectable: true, Attention: true, WatchCheckpoint: strings.Repeat("b", 64)}}},
 		closures:  &actionHistoryPage{Rows: []actionHistoryRow{{Number: 3, Selectable: true, HistoryCheckpoint: strings.Repeat("c", 64)}}},
 	}
@@ -1972,7 +1972,7 @@ print(json.dumps(dict(kind='pr', number=3, operation='close', status='pending', 
 
 	m := baselineModel(t, root)
 	old := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Status: "pending", Active: true,
-		Checkpoint: strings.Repeat("a", 64), Comment: "Original comment", Inputs: &proposalInputs{ContextCheckpoint: "context"}}
+		Checkpoint: strings.Repeat("a", 64), Comment: "Original comment", Inputs: proposalInputs{ContextCheckpoint: "context"}}
 	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{old}},
 		ticked: map[int]bool{3: true}, actionReview: &actionReviewUI{row: old}}
 	next, _ := m.handleNotificationsKey(tea.KeyPressMsg{Text: "e"})
@@ -2685,8 +2685,8 @@ else:
 	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	row := actionProposalRow{Kind: "issue", Number: 1, Title: "Needs reproduction", Target: "https://github.com/owner/repo/issues/1", Action: "comment", Operation: "comment", Comment: "Could you share steps to reproduce?", UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "action-1", Status: "pending", Active: true, Needs: true, Inputs: &proposalInputs{ContextCheckpoint: "ctx-a"}, DecisionQuestion: "Should this request be sent?"}
-	if err := json.Unmarshal([]byte(`{"context_checkpoint":"ctx-a","evidence":[{"kind":"issue","number":1,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}}]}`), row.Inputs); err != nil {
+	row := actionProposalRow{Kind: "issue", Number: 1, Title: "Needs reproduction", Target: "https://github.com/owner/repo/issues/1", Action: "comment", Operation: "comment", Comment: "Could you share steps to reproduce?", UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "action-1", Status: "pending", Active: true, Needs: true, Inputs: proposalInputs{ContextCheckpoint: "ctx-a"}, DecisionQuestion: "Should this request be sent?"}
+	if err := json.Unmarshal([]byte(`{"context_checkpoint":"ctx-a","evidence":[{"kind":"issue","number":1,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}}]}`), &row.Inputs); err != nil {
 		t.Fatal(err)
 	}
 	m := baselineModel(t, root)
@@ -2798,7 +2798,7 @@ else:
 	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	row := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Older change", Target: "https://github.com/owner/repo/pull/3", Comment: "This PR is superseded by #4.", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "closure-1", Status: "pending", Active: true, DecisionQuestion: "Does #4 replace this PR?", Inputs: &proposalInputs{ContextCheckpoint: "ctx-a"}}
+	row := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Older change", Target: "https://github.com/owner/repo/pull/3", Comment: "This PR is superseded by #4.", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "closure-1", Status: "pending", Active: true, DecisionQuestion: "Does #4 replace this PR?", Inputs: proposalInputs{ContextCheckpoint: "ctx-a"}}
 	m := baselineModel(t, root)
 	m.reviewer = "maintainer"
 	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{row}}}

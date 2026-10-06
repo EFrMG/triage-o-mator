@@ -217,8 +217,8 @@ func (m model) openProposalEdit(choice notificationChoice) (tea.Model, tea.Cmd) 
 	}
 
 	row := m.notifications.actions.Rows[choice.actionProposal]
-	status, checkpoint, target, comment, inputs := row.Status, row.Checkpoint, row.Target, row.Comment, row.Inputs
-	if status != "pending" || checkpoint == "" || inputs == nil {
+	status, checkpoint, target, comment := row.Status, row.Checkpoint, row.Target, row.Comment
+	if status != "pending" || checkpoint == "" {
 		m.warn("This proposal cannot be edited; inspect its current context first.")
 		return m, nil
 	}

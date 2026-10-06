@@ -74,8 +74,6 @@ To hand work to another contributor, share the relevant `data/<owner>/<repo>/gro
 
 This provides persistent group handoffs, assignment, and conflict detection within one checkout. It does **not** provide a shared server, authenticated access control, or distributed locking between Git clones. Ledger writers in one install serialize updates, and CSV imports also check exported row revisions. Separate contributors should reconcile group-file and ledger conflicts through Git review.
 
-Ordinary edits preserve historical structured fields already present in older group files. New review packets omit those retired fields and focus on the group's current membership, notes, assignment and status.
-
 ## Pinned candidate discovery
 
 Generate review-set suggestions from an explicit immutable snapshot or a frozen corpus's pinned progress:

@@ -173,10 +173,7 @@ type proposalEvidenceLine struct {
 	complete      bool
 }
 
-func proposalEvidenceLines(inputs *proposalInputs) []proposalEvidenceLine {
-	if inputs == nil {
-		return []proposalEvidenceLine{{item: "This older proposal has no declared evidence or local context."}}
-	}
+func proposalEvidenceLines(inputs proposalInputs) []proposalEvidenceLine {
 	var lines []proposalEvidenceLine
 	for _, evidence := range inputs.Evidence {
 		missing := make([]string, 0, len(evidence.Components))

@@ -316,12 +316,8 @@ def propose(args, repo):
                 question = args.decision_question or previous["decision_question"]
                 value["decision_question"] = question
                 if question == previous["decision_question"]:
-                    if "decision_review" in previous:
-                        value["decision_review"] = previous["decision_review"]
                     if value["target"] == previous["target"] and value["operation"] == previous["operation"] and value["action"] == previous["action"] and "decision_resolution" in previous:
                         value["decision_resolution"] = previous["decision_resolution"]
-            elif "decision_resolution" in previous and args.decision_question is None:
-                value["decision_resolution"] = previous["decision_resolution"]
             if previous["status"] == "rejected":
                 if not args.reconsideration_reason or not args.reconsideration_reason.strip():
                     raise ValueError("reconsidering a rejected action requires an attributed explanation")

@@ -58,16 +58,16 @@ def select(keys):
             if exact["checkpoint"] != row["checkpoint"] or exact["comment"] != row["comment"]:
                 raise ValueError(f"{kind} #{number} changed during action preview")
 
-        evidence = (row.get("inputs") or {}).get("evidence") or []
+        evidence = row["inputs"]["evidence"]
         complete_target = any(selected["kind"] == kind and selected["number"] == number and
                               all(component["status"] in ("complete", "not_applicable") for component in selected["components"].values())
                               for selected in evidence)
-        eligible = complete_target and not row["inputs"].get("evidence_gaps") and not row.get("reconsideration") and not row.get("decision_question")
+        eligible = complete_target and not row["inputs"]["evidence_gaps"] and not row.get("reconsideration") and not row.get("decision_question")
         mode = "execute" if setting["mode"] == "execute" and setting["configured"] and eligible else "stage"
         chosen.append(dict(kind=kind, number=number, action=row["action"], operation=operation, mode=mode,
                            policy_mode=setting["mode"], eligible=eligible, target=row["target"], comment=row["comment"],
                            proposal_checkpoint=row["checkpoint"], definition_sha256=setting["definition_sha256"],
-                           evidence_gaps=row["inputs"].get("evidence_gaps", []), decision_question=row.get("decision_question")))
+                           evidence_gaps=row["inputs"]["evidence_gaps"], decision_question=row.get("decision_question")))
 
     plan = dict(version=1, repository=REPO, operation="automated-actions", items=chosen)
     return dict(plan=plan, preview_sha256=digest(canonical(plan)), requests=0)

@@ -180,42 +180,40 @@ func (m model) yankActionProposal(row actionProposalRow) (string, string) {
 	fmt.Fprintf(&b, "\n%s #%d · %s\nTarget: %s\n", strings.ToUpper(row.Kind), row.Number, row.Status, sanitize(row.Target))
 	fmt.Fprintf(&b, "Saved proposal: bin/action-proposals --expected-repo %s view --kind %s --number %d --checkpoint %s\n", m.repo, row.Kind, row.Number, row.Checkpoint)
 	fmt.Fprintf(&b, "Current guidance and feedback: bin/action-proposals --expected-repo %s context --kind %s --number %d --checkpoint %s\n", m.repo, row.Kind, row.Number, row.Checkpoint)
-	if row.Inputs != nil {
-		if len(row.Inputs.Evidence) > 0 {
-			b.WriteString("\nSelected snapshots:\n")
-			for i, evidence := range row.Inputs.Evidence {
-				if i == 8 {
-					fmt.Fprintf(&b, "- %d more in the saved proposal\n", len(row.Inputs.Evidence)-i)
-					break
-				}
-				fmt.Fprintf(&b, "- %s #%d · %s\n", sanitize(evidence.Kind), evidence.Number, evidence.SnapshotID)
+	if len(row.Inputs.Evidence) > 0 {
+		b.WriteString("\nSelected snapshots:\n")
+		for i, evidence := range row.Inputs.Evidence {
+			if i == 8 {
+				fmt.Fprintf(&b, "- %d more in the saved proposal\n", len(row.Inputs.Evidence)-i)
+				break
 			}
+			fmt.Fprintf(&b, "- %s #%d · %s\n", sanitize(evidence.Kind), evidence.Number, evidence.SnapshotID)
 		}
-		var incomplete []proposalEvidenceLine
-		for _, line := range proposalEvidenceLines(row.Inputs) {
-			if line.item != "Gap" && line.missing != "" {
-				incomplete = append(incomplete, line)
-			}
+	}
+	var incomplete []proposalEvidenceLine
+	for _, line := range proposalEvidenceLines(row.Inputs) {
+		if line.item != "Gap" && line.missing != "" {
+			incomplete = append(incomplete, line)
 		}
-		if len(incomplete) > 0 {
-			b.WriteString("\nIncomplete evidence:\n")
-			for i, line := range incomplete {
-				if i == 8 {
-					fmt.Fprintf(&b, "- %d more in the saved proposal\n", len(incomplete)-i)
-					break
-				}
-				fmt.Fprintf(&b, "- Not found: %s · %s\n", sanitize(line.item), sanitize(line.missing))
+	}
+	if len(incomplete) > 0 {
+		b.WriteString("\nIncomplete evidence:\n")
+		for i, line := range incomplete {
+			if i == 8 {
+				fmt.Fprintf(&b, "- %d more in the saved proposal\n", len(incomplete)-i)
+				break
 			}
+			fmt.Fprintf(&b, "- Not found: %s · %s\n", sanitize(line.item), sanitize(line.missing))
 		}
-		if len(row.Inputs.EvidenceGaps) > 0 {
-			b.WriteString("\nEvidence gaps:\n")
-			for i, gap := range row.Inputs.EvidenceGaps {
-				if i == 5 {
-					fmt.Fprintf(&b, "- %d more in the saved proposal\n", len(row.Inputs.EvidenceGaps)-i)
-					break
-				}
-				fmt.Fprintf(&b, "- %s\n", truncate(sanitize(gap), 240))
+	}
+	if len(row.Inputs.EvidenceGaps) > 0 {
+		b.WriteString("\nEvidence gaps:\n")
+		for i, gap := range row.Inputs.EvidenceGaps {
+			if i == 5 {
+				fmt.Fprintf(&b, "- %d more in the saved proposal\n", len(row.Inputs.EvidenceGaps)-i)
+				break
 			}
+			fmt.Fprintf(&b, "- %s\n", truncate(sanitize(gap), 240))
 		}
 	}
 	b.WriteString("\nRead the saved proposal and current guidance before recommending or acting. This copy grants no approval.\n")

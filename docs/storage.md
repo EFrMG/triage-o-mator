@@ -38,7 +38,7 @@ Temporary files and locks stay in a self-ignoring `local/` directory beside the 
 
 ## Group transactions
 
-Group membership and metadata writes use the group lock and atomic replacement. The TUI passes the loaded revision; CLI callers can pass `--revision` to reject stale updates. Ordinary edits retain legacy structured fields in existing group files, while new exports omit them from maintainer handoffs.
+Group membership and metadata writes use the group lock and atomic replacement. The TUI passes the loaded revision; CLI callers can pass `--revision` to reject stale updates.
 
 ## Closed-PR watches
 

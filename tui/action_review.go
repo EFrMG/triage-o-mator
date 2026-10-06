@@ -140,7 +140,7 @@ func (m model) finishActionReview(msg actionReviewMsg) (tea.Model, tea.Cmd) {
 			msg.context.ItemContext.Repository != m.repo || msg.context.ItemContext.Item.Kind != current.row.Kind ||
 			msg.context.ItemContext.Item.Number != current.row.Number || msg.context.ItemContext.Requests != 0 ||
 			msg.context.ItemContext.Pagination.Offset != msg.offset || len(msg.context.ItemContext.Rows) > 10 ||
-			current.row.Inputs == nil || current.row.Status == "pending" && msg.context.ItemContext.Checkpoint != current.row.Inputs.ContextCheckpoint {
+			current.row.Status == "pending" && msg.context.ItemContext.Checkpoint != current.row.Inputs.ContextCheckpoint {
 			current.problem = "Saved action context differs from the selected proposal."
 			return m, nil
 		}

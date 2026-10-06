@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _briefed import BATCH_BRIEF_RE, BRIEF_DATE, ITEM_BRIEF_RE, active_name, read_name
+from _briefed import BATCH_BRIEF_RE, BRIEF_DATE, ITEM_BRIEF_RE, READ_SUFFIX, active_name, read_name, visible_batch_briefs
 from _storage import locked
 from _triage import DATA_DIR, REPO, REPORTS_DIR, WORK_ROOT
 
@@ -20,6 +20,7 @@ MASTER = re.compile(rf"^({BRIEF_DATE})-(?:master(?:-[A-Za-z0-9_-]+)?-brief|brief
 GROUP = re.compile(rf"^({BRIEF_DATE})-(?:ready-groups|group-[A-Za-z0-9_-]+)-brief\.md$")
 MAX_BRIEFS = 5000
 MAX_BRIEF_BYTES = 1024 * 1024
+DEFAULT_PLAN_LIMIT = 10
 
 
 def category(name):
@@ -126,32 +127,24 @@ def planned_path(value):
 
 
 def plan_briefs(names, all_briefs, include_read, limit):
-    if names and (all_briefs or include_read or limit != 10):
+    if names and (all_briefs or include_read or limit is not None):
         raise ValueError("--brief cannot be combined with --all, --include-read, or --limit")
 
+    if all_briefs and limit is not None:
+        raise ValueError("--all cannot be combined with --limit")
+
+    limit = DEFAULT_PLAN_LIMIT if limit is None else limit
     if not 1 <= limit <= MAX_BRIEFS:
         raise ValueError(f"--limit must be between 1 and {MAX_BRIEFS}")
-
-    if all_briefs and limit != 10:
-        raise ValueError("--all cannot be combined with --limit")
 
     if names:
         selected = [planned_path(name) for name in names]
     else:
-        directory = reports_dir()
-        selected = []
-        if directory.is_dir():
-            for path in directory.iterdir():
-                if active_name(path.name) != path.name and not include_read:
-                    continue
+        sources = visible_batch_briefs()
+        if include_read:
+            sources += [path.name for path in reports_dir().glob("*" + READ_SUFFIX) if BATCH_BRIEF_RE.fullmatch(active_name(path.name))]
 
-                base = active_name(path.name)
-                kind = category(base)
-                if kind is None or kind[1] != "batch":
-                    continue
-
-                selected.append(planned_path(path.name))
-
+        selected = [planned_path(name) for name in sources]
         selected.sort(key=lambda source: (source[1][2], source[0].name), reverse=True)
         if not all_briefs:
             selected = selected[:limit]
@@ -222,8 +215,8 @@ def main():
     plan = commands.add_parser("plan", help="select source briefs and calculate a master-brief size target")
     plan.add_argument("--brief", action="append", default=[], help="use this exact source brief ID or reports path; repeat for a named set")
     plan.add_argument("--all", action="store_true", help="select every visible batch brief")
-    plan.add_argument("--include-read", action="store_true", help="include _READ.md batch briefs in an automatic selection")
-    plan.add_argument("--limit", type=int, default=10, help="newest visible batch briefs for an ordinary plan (default: 10)")
+    plan.add_argument("--include-read", action="store_true", help="include batch briefs marked read in an automatic selection")
+    plan.add_argument("--limit", type=int, help=f"newest visible batch briefs for an ordinary plan (default: {DEFAULT_PLAN_LIMIT})")
     mark = commands.add_parser("mark-read", help="preview exact _READ.md renames; --apply needs the preview checksum")
     mark.add_argument("ids", nargs="+", help="supported brief filenames shown in the menu")
     mark.add_argument("--apply", action="store_true")

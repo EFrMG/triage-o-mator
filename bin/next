@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _groups import list_groups
-from _briefed import ITEM_BRIEF_RE, active_name, briefed_keys, load_records, saved_brief_exists
+from _briefed import ITEM_BRIEF_RE, active_name, briefed_keys, load_records, saved_brief_exists, visible_batch_briefs
 from _similar import TitleIndex
 from _notdupes import TitleVerdicts
 from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, action_operation, has_decision, load_jsonl, load_ledger, load_taxonomy, merge_ready
@@ -202,8 +202,9 @@ def suggestions(ledger):
             "each completed batch gets one concise brief, then its members leave the briefing queue")
 
     master_brief = REPORTS_DIR / f"{date.today().isoformat()}-master-brief.md"
-    if len(briefed_batches) >= 2 and not saved_brief_exists(master_brief):
-        add("agent", f"Polish selected batch briefs ({len(briefed_batches)} available)",
+    batch_briefs = len(visible_batch_briefs())
+    if batch_briefs >= 2 and not saved_brief_exists(master_brief):
+        add("agent", f"Polish selected batch briefs ({batch_briefs} available)",
             "bin/briefs plan; prompts/polish-briefs.md",
             "surface the most relevant decisions from completed batch passes")
 

@@ -689,8 +689,13 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         batch_name = "2026-10-06-batch-b20261006-000001-brief.md"
         preview = self.json_cli("briefs", "mark-read", batch_name)
         self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], batch_name)
-        self.assertTrue(any("Delete finished batch b20261006-000001" in row["what"] for row in self.json_cli("next", "--json")["suggestions"]))
+        after_read = self.json_cli("next", "--json")["suggestions"]
+        self.assertTrue(any("Delete finished batch b20261006-000001" in row["what"] for row in after_read))
+        self.assertFalse(any("Polish selected batch briefs" in row["what"] for row in after_read))
+        self.run_cli("batch", "--mark-briefed", "b20261006-000001", "--brief", str(reports / batch_name))
+        self.assertEqual(self.json_cli("briefs", "plan", "--all", "--include-read")["source_count"], 2)
 
+        (reports / "2026-10-06-batch-b20261006-000003-brief.md").write_text("# Later batch brief\n")
         master_name = f"{datetime.now(timezone.utc).date().isoformat()}-master-brief.md"
         (reports / master_name).write_text("# Master brief\n")
         preview = self.json_cli("briefs", "mark-read", master_name)

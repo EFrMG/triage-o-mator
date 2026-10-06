@@ -30,6 +30,11 @@ def saved_brief_exists(path):
     return path.exists() or path.with_name(read_name(path.name)).exists()
 
 
+def visible_batch_briefs():
+    """Batch briefs not marked read: the default source set of bin/briefs plan."""
+    return sorted(path.name for path in REPORTS_DIR.glob("*-brief.md") if BATCH_BRIEF_RE.fullmatch(path.name) and path.is_file() and not path.is_symlink())
+
+
 def is_batch_brief(name, batch_id):
     match = BATCH_BRIEF_RE.fullmatch(name)
     return bool(match) and match.group(2) == batch_id
@@ -83,11 +88,14 @@ def save_briefed(batch_id, members, brief_arg):
     if not requested.is_absolute() and not brief_path.is_file():
         brief_path = (WORK_ROOT / requested).resolve()
 
+    # The checkpoint keeps the brief's original name; marking the brief read later renames the file, not the record.
+    brief_path = brief_path.with_name(active_name(brief_path.name))
     reports_root = REPORTS_DIR.resolve()
     if not brief_path.is_relative_to(reports_root) or not is_batch_brief(brief_path.name, batch_id):
         raise ValueError("brief must be a dated batch brief in this repository's reports directory")
 
-    if not brief_path.is_file() or not brief_path.read_text().strip():
+    saved = brief_path if brief_path.is_file() else brief_path.with_name(read_name(brief_path.name))
+    if not saved.is_file() or not saved.read_text().strip():
         raise ValueError("brief file is missing or empty")
 
     for row in members:

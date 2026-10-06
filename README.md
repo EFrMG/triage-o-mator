@@ -176,7 +176,7 @@ Turning automatic download ON installs the optional engine from the checked-in, 
 | “prepare offline analysis”                      | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps             |
 | “is #N a duplicate?”                            | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal             |
 | “review PR #N”                                  | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and an unreviewed decision |
-| “recommend PR closures”                         | [Recommend PR closures](prompts/recommend-auto-close.md)                                          | Pending, unapproved PR closure proposals     |
+| “recommend PR closures”                         | [Recommend PR closures](prompts/recommend-closure.md)                                             | Pending, unapproved PR closure proposals     |
 | “organize these items”                          | [Organize groups](prompts/organize-groups.md)                                                     | Draft maintainer groups                      |
 | “assess this edited group”                      | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons        |
 | “review an appeal”                              | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment             |

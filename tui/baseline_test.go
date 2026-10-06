@@ -1639,9 +1639,9 @@ func TestClosureReviewShowsTargetAndRefreshPinsHost(t *testing.T) {
 	root := baselineRoot(t)
 	m := baselineModel(t, root)
 	target := "https://ghe.example/owner/repo/pull/3"
-	m.notifications = notificationsUI{open: true, review: &autoCloseReview{Approval: "exact-approval"}, reviewKey: "a"}
-	m.notifications.review.Plan.Proposals = []autoCloseRow{{Number: 3, Title: "Enterprise PR", Target: target, Comment: "Close with explanation"}, {Number: 4, Title: "Second PR", Target: "https://ghe.example/owner/repo/pull/4", Comment: "Close with explanation"}}
-	if !strings.Contains(ansi.Strip(m.autoCloseReviewView()), target) {
+	m.notifications = notificationsUI{open: true, review: &closureReview{Approval: "exact-approval"}, reviewKey: "a"}
+	m.notifications.review.Plan.Proposals = []actionProposalRow{{Number: 3, Title: "Enterprise PR", Target: target, Comment: "Close with explanation"}, {Number: 4, Title: "Second PR", Target: "https://ghe.example/owner/repo/pull/4", Comment: "Close with explanation"}}
+	if !strings.Contains(ansi.Strip(m.closureReviewView()), target) {
 		t.Fatal("closure approval did not show the exact target URL")
 	}
 
@@ -1724,7 +1724,7 @@ else:
 	m.notifications = notificationsUI{
 		open:      true,
 		tracked:   &trackedPage{Rows: []trackedRow{tracked}, Total: 1, UnreadTotal: 1},
-		actions:   actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Comment: "Publish this explanation", Operation: "close", Status: "pending", Active: true, Needs: true, Checkpoint: strings.Repeat("a", 64), Inputs: &autoCloseInputs{ContextCheckpoint: "context"}}}},
+		actions:   actionProposalList{Rows: []actionProposalRow{{Kind: "pr", Number: 3, Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Comment: "Publish this explanation", Operation: "close", Status: "pending", Active: true, Needs: true, Checkpoint: strings.Repeat("a", 64), Inputs: &proposalInputs{ContextCheckpoint: "context"}}}},
 		attention: &attentionPage{Rows: []attentionRow{{Number: 3, Selectable: true, Attention: true, WatchCheckpoint: strings.Repeat("b", 64)}}},
 		closures:  &actionHistoryPage{Rows: []actionHistoryRow{{Number: 3, Selectable: true, HistoryCheckpoint: strings.Repeat("c", 64)}}},
 	}
@@ -1972,7 +1972,7 @@ print(json.dumps(dict(kind='pr', number=3, operation='close', status='pending', 
 
 	m := baselineModel(t, root)
 	old := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Fixture", Target: "https://github.com/owner/repo/pull/3", Status: "pending", Active: true,
-		Checkpoint: strings.Repeat("a", 64), Comment: "Original comment", Inputs: &autoCloseInputs{ContextCheckpoint: "context"}}
+		Checkpoint: strings.Repeat("a", 64), Comment: "Original comment", Inputs: &proposalInputs{ContextCheckpoint: "context"}}
 	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{old}},
 		ticked: map[int]bool{3: true}, actionReview: &actionReviewUI{row: old}}
 	next, _ := m.handleNotificationsKey(tea.KeyPressMsg{Text: "e"})
@@ -2308,8 +2308,8 @@ func TestGroupContextScrollStopsAtVisibleBoundary(t *testing.T) {
 
 func TestCompletedOutcomesStayVisibleAndRejectedProposalsLeaveNotifications(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
-	rejected := autoCloseRow{Number: 5, Title: "Keep this PR", Status: "rejected", Checkpoint: "rejected-5", Rejection: &autoCloseRejection{By: "maintainer", At: "2026-09-29T00:00:00Z", Reason: "Compatibility work remains useful"}}
-	var completed autoCloseRow
+	rejected := actionProposalRow{Number: 5, Title: "Keep this PR", Status: "rejected", Checkpoint: "rejected-5", Rejection: &proposalRejection{By: "maintainer", At: "2026-09-29T00:00:00Z", Reason: "Compatibility work remains useful"}}
+	var completed actionProposalRow
 	if err := json.Unmarshal([]byte(`{"number":3,"title":"Completed fixture","target":"https://github.com/owner/repo/pull/3","comment":"Published explanation","status":"executed","needs_attention":true,"outcome":{"comment":{"status":"succeeded"},"state_change":{"status":"succeeded"}}}`), &completed); err != nil {
 		t.Fatal(err)
 	}
@@ -2597,13 +2597,13 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	if exact := reviewCmd().(actionReviewMsg); exact.err != nil || exact.approval != "fresh-approval" {
 		t.Fatalf("exact review did not return its approval: %+v", exact.err)
 	}
-	review := autoCloseReviewCmd(root, m.repo, m.notificationsGeneration, false, []int{3})().(autoCloseMsg)
+	review := closureReviewCmd(root, m.repo, m.notificationsGeneration, false, []int{3})().(closureReviewMsg)
 	if review.err != nil || !review.review.Contexts[3].Current {
 		t.Fatalf("batch review did not retain checked context: %+v", review.err)
 	}
 	missingContext := review
 	missingContext.review.Contexts = nil
-	_, publish := m.finishAutoClose(missingContext)
+	_, publish := m.finishClosureReview(missingContext)
 	if publish != nil {
 		t.Fatal("exact review without a checked context offered publication")
 	}
@@ -2622,7 +2622,7 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	if notesCmd == nil || !m.notifications.notesOpen {
 		t.Fatal("longer local guidance was not available from the proposal")
 	}
-	m = baselineSend(m, notesCmd().(autoCloseNotesMsg))
+	m = baselineSend(m, notesCmd().(proposalNotesMsg))
 	notesView := ansi.Strip(m.proposalNotesViewport().View())
 	if !strings.Contains(notesView, "across all supported versions") || !strings.Contains(notesView, "Group guidance") || !strings.Contains(notesView, "Member note") || m.actionReviewView() != underlying {
 		t.Fatal("floating notes failed to show full text without reflowing the proposal")
@@ -2685,7 +2685,7 @@ else:
 	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	row := actionProposalRow{Kind: "issue", Number: 1, Title: "Needs reproduction", Target: "https://github.com/owner/repo/issues/1", Action: "comment", Operation: "comment", Comment: "Could you share steps to reproduce?", UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "action-1", Status: "pending", Active: true, Needs: true, Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}, DecisionQuestion: "Should this request be sent?"}
+	row := actionProposalRow{Kind: "issue", Number: 1, Title: "Needs reproduction", Target: "https://github.com/owner/repo/issues/1", Action: "comment", Operation: "comment", Comment: "Could you share steps to reproduce?", UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "action-1", Status: "pending", Active: true, Needs: true, Inputs: &proposalInputs{ContextCheckpoint: "ctx-a"}, DecisionQuestion: "Should this request be sent?"}
 	if err := json.Unmarshal([]byte(`{"context_checkpoint":"ctx-a","evidence":[{"kind":"issue","number":1,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}}]}`), row.Inputs); err != nil {
 		t.Fatal(err)
 	}
@@ -2798,7 +2798,7 @@ else:
 	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	row := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Older change", Target: "https://github.com/owner/repo/pull/3", Comment: "This PR is superseded by #4.", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "closure-1", Status: "pending", Active: true, DecisionQuestion: "Does #4 replace this PR?", Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}}
+	row := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Older change", Target: "https://github.com/owner/repo/pull/3", Comment: "This PR is superseded by #4.", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "closure-1", Status: "pending", Active: true, DecisionQuestion: "Does #4 replace this PR?", Inputs: &proposalInputs{ContextCheckpoint: "ctx-a"}}
 	m := baselineModel(t, root)
 	m.reviewer = "maintainer"
 	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{row}}}

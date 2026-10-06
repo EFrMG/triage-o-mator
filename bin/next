@@ -137,7 +137,7 @@ def suggestions(ledger):
     open_prs = [r for r in open_items if r["kind"] == "pr"]
     if open_prs:
         add("agent", f"Assess a named PR for an explained closure proposal ({len(open_prs)} open PRs available)",
-            "prompts/recommend-auto-close.md (select the PR; reuse cached evidence first)",
+            "prompts/recommend-closure.md (select the PR; reuse cached evidence first)",
             "a scoped recommendation can keep the PR open; a saved proposal needs exact approval before any GitHub write")
 
     action_candidates = [r for r in ledger if action_operation(taxonomy, r.get("action")) in ("comment", "close", "reopen") and

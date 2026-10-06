@@ -15,7 +15,7 @@ type proposalEditDoneMsg struct {
 	key                    Key
 	comment                string
 	saved                  bool
-	row                    autoCloseRow
+	row                    actionProposalRow
 	err                    error
 }
 

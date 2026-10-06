@@ -8,19 +8,7 @@ import (
 	"strings"
 )
 
-type autoCloseContext struct {
-	Repository         string               `json:"repository"`
-	Kind               string               `json:"kind"`
-	Number             int                  `json:"number"`
-	ProposalCheckpoint string               `json:"proposal_checkpoint"`
-	Current            bool                 `json:"current"`
-	Reason             string               `json:"reason"`
-	ItemContext        autoCloseItemContext `json:"item_context"`
-	LatestRejection    *autoCloseRejection  `json:"latest_rejection"`
-	Requests           int                  `json:"requests"`
-}
-
-type autoCloseItemContext struct {
+type proposalItemContext struct {
 	Repository string `json:"repository"`
 	Item       struct {
 		Kind   string `json:"kind"`
@@ -42,24 +30,24 @@ type autoCloseItemContext struct {
 	Requests int `json:"requests"`
 }
 
-func readAutoCloseContext(root, repo string, number int, checkpoint string, offset int, contextCheckpoint string) (autoCloseContext, error) {
+func readClosureContext(root, repo string, number int, checkpoint string, offset int, contextCheckpoint string) (actionProposalContext, error) {
 	args := []string{"--expected-repo", repo, "context", "--kind", "pr", "--number", strconv.Itoa(number), "--checkpoint", checkpoint, "--offset", strconv.Itoa(offset)}
 	if contextCheckpoint != "" {
 		args = append(args, "--context-checkpoint", contextCheckpoint)
 	}
 	out, err := runScript(root, "action-proposals", args...)
 	if err != nil {
-		return autoCloseContext{}, err
+		return actionProposalContext{}, err
 	}
-	var context autoCloseContext
+	var context actionProposalContext
 	if err := json.Unmarshal([]byte(out), &context); err != nil {
-		return autoCloseContext{}, err
+		return actionProposalContext{}, err
 	}
 	if context.Repository != repo || context.Kind != "pr" || context.Number != number || context.ProposalCheckpoint != checkpoint || context.Requests != 0 ||
 		context.ItemContext.Repository != repo || context.ItemContext.Item.Kind != "pr" || context.ItemContext.Item.Number != number ||
 		context.ItemContext.Requests != 0 || context.ItemContext.Checkpoint == "" || context.ItemContext.Pagination.Offset != offset || len(context.ItemContext.Rows) > 10 ||
 		context.Current && context.Reason != "" || !context.Current && context.Reason == "" {
-		return autoCloseContext{}, fmt.Errorf("proposal context identity or status mismatch")
+		return actionProposalContext{}, fmt.Errorf("proposal context identity or status mismatch")
 	}
 	return context, nil
 }
@@ -101,7 +89,7 @@ func contextExcerpt(value string) string {
 	return value
 }
 
-func (c autoCloseContext) guidanceBlocks() []guidanceBlock {
+func (c actionProposalContext) guidanceBlocks() []guidanceBlock {
 	var blocks []guidanceBlock
 	lastGroup := -1
 	for _, row := range c.ItemContext.Rows {
@@ -171,7 +159,7 @@ func (c autoCloseContext) guidanceBlocks() []guidanceBlock {
 	return blocks
 }
 
-func (n notificationsUI) proposalContext(row autoCloseRow) *autoCloseContext {
+func (n notificationsUI) proposalContext(row actionProposalRow) *actionProposalContext {
 	if n.review != nil {
 		if context, ok := n.review.Contexts[row.Number]; ok && context.ProposalCheckpoint == row.Checkpoint {
 			return &context
@@ -185,12 +173,12 @@ type proposalEvidenceLine struct {
 	complete      bool
 }
 
-func proposalEvidenceLines(row autoCloseRow) []proposalEvidenceLine {
-	if row.Inputs == nil {
+func proposalEvidenceLines(inputs *proposalInputs) []proposalEvidenceLine {
+	if inputs == nil {
 		return []proposalEvidenceLine{{item: "This older proposal has no declared evidence or local context."}}
 	}
 	var lines []proposalEvidenceLine
-	for _, evidence := range row.Inputs.Evidence {
+	for _, evidence := range inputs.Evidence {
 		missing := make([]string, 0, len(evidence.Components))
 		for name, component := range evidence.Components {
 			if component.Status != "complete" && component.Status != "not_applicable" {
@@ -212,7 +200,7 @@ func proposalEvidenceLines(row autoCloseRow) []proposalEvidenceLine {
 		}
 		lines = append(lines, line)
 	}
-	for _, gap := range row.Inputs.EvidenceGaps {
+	for _, gap := range inputs.EvidenceGaps {
 		lines = append(lines, proposalEvidenceLine{item: "Gap", missing: gap})
 	}
 	if len(lines) == 0 {

@@ -97,9 +97,9 @@ func (s proposalReviewStyles) writeSavedState(b *strings.Builder, status, operat
 	return true
 }
 
-func (s proposalReviewStyles) writeEvidence(b *strings.Builder, inputs *autoCloseInputs, width int) {
+func (s proposalReviewStyles) writeEvidence(b *strings.Builder, inputs *proposalInputs, width int) {
 	fmt.Fprintf(b, "\n%s\n", inset(s.section.Render("Selected evidence")))
-	for _, line := range proposalEvidenceLines(autoCloseRow{Inputs: inputs}) {
+	for _, line := range proposalEvidenceLines(inputs) {
 		value := sanitize(line.item)
 		if line.complete {
 			value += " " + s.success.Render("Complete")

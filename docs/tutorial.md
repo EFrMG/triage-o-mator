@@ -13,7 +13,7 @@ Saves, approvals and group edits change your repository's git-tracked ledger and
 
 ## A focused review loop
 
-- **Human first:** Record a decision or notes for a named PR ([step 5](#5-record-a-decision)). Ask an agent to assess it with current `item-context` and selected evidence using the [closure prompt](../prompts/recommend-auto-close.md). It reports why the PR should stay open or saves a closure proposal. In **Notifications**, inspect the exact comment and context, edit with `e`, reject with `d`, or review and approve with `a`. The next agent pass reads any rejection.
+- **Human first:** Record a decision or notes for a named PR ([step 5](#5-record-a-decision)). Ask an agent to assess it with current `item-context` and selected evidence using the [closure prompt](../prompts/recommend-closure.md). It reports why the PR should stay open or saves a closure proposal. In **Notifications**, inspect the exact comment and context, edit with `e`, reject with `d`, or review and approve with `a`. The next agent pass reads any rejection.
 - **Agent first:** Ask an agent to prepare a focused draft group. Edit it in **Groups**, then use `y` for ticked or hovered members, or `Y` for all, to copy a handoff. The agent reads a fresh export and assesses the selected members, including already-triaged ones. Review any resulting PR proposals in **Notifications**.
 
 Group `ready`, ledger `reviewed` and approval to publish an exact GitHub action are separate choices. Changed guidance requires a fresh proposal and review. A saved write attempt needs [reconciliation](comment-plus.md#saved-action-proposals) before another action.

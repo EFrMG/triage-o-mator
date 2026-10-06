@@ -47,7 +47,7 @@ func (m model) rejectNotificationCmd() tea.Cmd {
 			return msg
 		}
 
-		var rejected autoCloseRow
+		var rejected actionProposalRow
 		if err := json.Unmarshal([]byte(out), &rejected); err != nil {
 			msg.rejected = true
 			msg.err = fmt.Errorf("could not read saved rejection: %w", err)

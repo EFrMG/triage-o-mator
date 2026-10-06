@@ -30,12 +30,12 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishComment(msg)
 	case notificationsMsg:
 		return m.finishNotifications(msg)
-	case autoCloseMsg:
-		return m.finishAutoClose(msg)
+	case closureReviewMsg:
+		return m.finishClosureReview(msg)
 	case actionReviewMsg:
 		return m.finishActionReview(msg)
-	case autoCloseNotesMsg:
-		return m.finishAutoCloseNotes(msg)
+	case proposalNotesMsg:
+		return m.finishProposalNotes(msg)
 	case notificationItemDoneMsg:
 		return m.finishNotificationItem(msg)
 	case notificationRejectionDoneMsg:

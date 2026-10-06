@@ -204,7 +204,7 @@ class ItemContextTests(Workspace):
 
 
 class ProposalFeedbackTests(Workspace):
-    def auto_close(self, *args, ok=True):
+    def closure(self, *args, ok=True):
         command, *rest = args
         if command in ("review", "execute", "context", "edit", "answer", "reject", "view", "dismiss"):
             rest = ["--kind", "pr", *rest]
@@ -215,7 +215,7 @@ class ProposalFeedbackTests(Workspace):
         comment.write_text("Thanks for the work; this PR is superseded.\n")
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", str(number))
 
-        return self.auto_close("propose", "--kind", "pr", "--number", str(number), "--operation", "close", "--observed-state", "open", "--title", "An older fix",
+        return self.closure("propose", "--kind", "pr", "--number", str(number), "--operation", "close", "--observed-state", "open", "--title", "An older fix",
                                "--head-sha", "b" * 40, "--updated-at", "2026-09-29T00:00:00Z",
                                "--comment-file", str(comment), "--by", "agent:helper",
                                "--context-checkpoint", context["checkpoint"], *extra, ok=ok)
@@ -241,27 +241,27 @@ class ProposalFeedbackTests(Workspace):
         self.assertEqual(inputs["evidence"][0]["snapshot_id"], snapshot)
         self.assertIn("summary", inputs["evidence"][0]["components"])
         self.assertEqual(inputs["evidence_gaps"], ["Issue #2 has no selected evidence"])
-        approved = self.auto_close("review", "--number", "1")
+        approved = self.closure("review", "--number", "1")
         self.assertEqual(approved["plan"]["proposals"][0]["inputs"], inputs)
         self.assertEqual(len(self.calls()), before)
 
         object_path = next(path for path in (self.root / "data/owner/repo/cache/objects").iterdir() if path.is_file())
         original_object = object_path.read_bytes()
         object_path.write_text("{}\n")
-        unavailable = self.auto_close("context", "--number", "1", "--checkpoint", selected["checkpoint"])
+        unavailable = self.closure("context", "--number", "1", "--checkpoint", selected["checkpoint"])
         self.assertFalse(unavailable["current"])
         self.assertIn("selected evidence", unavailable["reason"])
-        self.auto_close("review", "--number", "1", ok=False)
-        self.auto_close("execute", "--number", "1", "--publish", "--approve", approved["approval"], ok=False)
+        self.closure("review", "--number", "1", ok=False)
+        self.closure("execute", "--number", "1", "--publish", "--approve", approved["approval"], ok=False)
         self.assertEqual(len(self.calls()), before)
         object_path.write_bytes(original_object)
 
         edited_comment = self.root / "edited-comment.md"
         edited_comment.write_text("The maintainer refined this closure comment.\n")
-        edited = self.auto_close("edit", "--number", "1", "--checkpoint", selected["checkpoint"],
+        edited = self.closure("edit", "--number", "1", "--checkpoint", selected["checkpoint"],
                                  "--comment-file", str(edited_comment), "--by", "maintainer")
         self.assertEqual(edited["inputs"], inputs)
-        self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["checkpoint"], edited["checkpoint"])
+        self.assertEqual(self.closure("review", "--number", "1")["plan"]["proposals"][0]["checkpoint"], edited["checkpoint"])
         self.assertEqual(len(self.calls()), before)
 
         path = self.root / "data/owner/repo/action-proposals/pr-1.json"
@@ -270,8 +270,8 @@ class ProposalFeedbackTests(Workspace):
         legacy.pop("inputs")
         legacy["checksum"] = hashlib.sha256(json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         path.write_text(json.dumps(legacy) + "\n")
-        self.auto_close("list", ok=False)
-        self.auto_close("review", "--number", "1", ok=False)
+        self.closure("list", ok=False)
+        self.closure("review", "--number", "1", ok=False)
         self.assertEqual(len(self.calls()), before)
 
     def test_rejection_retains_exact_proposal_and_never_publishes(self):
@@ -279,11 +279,11 @@ class ProposalFeedbackTests(Workspace):
         ledger.write_text(json.dumps(dict(item(1, "An older fix", "pr"), reviewed=True, reviewed_by="maintainer")) + "\n")
         original = ledger.read_bytes()
         pending = self.propose(1, "--evidence-gap", "No selected cache snapshot")
-        reviewed = self.auto_close("review", "--number", "1")
+        reviewed = self.closure("review", "--number", "1")
         self.assertNotIn("rejection", reviewed["plan"]["proposals"][0])
-        self.auto_close("dismiss", "--number", "1", "--checkpoint", pending["checkpoint"])
+        self.closure("dismiss", "--number", "1", "--checkpoint", pending["checkpoint"])
 
-        rejected = self.auto_close("reject", "--number", "1", "--checkpoint", pending["checkpoint"],
+        rejected = self.closure("reject", "--number", "1", "--checkpoint", pending["checkpoint"],
                                    "--by", "maintainer", "--reason", "Keep the compatibility work open")
         record = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         self.assertEqual(rejected["status"], "rejected")
@@ -294,14 +294,14 @@ class ProposalFeedbackTests(Workspace):
         self.assertEqual(rejected["rejection"]["proposal_checkpoint"], pending["checkpoint"])
         self.assertEqual(record["history"][-1]["checksum"], pending["checkpoint"])
         self.assertEqual(record["request_id"], record["history"][-1]["request_id"])
-        self.assertEqual(self.auto_close("list")["rows"][0]["rejection"], rejected["rejection"])
+        self.assertEqual(self.closure("list")["rows"][0]["rejection"], rejected["rejection"])
 
-        self.auto_close("review", "--number", "1", ok=False)
-        self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], ok=False)
-        self.auto_close("reject", "--number", "1", "--checkpoint", pending["checkpoint"],
+        self.closure("review", "--number", "1", ok=False)
+        self.closure("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], ok=False)
+        self.closure("reject", "--number", "1", "--checkpoint", pending["checkpoint"],
                         "--by", "maintainer", "--reason", "Stale retry", ok=False)
-        self.auto_close("dismiss", "--number", "1", "--checkpoint", rejected["checkpoint"])
-        self.assertTrue(self.auto_close("list")["rows"][0]["dismissed"])
+        self.closure("dismiss", "--number", "1", "--checkpoint", rejected["checkpoint"])
+        self.assertTrue(self.closure("list")["rows"][0]["dismissed"])
 
         attempted = self.propose(2, "--evidence-gap", "No selected cache snapshot")
         saved = self.root / "data/owner/repo/action-proposals/pr-2.json"
@@ -309,14 +309,14 @@ class ProposalFeedbackTests(Workspace):
         writes = self.root / "data/owner/repo/writes"
         writes.mkdir()
         writes.joinpath(json.loads(before)["request_id"] + ".json").write_text("{}\n")
-        self.auto_close("reject", "--number", "2", "--checkpoint", attempted["checkpoint"],
+        self.closure("reject", "--number", "2", "--checkpoint", attempted["checkpoint"],
                         "--by", "maintainer", "--reason", "Too late", ok=False)
         self.assertEqual(saved.read_bytes(), before)
 
         optional = self.propose(3, "--evidence-gap", "No selected cache snapshot")
-        no_reason = self.auto_close("reject", "--number", "3", "--checkpoint", optional["checkpoint"], "--by", "maintainer")
+        no_reason = self.closure("reject", "--number", "3", "--checkpoint", optional["checkpoint"], "--by", "maintainer")
         self.assertEqual(no_reason["rejection"]["reason"], "")
-        self.assertEqual(self.auto_close("list")["rows"][-1]["rejection"]["reason"], "")
+        self.assertEqual(self.closure("list")["rows"][-1]["rejection"]["reason"], "")
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "3")
         self.assertEqual(next(row for row in context["rows"] if row["kind"] == "feedback")["fields"]["reason"]["preview"], "")
         self.assertEqual(ledger.read_bytes(), original)
@@ -337,13 +337,13 @@ class ProposalFeedbackTests(Workspace):
                                                  ("--member-context", f"{member['kind']}:{member['number']}:{member['local_context']['checkpoint']}")])
 
         initial = self.propose(1, *handoff(), "--evidence-gap", "No selected snapshot")
-        shown = self.auto_close("context", "--number", "1", "--checkpoint", initial["checkpoint"])
+        shown = self.closure("context", "--number", "1", "--checkpoint", initial["checkpoint"])
         self.assertTrue(shown["current"])
         self.assertEqual(shown["item_context"]["rows"][0]["fields"]["reviewer_notes"]["preview"], "Keep compatibility in view")
         self.assertEqual(shown["requests"], 0)
-        rejected = self.auto_close("reject", "--number", "1", "--checkpoint", initial["checkpoint"],
+        rejected = self.closure("reject", "--number", "1", "--checkpoint", initial["checkpoint"],
                                    "--by", "maintainer", "--reason", "Do not close until compatibility is resolved")
-        rejected_view = self.auto_close("context", "--number", "1", "--checkpoint", rejected["checkpoint"])
+        rejected_view = self.closure("context", "--number", "1", "--checkpoint", rejected["checkpoint"])
         self.assertFalse(rejected_view["current"])
         self.assertEqual(rejected_view["latest_rejection"]["reason"], rejected["rejection"]["reason"])
         before = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
@@ -371,8 +371,8 @@ class ProposalFeedbackTests(Workspace):
         self.assertEqual(record["history"][-1]["checksum"], rejected["checkpoint"])
         self.assertEqual(record["history"][-1]["rejection"]["reason"], rejected["rejection"]["reason"])
         self.assertNotEqual(record["request_id"], record["history"][-1]["request_id"])
-        self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["reconsideration"], reconsidered["reconsideration"])
-        self.assertTrue(self.auto_close("context", "--number", "1", "--checkpoint", reconsidered["checkpoint"])["current"])
+        self.assertEqual(self.closure("review", "--number", "1")["plan"]["proposals"][0]["reconsideration"], reconsidered["reconsideration"])
+        self.assertTrue(self.closure("context", "--number", "1", "--checkpoint", reconsidered["checkpoint"])["current"])
         self.assertEqual(self.json_cli("group", "export", group["id"], "--format", "json")["items"][0]["local_context"]["feedback"][0]["reason"],
                          rejected["rejection"]["reason"])
 
@@ -398,7 +398,7 @@ class ProposalFeedbackTests(Workspace):
         self.assertEqual(context(1)["checkpoint"], before["checkpoint"])
 
         reason = "é" * 300
-        self.auto_close("reject", "--number", "1", "--checkpoint", pending["checkpoint"], "--by", "maintainer", "--reason", reason)
+        self.closure("reject", "--number", "1", "--checkpoint", pending["checkpoint"], "--by", "maintainer", "--reason", reason)
         rejected = context(1)
         self.assertEqual(rejected["context_revision"], before["context_revision"])
         self.assertIsNotNone(rejected["feedback_checkpoint"])

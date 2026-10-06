@@ -16,7 +16,7 @@ type proposalNote struct {
 	omitted                    int
 }
 
-type autoCloseNotesMsg struct {
+type proposalNotesMsg struct {
 	root, repo, proposalCheckpoint, contextCheckpoint string
 	kind                                              string
 	generation, request                               uint64
@@ -25,7 +25,7 @@ type autoCloseNotesMsg struct {
 	err                                               error
 }
 
-func proposalNotes(context *autoCloseContext) []proposalNote {
+func proposalNotes(context *actionProposalContext) []proposalNote {
 	var notes []proposalNote
 	add := func(rowID string, fields map[string]json.RawMessage, field, label string) {
 		raw := fields[field]
@@ -63,7 +63,7 @@ func proposalNotes(context *autoCloseContext) []proposalNote {
 	return notes
 }
 
-func hasExpandableProposalNotes(context *autoCloseContext) bool {
+func hasExpandableProposalNotes(context *actionProposalContext) bool {
 	if context == nil {
 		return false
 	}
@@ -75,9 +75,9 @@ func hasExpandableProposalNotes(context *autoCloseContext) bool {
 	return false
 }
 
-func autoCloseNotesCmd(root, repo, kind string, generation, request uint64, number int, proposalCheckpoint, contextCheckpoint string, notes []proposalNote) tea.Cmd {
+func proposalNotesCmd(root, repo, kind string, generation, request uint64, number int, proposalCheckpoint, contextCheckpoint string, notes []proposalNote) tea.Cmd {
 	return func() tea.Msg {
-		msg := autoCloseNotesMsg{root: root, repo: repo, kind: kind, generation: generation, request: request, number: number,
+		msg := proposalNotesMsg{root: root, repo: repo, kind: kind, generation: generation, request: request, number: number,
 			proposalCheckpoint: proposalCheckpoint, contextCheckpoint: contextCheckpoint}
 		var output strings.Builder
 		for _, note := range notes {
@@ -145,7 +145,7 @@ func (m model) toggleActionNotes(row actionProposalRow) (tea.Model, tea.Cmd) {
 		m.status = "Read local context before opening its notes."
 		return m, nil
 	}
-	context := &autoCloseContext{ItemContext: m.notifications.actionReview.context.ItemContext}
+	context := m.notifications.actionReview.context
 	if !hasExpandableProposalNotes(context) {
 		m.status = "Full local notes are already shown in the proposal."
 		return m, nil
@@ -155,11 +155,11 @@ func (m model) toggleActionNotes(row actionProposalRow) (tea.Model, tea.Cmd) {
 	m.notifications.notesError = ""
 	m.notifications.notesScroll = 0
 	m.notifications.notesRequest++
-	return m, autoCloseNotesCmd(m.installRoot, m.repo, row.Kind, m.notificationsGeneration, m.notifications.notesRequest,
+	return m, proposalNotesCmd(m.installRoot, m.repo, row.Kind, m.notificationsGeneration, m.notifications.notesRequest,
 		row.Number, row.Checkpoint, context.ItemContext.Checkpoint, proposalNotes(context))
 }
 
-func (m model) finishAutoCloseNotes(msg autoCloseNotesMsg) (tea.Model, tea.Cmd) {
+func (m model) finishProposalNotes(msg proposalNotesMsg) (tea.Model, tea.Cmd) {
 	if !m.notifications.open || !m.notifications.notesOpen || msg.root != m.installRoot || msg.repo != m.repo ||
 		msg.generation != m.notificationsGeneration || msg.request != m.notifications.notesRequest {
 		return m, nil

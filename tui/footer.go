@@ -214,7 +214,7 @@ func (m model) contextFooterGroups() []footerGroup {
 			}
 			action := group(name, hint{"j/k Ctrl-D/U", "scroll"}, hint{"Enter", "view item"}, hint{"y", "copy for agent"}, hint{"w", "track comments"})
 			if context := m.notifications.actionReview.context; context != nil {
-				if hasExpandableProposalNotes(&autoCloseContext{ItemContext: context.ItemContext}) {
+				if hasExpandableProposalNotes(context) {
 					action.hints = append(action.hints, hint{"m", "full notes"})
 				}
 				if context.ItemContext.Pagination.Offset > 0 || context.ItemContext.Pagination.Next != nil {

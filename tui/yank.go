@@ -192,7 +192,7 @@ func (m model) yankActionProposal(row actionProposalRow) (string, string) {
 			}
 		}
 		var incomplete []proposalEvidenceLine
-		for _, line := range proposalEvidenceLines(autoCloseRow{Inputs: row.Inputs}) {
+		for _, line := range proposalEvidenceLines(row.Inputs) {
 			if line.item != "Gap" && line.missing != "" {
 				incomplete = append(incomplete, line)
 			}

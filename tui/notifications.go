@@ -22,7 +22,7 @@ type notificationsUI struct {
 	suggestionOffset int
 	actionReview     *actionReviewUI
 	ticked           map[int]bool
-	review           *autoCloseReview
+	review           *closureReview
 	reviewBusy       bool
 	reviewAll        bool
 	reviewKey        string
@@ -94,13 +94,13 @@ type actionProposalRow struct {
 	Checkpoint         string                    `json:"checkpoint"`
 	DecisionQuestion   string                    `json:"decision_question"`
 	DecisionResolution *actionDecisionResolution `json:"decision_resolution"`
-	Rejection          *autoCloseRejection       `json:"rejection"`
-	Reconsideration    *autoCloseReconsideration `json:"reconsideration"`
+	Rejection          *proposalRejection        `json:"rejection"`
+	Reconsideration    *proposalReconsideration  `json:"reconsideration"`
 	Number             int                       `json:"number"`
 	Active             bool                      `json:"active"`
 	Needs              bool                      `json:"needs_attention"`
 	Dismissed          bool                      `json:"dismissed"`
-	Inputs             *autoCloseInputs          `json:"inputs"`
+	Inputs             *proposalInputs           `json:"inputs"`
 	Outcome            *struct {
 		Comment struct {
 			Status string `json:"status"`
@@ -130,8 +130,6 @@ func (l actionProposalList) closures() []actionProposalRow {
 	return rows
 }
 
-type autoCloseRow = actionProposalRow
-
 type actionDecisionResolution struct {
 	By             string `json:"by"`
 	At             string `json:"at"`
@@ -139,21 +137,21 @@ type actionDecisionResolution struct {
 	HeldCheckpoint string `json:"held_checkpoint"`
 }
 
-type autoCloseRejection struct {
+type proposalRejection struct {
 	ProposalCheckpoint string `json:"proposal_checkpoint"`
 	By                 string `json:"by"`
 	At                 string `json:"at"`
 	Reason             string `json:"reason"`
 }
 
-type autoCloseReconsideration struct {
+type proposalReconsideration struct {
 	By                 string `json:"by"`
 	At                 string `json:"at"`
 	Reason             string `json:"reason"`
 	RejectedCheckpoint string `json:"rejected_checkpoint"`
 }
 
-type autoCloseInputs struct {
+type proposalInputs struct {
 	ContextRevision    string `json:"context_revision"`
 	FeedbackCheckpoint string `json:"feedback_checkpoint"`
 	ContextCheckpoint  string `json:"context_checkpoint"`
@@ -168,30 +166,28 @@ type autoCloseInputs struct {
 	EvidenceGaps []string `json:"evidence_gaps"`
 }
 
-type autoCloseList = actionProposalList
-
-type autoCloseReview struct {
+type closureReview struct {
 	Plan struct {
-		Repository string         `json:"repo"`
-		Operation  string         `json:"operation"`
-		Proposals  []autoCloseRow `json:"proposals"`
+		Repository string              `json:"repo"`
+		Operation  string              `json:"operation"`
+		Proposals  []actionProposalRow `json:"proposals"`
 	} `json:"plan"`
-	Approval string                   `json:"approval"`
-	Contexts map[int]autoCloseContext `json:"-"`
+	Approval string                        `json:"approval"`
+	Contexts map[int]actionProposalContext `json:"-"`
 }
 
-type autoCloseMsg struct {
+type closureReviewMsg struct {
 	root, repo string
 	generation uint64
 	action     string
 	all        bool
 	numbers    []int
-	review     autoCloseReview
+	review     closureReview
 	out        string
 	err        error
 }
 
-func autoCloseSelectionArgs(all bool, numbers []int) []string {
+func closureSelectionArgs(all bool, numbers []int) []string {
 	if all {
 		return []string{"--all", "--kind", "pr", "--operation", "close"}
 	}
@@ -202,18 +198,18 @@ func autoCloseSelectionArgs(all bool, numbers []int) []string {
 	return args
 }
 
-func autoCloseReviewCmd(root, repo string, generation uint64, all bool, numbers []int) tea.Cmd {
+func closureReviewCmd(root, repo string, generation uint64, all bool, numbers []int) tea.Cmd {
 	return func() tea.Msg {
-		args := append([]string{"--expected-repo", repo, "review"}, autoCloseSelectionArgs(all, numbers)...)
+		args := append([]string{"--expected-repo", repo, "review"}, closureSelectionArgs(all, numbers)...)
 		out, err := runScript(root, "action-proposals", args...)
-		msg := autoCloseMsg{root: root, repo: repo, generation: generation, action: "review", all: all, numbers: numbers, err: err}
+		msg := closureReviewMsg{root: root, repo: repo, generation: generation, action: "review", all: all, numbers: numbers, err: err}
 		if err == nil {
 			msg.err = json.Unmarshal([]byte(out), &msg.review)
 		}
 		if msg.err == nil {
-			msg.review.Contexts = make(map[int]autoCloseContext, len(msg.review.Plan.Proposals))
+			msg.review.Contexts = make(map[int]actionProposalContext, len(msg.review.Plan.Proposals))
 			for _, row := range msg.review.Plan.Proposals {
-				context, err := readAutoCloseContext(root, repo, row.Number, row.Checkpoint, 0, "")
+				context, err := readClosureContext(root, repo, row.Number, row.Checkpoint, 0, "")
 				if err != nil {
 					msg.err = err
 					break
@@ -229,22 +225,22 @@ func autoCloseReviewCmd(root, repo string, generation uint64, all bool, numbers 
 	}
 }
 
-func (m model) beginAutoCloseReview(all bool, numbers []int) (tea.Model, tea.Cmd) {
+func (m model) beginClosureReview(all bool, numbers []int) (tea.Model, tea.Cmd) {
 	m.notifications.reviewBusy = true
 	m.status = "Preparing exact PR closure review…"
-	return m, autoCloseReviewCmd(m.installRoot, m.repo, m.notificationsGeneration, all, numbers)
+	return m, closureReviewCmd(m.installRoot, m.repo, m.notificationsGeneration, all, numbers)
 }
 
-func autoCloseExecuteCmd(root, repo string, generation uint64, all bool, numbers []int, approval string) tea.Cmd {
+func closureExecuteCmd(root, repo string, generation uint64, all bool, numbers []int, approval string) tea.Cmd {
 	return func() tea.Msg {
-		args := append([]string{"--expected-repo", repo, "execute"}, autoCloseSelectionArgs(all, numbers)...)
+		args := append([]string{"--expected-repo", repo, "execute"}, closureSelectionArgs(all, numbers)...)
 		args = append(args, "--publish", "--approve", approval)
 		out, err := runScript(root, "action-proposals", args...)
-		return autoCloseMsg{root: root, repo: repo, generation: generation, action: "execute", out: out, err: err}
+		return closureReviewMsg{root: root, repo: repo, generation: generation, action: "execute", out: out, err: err}
 	}
 }
 
-func (m model) finishAutoClose(msg autoCloseMsg) (tea.Model, tea.Cmd) {
+func (m model) finishClosureReview(msg closureReviewMsg) (tea.Model, tea.Cmd) {
 	if !m.notifications.open || msg.root != m.installRoot || msg.repo != m.repo || msg.generation != m.notificationsGeneration {
 		return m, nil
 	}
@@ -262,7 +258,7 @@ func (m model) finishAutoClose(msg autoCloseMsg) (tea.Model, tea.Cmd) {
 			m.fail("Invalid action review; nothing published.")
 			return m, nil
 		}
-		current := make(map[int]autoCloseRow)
+		current := make(map[int]actionProposalRow)
 		for _, row := range m.notifications.actions.closures() {
 			current[row.Number] = row
 		}
@@ -695,7 +691,7 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			}
 			m.notifications.reviewBusy = true
 			m.status = "Publishing approved comments and closing PRs…"
-			return m, autoCloseExecuteCmd(m.installRoot, m.repo, m.notificationsGeneration, m.notifications.reviewAll, m.notifications.reviewNumbers, m.notifications.review.Approval)
+			return m, closureExecuteCmd(m.installRoot, m.repo, m.notificationsGeneration, m.notifications.reviewAll, m.notifications.reviewNumbers, m.notifications.review.Approval)
 		case "j", "down":
 			m.notifications.reviewScroll++
 		case "k", "up":
@@ -705,7 +701,7 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		case "ctrl+u":
 			m.notifications.reviewScroll = maxInt(0, m.notifications.reviewScroll-maxInt(m.mainHeight()/2, 1))
 		}
-		vp := m.autoCloseReviewViewport()
+		vp := m.closureReviewViewport()
 		m.notifications.reviewScroll = vp.YOffset()
 		return m, nil
 	}
@@ -794,7 +790,7 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			return m.openActionReview(choice)
 		}
 		if len(numbers) > 1 {
-			return m.beginAutoCloseReview(all, numbers)
+			return m.beginClosureReview(all, numbers)
 		}
 		if all {
 			break
@@ -904,7 +900,7 @@ func (m model) notificationsView() string {
 		return m.actionReviewView()
 	}
 	if n.review != nil {
-		return m.autoCloseReviewView()
+		return m.closureReviewView()
 	}
 	if n.tracked == nil {
 		n.tracked = &trackedPage{}
@@ -967,7 +963,7 @@ func (m model) notificationsView() string {
 	return vp.View()
 }
 
-func (m model) autoCloseReviewViewport() viewport.Model {
+func (m model) closureReviewViewport() viewport.Model {
 	n := m.notifications
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\n", inset(titleBar("Review PR closures", "", m.menuWidth())))
@@ -1049,7 +1045,7 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 	return vp
 }
 
-func proposalRevisionFooter(row autoCloseRow, width int) string {
+func proposalRevisionFooter(row actionProposalRow, width int) string {
 	updated := sanitize(row.UpdatedAt)
 	if len(updated) >= 20 && updated[10] == 'T' {
 		updated = updated[:10] + " " + updated[11:16] + " UTC"
@@ -1063,8 +1059,8 @@ func proposalRevisionFooter(row autoCloseRow, width int) string {
 	return left + strings.Repeat(" ", maxInt(width-ansi.StringWidth(left)-ansi.StringWidth(right), 1)) + right
 }
 
-func (m model) autoCloseReviewView() string {
-	return m.autoCloseReviewViewport().View()
+func (m model) closureReviewView() string {
+	return m.closureReviewViewport().View()
 }
 
 func proposalStatusSummary(operation, status string) string {

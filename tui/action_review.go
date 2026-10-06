@@ -11,15 +11,15 @@ import (
 )
 
 type actionProposalContext struct {
-	Repository         string               `json:"repository"`
-	Kind               string               `json:"kind"`
-	Number             int                  `json:"number"`
-	ProposalCheckpoint string               `json:"proposal_checkpoint"`
-	Current            bool                 `json:"current"`
-	Reason             string               `json:"reason"`
-	ItemContext        autoCloseItemContext `json:"item_context"`
-	LatestRejection    *autoCloseRejection  `json:"latest_rejection"`
-	Requests           int                  `json:"requests"`
+	Repository         string              `json:"repository"`
+	Kind               string              `json:"kind"`
+	Number             int                 `json:"number"`
+	ProposalCheckpoint string              `json:"proposal_checkpoint"`
+	Current            bool                `json:"current"`
+	Reason             string              `json:"reason"`
+	ItemContext        proposalItemContext `json:"item_context"`
+	LatestRejection    *proposalRejection  `json:"latest_rejection"`
+	Requests           int                 `json:"requests"`
 }
 
 type actionReviewUI struct {
@@ -303,7 +303,7 @@ func (m model) actionReviewView() string {
 	if review == nil {
 		return ""
 	}
-	footer := proposalRevisionFooter(autoCloseRow{UpdatedAt: review.row.UpdatedAt, HeadSHA: review.row.HeadSHA}, maxInt(m.cardWidth()-1, 1))
+	footer := proposalRevisionFooter(review.row, maxInt(m.cardWidth()-1, 1))
 	return m.actionReviewViewport().View() + "\n" + inset(mutedText(footer))
 }
 
@@ -363,8 +363,7 @@ func (m model) actionReviewViewport() viewport.Model {
 		if !review.context.Current && row.Status == "pending" {
 			fmt.Fprintf(&b, "%s\n", inset(styles.action.Render(wrapText("Why: "+sanitize(review.context.Reason), width))))
 		}
-		context := autoCloseContext{ItemContext: review.context.ItemContext}
-		for _, block := range context.guidanceBlocks() {
+		for _, block := range review.context.guidanceBlocks() {
 			fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Bold(true).Render(sanitize(block.title))))
 			for _, line := range block.lines {
 				fmt.Fprintf(&b, "%s\n", inset(wrapText(sanitize(line), width)))

@@ -320,7 +320,7 @@ class WriteTests(Workspace):
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "POST", "PATCH"])
 
 
-class AutoCloseWriteTests(Workspace):
+class ClosureWriteTests(Workspace):
     def setUp(self):
         super().setUp()
         (self.mock / "gh").write_text(CLOSE_GH)
@@ -332,7 +332,7 @@ class AutoCloseWriteTests(Workspace):
                                                                                updated_at="2026-09-29T00:00:00Z", pull_request={})))
             (self.mock / f"pulls-{number}.json").write_text(json.dumps(dict(number=number, html_url=target, head=dict(sha="b" * 40))))
 
-    def auto_close(self, *args, ok=True):
+    def closure(self, *args, ok=True):
         command, *rest = args
         if command == "propose":
             rest = ["--kind", "pr", "--operation", "close", "--observed-state", "open", *rest]
@@ -358,7 +358,7 @@ class AutoCloseWriteTests(Workspace):
         comment = self.root / f"comment-{number}.md"
         comment.write_text(f"PR #{number} is superseded.\n")
         gap = () if "--evidence" in extra else ("--evidence-gap", "No selected snapshot")
-        return self.auto_close("propose", "--number", str(number), "--title", f"PR {number}", "--head-sha", "b" * 40,
+        return self.closure("propose", "--number", str(number), "--title", f"PR {number}", "--head-sha", "b" * 40,
                                "--updated-at", "2026-09-29T00:00:00Z", "--comment-file", str(comment),
                                "--by", "agent:helper", "--context-checkpoint", context["checkpoint"],
                                *gap, *extra, ok=ok)
@@ -379,15 +379,15 @@ class AutoCloseWriteTests(Workspace):
 
     def test_unbound_pr_closure_requires_exact_human_approval(self):
         proposal = self.propose(1)
-        listed = self.auto_close("list")["rows"][0]
+        listed = self.closure("list")["rows"][0]
         self.assertIsNone(listed["action"])
         self.assertEqual(listed["operation"], "close")
         self.assertEqual(listed["checkpoint"], proposal["checkpoint"])
 
-        reviewed = self.auto_close("review", "--number", "1")
+        reviewed = self.closure("review", "--number", "1")
         self.assertEqual(reviewed["plan"]["proposals"][0]["checkpoint"], proposal["checkpoint"])
         self.json_cli("action-pass", "preview", "--expected-repo", "owner/repo", "--item", "pr:1", ok=False)
-        self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], "--automation", ok=False)
+        self.closure("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], "--automation", ok=False)
         self.assertEqual(self.write_calls(), [])
 
     def test_repository_policy_routes_bound_pr_closure_through_action_proposal(self):
@@ -501,10 +501,10 @@ class AutoCloseWriteTests(Workspace):
         legacy["checksum"] = hashlib.sha256(canonical.encode()).hexdigest()
         path.write_text(json.dumps(legacy))
 
-        listed = self.auto_close("list")["rows"][0]
+        listed = self.closure("list")["rows"][0]
         self.assertEqual(listed["decision_resolution"]["reason"], "Replacement covers it")
         self.assertNotIn("decision_question", listed)
-        self.assertEqual(self.auto_close("review", "--number", "1")["plan"]["proposals"][0]["checkpoint"], listed["checkpoint"])
+        self.assertEqual(self.closure("review", "--number", "1")["plan"]["proposals"][0]["checkpoint"], listed["checkpoint"])
 
     def test_policy_routes_pr_comment_without_creating_a_closure_proposal(self):
         write_gh = (self.mock / "gh").read_text()
@@ -526,7 +526,7 @@ class AutoCloseWriteTests(Workspace):
                          "--comment-file", str(comment), "--by", "agent:helper", "--evidence", f"pr:1:{snapshot}")
         held = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "propose", *proposal_args,
                              "--context-checkpoint", context["checkpoint"], "--decision-question", "Should this feedback be sent now?")
-        self.auto_close("propose", "--number", "1", "--title", "PR 1", "--head-sha", "b" * 40,
+        self.closure("propose", "--number", "1", "--title", "PR 1", "--head-sha", "b" * 40,
                         "--updated-at", "2026-09-29T00:00:00Z", "--comment-file", str(comment), "--by", "agent:helper",
                         "--context-checkpoint", context["checkpoint"], "--evidence-gap", "No selected close evidence", ok=False)
         selection = ("--expected-repo", "owner/repo", "--item", "pr:1")
@@ -573,40 +573,39 @@ class AutoCloseWriteTests(Workspace):
                                "--publish", "--approve", fresh["approval"])
         self.assertEqual(result["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST"])
-        self.assertFalse((self.root / "data/owner/repo/auto-close/pr-1.json").exists())
         self.assertFalse(self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"][0]["needs_attention"])
         self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
         self.assertEqual(self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")["feedback_count"], 1)
 
     def test_changed_guidance_requires_fresh_review_and_approval(self):
         self.assertNotIn("rationale", self.propose(1))
-        old = self.auto_close("review", "--number", "1")
+        old = self.closure("review", "--number", "1")
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
         rows[0]["reviewer_notes"] = "Keep open for compatibility"
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
 
-        self.auto_close("review", "--number", "1", ok=False)
-        self.auto_close("execute", "--number", "1", "--publish", "--approve", old["approval"], ok=False)
+        self.closure("review", "--number", "1", ok=False)
+        self.closure("execute", "--number", "1", "--publish", "--approve", old["approval"], ok=False)
         self.assertEqual(self.write_calls(), [])
 
-        pending = self.auto_close("list")["rows"][0]
+        pending = self.closure("list")["rows"][0]
         fresh = self.propose(1, "--replace-checkpoint", pending["checkpoint"])
-        reviewed = self.auto_close("review", "--number", "1")
+        reviewed = self.closure("review", "--number", "1")
         self.assertNotEqual(reviewed["approval"], old["approval"])
-        self.auto_close("execute", "--number", "1", "--publish", "--approve", old["approval"], ok=False)
+        self.closure("execute", "--number", "1", "--publish", "--approve", old["approval"], ok=False)
         self.assertEqual(self.write_calls(), [])
-        result = self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"])
+        result = self.closure("execute", "--number", "1", "--publish", "--approve", reviewed["approval"])
         self.assertEqual(result["results"][0]["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
         self.assertEqual(self.write_calls()[2]["body"]["body"], fresh["comment"])
 
     def test_reconsidered_rejection_requires_a_new_exact_approval(self):
         pending = self.propose(1)
-        old = self.auto_close("review", "--number", "1")
-        rejected = self.auto_close("reject", "--number", "1", "--checkpoint", pending["checkpoint"],
+        old = self.closure("review", "--number", "1")
+        rejected = self.closure("reject", "--number", "1", "--checkpoint", pending["checkpoint"],
                                    "--by", "maintainer", "--reason", "Keep the old API")
-        self.auto_close("execute", "--number", "1", "--publish", "--approve", old["approval"], ok=False)
+        self.closure("execute", "--number", "1", "--publish", "--approve", old["approval"], ok=False)
         self.assertEqual(self.write_calls(), [])
 
         ledger = self.root / "data/owner/repo/ledger.jsonl"
@@ -615,24 +614,24 @@ class AutoCloseWriteTests(Workspace):
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         fresh = self.propose(1, "--replace-checkpoint", rejected["checkpoint"],
                              "--reconsideration-reason", "Maintainer resolved the old API concern in local guidance")
-        reviewed = self.auto_close("review", "--number", "1")
+        reviewed = self.closure("review", "--number", "1")
         self.assertNotEqual(reviewed["approval"], old["approval"])
-        self.auto_close("execute", "--number", "1", "--publish", "--approve", old["approval"], ok=False)
+        self.closure("execute", "--number", "1", "--publish", "--approve", old["approval"], ok=False)
         self.assertEqual(self.write_calls(), [])
 
-        result = self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"])
+        result = self.closure("execute", "--number", "1", "--publish", "--approve", reviewed["approval"])
         self.assertEqual(result["results"][0]["status"], "executed")
-        self.assertEqual(self.auto_close("list")["rows"][0]["reconsideration"], fresh["reconsideration"])
+        self.assertEqual(self.closure("list")["rows"][0]["reconsideration"], fresh["reconsideration"])
         self.assertEqual(self.write_calls()[2]["body"]["body"], fresh["comment"])
 
     def test_pending_edit_retains_history_and_invalidates_selected_plan(self):
         first = self.propose(1, "--reference-kind", "issue", "--reference-number", "2")
         self.propose(2)
-        old = self.auto_close("review", "--number", "1", "--number", "2")
+        old = self.closure("review", "--number", "1", "--number", "2")
         comment = self.root / "edited-comment.md"
         comment.write_text("The maintainer revised this explanation.\n")
 
-        edited = self.auto_close("edit", "--number", "1", "--checkpoint", first["checkpoint"],
+        edited = self.closure("edit", "--number", "1", "--checkpoint", first["checkpoint"],
                                  "--comment-file", str(comment), "--by", "maintainer")
         record = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         self.assertEqual(edited["comment"], comment.read_text())
@@ -642,34 +641,34 @@ class AutoCloseWriteTests(Workspace):
         self.assertEqual(record["history"][-1]["checksum"], first["checkpoint"])
         self.assertEqual(record["inputs"], record["history"][-1]["inputs"])
         self.assertNotEqual(record["request_id"], record["history"][-1]["request_id"])
-        self.auto_close("edit", "--number", "1", "--checkpoint", first["checkpoint"],
+        self.closure("edit", "--number", "1", "--checkpoint", first["checkpoint"],
                         "--comment-file", str(comment), "--by", "maintainer", ok=False)
-        self.auto_close("execute", "--number", "1", "--number", "2", "--publish", "--approve", old["approval"], ok=False)
+        self.closure("execute", "--number", "1", "--number", "2", "--publish", "--approve", old["approval"], ok=False)
         self.assertEqual(self.write_calls(), [])
 
         receipt = self.root / "data/owner/repo/writes" / (record["request_id"] + ".json")
         receipt.parent.mkdir(exist_ok=True)
         receipt.write_text("{}\n")
-        self.auto_close("edit", "--number", "1", "--checkpoint", edited["checkpoint"],
+        self.closure("edit", "--number", "1", "--checkpoint", edited["checkpoint"],
                         "--comment-file", str(comment), "--by", "maintainer", ok=False)
         self.assertEqual(json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text()), record)
         receipt.unlink()
 
-        fresh = self.auto_close("review", "--number", "1", "--number", "2")
+        fresh = self.closure("review", "--number", "1", "--number", "2")
         self.assertNotEqual(fresh["approval"], old["approval"])
-        self.auto_close("execute", "--number", "1", "--number", "2", "--publish", "--approve", fresh["approval"])
+        self.closure("execute", "--number", "1", "--number", "2", "--publish", "--approve", fresh["approval"])
         self.assertEqual(self.write_calls()[2]["body"]["body"], comment.read_text())
-        self.auto_close("edit", "--number", "1", "--checkpoint", edited["checkpoint"],
+        self.closure("edit", "--number", "1", "--checkpoint", edited["checkpoint"],
                         "--comment-file", str(comment), "--by", "maintainer", ok=False)
 
     def test_execution_rechecks_remaining_items(self):
         self.propose(1)
         self.propose(2)
-        reviewed = self.auto_close("review", "--number", "1", "--number", "2")
+        reviewed = self.closure("review", "--number", "1", "--number", "2")
         (self.mock / "edit-after-first-comment").touch()
-        self.auto_close("execute", "--number", "1", "--number", "2", "--publish", "--approve", reviewed["approval"], ok=False)
+        self.closure("execute", "--number", "1", "--number", "2", "--publish", "--approve", reviewed["approval"], ok=False)
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
-        rows = {row["number"]: row for row in self.auto_close("list")["rows"]}
+        rows = {row["number"]: row for row in self.closure("list")["rows"]}
         self.assertEqual(rows[1]["status"], "executed")
         self.assertEqual(rows[2]["status"], "pending")
 
@@ -716,7 +715,7 @@ class AutoCloseWriteTests(Workspace):
                  "--expected-head", first["head_sha"], "--expected-updated-at", first["updated_at"])
         plan = self.json_cli("comment-plus", *write)
         self.json_cli("comment-plus", *write, "--publish", "--approve", plan["approval"])
-        self.assertEqual(self.auto_close("list")["rows"][0]["status"], "pending")
+        self.assertEqual(self.closure("list")["rows"][0]["status"], "pending")
 
         result = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "execute", *selected,
                                "--publish", "--approve", approved["approval"])
@@ -725,7 +724,7 @@ class AutoCloseWriteTests(Workspace):
 
     def test_stale_context_does_not_block_uncertain_write_reconciliation(self):
         proposal = self.propose(1)
-        reviewed = self.auto_close("review", "--number", "1")
+        reviewed = self.closure("review", "--number", "1")
         saved = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         base = ("--expected-repo", "owner/repo", "--host", "github.com", "--kind", "pr", "--number", "1",
                 "--body", proposal["comment"], "--close", "--request-id", saved["request_id"],
@@ -740,8 +739,8 @@ class AutoCloseWriteTests(Workspace):
         rows[0]["reviewer_notes"] = "Changed after the write attempt"
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
 
-        self.auto_close("review", "--number", "1", ok=False)
-        outcome = self.auto_close("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], ok=False)
+        self.closure("review", "--number", "1", ok=False)
+        outcome = self.closure("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], ok=False)
         self.assertEqual(outcome["results"][0]["status"], "uncertain")
         self.assertEqual(self.write_calls(), before)
 
@@ -760,19 +759,19 @@ class AutoCloseWriteTests(Workspace):
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
         rows[1]["reviewer_notes"] = "Prefer the other fix"
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
-        context_status = self.auto_close("context", "--number", "1", "--checkpoint", pending["checkpoint"])
+        context_status = self.closure("context", "--number", "1", "--checkpoint", pending["checkpoint"])
         self.assertFalse(context_status["current"])
         self.assertIn("group member context changed", context_status["reason"])
-        self.auto_close("review", "--number", "1", ok=False)
+        self.closure("review", "--number", "1", ok=False)
 
         fresh = self.propose(1, *handoff_args(), "--replace-checkpoint", pending["checkpoint"])
-        approved = self.auto_close("review", "--number", "1")
+        approved = self.closure("review", "--number", "1")
         self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", "2", "--notes", "Keep this member open", "--by", "maintainer")
-        self.auto_close("execute", "--number", "1", "--publish", "--approve", approved["approval"], ok=False)
+        self.closure("execute", "--number", "1", "--publish", "--approve", approved["approval"], ok=False)
         self.assertEqual(self.write_calls(), [])
 
-        rejected = self.auto_close("reject", "--number", "1", "--checkpoint", fresh["checkpoint"],
+        rejected = self.closure("reject", "--number", "1", "--checkpoint", fresh["checkpoint"],
                                    "--by", "maintainer", "--reason", "Group guidance changed")
         self.assertEqual(rejected["status"], "rejected")
-        self.auto_close("execute", "--number", "1", "--publish", "--approve", approved["approval"], ok=False)
+        self.closure("execute", "--number", "1", "--publish", "--approve", approved["approval"], ok=False)
         self.assertEqual(self.write_calls(), [])

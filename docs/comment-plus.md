@@ -41,7 +41,7 @@ The implementation uses GitHub's [conversation comment endpoint](https://docs.gi
 
 ## Saved action proposals
 
-The [PR closure playbook](../prompts/recommend-auto-close.md) saves an exact explanatory comment through `bin/action-proposals propose`, the same record used for comments, issue closures and reopenings. Proposal records in `data/<owner>/<repo>/action-proposals/` are Git-tracked; local viewed and dismissed flags are ignored. Saving or viewing a proposal never writes to GitHub or marks a ledger decision reviewed. A PR closure recommendation may omit a saved ledger action, in which case it always requires human approval.
+The [PR closure playbook](../prompts/recommend-closure.md) saves an exact explanatory comment through `bin/action-proposals propose`, the same record used for comments, issue closures and reopenings. Proposal records in `data/<owner>/<repo>/action-proposals/` are Git-tracked; local viewed and dismissed flags are ignored. Saving or viewing a proposal never writes to GitHub or marks a ledger decision reviewed. A PR closure recommendation may omit a saved ledger action, in which case it always requires human approval.
 
 For a named PR or [selected group members](groups.md#from-draft-to-maintainers), the review loop is:
 

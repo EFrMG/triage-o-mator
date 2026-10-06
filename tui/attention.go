@@ -101,7 +101,7 @@ func validAttentionWindow(p attentionWindow, offset, limit int, exact bool) bool
 
 func validateAttentionPage(p attentionPage, at attentionLocation, repo string) error {
 	bad := fmt.Errorf("attention response changed bindings or exceeded its bounds; restart the watch list")
-	if p.Schema != 1 || p.Policy != "attention-reader-v1" || p.Repository.Name != repo || p.Repository.Host != "github.com" || p.Requests != 0 || p.Section != at.section || p.Number != at.number || !validCorpusID(p.Checkpoint) || (at.checkpoint != "" && p.Checkpoint != at.checkpoint) {
+	if p.Schema != 1 || p.Policy != "attention-reader-v1" || p.Repository.Name != repo || p.Repository.Host != evidenceHost || p.Requests != 0 || p.Section != at.section || p.Number != at.number || !validCorpusID(p.Checkpoint) || (at.checkpoint != "" && p.Checkpoint != at.checkpoint) {
 		return bad
 	}
 	if !validAttentionWindow(p.Pagination, at.offset, attentionPageSize, true) || len(p.Rows) != p.Pagination.Returned {

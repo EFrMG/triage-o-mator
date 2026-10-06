@@ -80,7 +80,7 @@ func actionHistoryCommand(root, repo string, generation uint64, at actionHistory
 
 func validateActionHistoryPage(p actionHistoryPage, at actionHistoryLocation, repo string) error {
 	bad := fmt.Errorf("action history response changed bindings or exceeded bounds; restart")
-	if p.Schema != 1 || p.Policy != "action-history-reader-v1" || p.Repository.Name != repo || p.Repository.Host != "github.com" || p.Requests != 0 || p.Section != at.section || p.Number != at.number || !validCorpusID(p.Checkpoint) || (at.checkpoint != "" && at.checkpoint != p.Checkpoint) {
+	if p.Schema != 1 || p.Policy != "action-history-reader-v1" || p.Repository.Name != repo || p.Repository.Host != evidenceHost || p.Requests != 0 || p.Section != at.section || p.Number != at.number || !validCorpusID(p.Checkpoint) || (at.checkpoint != "" && at.checkpoint != p.Checkpoint) {
 		return bad
 	}
 	if !validAttentionWindow(p.Pagination, at.offset, actionHistoryPageSize, true) || len(p.Rows) != p.Pagination.Returned {

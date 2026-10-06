@@ -16,11 +16,11 @@ import (
 	"github.com/yuin/goldmark/util"
 )
 
-// briefItemLink accepts only Markdown links to a numbered issue or PR in the selected repository.
+// briefItemLink accepts only Markdown links to a numbered issue or PR in the selected repository. Like the rest of the TUI it reads one host, evidenceHost.
 func briefItemLink(destination []byte, repo string) (Key, bool) {
 	raw := string(destination)
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Host != "github.com" || u.User != nil || strings.ContainsAny(raw, "?#") || u.RawPath != "" {
+	if err != nil || u.Scheme != "https" || u.Host != evidenceHost || u.User != nil || strings.ContainsAny(raw, "?#") || u.RawPath != "" {
 		return Key{}, false
 	}
 

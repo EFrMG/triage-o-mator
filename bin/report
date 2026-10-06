@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _groups import list_groups
-from _triage import REPO, REPORTS_DIR, action_operation, decision_text, has_decision, here, load_ledger, load_taxonomy
+from _triage import REPO, REPORTS_DIR, action_operation, decision_text, has_decision, here, load_ledger, load_taxonomy, merge_ready
 
 
 ACT_LIMIT = 20
@@ -174,7 +174,7 @@ def render(ledger):
     merge_ready = [
         r
         for r in prs
-        if (r.get("category") == "merge-ready" or "merge-ready" in (r.get("proposed_labels") or []))
+        if merge_ready(r)
         and r["confidence"] == "high"
         and not r["reviewed"]
     ]

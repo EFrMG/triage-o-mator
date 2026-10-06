@@ -116,6 +116,9 @@ def load_taxonomy():
     return json.loads(TAXONOMY_PATH.read_text())
 
 
+# A starter label in bin/label-definitions; the TUI's Merge-Ready PRs list (tui/ledger.go), bin/report and bin/next read it from proposed labels.
+MERGE_READY_LABEL = "merge-ready"
+
 # Default action titles from before actions were named after their GitHub operation. Older installs own a taxonomy copy without action_operations, so these stay resolvable; tui/taxonomy.go mirrors this table.
 LEGACY_ACTION_OPERATIONS = {
     "no-action-needed": "none",
@@ -191,6 +194,11 @@ def ledger_key(rec):
 def has_decision(rec):
     """Legacy categories, proposed labels, or an action identify a saved local decision."""
     return bool(rec.get("category") or rec.get("proposed_labels") or rec.get("action"))
+
+
+def merge_ready(rec):
+    """A proposed starter label, or the legacy category of the same name, marks a PR whose code was read and found mergeable."""
+    return rec.get("category") == MERGE_READY_LABEL or MERGE_READY_LABEL in (rec.get("proposed_labels") or [])
 
 
 def decision_text(rec):

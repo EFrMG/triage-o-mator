@@ -108,8 +108,11 @@ func (i Item) ByAgent() bool {
 
 func (i Item) PendingReview() bool { return !i.Untriaged() && !i.Reviewed }
 
+// mergeReadyLabel mirrors MERGE_READY_LABEL in bin/_triage.py: a starter label, and the legacy category of the same name.
+const mergeReadyLabel = "merge-ready"
+
 func (i Item) MergeReadyHighConfidence() bool {
-	return (i.Category == "merge-ready" || slices.Contains(i.ProposedLabels, "merge-ready")) && i.Confidence == "high" && !i.Reviewed
+	return (i.Category == mergeReadyLabel || slices.Contains(i.ProposedLabels, mergeReadyLabel)) && i.Confidence == "high" && !i.Reviewed
 }
 
 func (i Item) CloseCandidate(taxonomy Taxonomy) bool {

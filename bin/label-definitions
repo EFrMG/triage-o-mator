@@ -12,7 +12,7 @@ from urllib.parse import quote
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _install import now_iso, read_github_labels, reconcile_label_catalog
 from _storage import atomic_writer, locked
-from _triage import REPO, TAXONOMY_PATH
+from _triage import MERGE_READY_LABEL, REPO, TAXONOMY_PATH
 
 
 NEW_LABEL_COLOR = "ededed"
@@ -25,6 +25,7 @@ STARTER_LABELS = [
     {"name": "needs-info", "description": "More information is needed to assess this item", "color": "fbca04"},
     {"name": "verified", "description": "The reported result or proposed change has been checked", "color": "0e8a16"},
     {"name": "ready", "description": "Ready for a maintainer decision or next step", "color": "7057ff"},
+    {"name": MERGE_READY_LABEL, "description": "Code was read and nothing blocks merging", "color": "1a7f37"},
 ]
 
 

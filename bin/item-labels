@@ -44,6 +44,7 @@ def read_json(path, fallback):
 
 def save_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
+
     with atomic_writer(path) as out:
         out.write(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
 
@@ -52,9 +53,11 @@ def policy():
     value = read_json(POLICY_PATH, {"version": 1, "repositories": {}})
     if value.get("version") != 1 or not isinstance(value.get("repositories"), dict):
         raise ValueError("label-application policy is malformed")
+
     for repo, setting in value["repositories"].items():
         if not isinstance(repo, str) or not isinstance(setting, dict) or type(setting.get("enabled")) is not bool:
             raise ValueError("label-application repository setting is malformed")
+
     return value
 
 
@@ -66,19 +69,25 @@ def state():
     value = read_json(STATE_PATH, {"version": 1, "repository": REPO, "items": {}, "next_order": 0})
     if value.get("version") != 1 or value.get("repository") != REPO or not isinstance(value.get("items"), dict) or type(value.get("next_order", 0)) is not int or value.get("next_order", 0) < 0:
         raise ValueError("item-label state is malformed or belongs to another repository")
+
     for key, row in value["items"].items():
         if not isinstance(key, str) or not re.fullmatch(r"(issue|pr):[1-9][0-9]*", key) or not isinstance(row, dict):
             raise ValueError("item-label state has an invalid item identity")
+
         for field in ("last_labels", "managed"):
             names = row.get(field, [])
             if not isinstance(names, list) or any(not isinstance(name, str) or not name for name in names) or len(names) != len(set(names)):
                 raise ValueError(f"item-label state has invalid {field} for {key}")
+
         if not set(row.get("managed", [])).issubset(row.get("last_labels", [])):
             raise ValueError(f"item-label state has managed labels absent from its observation for {key}")
+
         if type(row.get("pending", False)) is not bool or type(row.get("paused", False)) is not bool:
             raise ValueError(f"item-label state has invalid control flags for {key}")
+
         if "checked_order" in row and (type(row["checked_order"]) is not int or row["checked_order"] < 1 or row["checked_order"] > value.get("next_order", 0)):
             raise ValueError(f"item-label state has an invalid checked order for {key}")
+
     return value
 
 
@@ -101,6 +110,7 @@ def reset_plan(saved, kind, number, transport):
     prior = saved["items"].get(key)
     if not isinstance(prior, dict):
         raise ValueError(f"no saved item-label state for {key}")
+
     live_state, live_labels = transport.item(number)
     plan = {"repository": REPO, "operation": "reset-item", "key": key, "before": prior,
             "current_state": live_state, "current_labels": live_labels,
@@ -117,20 +127,25 @@ class Transport:
     def api(self, method, endpoint, body=None):
         if self.used >= self.budget:
             raise ValueError("GitHub request budget exhausted")
+
         self.used += 1
 
         command = ["gh", "api", "--method", method, endpoint]
         if body is not None:
             command += ["--input", "-"]
+
         try:
             result = subprocess.run(command, input=json.dumps(body) if body is not None else None,
                                     capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise ValueError(f"GitHub {method} may have been attempted for {endpoint}: {error}") from error
+
         if result.returncode:
             raise ValueError(f"GitHub {method} failed for {endpoint}: {result.stderr.strip() or 'gh api failed'}")
+
         if not result.stdout.strip():
             return None
+
         try:
             return json.loads(result.stdout)
         except json.JSONDecodeError as error:
@@ -140,12 +155,16 @@ class Transport:
         value = self.api("GET", f"repos/{REPO}/issues/{number}")
         if not isinstance(value, dict) or value.get("number") != number or value.get("state") not in ("open", "closed") or not isinstance(value.get("labels"), list):
             raise ValueError(f"invalid GitHub item #{number} response")
+
         labels = []
+
         for row in value["labels"]:
             name = row.get("name") if isinstance(row, dict) else None
             if not isinstance(name, str) or not name or name in labels:
                 raise ValueError(f"invalid GitHub labels for #{number}")
+
             labels.append(name)
+
         return value["state"], labels
 
 
@@ -164,19 +183,25 @@ def candidates(saved, limit, selected_keys=()):
     rows.sort(key=priority)
     chosen = []
     selected = set(selected_keys)
+
     for row in rows:
         key = f"{row['kind']}:{row['number']}"
         if selected and key not in selected:
             continue
+
         prior = saved["items"].get(key, {})
         if row.get("state") != "open":
             continue
+
         if row.get("proposed_labels") or prior.get("managed") or prior.get("pending"):
             chosen.append((key, row))
+
         if len(chosen) >= limit:
             break
+
     if selected and set(selected_keys) != {key for key, _ in chosen}:
         raise ValueError(f"selected items have no eligible label proposal: {sorted(selected - {key for key, _ in chosen})}")
+
     return chosen
 
 
@@ -191,13 +216,17 @@ def build_plan(saved, limit, transport, selected_keys=()):
     catalog = taxonomy.get("label_catalog", {})
     if not isinstance(catalog, dict) or catalog.get("repository") != REPO or catalog.get("status") != "observed":
         raise ValueError("this repository's label catalog is pending; sync Labels first")
+
     definitions = catalog.get("labels")
     if not isinstance(definitions, list) or any(not isinstance(row, dict) or type(row.get("id")) is not int or not isinstance(row.get("name"), str) or not row["name"] for row in definitions):
         raise ValueError("this repository's label catalog is malformed")
+
     names = {row["name"] for row in definitions}
     if len(names) != len(definitions) or len({row["id"] for row in definitions}) != len(definitions):
         raise ValueError("this repository's label catalog has duplicate label identities")
+
     rows = []
+
     for key, decision in candidates(saved, limit, selected_keys):
         desired = decision.get("proposed_labels") or []
         prior = saved["items"].get(key, {})
@@ -209,6 +238,7 @@ def build_plan(saved, limit, transport, selected_keys=()):
             item["status"] = "uncertain-write"
         elif prior.get("paused"):
             item["status"] = "paused-after-correction"
+
         if item["status"] == "ready":
             live_state, live_labels = transport.item(decision["number"])
             item["observed_state"], item["observed_labels"] = live_state, live_labels
@@ -221,6 +251,7 @@ def build_plan(saved, limit, transport, selected_keys=()):
                 item["remove"] = [name for name in prior.get("managed", []) if name not in desired and name in live_labels]
                 if not item["add"] and not item["remove"]:
                     item["status"] = "no-change"
+
         rows.append(item)
 
     plan = {"repository": REPO, "enabled": enabled(), "limit": limit, "request_budget": transport.budget, "requests": transport.used,
@@ -231,6 +262,7 @@ def build_plan(saved, limit, transport, selected_keys=()):
 
 def record_outcome(row):
     OUTCOMES_PATH.parent.mkdir(parents=True, exist_ok=True)
+
     with OUTCOMES_PATH.open("a", encoding="utf-8") as out:
         out.write(json.dumps({"repository": REPO, "at": now_iso(), **row}, ensure_ascii=False) + "\n")
         out.flush()
@@ -244,6 +276,7 @@ def run_pass(parser, args):
         plan = build_plan(saved, args.limit, transport, args.keys)
         if plan["preview_sha256"] != args.preview_sha256:
             fail(parser, "the selected decisions or GitHub labels changed; preview the pass again")
+
         if not enabled():
             fail(parser, "Labeling is OFF for this repository in Settings → Automations")
 
@@ -252,12 +285,14 @@ def run_pass(parser, args):
             fail(parser, "request budget cannot cover revalidation and outcomes for this preview")
 
         outcomes = []
+
         for row in plan["items"]:
             key = f"{row['kind']}:{row['number']}"
             if row["status"] not in ("ready", "no-change"):
                 prior = saved["items"].get(key, {})
                 if row["status"] == "human-correction":
                     prior = {**prior, "paused": True}
+
                 mark_checked(saved, key, prior)
                 record_outcome({"key": key, "status": row["status"], "preview_sha256": args.preview_sha256})
                 outcomes.append({"key": key, "status": row["status"]})
@@ -269,6 +304,7 @@ def run_pass(parser, args):
                 record_outcome({"key": key, "status": "changed-decision", "preview_sha256": args.preview_sha256})
                 outcomes.append({"key": key, "status": "changed-decision"})
                 continue
+
             live_state, live_labels = transport.item(row["number"])
             if live_state != row.get("observed_state") or set(live_labels) != set(row.get("observed_labels", [])):
                 mark_checked(saved, key, saved["items"].get(key, {}))
@@ -287,6 +323,7 @@ def run_pass(parser, args):
                                       "attempt": {"add": row["add"], "remove": row["remove"], "preview_sha256": args.preview_sha256}})
             record_outcome({"key": key, "status": "attempting", "add": row["add"], "remove": row["remove"], "preview_sha256": args.preview_sha256})
             endpoint = f"repos/{REPO}/issues/{row['number']}/labels"
+
             try:
                 expected = set(live_labels)
                 if row["add"]:
@@ -294,13 +331,17 @@ def run_pass(parser, args):
                     _, added_state = transport.item(row["number"])
                     if set(added_state) != expected | set(row["add"]):
                         raise ValueError("GitHub label state changed during addition")
+
                     expected = set(added_state)
+
                 for name in row["remove"]:
                     _, before_remove = transport.item(row["number"])
                     if set(before_remove) != expected:
                         raise ValueError("GitHub labels changed before removal")
+
                     transport.api("DELETE", endpoint + "/" + quote(name, safe=""))
                     expected.discard(name)
+
                 _, after = transport.item(row["number"])
                 if set(after) != expected or any(name not in after for name in row["add"]) or any(name in after for name in row["remove"]):
                     raise ValueError("GitHub did not report the requested label state after the write")
@@ -332,21 +373,29 @@ def main():
     args = parser.parse_args()
     if args.expected_repo != REPO:
         parser.error("configured repository changed; reopen Settings")
+
     if not 1 <= args.limit <= 50 or not 1 <= args.request_budget <= 500:
         parser.error("limit must be 1–50 and request budget 1–500")
+
     if args.key and args.command not in ("preview", "run"):
         parser.error("--key is only for preview and run")
+
     if len(set(args.key)) != len(args.key) or any(not re.fullmatch(r"(issue|pr):[1-9][0-9]*", key) for key in args.key):
         parser.error("--key requires distinct KIND:NUMBER values")
+
     if len(args.key) > args.limit:
         parser.error("selected keys exceed --limit")
+
     args.keys = tuple(sorted(args.key))
     if args.command == "reset-item" and (args.kind is None or args.number is None or args.number <= 0):
         parser.error("reset-item requires --kind and a positive --number")
+
     if args.command != "reset-item" and (args.kind is not None or args.number is not None):
         parser.error("--kind and --number are only for reset-item")
+
     if args.command == "status" and (args.apply or args.preview_sha256):
         parser.error("status never writes or accepts a preview hash")
+
     if args.command in ("enable", "disable") and args.apply != (args.preview_sha256 is not None):
         parser.error("--apply requires --preview-sha256, and a preview hash requires --apply")
 
@@ -360,16 +409,20 @@ def main():
             else:
                 if args.preview_sha256 != plan["preview_sha256"]:
                     fail(parser, "Settings policy changed; preview it again")
+
                 with locked(POLICY_PATH):
                     if policy_plan(args.command == "enable")["preview_sha256"] != args.preview_sha256:
                         fail(parser, "Settings policy changed; preview it again")
+
                     value = policy()
                     value["repositories"][REPO] = {"enabled": args.command == "enable", "updated_at": now_iso()}
                     save_json(POLICY_PATH, value)
+
                 print(json.dumps(status(), indent=2, ensure_ascii=False))
         elif args.command == "preview":
             if args.apply or args.preview_sha256:
                 parser.error("preview never writes")
+
             transport = Transport(args.request_budget)
             print(json.dumps(build_plan(state(), args.limit, transport, args.keys), indent=2, ensure_ascii=False))
         elif args.command == "reset-item":
@@ -378,18 +431,22 @@ def main():
             else:
                 if not args.preview_sha256:
                     parser.error("reset-item --apply requires --preview-sha256")
+
                 with locked(PASS_LOCK):
                     saved = state()
                     plan = reset_plan(saved, args.kind, args.number, Transport(args.request_budget))
                     if plan["preview_sha256"] != args.preview_sha256:
                         fail(parser, "item-label state or GitHub labels changed; preview reset-item again")
+
                     saved["items"][plan["key"]] = plan["after"]
                     save_json(STATE_PATH, saved)
                     record_outcome({"key": plan["key"], "status": "reset-by-human", "labels": plan["current_labels"], "preview_sha256": args.preview_sha256})
+
                 print(json.dumps({"repository": REPO, "reset": plan["key"]}))
         else:
             if args.apply or not args.preview_sha256:
                 parser.error("run requires --preview-sha256 and no --apply")
+
             run_pass(parser, args)
     except (OSError, ValueError, KeyError, TypeError) as error:
         fail(parser, str(error))

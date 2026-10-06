@@ -106,6 +106,7 @@ REPO = read_repo() if (CONFIG_DIR / "repo").exists() else None
 DATA_DIR = DATA_ROOT.joinpath(*REPO.split("/")) if REPO else DATA_ROOT
 RAW_DIR = DATA_DIR / "raw"
 BATCHES_DIR = DATA_DIR / "batches"
+BRIEFED_DIR = DATA_DIR / "briefed-batches"
 EXPORTS_DIR = DATA_DIR / "exports"
 LEDGER_PATH = DATA_DIR / "ledger.jsonl"
 REPORTS_DIR = WORK_ROOT.joinpath("reports", *REPO.split("/")) if REPO else WORK_ROOT / "reports"
@@ -209,7 +210,7 @@ def new_batch_id():
     base = "b" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     for n in range(1, 1000):
         batch_id = base if n == 1 else f"{base}-{n}"
-        if (DATA_DIR / "briefed-batches" / f"{batch_id}.json").exists():
+        if (BRIEFED_DIR / f"{batch_id}.json").exists():
             continue
 
         try:

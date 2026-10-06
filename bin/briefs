@@ -11,42 +11,28 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _briefed import BATCH_BRIEF_RE, BRIEF_DATE, ITEM_BRIEF_RE, active_name, read_name
 from _storage import locked
 from _triage import DATA_DIR, REPO, REPORTS_DIR, WORK_ROOT
 
 
-DATE = r"\d{4}-\d{2}-\d{2}"
-MASTER = re.compile(rf"^({DATE})-(?:master(?:-[A-Za-z0-9_-]+)?-brief|brief)\.md$")
-ITEM = re.compile(rf"^({DATE})-(issue|pr)-(\d+)-brief\.md$")
-GROUP = re.compile(rf"^({DATE})-(?:ready-groups|group-[A-Za-z0-9_-]+)-brief\.md$")
-BATCH = re.compile(rf"^({DATE})-batch-b\d{{8}}-\d{{6}}(?:-\d+)?-brief\.md$")
+MASTER = re.compile(rf"^({BRIEF_DATE})-(?:master(?:-[A-Za-z0-9_-]+)?-brief|brief)\.md$")
+GROUP = re.compile(rf"^({BRIEF_DATE})-(?:ready-groups|group-[A-Za-z0-9_-]+)-brief\.md$")
 MAX_BRIEFS = 5000
 MAX_BRIEF_BYTES = 1024 * 1024
-READ_MARKER = "_READ"
-
-
-def active_name(name):
-    if name.endswith("_READ.md"):
-        return name.removesuffix("_READ.md") + ".md"
-
-    return name
-
-
-def read_name(name):
-    return name.removesuffix(".md") + READ_MARKER + ".md"
 
 
 def category(name):
     if match := MASTER.fullmatch(name):
         return "master", "master", match.group(1)
 
-    if match := ITEM.fullmatch(name):
+    if match := ITEM_BRIEF_RE.fullmatch(name):
         return "item", match.group(2), match.group(1)
 
     if match := GROUP.fullmatch(name):
         return "work", "group", match.group(1)
 
-    if match := BATCH.fullmatch(name):
+    if match := BATCH_BRIEF_RE.fullmatch(name):
         return "work", "batch", match.group(1)
 
     return None

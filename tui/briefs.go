@@ -59,6 +59,9 @@ type briefMarkMsg struct {
 	err        error
 }
 
+// briefReadSuffix mirrors READ_SUFFIX in bin/_briefed.py: a brief marked read is renamed from NAME.md to NAME_READ.md.
+const briefReadSuffix = "_READ.md"
+
 type briefsMsg struct {
 	root, repo string
 	generation uint64
@@ -107,7 +110,7 @@ func briefMarkCommand(root, repo string, generation uint64, ids []string, apply 
 			}
 			if err == nil {
 				for i, row := range reply.Renames {
-					if row.Source != ids[i] || row.Target != strings.TrimSuffix(ids[i], ".md")+"_READ.md" {
+					if row.Source != ids[i] || row.Target != strings.TrimSuffix(ids[i], ".md")+briefReadSuffix {
 						err = fmt.Errorf("brief rename preview changed target")
 						break
 					}

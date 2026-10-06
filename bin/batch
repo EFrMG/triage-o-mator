@@ -31,21 +31,17 @@ The triage-o-mator TUI runs this same script from its Batches screen (n creates,
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 import _notdupes
-from _briefed import batch_path, briefed_keys, save_briefed
+from _briefed import BATCH_ID_RE, batch_path, briefed_keys, save_briefed
 from _groups import load_group
 from _storage import atomic_writer
 from _similar import TitleIndex
 from _evidence import DEFAULT_MAX_AGE
 from _triage import BATCHES_DIR, enrich_item, has_decision, here, load_ledger, new_batch_id
-
-# Only IDs new_batch_id() can produce, so --delete can never reach a path outside data/<owner>/<repo>/batches/.
-BATCH_ID_RE = re.compile(r"^b\d{8}-\d{6}(-\d+)?$")
 
 # Enough for a triager (or prompts/auto-triage.md) to spot and name a duplicate without drowning each item in noise.
 CANDIDATES_PER_ITEM = 3

@@ -11,14 +11,13 @@ Each suggestion says who should do it: [agent] steps prepare evidence or proposa
 
 import argparse
 import json
-import re
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _groups import list_groups
-from _briefed import briefed_keys, load_records
+from _briefed import ITEM_BRIEF_RE, active_name, briefed_keys, load_records, saved_brief_exists
 from _similar import TitleIndex
 from _notdupes import TitleVerdicts
 from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, action_operation, has_decision, load_jsonl, load_ledger, load_taxonomy, merge_ready
@@ -27,15 +26,6 @@ STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
 # Proposed labels, besides `ready`, that say a PR's code still needs to be read.
 CODE_REVIEW_LABELS = ("trivial", "needs-revision")
-ITEM_BRIEF_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-(issue|pr)-([1-9]\d*)-brief\.md$")
-
-
-def active_brief_name(name):
-    return name.removesuffix("_READ.md") + ".md" if name.endswith("_READ.md") else name
-
-
-def saved_brief_exists(path):
-    return path.exists() or path.with_name(path.stem + "_READ.md").exists()
 
 
 def hours_since(iso):
@@ -119,7 +109,7 @@ def suggestions(ledger):
         add("human", f"Review {len(pending)} triaged decisions ({closes} suggest closing)",
             f"TUI: All Items (search {sample}, a confirms a saved call); or bin/export-csv --pending-review, edit, bin/import-csv --by <you>",
             "review remains separate from repository-enabled label automation and action-write approval")
-        item_briefs = {match.group(1, 2) for path in REPORTS_DIR.glob("*-brief*") if (match := ITEM_BRIEF_RE.fullmatch(active_brief_name(path.name)))}
+        item_briefs = {match.group(2, 3) for path in REPORTS_DIR.glob("*-brief*") if (match := ITEM_BRIEF_RE.fullmatch(active_name(path.name)))}
         target = next((row for row in pending if (row["kind"], str(row["number"])) not in item_briefs), None)
         if target is not None:
             add("agent", f"Write a detailed brief for {target['kind']} #{target['number']}",

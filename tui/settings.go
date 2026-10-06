@@ -142,7 +142,7 @@ func (m *model) settingsMove(delta int) {
 		return
 	}
 	if m.settings.section == "automations" {
-		count := 2 + len(m.settings.automations.actions)
+		count := len(m.automationCards())
 		m.settings.selected = (m.settings.selected + delta%count + count) % count
 		return
 	}

@@ -167,10 +167,11 @@ func (m model) contextFooterGroups() []footerGroup {
 			return []footerGroup{group("Settings", hint{"j/k", "select"}, hint{"Enter", "open"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}
 		if m.settings.section == "automations" {
-			if m.settings.selected == 1 {
+			card := m.automationCard()
+			if card.kind == "scoring" {
 				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}
-			if m.settings.selected >= 2 {
+			if card.kind == "action" {
 				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle action mode"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}
 			return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle Labeling"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}

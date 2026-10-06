@@ -13,6 +13,25 @@ type automationsUI struct {
 	actions                 []automationAction
 }
 
+// automationCard is one row of Settings → Automations: Labeling, Scoring, then one card per action type.
+type automationCard struct {
+	kind   string
+	action automationAction
+}
+
+func (m model) automationCards() []automationCard {
+	cards := []automationCard{{kind: "labeling"}, {kind: "scoring"}}
+	for _, action := range m.settings.automations.actions {
+		cards = append(cards, automationCard{kind: "action", action: action})
+	}
+	return cards
+}
+
+func (m model) automationCard() automationCard {
+	cards := m.automationCards()
+	return cards[maxInt(0, minInt(m.settings.selected, len(cards)-1))]
+}
+
 type automationAction struct {
 	Name             string `json:"name"`
 	Operation        string `json:"operation"`
@@ -144,7 +163,7 @@ func (m model) automationsView() string {
 	state := "Loading…"
 	labeling := "Reading repository setting…"
 	if m.settings.automations.loaded {
-		state = fmt.Sprintf("%d available", 2+len(m.settings.automations.actions))
+		state = fmt.Sprintf("%d available", len(m.automationCards()))
 		labeling = "OFF · Agent label writes disabled"
 		if m.settings.automations.labelingEnabled {
 			labeling = "ON · Agent may apply proposed labels to GitHub"
@@ -159,19 +178,23 @@ func (m model) automationsView() string {
 	if m.settings.busy {
 		state = "Working…"
 	}
-	cards := [][2]string{
-		{"Labeling", labeling},
-		{"Scoring", "Local · 0–5 quality/readiness · y copies a bounded pass prompt"},
-	}
-	for _, action := range m.settings.automations.actions {
-		summary := "STAGE · Suggested " + action.Operation + " waits in Notifications"
-		if action.Mode == "execute" {
-			summary = "EXECUTE · Agent pass may publish a checked " + action.Operation
+	var cards [][2]string
+	for _, card := range m.automationCards() {
+		switch card.kind {
+		case "labeling":
+			cards = append(cards, [2]string{"Labeling", labeling})
+		case "scoring":
+			cards = append(cards, [2]string{"Scoring", "Local · 0–5 quality/readiness · y copies a bounded pass prompt"})
+		default:
+			summary := "STAGE · Suggested " + card.action.Operation + " waits in Notifications"
+			if card.action.Mode == "execute" {
+				summary = "EXECUTE · Agent pass may publish a checked " + card.action.Operation
+			}
+			if card.action.StaleSetting {
+				summary += " · Prior setting expired after action edit"
+			}
+			cards = append(cards, [2]string{card.action.Name, summary})
 		}
-		if action.StaleSetting {
-			summary += " · Prior setting expired after action edit"
-		}
-		cards = append(cards, [2]string{action.Name, summary})
 	}
 	return inset(titleBar("Automations", state, m.menuWidth())) + "\n\n" + cardList(cards, m.settings.selected, m.cardWidth(), m.mainHeight()-2)
 }
@@ -220,7 +243,7 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "j", "down", "tab":
 		m.settingsMove(1)
 	case "G", "end":
-		m.settings.selected = 1 + len(m.settings.automations.actions)
+		m.settings.selected = len(m.automationCards()) - 1
 	case "k", "up", "shift+tab":
 		m.settingsMove(-1)
 	case "g", "home":
@@ -230,7 +253,8 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.settings.request++
 		return m, automationStatusCmd(m.installRoot, m.repo, m.settings.request)
 	case "enter", "l", "right", "space", "e":
-		if m.settings.selected == 1 {
+		card := m.automationCard()
+		if card.kind == "scoring" {
 			m.status = "Press y to copy the bounded local scoring prompt."
 			return m, nil
 		}
@@ -240,8 +264,8 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.settings.busy = true
 		m.settings.request++
-		if m.settings.selected >= 2 {
-			action := m.settings.automations.actions[m.settings.selected-2]
+		if card.kind == "action" {
+			action := card.action
 			after := "execute"
 			if action.Mode == "execute" {
 				after = "stage"
@@ -251,22 +275,18 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		before := m.settings.automations.labelingEnabled
 		return m, automationToggleCmd(m.installRoot, m.repo, m.settings.request, before, !before)
 	case "y":
-		if m.settings.selected == 1 {
+		card := m.automationCard()
+		if card.kind == "scoring" {
 			m.status = "Taking Item scoring prompt…"
 			return m, yankCmd(m.installRoot, m.repo, "Item scoring prompt", m.scoringPrompt())
-		}
-		if m.settings.selected >= 2 {
-			if !m.settings.automations.loaded {
-				m.status = "Reading this repository's automation setting…"
-				return m, nil
-			}
-			action := m.settings.automations.actions[m.settings.selected-2]
-			m.status = "Taking " + action.Name + " action prompt…"
-			return m, yankCmd(m.installRoot, m.repo, "Action automation prompt", m.actionPrompt(action))
 		}
 		if !m.settings.automations.loaded {
 			m.status = "Reading this repository's automation setting…"
 			return m, nil
+		}
+		if card.kind == "action" {
+			m.status = "Taking " + card.action.Name + " action prompt…"
+			return m, yankCmd(m.installRoot, m.repo, "Action automation prompt", m.actionPrompt(card.action))
 		}
 		m.status = "Taking Labeling automation prompt…"
 		return m, yankCmd(m.installRoot, m.repo, "Labeling automation prompt", m.labelingPrompt())

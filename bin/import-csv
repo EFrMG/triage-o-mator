@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _csv_revision import review_revision
-from _triage import LEDGER_PATH, REPO, has_decision, load_ledger, load_taxonomy, now_iso, save_ledger
+from _triage import LEDGER_PATH, REPO, has_decision, load_ledger, load_taxonomy, now_iso, observed_catalog, save_ledger
 from _storage import locked
 
 DECISION = ("proposed_labels", "action", "confidence", "reason")
@@ -67,6 +67,7 @@ def main():
     with locked(LEDGER_PATH):
         ledger = load_ledger()
         by_key = {(r["kind"], r["number"]): r for r in ledger}
+        catalog = observed_catalog(load_taxonomy())
         proposed = []
         seen = set()
         approvals_cleared = 0
@@ -122,10 +123,10 @@ def main():
                         fail(f"CSV row {line}: --by must name the person changing the decision")
 
                     if updated.get("proposed_labels", []) != rec.get("proposed_labels", []):
-                        catalog = load_taxonomy().get("label_catalog", {})
-                        if catalog.get("repository") != REPO or catalog.get("status") != "observed":
+                        if catalog is None:
                             fail(f"CSV row {line}: refresh the repository label catalog before changing proposed labels")
-                        names = {label.get("name") for label in catalog.get("labels", []) if isinstance(label, dict)}
+
+                        names = {label.get("name") for label in catalog["labels"] if isinstance(label, dict)}
                         if set(updated["proposed_labels"]) - names:
                             fail(f"CSV row {line}: proposed labels are absent from the current catalog")
 

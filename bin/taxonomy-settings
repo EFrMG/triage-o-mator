@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
-from _storage import atomic_writer, locked
-from _triage import REPO, TAXONOMY_PATH
+from _storage import locked
+from _triage import REPO, TAXONOMY_PATH, observed_catalog, save_taxonomy
 
 
 def main():
@@ -94,8 +94,7 @@ def main():
                     operations[args.name] = args.operation
 
             if updated:
-                with atomic_writer(TAXONOMY_PATH) as out:
-                    out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
+                save_taxonomy(taxonomy)
 
             print(json.dumps({"updated": updated}))
             return
@@ -104,12 +103,9 @@ def main():
             if args.expected_name is None:
                 parser.error("--expected-name is required with --label-id")
 
-            catalog = taxonomy.get("label_catalog", {})
-            if not isinstance(catalog, dict) or not isinstance(catalog.get("labels"), list):
-                parser.exit(1, "error: label catalog is malformed; repair taxonomy.json before editing\n")
-
-            if catalog.get("repository") != REPO or catalog.get("status") != "observed":
-                parser.exit(1, "error: label catalog is pending or belongs to another repository; sync it first\n")
+            catalog = observed_catalog(taxonomy)
+            if catalog is None:
+                parser.exit(1, "error: label catalog is pending, malformed or belongs to another repository; sync it first\n")
 
             rows = [row for row in catalog["labels"] if isinstance(row, dict) and row.get("id") == args.label_id]
             if len(rows) != 1:
@@ -139,8 +135,7 @@ def main():
             else:
                 guidance[args.action] = args.value
 
-            with atomic_writer(TAXONOMY_PATH) as out:
-                out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
+            save_taxonomy(taxonomy)
 
     print(json.dumps({"updated": args.value != current}))
 

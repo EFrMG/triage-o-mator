@@ -8,8 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _install import now_iso, read_github_labels, reconcile_label_catalog
-from _storage import atomic_writer, locked
-from _triage import REPO, TAXONOMY_PATH
+from _storage import locked
+from _triage import REPO, TAXONOMY_PATH, save_taxonomy
 
 
 def main():
@@ -51,8 +51,7 @@ def main():
         with locked(TAXONOMY_PATH):
             taxonomy = read_taxonomy()
             reconcile_label_catalog(taxonomy, REPO, labels, now_iso())
-            with atomic_writer(TAXONOMY_PATH) as out:
-                out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
+            save_taxonomy(taxonomy)
 
     print(json.dumps(taxonomy.get("label_catalog", {"repository": REPO, "status": "pending", "observed_at": None, "labels": [], "retired": []}), indent=2, ensure_ascii=False))
 

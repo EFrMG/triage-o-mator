@@ -115,6 +115,21 @@ def load_taxonomy():
     return json.loads(TAXONOMY_PATH.read_text())
 
 
+def save_taxonomy(taxonomy):
+    """Replace the install's taxonomy whole; callers that read before writing hold locked(TAXONOMY_PATH)."""
+    with atomic_writer(TAXONOMY_PATH) as out:
+        out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
+
+
+def observed_catalog(taxonomy):
+    """This repository's GitHub label catalog once a read of it was saved; None while it is pending, malformed or left over from another repository."""
+    catalog = taxonomy.get("label_catalog")
+    if not isinstance(catalog, dict) or catalog.get("repository") != REPO or catalog.get("status") != "observed" or not isinstance(catalog.get("labels"), list):
+        return None
+
+    return catalog
+
+
 # On a PR, the `ready` starter label from bin/label-definitions means its code was read and nothing blocks merging. tui/ledger.go mirrors the name.
 READY_LABEL = "ready"
 

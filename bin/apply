@@ -40,7 +40,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import LEDGER_PATH, REPO, TRIAGE_DEFAULTS, action_operation, has_decision, here, load_jsonl, load_ledger, load_taxonomy, now_iso, parse_key, save_ledger
+from _triage import LEDGER_PATH, REPO, TRIAGE_DEFAULTS, action_operation, has_decision, here, load_jsonl, load_ledger, load_taxonomy, now_iso, observed_catalog, parse_key, save_ledger
 from _storage import locked
 
 DECISION_FIELDS = ("proposed_labels", "action", "confidence", "reason")
@@ -191,10 +191,8 @@ def main():
 
     taxonomy = load_taxonomy()
     valid_actions = set(taxonomy["actions"])
-    catalog = taxonomy.get("label_catalog", {})
-    catalog_names = []
-    if isinstance(catalog, dict) and catalog.get("repository") == REPO and catalog.get("status") == "observed":
-        catalog_names = [row.get("name") for row in catalog.get("labels", []) if isinstance(row, dict)]
+    catalog = observed_catalog(taxonomy)
+    catalog_names = [row.get("name") for row in catalog["labels"] if isinstance(row, dict)] if catalog else []
 
     with nullcontext() if args.dry_run else locked(LEDGER_PATH):
         ledger = load_ledger()

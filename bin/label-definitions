@@ -12,8 +12,8 @@ from urllib.parse import quote
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _evidence import value_digest
 from _install import now_iso, read_github_labels, reconcile_label_catalog
-from _storage import atomic_writer, locked
-from _triage import REPO, TAXONOMY_PATH
+from _storage import locked
+from _triage import REPO, TAXONOMY_PATH, observed_catalog, save_taxonomy
 
 
 NEW_LABEL_COLOR = "ededed"
@@ -71,10 +71,11 @@ def local_catalog(parser):
     try:
         original = TAXONOMY_PATH.read_bytes()
         taxonomy = json.loads(original)
-        catalog = taxonomy["label_catalog"]
-        rows = catalog["labels"]
-        if catalog["repository"] != REPO or catalog["status"] != "observed" or not isinstance(rows, list):
+        catalog = observed_catalog(taxonomy)
+        if catalog is None:
             raise ValueError("the selected repository needs an observed local label catalog")
+
+        rows = catalog["labels"]
 
         ids, names = set(), set()
 
@@ -147,8 +148,7 @@ def save_catalog(parser, labels, expected_local_sha256=None):
                     if old is not None:
                         row["guidance"] = old.get("guidance", "")
 
-            with atomic_writer(TAXONOMY_PATH) as out:
-                out.write(json.dumps(taxonomy, indent=2, ensure_ascii=False) + "\n")
+            save_taxonomy(taxonomy)
         except (OSError, ValueError) as error:
             fail(parser, f"GitHub labels may have changed, but local refresh failed: {error}; inspect GitHub and preview again")
 

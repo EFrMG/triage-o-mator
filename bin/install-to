@@ -37,7 +37,7 @@ SYMLINK_BLOCK_START = "# <triage-o-mator:symlinks> — rewritten by bin/install-
 SYMLINK_BLOCK_END = "# </triage-o-mator:symlinks>"
 CACHE_BLOCK_START = "# <triage-o-mator:cache>"
 CACHE_BLOCK_END = "# </triage-o-mator:cache>"
-CACHE_BLOCK = "\n".join((CACHE_BLOCK_START, "# Ignored evidence, derived search indexes and machine-local transaction state.", "/data/*/*/cache/", "/data/*/*/reposition/", "/data/*/*/local/", "/data/*/*/writes/", CACHE_BLOCK_END))
+CACHE_BLOCK = "\n".join((CACHE_BLOCK_START, "# Ignored evidence, derived search indexes and machine-local transaction state.", "/data/*/*/cache/", "/data/*/*/reposition/", "/data/*/*/local/", "/data/*/*/*/local/", "/config/local/", "/data/*/*/writes/", CACHE_BLOCK_END))
 
 GITIGNORE_TAIL = """
 # Machine-local: which triage-o-mator checkout this install is wired to.
@@ -51,7 +51,6 @@ GITIGNORE_TAIL = """
 # Local group locking and atomic-write temporary files.
 /data/*/*/groups/.lock
 /data/*/*/groups/.group-*
-/data/*/*/briefed-batches/local/
 
 # Per-checkout UI preference.
 /config/theme.local

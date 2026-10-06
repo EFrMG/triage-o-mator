@@ -118,6 +118,8 @@ def load_taxonomy():
 # On a PR, the `ready` starter label from bin/label-definitions means its code was read and nothing blocks merging. tui/ledger.go mirrors the name.
 READY_LABEL = "ready"
 
+SCORE_RUBRIC = "item-quality-v1"
+
 def action_operation(taxonomy, action):
     """Resolve a local action title to its GitHub write type, or "" when the taxonomy gives it none."""
     operation = taxonomy.get("action_operations", {}).get(action)
@@ -174,6 +176,19 @@ def ledger_key(rec):
 def has_decision(rec):
     """Proposed labels or an action identify a saved local decision."""
     return bool(rec.get("proposed_labels") or rec.get("action"))
+
+
+def current_score(rec):
+    """The saved 0–5 score, or None when it is absent, unassessed, from another rubric or bound to an older revision. Item.ScoreValue in tui/ledger.go mirrors this."""
+    score = rec.get("item_score")
+    if not isinstance(score, dict) or score.get("rubric") != SCORE_RUBRIC or type(score.get("value")) is not int or not 0 <= score["value"] <= 5:
+        return None
+
+    revision = score.get("revision")
+    if not isinstance(revision, dict) or not revision.get("updated_at") or revision["updated_at"] != rec.get("updated_at"):
+        return None
+
+    return score["value"]
 
 
 def merge_ready(rec):

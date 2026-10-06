@@ -20,7 +20,7 @@ from _groups import list_groups
 from _briefed import ITEM_BRIEF_RE, active_name, briefed_keys, load_records, saved_brief_exists, visible_batch_briefs
 from _similar import TitleIndex
 from _notdupes import TitleVerdicts
-from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, action_operation, has_decision, load_jsonl, load_ledger, load_taxonomy, merge_ready
+from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, action_operation, current_score, has_decision, load_jsonl, load_ledger, load_taxonomy, merge_ready
 
 STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
@@ -137,8 +137,9 @@ def suggestions(ledger):
             "prompts/automated-actions.md (select exact keys; reuse cached evidence first)",
             "each action follows its repository policy; incomplete or disputed cases stay staged")
 
+    # An entry saved as unassessed stays out of the queue; a numeric score re-enters it once its revision is no longer current.
     unscored = [r for r in open_items if not isinstance(r.get("item_score"), dict) or
-                r["item_score"].get("value") is not None and (r["item_score"].get("revision") or {}).get("updated_at") != r.get("updated_at")]
+                r["item_score"].get("value") is not None and current_score(r) is None]
     if unscored:
         add("agent", f"Score a bounded selection of {len(unscored)} new or stale items",
             "prompts/score-items.md (select up to 20 exact item keys and saved snapshots)",

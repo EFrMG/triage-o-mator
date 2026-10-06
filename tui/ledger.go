@@ -65,8 +65,11 @@ type Key struct {
 
 func (i Item) Key() Key { return Key{Kind: i.Kind, Number: i.Number} }
 
+// scoreRubric and ScoreValue mirror SCORE_RUBRIC and current_score in bin/_triage.py.
+const scoreRubric = "item-quality-v1"
+
 func (i Item) ScoreValue() (int, bool) {
-	if i.ItemScore == nil || i.ItemScore.Rubric != "item-quality-v1" || i.ItemScore.Value == nil ||
+	if i.ItemScore == nil || i.ItemScore.Rubric != scoreRubric || i.ItemScore.Value == nil ||
 		*i.ItemScore.Value < 0 || *i.ItemScore.Value > 5 || i.ItemScore.Revision.UpdatedAt == "" ||
 		i.ItemScore.Revision.UpdatedAt != i.UpdatedAt {
 		return 0, false

@@ -10,10 +10,9 @@ sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _cache import EvidenceCache
 from _evidence import repository, validate_payload
 from _storage import locked
-from _triage import LEDGER_PATH, REPO, load_ledger, now_iso, save_ledger
+from _triage import LEDGER_PATH, REPO, SCORE_RUBRIC, current_score, load_ledger, now_iso, save_ledger
 
 
-RUBRIC = "item-quality-v1"
 DIMENSIONS = {
     "issue": (("clarity", 2), ("support", 2), ("actionability", 1)),
     "pr": (("correctness", 2), ("safeguards", 2), ("reviewability", 1)),
@@ -120,9 +119,7 @@ def main():
             sys.exit("error: item is absent from the ledger")
 
         score = row.get("item_score")
-        print(json.dumps(dict(repository=REPO, kind=args.kind, number=args.number, score=score,
-                              current=bool(isinstance(score, dict) and score.get("value") is not None and isinstance(score.get("revision"), dict) and
-                                           score["revision"].get("updated_at") == row.get("updated_at")),
+        print(json.dumps(dict(repository=REPO, kind=args.kind, number=args.number, score=score, current=current_score(row) is not None,
                               ledger_updated_at=row.get("updated_at")), ensure_ascii=False, indent=2))
         return
 
@@ -136,7 +133,7 @@ def main():
             if args.snapshot or any(getattr(args, name) is not None for dimensions in DIMENSIONS.values() for name, _ in dimensions):
                 raise ValueError("unassessed entries have no numeric dimensions or snapshot")
 
-            score = dict(rubric=RUBRIC, value=None, dimensions={}, reason=args.reason.strip(), suggestion=args.suggestion.strip(),
+            score = dict(rubric=SCORE_RUBRIC, value=None, dimensions={}, reason=args.reason.strip(), suggestion=args.suggestion.strip(),
                          snapshot_id=None, source_repository=None, revision=None, coverage={}, assessed_at=now_iso(), assessed_by=args.by.strip())
         else:
             if not args.snapshot:
@@ -145,7 +142,7 @@ def main():
             dimensions = dimensions_for(args)
             validate_dimension_reason(args.kind, dimensions, args.reason.strip())
             record, source_repository = selected_record(args.kind, args.number, args.snapshot, args.host)
-            score = dict(rubric=RUBRIC, value=sum(dimensions.values()), dimensions=dimensions, reason=args.reason.strip(),
+            score = dict(rubric=SCORE_RUBRIC, value=sum(dimensions.values()), dimensions=dimensions, reason=args.reason.strip(),
                          suggestion=args.suggestion.strip(), snapshot_id=args.snapshot, source_repository=source_repository,
                          revision=record["revision"], coverage={name: component["status"] for name, component in record["components"].items()},
                          assessed_at=now_iso(), assessed_by=args.by.strip())

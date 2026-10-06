@@ -1623,6 +1623,46 @@ else:
 	}
 }
 
+func TestNotificationsReviewSelectionUsesSharedReaderForOneClosure(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	m.notifications = notificationsUI{open: true, ticked: map[int]bool{1: true}}
+	m.notifications.actions = actionProposalList{Rows: []actionProposalRow{
+		{Kind: "pr", Number: 1, Operation: "close", Status: "pending", Active: true, Checkpoint: "first"},
+		{Kind: "pr", Number: 2, Operation: "close", Status: "pending", Active: true, Checkpoint: "second"},
+		{Kind: "issue", Number: 3, Operation: "comment", Status: "pending", Active: true, Checkpoint: "issue"},
+	}}
+	m.notifications.proposals = closeProposals(m.notifications.actions)
+	for index, choice := range m.notifications.choices() {
+		if choice.key == (Key{Kind: "issue", Number: 3}) {
+			m.notifications.selected = index
+		}
+	}
+
+	next, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	m = next.(model)
+	if cmd == nil || m.notifications.actionReview == nil || m.notifications.actionReview.row.Number != 1 || m.notifications.review != nil {
+		t.Fatal("one ticked PR closure did not use the shared action reader ahead of the cursor")
+	}
+
+	m.notifications.actionReview = nil
+	m.notifications.ticked[2] = true
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	m = next.(model)
+	if cmd == nil || !m.notifications.reviewBusy || m.notifications.actionReview != nil {
+		t.Fatal("two ticked PR closures did not enter batch review")
+	}
+
+	m.notifications.reviewBusy = false
+	m.notifications.ticked = map[int]bool{}
+	m.notifications.actions.Rows[1].Active = false
+	m.notifications.proposals = closeProposals(m.notifications.actions)
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "A"})
+	m = next.(model)
+	if cmd == nil || m.notifications.actionReview == nil || m.notifications.actionReview.row.Number != 1 || m.notifications.review != nil {
+		t.Fatal("one active PR closure under A did not use the shared action reader")
+	}
+}
+
 func TestCommentComposerEditorAndPreviewExit(t *testing.T) {
 	root := baselineRoot(t)
 	target := commentTarget{key: Key{Kind: "pr", Number: 3}, host: "github.com", url: "https://github.com/owner/repo/pull/3"}

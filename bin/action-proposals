@@ -520,8 +520,7 @@ def execute(repo, kind, number, items, all_pending, operation, approval, automat
             if value["status"] != "executed":
                 print(canonical(dict(results=results)))
                 raise ValueError("write outcome uncertain; inspect GitHub and the saved record")
-            if new_attempt:
-                completed_batch[value["request_id"]] = value["target"]
+            completed_batch[value["request_id"]] = value["target"]
 
     return dict(results=results) if all_pending or items else results[0]
 

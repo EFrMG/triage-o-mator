@@ -697,6 +697,32 @@ class AutoCloseWriteTests(Workspace):
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
         self.assertEqual(next(row for row in context["rows"] if row["kind"] == "feedback")["fields"]["kind"]["preview"], "write_outcome")
 
+    def test_group_batch_reconciles_saved_first_receipt_before_next_member(self):
+        group = self.json_cli("group", "create", "--title", "Compare fixes", "--by", "maintainer")
+        for number in (1, 2):
+            self.run_cli("group", "add", group["id"], "--kind", "pr", "--number", str(number), "--by", "maintainer")
+
+        packet = self.json_cli("group", "export", group["id"], "--format", "json")
+        handoff = ("--group-id", group["id"], *[part for member in packet["items"] for part in
+                                               ("--member-context", f"{member['kind']}:{member['number']}:{member['local_context']['checkpoint']}")])
+        self.propose_action_close(1, *handoff)
+        self.propose_action_close(2, *handoff)
+        selected = ("--item", "pr:1", "--item", "pr:2")
+        approved = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", *selected)
+
+        first = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
+        write = ("--expected-repo", "owner/repo", "--host", first["host"], "--kind", "pr", "--number", "1",
+                 "--body", first["comment"], "--close", "--request-id", first["request_id"],
+                 "--expected-head", first["head_sha"], "--expected-updated-at", first["updated_at"])
+        plan = self.json_cli("comment-plus", *write)
+        self.json_cli("comment-plus", *write, "--publish", "--approve", plan["approval"])
+        self.assertEqual(self.auto_close("list")["rows"][0]["status"], "pending")
+
+        result = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "execute", *selected,
+                               "--publish", "--approve", approved["approval"])
+        self.assertEqual([row["status"] for row in result["results"]], ["executed", "executed"])
+        self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"] * 2)
+
     def test_stale_context_does_not_block_uncertain_write_reconciliation(self):
         proposal = self.propose(1)
         reviewed = self.auto_close("review", "--number", "1")

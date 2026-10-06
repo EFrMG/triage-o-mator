@@ -107,8 +107,7 @@ type actionProposalRow struct {
 	Dismissed          bool                      `json:"dismissed"`
 	Inputs             *autoCloseInputs          `json:"inputs"`
 	Outcome            *struct {
-		RequestID string `json:"request_id"`
-		Comment   struct {
+		Comment struct {
 			Status string `json:"status"`
 			URL    string `json:"url"`
 		} `json:"comment"`
@@ -979,49 +978,37 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		if m.trackingBusy || m.notifications.reviewBusy {
 			break
 		}
-		if msg.String() == "a" && len(choices) > 0 {
+		all := msg.String() == "A"
+		var numbers []int
+		for _, row := range m.notifications.proposals.Rows {
+			if row.Active && (all || m.notifications.ticked[row.Number]) {
+				numbers = append(numbers, row.Number)
+			}
+		}
+		if len(numbers) == 1 {
+			choice, ok := m.notifications.actionProposalChoice(Key{Kind: "pr", Number: numbers[0]})
+			if !ok {
+				m.fail("Selected PR closure changed; reopen Notifications.")
+				return m, nil
+			}
+			return m.openActionReview(choice)
+		}
+		if len(numbers) > 1 {
+			return m.beginAutoCloseReview(all, false, numbers)
+		}
+		if all {
+			break
+		}
+		if len(choices) > 0 {
 			choice := choices[m.notifications.selected]
-			if choice.kind == "item" && choice.suggestion >= 0 && choice.actionProposal < 0 && choice.proposal < 0 {
+			if choice.kind == "item" && choice.suggestion >= 0 && choice.actionProposal < 0 {
 				m.warn("Prepare an exact action proposal before approval; press y to copy this item for an agent.")
 				return m, nil
 			}
 			if choice.actionProposal >= 0 {
-				if m.notifications.actions.Rows[choice.actionProposal].Kind == "pr" && m.notifications.actions.Rows[choice.actionProposal].Operation == "close" {
-					var selected []int
-					for _, row := range m.notifications.proposals.Rows {
-						if row.Active && m.notifications.ticked[row.Number] {
-							selected = append(selected, row.Number)
-						}
-					}
-					if len(selected) > 0 {
-						return m.beginAutoCloseReview(false, false, selected)
-					}
-				}
 				return m.openActionReview(choice)
 			}
 		}
-		all := msg.String() == "A"
-		var numbers []int
-		if !all {
-			for _, row := range m.notifications.proposals.Rows {
-				if row.Active && m.notifications.ticked[row.Number] {
-					numbers = append(numbers, row.Number)
-				}
-			}
-			if len(numbers) == 0 {
-				break
-			}
-		} else {
-			for _, row := range m.notifications.proposals.Rows {
-				if row.Active {
-					numbers = append(numbers, row.Number)
-				}
-			}
-			if len(numbers) == 0 {
-				break
-			}
-		}
-		return m.beginAutoCloseReview(all, false, numbers)
 	case "v":
 		if len(choices) == 0 || m.trackingBusy {
 			break
@@ -1033,12 +1020,6 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		}
 		choice := choices[m.notifications.selected]
 		if choice.kind == "item" && choice.actionProposal >= 0 && m.notifications.actions.Rows[choice.actionProposal].Status == "pending" {
-			if msg.String() == "D" {
-				return m.openExternalRejectionComposer(choice)
-			}
-			return m.openRejectionComposer(choice)
-		}
-		if choice.kind == "item" && choice.proposal >= 0 && m.notifications.proposals.Rows[choice.proposal].Status == "pending" {
 			if msg.String() == "D" {
 				return m.openExternalRejectionComposer(choice)
 			}
@@ -1274,7 +1255,6 @@ func (m model) autoCloseReviewViewport() viewport.Model {
 			fmt.Fprintf(&b, "\n%s\n", inset(styles.section.Render(proposalOutcomeSection(row.Status))))
 			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Comment: "+sanitize(row.Outcome.Comment.Status))))
 			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Close: "+sanitize(row.Outcome.StateChange.Status))))
-			fmt.Fprintf(&b, "%s\n", inset(styles.muted.Render("Write request: "+sanitize(row.Outcome.RequestID))))
 		}
 		if len(n.review.Plan.Proposals) > 1 {
 			fmt.Fprintf(&b, "\n%s\n", inset(styles.muted.Render(proposalRevisionFooter(row, textWidth))))

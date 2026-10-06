@@ -39,17 +39,7 @@
     "none": "none",
     "comment": "comment",
     "close": "close",
-    "reopen": "reopen",
-    "no-action-needed": "none",
-    "comment-request-info": "comment",
-    "comment-feedback": "comment",
-    "comment-explain-close": "close",
-    "close-duplicate": "close",
-    "close-stale": "close",
-    "close-out-of-scope": "close",
-    "close-resolved": "close",
-    "close-with-explanation": "close",
-    "reopen-with-explanation": "reopen"
+    "reopen": "reopen"
   },
   "action_guidance": {
     "none": "No conversation or state change is justified now. Proposed labels remain independent.",

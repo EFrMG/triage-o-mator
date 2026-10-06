@@ -120,7 +120,7 @@ def load_taxonomy():
 READY_LABEL = "ready"
 MERGE_READY_CATEGORY = "merge-ready"
 
-# Default action titles from before actions were named after their GitHub operation. Older installs own a taxonomy copy without action_operations, so these stay resolvable; tui/taxonomy.go mirrors this table.
+# Retired default action titles, kept only so they can be recognized: older installs own a taxonomy copy that still lists them, saved decisions may name them, and `taxonomy-settings simplify-actions` uses this table to replace them. New installs get none of these names; tui/taxonomy.go mirrors this table.
 LEGACY_ACTION_OPERATIONS = {
     "no-action-needed": "none",
     "comment-request-info": "comment",

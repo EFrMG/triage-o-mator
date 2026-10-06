@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _storage import atomic_writer, locked
-from _triage import CONFIG_DIR, REPO, load_taxonomy
+from _triage import CONFIG_DIR, REPO, action_operation, load_taxonomy
 
 
 POLICY_PATH = CONFIG_DIR / "action-automation.json"
@@ -43,14 +43,14 @@ def policy():
 def definitions():
     taxonomy = load_taxonomy()
     actions = taxonomy.get("actions")
-    operations = taxonomy.get("action_operations")
+    operations = taxonomy.get("action_operations", {})
     guidance = taxonomy.get("action_guidance", {})
     if not isinstance(actions, list) or not isinstance(operations, dict) or not isinstance(guidance, dict) or len(actions) != len(set(actions)):
         raise ValueError("action taxonomy is malformed")
 
     rows = []
     for action in actions:
-        operation = operations.get(action)
+        operation = action_operation(taxonomy, action) if isinstance(action, str) else None
         if not isinstance(action, str) or not action or operation not in OPERATIONS | {"none"} or not isinstance(guidance.get(action, ""), str):
             raise ValueError("action taxonomy is malformed")
 

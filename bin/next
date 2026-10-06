@@ -21,25 +21,21 @@ from _groups import list_groups
 from _briefed import briefed_keys, load_records
 from _similar import TitleIndex
 from _notdupes import TitleVerdicts
-from _triage import here, BATCHES_DIR, DATA_DIR, MERGE_READY_CATEGORY, RAW_DIR, REPO, REPORTS_DIR, action_operation, has_decision, load_jsonl, load_ledger, load_taxonomy, merge_ready
+from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, action_operation, has_decision, load_jsonl, load_ledger, load_taxonomy, merge_ready
 
 STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
-# Legacy category names as older ledger rows saved them, and the proposed labels that ask for the same code review.
-CODE_REVIEW_CATEGORIES = (MERGE_READY_CATEGORY, "trivial", "needs-revision", "needs-maintainer-call")
+# Proposed labels, besides `ready`, that say a PR's code still needs to be read.
 CODE_REVIEW_LABELS = ("trivial", "needs-revision")
 ITEM_BRIEF_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-(issue|pr)-([1-9]\d*)-brief\.md$")
 
 
 def active_brief_name(name):
-    if name.endswith("_READ.md"):
-        return name.removesuffix("_READ.md") + ".md"
-
-    return name.removesuffix("_READ") if name.endswith(".md_READ") else name
+    return name.removesuffix("_READ.md") + ".md" if name.endswith("_READ.md") else name
 
 
 def saved_brief_exists(path):
-    return path.exists() or path.with_name(path.stem + "_READ.md").exists() or Path(str(path) + "_READ").exists()
+    return path.exists() or path.with_name(path.stem + "_READ.md").exists()
 
 
 def hours_since(iso):
@@ -130,7 +126,7 @@ def suggestions(ledger):
                 f"prompts/item-brief.md (selected {target['kind']} #{target['number']})",
                 "a focused case can help a maintainer resolve an unreviewed call")
 
-    unreviewed_code = [r for r in open_items if r["kind"] == "pr" and (merge_ready(r) or r.get("category") in CODE_REVIEW_CATEGORIES or any(name in CODE_REVIEW_LABELS for name in r.get("proposed_labels") or []))
+    unreviewed_code = [r for r in open_items if r["kind"] == "pr" and (merge_ready(r) or any(name in CODE_REVIEW_LABELS for name in r.get("proposed_labels") or []))
                        and not r["reviewed"] and not (r.get("agent_notes") or "").strip()]
     if unreviewed_code:
         marked = sum(1 for r in unreviewed_code if merge_ready(r))
@@ -180,8 +176,7 @@ def suggestions(ledger):
                 "TUI: b -> group -> Enter -> open each member", "a ready group reads best when its decisions are confirmed")
 
     group_brief = REPORTS_DIR / f"{date.today().isoformat()}-ready-groups-brief.md"
-    legacy_polished = REPORTS_DIR / f"{date.today().isoformat()}-polished.md"
-    if ready and not saved_brief_exists(group_brief) and not saved_brief_exists(legacy_polished):
+    if ready and not saved_brief_exists(group_brief):
         titles = ", ".join(f'"{g["title"]}"' for g in ready[:2])
         add("agent", f"Make the case for {len(ready)} ready group{'' if len(ready) == 1 else 's'}: {titles}", "prompts/maintainer-brief.md (focused brief for ready groups)",
             "the report lists ready groups; it doesn't argue them, and a maintainer has to decide")

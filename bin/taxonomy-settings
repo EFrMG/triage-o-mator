@@ -17,7 +17,7 @@ def main():
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--label-id", type=int)
     target.add_argument("--action")
-    parser.add_argument("--value", help="legacy guidance text")
+    parser.add_argument("--value", help="guidance text")
     parser.add_argument("--expected", help="the guidance shown when editing began")
     parser.add_argument("--expected-name", help="the GitHub label name shown when editing began")
     parser.add_argument("--name", help="new action title")

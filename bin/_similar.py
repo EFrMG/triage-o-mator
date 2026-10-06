@@ -124,7 +124,7 @@ def candidate(rec, score):
         "kind": rec["kind"],
         "title": rec.get("title", ""),
         "state": rec.get("state", ""),
-        "category": rec.get("category", ""),
+        "proposed_labels": rec.get("proposed_labels") or [],
         "action": rec.get("action", ""),
         "reviewed": bool(rec.get("reviewed")),
         "score": round(score, 3),

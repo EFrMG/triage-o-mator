@@ -544,7 +544,7 @@ func (m model) dupItemState(it Item) string {
 	return dupTriage(it)
 }
 
-// dupTriage is an item's decision in a few words: untriaged, or triaged or reviewed with its category/action.
+// dupTriage is an item's decision in a few words: untriaged, or triaged or reviewed with its labels/action.
 func dupTriage(it Item) string {
 	switch {
 	case it.Reviewed:
@@ -703,12 +703,10 @@ func pairStatus(newer, original Item) string {
 	return fmt.Sprintf("#%d %s / #%d %s", newer.Number, status(newer), original.Number, status(original))
 }
 
-func isDuplicateCategory(c string) bool { return c == "duplicate" || c == "duplicate-pr" }
-
 // pairHandled reports a pair that no longer needs a look: either item is closed, or already marked as a duplicate.
 func pairHandled(newer, original Item) bool {
 	marked := func(item Item) bool {
-		return isDuplicateCategory(item.Category) || slices.Contains(item.ProposedLabels, "duplicate") || slices.Contains(item.ProposedLabels, "duplicate-pr")
+		return slices.Contains(item.ProposedLabels, "duplicate")
 	}
 	return newer.State != "open" || original.State != "open" || marked(newer) || marked(original)
 }

@@ -7,7 +7,7 @@ from _groups import list_groups
 from _triage import REPO, TRIAGE_DEFAULTS, load_ledger
 
 POLICY = "item-context-v1"
-LEDGER_FIELDS = ("category", "action", "confidence", "reason", "triaged_by", "triaged_at", "agent_notes",
+LEDGER_FIELDS = ("action", "confidence", "reason", "triaged_by", "triaged_at", "agent_notes",
                  "reviewed", "reviewed_by", "reviewed_at", "reviewer_notes")
 GROUP_FIELDS = ("id", "title", "description", "status")
 MEMBER_FIELDS = ("kind", "number", "notes", "added_by", "added_at", "updated_by", "updated_at")

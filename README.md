@@ -114,7 +114,7 @@ The paths below are relative to an install: `data/<owner>/<repo>/ledger.jsonl`, 
 
 ### Local records
 
-Each ledger row separates observed GitHub labels from proposed labels, and records a recommended action, confidence and reason, plus triage attribution and optional agent notes. Existing category values remain readable as legacy decisions. Separate review fields record whether a person confirmed the call and any reviewer notes; [the playbook](prompts/PLAYBOOK.md#two-stage-review) explains the distinction. Each install owns its [taxonomy.json](config/taxonomy.json); [taxonomy guidance](docs/taxonomy.md) explains how to use it.
+Each ledger row separates observed GitHub labels from proposed labels, and records a recommended action, confidence and reason, plus triage attribution and optional agent notes. Separate review fields record whether a person confirmed the call and any reviewer notes; [the playbook](prompts/PLAYBOOK.md#two-stage-review) explains the distinction. Each install owns its [taxonomy.json](config/taxonomy.json); [taxonomy guidance](docs/taxonomy.md) explains how to use it.
 
 The ledger and other transactional records use atomic replacement; reports and CSV exports do not. See [local storage and recovery](docs/storage.md).
 
@@ -137,7 +137,7 @@ bin/briefs plan --all
 
 After screening a whole batch, save its dated batch brief and use `bin/batch --mark-briefed ID --brief PATH`. The checkpoint lets the next `--unbriefed` pass skip every member of that batch, including members the brief did not feature. A brief can say that no maintainer call surfaced. `bin/next` suggests the next pass or [polishing selected briefs](prompts/polish-briefs.md); it does not run either step automatically.
 
-`bin/briefs plan` returns the selected batch brief paths and a calculated master-brief size target. Use `--all` for every visible batch brief, `--all --include-read` to include briefs archived from the TUI, or repeat `--brief FILENAME` for an exact set. `bin/briefs mark-read NAME.md` previews a rename to `NAME_READ.md`; applying it requires `--apply --preview-sha256 HASH` from that preview. The same command can move an older `NAME.md_READ` archive to `NAME_READ.md`. The rename leaves the Markdown intact and removes the brief from the TUI menus. It does not change ledger review or GitHub state.
+`bin/briefs plan` returns the selected batch brief paths and a calculated master-brief size target. Use `--all` for every visible batch brief, `--all --include-read` to include briefs archived from the TUI, or repeat `--brief FILENAME` for an exact set. `bin/briefs mark-read NAME.md` previews a rename to `NAME_READ.md`; applying it requires `--apply --preview-sha256 HASH` from that preview. The rename leaves the Markdown intact and removes the brief from the TUI menus. It does not change ledger review or GitHub state.
 
 | Task                                            | Commands                                                                       |
 | ----------------------------------------------- | ------------------------------------------------------------------------------ |

@@ -1,6 +1,6 @@
 # Review groups
 
-A group is a named set of issues and PRs with shared context and individual membership notes. Items can belong to several groups, while their existing categories, recommendations, confidence, and human review status remain in the item ledger.
+A group is a named set of issues and PRs with shared context and individual membership notes. Items can belong to several groups, while their proposed labels, recommendations, confidence, and human review status remain in the item ledger.
 
 Groups are stored as one JSON file per group under `data/<owner>/<repo>/groups/`. These files are permanent project data: include them in your normal Git review and commit workflow. Exported packets in `data/<owner>/<repo>/exports/` are disposable snapshots that can be regenerated. Creating a group or setting it to `ready` never changes any item's decision or approval.
 

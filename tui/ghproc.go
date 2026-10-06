@@ -241,16 +241,13 @@ type applyDoneMsg struct {
 // applyDecisionCmd saves one decision; batchID, when set, stamps it with the batch it was made in (bin/apply defaults to "tui").
 // agentNotes, when non-empty, carries a batch proposal's notes into the ledger along with the decision saved from it; empty leaves the item's existing notes alone.
 // reviewedBy records an explicit human confirmation with the save; by remains the decision author, which can be the author of an unchanged batch proposal.
-func applyDecisionCmd(installRoot, repo string, key Key, category string, proposedLabels []string, replaceLabels bool, action, confidence, reason, agentNotes, by, batchID, reviewedBy string) tea.Cmd {
+func applyDecisionCmd(installRoot, repo string, key Key, proposedLabels []string, replaceLabels bool, action, confidence, reason, agentNotes, by, batchID, reviewedBy string) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{
 			"--expected-repo", repo,
 			"--number", strconv.Itoa(key.Number), "--kind", key.Kind,
 			"--action", action,
 			"--reason", reason, "--by", by,
-		}
-		if category != "" {
-			args = append(args, "--category", category)
 		}
 		if replaceLabels {
 			args = append(args, "--replace-proposed-labels")

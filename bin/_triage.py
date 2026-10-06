@@ -56,7 +56,6 @@ FIELDS = [
     "updated_at",
     "labels",
     "comments_count",
-    "category",
     "proposed_labels",
     "action",
     "confidence",
@@ -74,7 +73,6 @@ FIELDS = [
 ]
 
 TRIAGE_DEFAULTS = {
-    "category": "",
     "proposed_labels": [],
     "action": "",
     "confidence": "",
@@ -116,9 +114,8 @@ def load_taxonomy():
     return json.loads(TAXONOMY_PATH.read_text())
 
 
-# On a PR, the `ready` starter label from bin/label-definitions means its code was read and nothing blocks merging; `merge-ready` is the legacy category it replaced. tui/ledger.go mirrors both names.
+# On a PR, the `ready` starter label from bin/label-definitions means its code was read and nothing blocks merging. tui/ledger.go mirrors the name.
 READY_LABEL = "ready"
-MERGE_READY_CATEGORY = "merge-ready"
 
 def action_operation(taxonomy, action):
     """Resolve a local action title to its GitHub write type, or "" when the taxonomy gives it none."""
@@ -174,13 +171,13 @@ def ledger_key(rec):
 
 
 def has_decision(rec):
-    """Legacy categories, proposed labels, or an action identify a saved local decision."""
-    return bool(rec.get("category") or rec.get("proposed_labels") or rec.get("action"))
+    """Proposed labels or an action identify a saved local decision."""
+    return bool(rec.get("proposed_labels") or rec.get("action"))
 
 
 def merge_ready(rec):
-    """A PR proposed as `ready`, or saved under the legacy merge-ready category, is one whose code was read and found mergeable."""
-    return rec.get("kind") == "pr" and (rec.get("category") == MERGE_READY_CATEGORY or READY_LABEL in (rec.get("proposed_labels") or []))
+    """A PR proposed as `ready` is one whose code was read and found mergeable."""
+    return rec.get("kind") == "pr" and READY_LABEL in (rec.get("proposed_labels") or [])
 
 
 def decision_text(rec):
@@ -188,12 +185,7 @@ def decision_text(rec):
         return "untriaged"
 
     labels = rec.get("proposed_labels") or []
-    if labels:
-        source = "labels: " + ", ".join(labels)
-    elif rec.get("category"):
-        source = "legacy: " + rec["category"]
-    else:
-        source = "no labels"
+    source = "labels: " + ", ".join(labels) if labels else "no labels"
 
     return source + " / " + (rec.get("action") or "action not assessed")
 

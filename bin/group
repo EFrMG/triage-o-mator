@@ -108,7 +108,7 @@ def markdown(data):
         if other_groups:
             lines.append("Other relevant groups: " + ", ".join(other_groups))
 
-        for field in ("missing_from_ledger", "state", "author", "labels", "category", "proposed_labels", "action", "confidence", "reason", "triaged_by", "triaged_at", "reviewed", "reviewed_by", "reviewed_at", "reviewer_notes", "last_synced_at", "additions", "deletions", "changed_files", "is_draft", "mergeable"):
+        for field in ("missing_from_ledger", "state", "author", "labels", "proposed_labels", "action", "confidence", "reason", "triaged_by", "triaged_at", "reviewed", "reviewed_by", "reviewed_at", "reviewer_notes", "last_synced_at", "additions", "deletions", "changed_files", "is_draft", "mergeable"):
             if field in item:
                 value = item[field]
                 if value is None or (isinstance(value, str) and not value.strip()) or (isinstance(value, (list, dict)) and not value):

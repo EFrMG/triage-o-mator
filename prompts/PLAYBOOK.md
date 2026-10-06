@@ -97,7 +97,7 @@ This updates `data/<owner>/<repo>/ledger.jsonl` in place, stamping `triaged_at` 
 
 The ledger has two layers of state, deliberately kept separate:
 
-1. **Triaged** (one or more `proposed_labels`, an `action`, or a legacy category saved with confidence, reason and optional `agent_notes`): an agent or a human has made a first-pass call. A label-first pass may leave `action` blank until action assessment.
+1. **Triaged** (one or more `proposed_labels` or an `action`, saved with confidence, reason and optional `agent_notes`): an agent or a human has made a first-pass call. A label-first pass may leave `action` blank until action assessment.
 2. **Reviewed** (`reviewed: true`, `reviewed_by`, `reviewed_at`): a human has confirmed that call. It is distinct from repository-enabled label automation and approval of a conversation or state write.
 
 Nothing here auto-escalates a triaged item to "reviewed". A person can confirm a saved call from **All Items** or review unreviewed calls through a spreadsheet. Action preparation and exact write approval happen in **Notifications**. The [TUI tutorial](docs/tutorial.md#7-review-proposed-decisions) covers the controls.
@@ -113,7 +113,7 @@ bin/import-csv data/<owner>/<repo>/exports/ledger-<date>.csv --by <reviewer-name
 
 Keep each row's `kind`, `number`, and `review_revision` intact. Import checks every included row before writing; if any row is stale or missing its revision, export a new CSV and transfer your edits to it. A changed decision that was already reviewed loses review approval, even if the CSV still says `reviewed: true`; export again and explicitly approve the updated decision. A previously unreviewed decision can be edited and approved together by setting `reviewed` true and supplying a reviewer name in `reviewed_by` or `--by`.
 
-Those decision and review columns are directly editable; legacy `category` is also editable for an older row. Changing a decision updates its triage attribution and may clear prior review approval; approving a decision records review attribution. Editing GitHub-derived columns (title, observed labels, state, ...) remains a no-op.
+Those decision and review columns are directly editable. Changing a decision updates its triage attribution and may clear prior review approval; approving a decision records review attribution. Editing GitHub-derived columns (title, observed labels, state, ...) remains a no-op.
 
 If a human is triaging live in conversation instead, `bin/apply --by <name> --reviewed` on their own decisions file is fine. That is a human decision going straight in instead of an agent proposal awaiting review.
 

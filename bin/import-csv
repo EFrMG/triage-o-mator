@@ -3,7 +3,7 @@
 
 Usage: bin/import-csv PATH [--by NAME]
 
-Editable columns: proposed_labels (a JSON list), action, confidence, reason, reviewed, reviewed_by, reviewer_notes, and legacy category.
+Editable columns: proposed_labels (a JSON list), action, confidence, reason, reviewed, reviewed_by, reviewer_notes.
 Keep kind, number, and review_revision from the export. Export again after any ledger change.
 """
 
@@ -19,7 +19,7 @@ from _csv_revision import review_revision
 from _triage import LEDGER_PATH, REPO, has_decision, load_ledger, load_taxonomy, now_iso, save_ledger
 from _storage import locked
 
-DECISION = ("category", "proposed_labels", "action", "confidence", "reason")
+DECISION = ("proposed_labels", "action", "confidence", "reason")
 EDITABLE = (*DECISION, "reviewed", "reviewed_by", "reviewer_notes")
 TRUE = {"true", "1", "yes", "y"}
 FALSE = {"false", "0", "no", "n", ""}
@@ -140,7 +140,7 @@ def main():
                     approvals_cleared += 1
                 elif updated["reviewed"]:
                     if not has_decision(updated):
-                        fail(f"CSV row {line}: reviewed item needs proposed labels, an action or a legacy category")
+                        fail(f"CSV row {line}: reviewed item needs proposed labels or an action")
 
                     if not rec["reviewed"]:
                         updated["reviewed_by"] = updated["reviewed_by"] or args.by

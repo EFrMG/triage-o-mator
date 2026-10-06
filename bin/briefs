@@ -16,7 +16,7 @@ from _triage import DATA_DIR, REPO, REPORTS_DIR, WORK_ROOT
 
 
 DATE = r"\d{4}-\d{2}-\d{2}"
-MASTER = re.compile(rf"^({DATE})-(?:master(?:-[A-Za-z0-9_-]+)?-brief|brief|polished)\.md$")
+MASTER = re.compile(rf"^({DATE})-(?:master(?:-[A-Za-z0-9_-]+)?-brief|brief)\.md$")
 ITEM = re.compile(rf"^({DATE})-(issue|pr)-(\d+)-brief\.md$")
 GROUP = re.compile(rf"^({DATE})-(?:ready-groups|group-[A-Za-z0-9_-]+)-brief\.md$")
 BATCH = re.compile(rf"^({DATE})-batch-b\d{{8}}-\d{{6}}(?:-\d+)?-brief\.md$")
@@ -28,9 +28,6 @@ READ_MARKER = "_READ"
 def active_name(name):
     if name.endswith("_READ.md"):
         return name.removesuffix("_READ.md") + ".md"
-
-    if name.endswith(".md_READ"):
-        return name.removesuffix("_READ")
 
     return name
 
@@ -190,18 +187,12 @@ def mark_read_preview(names):
     directory = reports_dir()
     renames = []
     for name in names:
-        base = active_name(name)
-        legacy = name.endswith(".md_READ") and category(base) is not None
-        if Path(name).name != name or (category(name) is None and not legacy):
+        if Path(name).name != name or category(name) is None:
             raise ValueError(f"invalid brief ID: {name}")
 
         source = directory / name
-        target = directory / read_name(base)
+        target = directory / read_name(name)
         if source.is_symlink() or not source.is_file() or target.exists() or target.is_symlink():
-            raise ValueError(f"brief changed or read destination already exists: {name}")
-
-        competing_copy = directory / (base if legacy else base + READ_MARKER)
-        if competing_copy.exists() or competing_copy.is_symlink():
             raise ValueError(f"brief changed or read destination already exists: {name}")
 
         digest = hashlib.sha256()
@@ -245,7 +236,7 @@ def main():
     plan = commands.add_parser("plan", help="select source briefs and calculate a master-brief size target")
     plan.add_argument("--brief", action="append", default=[], help="use this exact source brief ID or reports path; repeat for a named set")
     plan.add_argument("--all", action="store_true", help="select every visible batch brief")
-    plan.add_argument("--include-read", action="store_true", help="include _READ.md and older .md_READ batch briefs in an automatic selection")
+    plan.add_argument("--include-read", action="store_true", help="include _READ.md batch briefs in an automatic selection")
     plan.add_argument("--limit", type=int, default=10, help="newest visible batch briefs for an ordinary plan (default: 10)")
     mark = commands.add_parser("mark-read", help="preview exact _READ.md renames; --apply needs the preview checksum")
     mark.add_argument("ids", nargs="+", help="supported brief filenames shown in the menu")

@@ -127,7 +127,7 @@ def render(ledger):
 
     unmapped = [r for r in reviewed if r["action"] and not action_operation(taxonomy, r["action"])]
     if unmapped:
-        lines.append(f"## Reviewed legacy actions without a GitHub operation ({len(unmapped)})")
+        lines.append(f"## Reviewed actions without a GitHub operation ({len(unmapped)})")
         lines.append("")
         lines.append("These saved decisions remain readable. Map their action titles in Settings before treating them as GitHub write recommendations.")
         lines.append("")
@@ -147,16 +147,6 @@ def render(ledger):
             lines.append("| label | items | % of open |")
             lines.append("|---|---|---|")
             for name, n in labels.most_common():
-                lines.append(f"| {name} | {n} | {pct(n, len(items))} |")
-            lines.append("")
-
-        legacy = Counter(r["category"] for r in items if r.get("category"))
-        if legacy:
-            lines.append(f"## {kind} legacy categories")
-            lines.append("")
-            lines.append("| category | items | % of open |")
-            lines.append("|---|---|---|")
-            for name, n in legacy.most_common():
                 lines.append(f"| {name} | {n} | {pct(n, len(items))} |")
             lines.append("")
 

@@ -7,7 +7,7 @@ Usage:
     bin/similar --pairs [--min-score 0.5]
     bin/similar --query "suspend lid" [--top 20] [--min-score 0.1] [--include-closed]
 
-Prints one JSON object: the item plus a `candidates` list (number, kind, title, state, category, action, reviewed, score), best first. Candidates are the same kind as the item unless --any-kind. Pairs ruled out with bin/not-duplicate are excluded before --top; --include-checked retains them with their recorded verdict.
+Prints one JSON object: the item plus a `candidates` list (number, kind, title, state, proposed_labels, action, reviewed, score), best first. Candidates are the same kind as the item unless --any-kind. Pairs ruled out with bin/not-duplicate are excluded before --top; --include-checked retains them with their recorded verdict.
 
 --enrich also fetches the body and comments of the item and every candidate from GitHub (read-only), producing exactly the input prompts/find-duplicates.md expects. Without it, nothing leaves the machine.
 
@@ -86,7 +86,7 @@ def main():
         sys.exit(here(f"error: {key} is not in the ledger — run bin/sync first"))
 
     rec = index.records[key]
-    out = {k: rec.get(k, "") for k in ("number", "kind", "title", "state", "category", "action", "url")}
+    out = {k: rec.get(k, "") for k in ("number", "kind", "title", "state", "proposed_labels", "action", "url")}
     verdicts = _notdupes.TitleVerdicts()
     out["candidates"] = verdicts.candidates(index, key, include_checked=args.include_checked,
                                            top=args.top, min_score=args.min_score, any_kind=args.any_kind)

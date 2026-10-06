@@ -432,8 +432,8 @@ print(json.dumps(live["labels"]))
         taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
         taxonomy_path.write_text(json.dumps(taxonomy))
         ledger_path = self.root / "data/owner/repo/ledger.jsonl"
-        first = dict(item(1, "Bug"), category="", proposed_labels=["bug"], action="", confidence="high", reason="Agent proposal", reviewed=False, reviewed_by="", reviewed_at="")
-        second = dict(item(2, "Unlabeled"), category="", proposed_labels=["bug"], action="", confidence="medium", reason="Agent proposal", reviewed=False, reviewed_by="", reviewed_at="")
+        first = dict(item(1, "Bug"), proposed_labels=["bug"], action="", confidence="high", reason="Agent proposal", reviewed=False, reviewed_by="", reviewed_at="")
+        second = dict(item(2, "Unlabeled"), proposed_labels=["bug"], action="", confidence="medium", reason="Agent proposal", reviewed=False, reviewed_by="", reviewed_at="")
         first["labels"] = ["manual"]
         ledger_path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
 
@@ -556,10 +556,6 @@ class LedgerTests(Workspace):
         self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", batch_preview["preview_sha256"], batch_name)
         self.assertEqual(self.json_cli("briefs", "plan", "--all")["source_count"], 15)
         self.assertEqual(self.json_cli("briefs", "plan", "--all", "--include-read")["source_count"], 16)
-        (reports / (Path(batch_name).stem + "_READ.md")).rename(reports / (batch_name + "_READ"))
-        self.assertEqual(self.json_cli("briefs", "plan", "--all", "--include-read")["source_count"], 16)
-        legacy_preview = self.json_cli("briefs", "mark-read", batch_name + "_READ")
-        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", legacy_preview["preview_sha256"], batch_name + "_READ")
         self.assertTrue((reports / (Path(batch_name).stem + "_READ.md")).exists())
 
         pr_name = "2026-10-06-pr-42-brief.md"
@@ -585,14 +581,6 @@ class LedgerTests(Workspace):
         self.run_cli("briefs", "mark-read", group_name, ok=False)
         self.run_cli("briefs", "plan", "--brief", group_name, "--brief", Path(group_name).stem + "_READ.md", ok=False)
         self.assertTrue((reports / group_name).exists())
-        legacy_name = "2026-10-04-group-legacy-brief.md_READ"
-        (reports / legacy_name).write_text("# Legacy archive\n")
-        self.assertEqual(self.json_cli("briefs", "plan", "--brief", legacy_name)["source_count"], 1)
-        preview = self.json_cli("briefs", "mark-read", legacy_name)
-        self.assertEqual(preview["renames"][0]["target"], "2026-10-04-group-legacy-brief_READ.md")
-        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], legacy_name)
-        self.assertFalse((reports / legacy_name).exists())
-        self.assertTrue((reports / "2026-10-04-group-legacy-brief_READ.md").exists())
         self.assertEqual(len(self.calls()), calls_before)
         self.run_cli("briefs", "--expected-repo", "other/repo", "list", ok=False)
         self.run_cli("briefs", "read", "2026-10-06-issue-99-brief.md", ok=False)
@@ -630,7 +618,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.assertEqual(self.json_cli("enrich-one", "--kind", "issue", "--number", "2")["state"], "closed")
 
         before = ledger_path.read_bytes()
-        args = ("--number", "1", "--kind", "issue", "--category", "bug", "--action", "none", "--reason", "Reproduced", "--by", "agent:triage")
+        args = ("--number", "1", "--kind", "issue", "--action", "none", "--reason", "Reproduced", "--by", "agent:triage")
         self.run_cli("apply", *args, "--dry-run")
         self.assertEqual(ledger_path.read_bytes(), before)
         self.run_cli("apply", *args)
@@ -711,7 +699,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
 
     def test_sync_preserves_proposals(self):
         self.sync()
-        self.run_cli("apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "none", "--confidence", "high", "--reason", "Existing call", "--by", "agent:triage")
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--action", "none", "--confidence", "high", "--reason", "Existing call", "--by", "agent:triage")
         taxonomy_path = self.root / "config/taxonomy.json"
         taxonomy = json.loads(taxonomy_path.read_text())
         taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
@@ -719,11 +707,10 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.run_cli("apply", "--number", "2", "--kind", "issue", "--proposed-label", "bug", "--by", "agent:triage")
         self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], ["bug"])
         self.assertEqual(self.ledger()[("issue", 2)]["action"], "")
-        self.assertEqual(self.ledger()[("issue", 2)]["category"], "")
         self.assertEqual(self.ledger()[("issue", 2)]["labels"], [])
         self.run_cli("fetch", "--full")
         self.run_cli("sync")
-        self.assertEqual(self.ledger()[("issue", 1)]["category"], "bug")
+        self.assertEqual(self.ledger()[("issue", 1)]["action"], "none")
         self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
         self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], ["bug"])
         self.assertIn("Triaged: 2/2", self.run_cli("stats").stdout)
@@ -753,7 +740,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
             reader = csv.DictReader(source)
             fields, rows = reader.fieldnames, list(reader)
 
-        rows[0].update(category="bug", action="none", reviewed="true", reviewed_by="human")
+        rows[0].update(action="none", reviewed="true", reviewed_by="human")
         with csv_path.open("w", newline="") as out:
             writer = csv.DictWriter(out, fieldnames=fields)
             writer.writeheader()
@@ -795,7 +782,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
             writer = csv.DictWriter(out, fieldnames=fields)
             writer.writeheader()
             writer.writerows(rows)
-        self.run_cli("apply", "--number", "2", "--kind", "issue", "--category", "bug", "--action", "none", "--by", "agent:triage")
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--action", "none", "--by", "agent:triage")
         before = ledger_path.read_bytes()
         self.run_cli("import-csv", str(csv_path), ok=False)
         self.assertEqual(ledger_path.read_bytes(), before)
@@ -846,8 +833,8 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
 
         read_fd, write_fd = os.pipe()
         commands = [
-            ["apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "none"],
-            ["apply", "--number", "2", "--kind", "issue", "--category", "bug", "--action", "none"],
+            ["apply", "--number", "1", "--kind", "issue", "--action", "none"],
+            ["apply", "--number", "2", "--kind", "issue", "--action", "none"],
             ["sync"],
             ["import-csv", str(csv_path)],
         ]
@@ -882,8 +869,8 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
             os.close(write_fd)
 
         ledger = self.ledger()
-        self.assertEqual(ledger[("issue", 1)]["category"], "bug")
-        self.assertEqual(ledger[("issue", 2)]["category"], "bug")
+        self.assertEqual(ledger[("issue", 1)]["action"], "none")
+        self.assertEqual(ledger[("issue", 2)]["action"], "none")
         self.assertEqual(ledger[("issue", 3)]["reviewer_notes"], "Separate note")
         self.assertEqual(ledger[("issue", 1)]["title"], "Fresh title")
         self.assertEqual(self.calls(), calls_before)

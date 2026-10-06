@@ -26,7 +26,6 @@ import (
 type proposal struct {
 	Number         int      `json:"number"`
 	Kind           string   `json:"kind"`
-	Category       string   `json:"category"`
 	ProposedLabels []string `json:"proposed_labels"`
 	Action         string   `json:"action"`
 	Confidence     string   `json:"confidence"`
@@ -142,7 +141,7 @@ func loadBatches(root, repo string) ([]batchRecord, error) {
 					return err
 				}
 
-				if p.Action != "" || len(p.ProposedLabels) > 0 || p.Category != "" {
+				if p.Action != "" || len(p.ProposedLabels) > 0 {
 					rec.Proposals[Key{Kind: p.Kind, Number: p.Number}] = p
 				}
 
@@ -696,7 +695,7 @@ func (m model) pendingProposals(b batchRecord) int {
 	return n
 }
 
-// countProposals counts the proposals A would apply, and how many of those use a category or action config/taxonomy.json doesn't have (bin/apply records them as-is, with a warning).
+// countProposals counts the proposals A would apply, and how many of those use an action config/taxonomy.json doesn't have (bin/apply records them as-is, with a warning).
 func (m model) countProposals(b batchRecord) (pending, invalid int) {
 	for key, p := range b.Proposals {
 		if it, ok := m.findItem(key); ok && it.Untriaged() {
@@ -759,11 +758,7 @@ func (m model) batchItems(b batchRecord) ([]list.Item, int) {
 
 		li := listItem{Item: it}
 		if p, ok := b.Proposals[key]; ok && it.Untriaged() {
-			labels := strings.Join(p.ProposedLabels, ", ")
-			if labels == "" {
-				labels = p.Category
-			}
-			li.proposal = labels + "/" + p.Action
+			li.proposal = strings.Join(p.ProposedLabels, ", ") + "/" + p.Action
 		}
 
 		out = append(out, li)

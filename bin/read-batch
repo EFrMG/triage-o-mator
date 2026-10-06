@@ -57,7 +57,7 @@ def render(item):
 
     candidates = item.get("duplicate_candidates") or []
     out += ["", "--- duplicate candidates (title similarity only; an empty list proves nothing)"]
-    out += [f"  #{c['number']} {c['score']:.0%} [{c['state']}{', ' + c['category'] if c.get('category') else ''}] {c['title']}" for c in candidates] or ["  (none above threshold)"]
+    out += [f"  #{c['number']} {c['score']:.0%} [{c['state']}{', ' + ', '.join(c['proposed_labels']) if c.get('proposed_labels') else ''}] {c['title']}" for c in candidates] or ["  (none above threshold)"]
     if "diff_text" in item:
         out += ["", "--- diff", item["diff_text"].rstrip()]
 
@@ -77,8 +77,8 @@ def main():
         decisions = {(d["kind"], d["number"]): d for d in load_jsonl(path.with_name(path.name.replace(".items.", ".decisions.")))}
         for item in items:
             d = decisions.get((item["kind"], item["number"]), {})
-            labels = ", ".join(d.get("proposed_labels") or []) or d.get("category") or "no labels"
-            proposal = f"{labels}/{d.get('action') or 'action not assessed'} {d.get('confidence', '')}" if d.get("action") or d.get("proposed_labels") or d.get("category") else "(blank)"
+            labels = ", ".join(d.get("proposed_labels") or []) or "no labels"
+            proposal = f"{labels}/{d.get('action') or 'action not assessed'} {d.get('confidence', '')}" if d.get("action") or d.get("proposed_labels") else "(blank)"
             print(f"{item['kind']:5} #{item['number']:<6} {proposal:45} {item['title']}")
 
         return

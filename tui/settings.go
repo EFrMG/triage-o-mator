@@ -208,8 +208,6 @@ func (m model) settingsView() string {
 			operation := m.taxonomy.OperationFor(row.name)
 			if operation == "" {
 				operation = "unmapped"
-			} else if row.operation == "" {
-				operation = "legacy " + operation
 			}
 			summary = operation + " · " + summary
 		}

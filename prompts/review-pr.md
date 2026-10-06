@@ -7,7 +7,7 @@
 ## 1. Pick the PRs
 
 - **Named PRs:** review those.
-- **Otherwise:** take what `bin/next` lists: triaged PRs proposed as `ready`, `trivial` or `needs-revision`, or saved under an older code-review category, that have no `agent_notes` yet, starting with the ones marked ready to merge.
+- **Otherwise:** take what `bin/next` lists: triaged PRs proposed as `ready`, `trivial` or `needs-revision` that have no `agent_notes` yet, starting with the ones marked ready to merge.
 - **Several untriaged PRs at once:** `bin/batch 10 --kind pr --diff` and follow this checklist per item, inside `prompts/auto-triage.md`.
 
 Your attribution is `agent:<contributor>` (`git config user.name`). Today's date: `date -u +%F`.

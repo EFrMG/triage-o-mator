@@ -6,7 +6,7 @@ Usage:
     bin/export-csv [--open-only] [--pending-review]
     -> data/<owner>/<repo>/exports/ledger-<date>.csv
 
-Edit proposed_labels (a JSON list), action, confidence, reason, reviewed, reviewed_by or reviewer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. Legacy category remains editable for old rows. Keep `number`, `kind`, and `review_revision` intact; the revision rejects stale rows.
+Edit proposed_labels (a JSON list), action, confidence, reason, reviewed, reviewed_by or reviewer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. Keep `number`, `kind`, and `review_revision` intact; the revision rejects stale rows.
 """
 
 import argparse

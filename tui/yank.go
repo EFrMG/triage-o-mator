@@ -348,11 +348,8 @@ func (m model) yankBatch(all bool) (string, string) {
 		}
 
 		proposed := ""
-		if p, ok := record.Proposals[key]; ok && (p.Action != "" || len(p.ProposedLabels) > 0 || p.Category != "") {
+		if p, ok := record.Proposals[key]; ok && (p.Action != "" || len(p.ProposedLabels) > 0) {
 			labels := strings.Join(p.ProposedLabels, ", ")
-			if labels == "" {
-				labels = p.Category
-			}
 			action := p.Action
 			if action == "" {
 				action = "action not assessed"

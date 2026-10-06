@@ -13,7 +13,7 @@ import (
 )
 
 // formField indexes the Tab-cycle stops within the detail panel: the enrichment content (Body/Comments/Diff, owned by detailModel) plus the four decision fields.
-// fieldContent is the default on selecting an item, so Enter / H / L / j / k / gg / G immediately act on the content sections rather than being swallowed by the category picker.
+// fieldContent is the default on selecting an item, so Enter / H / L / j / k / gg / G immediately act on the content sections rather than being swallowed by the label picker.
 type formField int
 
 const (
@@ -25,7 +25,7 @@ const (
 	fieldCount
 )
 
-// decisionForm edits proposed labels, action, confidence and reason for the selected item. Legacy category values remain visible as saved context.
+// decisionForm edits proposed labels, action, confidence and reason for the selected item.
 type decisionForm struct {
 	taxonomy Taxonomy
 	repo     string
@@ -36,13 +36,12 @@ type decisionForm struct {
 	actionIdx      int
 	confidenceIdx  int
 	proposedLabels []string
-	legacyCategory string
 	// The reason editor grows up to reasonMaxLines visible rows; Enter saves rather than inserting a newline.
 	reason textarea.Model
 
 	dirty bool
 	saved bool // true right after a successful save, until the item changes again
-	// touched is false while category/action/confidence are still the placeholder defaults LoadItem seeds for an untriaged item; saving untouched defaults needs a repeated save action.
+	// touched is false while labels/action/confidence are still the placeholder defaults LoadItem seeds for an untriaged item; saving untouched defaults needs a repeated save action.
 	touched bool
 	// proposed is true while the fields show a batch proposal that hasn't been saved to the ledger yet.
 	proposed bool
@@ -114,7 +113,6 @@ type decisionSnapshot struct {
 	actionIdx      int
 	confidenceIdx  int
 	proposedLabels []string
-	legacyCategory string
 	reason         string
 	badLabels      []string
 	badAction      string
@@ -122,7 +120,7 @@ type decisionSnapshot struct {
 }
 
 func (s decisionSnapshot) Equal(other decisionSnapshot) bool {
-	return s.actionIdx == other.actionIdx && s.confidenceIdx == other.confidenceIdx && s.legacyCategory == other.legacyCategory &&
+	return s.actionIdx == other.actionIdx && s.confidenceIdx == other.confidenceIdx &&
 		s.reason == other.reason && s.badAction == other.badAction && s.badConfidence == other.badConfidence &&
 		slices.Equal(s.proposedLabels, other.proposedLabels) && slices.Equal(s.badLabels, other.badLabels)
 }
@@ -132,7 +130,6 @@ func (f decisionForm) Snapshot() decisionSnapshot {
 		actionIdx:      f.actionIdx,
 		confidenceIdx:  f.confidenceIdx,
 		proposedLabels: slices.Clone(f.proposedLabels),
-		legacyCategory: f.legacyCategory,
 		reason:         f.reason.Value(),
 		badLabels:      slices.Clone(f.badLabels),
 		badAction:      f.badAction,
@@ -145,7 +142,6 @@ func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 	f.actionIdx = s.actionIdx
 	f.confidenceIdx = s.confidenceIdx
 	f.proposedLabels = slices.Clone(s.proposedLabels)
-	f.legacyCategory = s.legacyCategory
 	f.reason.SetValue(s.reason)
 	f.badLabels, f.badAction, f.badConfidence = slices.Clone(s.badLabels), s.badAction, s.badConfidence
 	f.dirty = true
@@ -155,7 +151,6 @@ func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 
 // ApplyProposal seeds the form from a batch decisions file's proposal for an untriaged item. It counts as touched (someone chose these values) but not dirty: the proposal stays in the file, so leaving without saving loses nothing.
 func (f *decisionForm) ApplyProposal(p proposal) {
-	f.legacyCategory = p.Category
 	f.proposedLabels = slices.Clone(p.ProposedLabels)
 	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), p.Action)
 	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, p.Confidence)
@@ -181,9 +176,6 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 // MarkDuplicate prefills a matching GitHub label and a close operation, leaving confidence for the reviewer to set.
 func (f *decisionForm) MarkDuplicate(number int, title string) error {
 	label := "duplicate"
-	if f.kind == "pr" {
-		label = "duplicate-pr"
-	}
 
 	act := -1
 	for i, a := range f.taxonomy.SelectableActions() {
@@ -221,7 +213,6 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 // LoadItem seeds the form from an existing ledger row (empty strings if untriaged).
 func (f *decisionForm) LoadItem(it Item) {
 	f.kind = it.Kind
-	f.legacyCategory = it.Category
 	f.proposedLabels = slices.Clone(it.ProposedLabels)
 	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), it.Action)
 	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, it.Confidence)
@@ -317,8 +308,6 @@ func (f decisionForm) unlistedLabels() []string {
 	}
 	return bad
 }
-
-func (f decisionForm) Category() string { return f.legacyCategory }
 
 func (f decisionForm) ProposedLabels() []string { return slices.Clone(f.proposedLabels) }
 
@@ -554,9 +543,6 @@ func (f decisionForm) View(width int) string {
 		}
 
 		rows = append(rows, prefix+line)
-	}
-	if f.legacyCategory != "" {
-		rows = append(rows, muted.Render("  legacy category: "+sanitize(f.legacyCategory)))
 	}
 
 	// "Saved." itself goes to the status line only, not here as well.

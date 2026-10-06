@@ -1248,7 +1248,7 @@ func (m model) requestDecisionSave(approve bool) (tea.Model, tea.Cmd) {
 
 		return m, nil
 	}
-	if m.form.Category() == "" && len(m.form.ProposedLabels()) == 0 && m.form.Action() == "" {
+	if len(m.form.ProposedLabels()) == 0 && m.form.Action() == "" {
 		m.fail("Choose at least one proposed label or an action before saving.")
 
 		return m, nil
@@ -1324,7 +1324,7 @@ func (m model) saveDecisionCmd(approve bool) tea.Cmd {
 		}
 	}
 
-	cmd := applyDecisionCmd(m.installRoot, m.repo, m.detail.key, m.form.Category(), m.form.ProposedLabels(), m.form.ReplaceProposedLabels(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, by, m.activeBatch, reviewedBy)
+	cmd := applyDecisionCmd(m.installRoot, m.repo, m.detail.key, m.form.ProposedLabels(), m.form.ReplaceProposedLabels(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, by, m.activeBatch, reviewedBy)
 
 	return func() tea.Msg { msg := cmd().(applyDoneMsg); msg.snapshot = &snapshot; return msg }
 }

@@ -10,7 +10,7 @@ import (
 )
 
 // listItem adapts Item to bubbles/list's item interface.
-// proposal is set when the item is listed through a batch whose decisions file proposes a category/action for it.
+// proposal is set when the item is listed through a batch whose decisions file proposes labels or an action for it.
 type listItem struct {
 	Item
 	proposal string

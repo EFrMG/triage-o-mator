@@ -27,7 +27,6 @@ type Item struct {
 	ProposedLabels []string   `json:"proposed_labels"`
 	CommentsCount  int        `json:"comments_count"`
 	ItemScore      *ItemScore `json:"item_score"`
-	Category       string     `json:"category"`
 	Action         string     `json:"action"`
 	Confidence     string     `json:"confidence"`
 	Reason         string     `json:"reason"`
@@ -88,15 +87,12 @@ func (i Item) ScoreLabel() string {
 }
 
 func (i Item) Untriaged() bool {
-	return i.Category == "" && len(i.ProposedLabels) == 0 && i.Action == ""
+	return len(i.ProposedLabels) == 0 && i.Action == ""
 }
 
 func (i Item) DecisionLabel() string {
 	if len(i.ProposedLabels) > 0 {
 		return strings.Join(i.ProposedLabels, ", ")
-	}
-	if i.Category != "" {
-		return "legacy: " + i.Category
 	}
 	return "no labels"
 }
@@ -108,14 +104,11 @@ func (i Item) ByAgent() bool {
 
 func (i Item) PendingReview() bool { return !i.Untriaged() && !i.Reviewed }
 
-// These mirror READY_LABEL and MERGE_READY_CATEGORY in bin/_triage.py: on a PR the `ready` starter label means its code was read and nothing blocks merging, and `merge-ready` is the legacy category it replaced.
-const (
-	readyLabel         = "ready"
-	mergeReadyCategory = "merge-ready"
-)
+// readyLabel mirrors READY_LABEL in bin/_triage.py: on a PR the `ready` starter label means its code was read and nothing blocks merging.
+const readyLabel = "ready"
 
 func (i Item) MergeReadyHighConfidence() bool {
-	return i.Kind == "pr" && (i.Category == mergeReadyCategory || slices.Contains(i.ProposedLabels, readyLabel)) && i.Confidence == "high" && !i.Reviewed
+	return i.Kind == "pr" && slices.Contains(i.ProposedLabels, readyLabel) && i.Confidence == "high" && !i.Reviewed
 }
 
 func (i Item) CloseCandidate(taxonomy Taxonomy) bool {

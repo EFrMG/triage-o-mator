@@ -55,7 +55,7 @@ Two conventions `make check` couldn't enforce:
 ## Adding to it
 
 - **A playbook:** write it in `prompts/`, add a row to `prompts/PLAYBOOK.md`'s "What you can be asked" table and to `README.md`'s prompts table, and give `bin/next` a suggestion that points at it.
-- **A category or action:** update `config/taxonomy.json` and any relevant guidance in `docs/taxonomy.md`. Installs keep their own JSON copy, so this changes the default for new ones, not the ones already out there. Actions guide separate agent suggestions and later automation, not GitHub label names. Keep tool-defined default values to at most two words, preferably one, using `no-...` when needed; preserve GitHub label names exactly as supplied.
+- **An action:** update `config/taxonomy.json` and any relevant guidance in `docs/taxonomy.md`. Installs keep their own JSON copy, so this changes the default for new ones, not the ones already out there. Actions guide separate agent suggestions and later automation, not GitHub label names. Keep tool-defined default values to at most two words, preferably one, using `no-...` when needed; preserve GitHub label names exactly as supplied.
 - **A script:** it imports `bin/_triage.py`, reads its paths from `WORK_ROOT`, and stays read-only against GitHub unless it is an explicitly authorized write script. Label and action automation follow rule 1's repository and operation-type settings, bounded passes and outcome contract; unconfigured write scripts default to dry-run and require approval of the exact proposed operation. Add it to `README.md`'s script table.
 - **The playbook itself:** remember where it is read. `prompts/PLAYBOOK.md` is an install's `AGENTS.md`, so its paths and links are relative to an install.
 

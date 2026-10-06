@@ -2384,6 +2384,11 @@ func TestSuggestedActionsLiveInNotificationsWithoutSeparateReviewTabs(t *testing
 	if len(tabs) != 3 || tabs[0].Name != "Untriaged" || tabs[1].Name != "Merge-Ready PRs" || tabs[2].Name != "All Items" {
 		t.Fatal("separate Pending Review or Close Candidates menu remains")
 	}
+	ready := []Item{{Kind: "pr", Number: 1, State: "open", ProposedLabels: []string{"ready"}, Confidence: "high"}, {Kind: "issue", Number: 2, State: "open", ProposedLabels: []string{"ready"}, Confidence: "high"},
+		{Kind: "pr", Number: 3, State: "open", Category: "merge-ready", Confidence: "high"}, {Kind: "pr", Number: 4, State: "open", ProposedLabels: []string{"ready"}, Confidence: "medium"}}
+	if listed := tabs[mergeReadyTab].Filter(ready, Taxonomy{}); len(listed) != 2 || listed[0].Number != 1 || listed[1].Number != 3 {
+		t.Fatalf("Merge-Ready PRs did not list exactly the high-confidence ready PRs: %+v", listed)
+	}
 
 	m := baselineModel(t, baselineRoot(t))
 	m.taxonomy = Taxonomy{ActionOperations: map[string]string{"comment": "comment", "close": "close", "reopen": "reopen"}}

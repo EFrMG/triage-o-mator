@@ -7,7 +7,7 @@
 ## 1. Pick the PRs
 
 - **Named PRs:** review those.
-- **Otherwise:** take what `bin/next` lists: triaged PRs with matching legacy categories or proposed labels such as `merge-ready`, `trivial`, `needs-revision` or `needs-maintainer-call` that have no `agent_notes` yet, starting with `merge-ready`.
+- **Otherwise:** take what `bin/next` lists: triaged PRs proposed as `ready`, or with matching legacy categories or proposed labels such as `merge-ready`, `trivial`, `needs-revision` or `needs-maintainer-call`, that have no `agent_notes` yet, starting with the ones marked ready to merge.
 - **Several untriaged PRs at once:** `bin/batch 10 --kind pr --diff` and follow this checklist per item, inside `prompts/auto-triage.md`.
 
 Your attribution is `agent:<contributor>` (`git config user.name`). Today's date: `date -u +%F`.
@@ -72,7 +72,7 @@ Only ever GET requests, as the rest of this tooling does.
 
 Use only labels actually present in this repository's observed `label_catalog`, and actions in `config/taxonomy.json`. The following names are examples when the repository has them:
 
-- `merge-ready` + `none`: you read the whole diff, found nothing blocking, the scope is focused and the checks above pass. Propose the available label separately; the labeling pass handles it whether or not it is already present. Put the merge recommendation in `agent_notes`; the TUI does not merge PRs. Use `high` only for small diffs with no safety-sensitive changes.
+- `ready` + `none`: you read the whole diff, found nothing blocking, the scope is focused and the checks above pass. Propose the available label separately; the labeling pass handles it whether or not it is already present. Put the merge recommendation in `agent_notes`; the TUI does not merge PRs. Use `high` only for small diffs with no safety-sensitive changes.
 - `trivial` + `none`: typo-, formatting- or lint-only. Propose the available label separately.
 - `needs-revision` + `comment`: good direction, but it has blocking findings that can be stated in a conversation comment. The notes list them. This is not a formal GitHub review.
 - `needs-maintainer-call` + `none`: the code may be fine, but it makes a design or scope decision (new default, new dependency, new user-facing behaviour). State the decision as one question in `agent_notes` before proposing any write.

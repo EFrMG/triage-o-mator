@@ -521,7 +521,56 @@ func (m *model) layout() {
 	}
 }
 
-// formPanel is the decision form plus who made and confirmed the decision, and who you are.
+type scoreDimensionSpec struct {
+	key, label string
+	maximum    int
+}
+
+func scoreDimensions(kind string) []scoreDimensionSpec {
+	if kind == "pr" {
+		return []scoreDimensionSpec{{"correctness", "Correctness", 2}, {"safeguards", "Safeguards", 2}, {"reviewability", "Reviewability", 1}}
+	}
+
+	return []scoreDimensionSpec{{"clarity", "Clarity", 2}, {"support", "Support", 2}, {"actionability", "Actionability", 1}}
+}
+
+func scoreDimensionText(score *ItemScore, spec scoreDimensionSpec, next *scoreDimensionSpec) string {
+	value, found := score.Dimensions[spec.key]
+	if !found {
+		return "No separate assessment recorded"
+	}
+
+	result := fmt.Sprintf("%d/%d", value, spec.maximum)
+	prefix := fmt.Sprintf("%s %d:", spec.label, value)
+	reason := singleLine(score.Reason)
+	start := strings.Index(strings.ToLower(reason), strings.ToLower(prefix))
+	if start < 0 {
+		return result
+	}
+	start += len(prefix)
+	end := len(reason)
+	if next != nil {
+		if nextValue, ok := score.Dimensions[next.key]; ok {
+			nextPrefix := fmt.Sprintf("%s %d:", next.label, nextValue)
+			if offset := strings.Index(strings.ToLower(reason[start:]), strings.ToLower(nextPrefix)); offset >= 0 {
+				end = start + offset
+			}
+		}
+	}
+
+	detail := strings.TrimSpace(reason[start:end])
+	// The saved reason may append a separate coverage note after the three dimension sentences; the form shows only the dimension sentence.
+	if stop := strings.Index(detail, ". "); stop >= 0 {
+		detail = detail[:stop+1]
+	}
+	if detail != "" {
+		result += " · " + detail
+	}
+
+	return result
+}
+
+// formPanel is the decision form, its attribution, the current reviewer and any separate score breakdown.
 func (m model) formPanel(width int) string {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
 	lines := append(strings.Split(m.form.View(width), "\n"), "")
@@ -544,23 +593,65 @@ func (m model) formPanel(width int) string {
 		appendMuted(triaged)
 		appendMuted(reviewed)
 	}
-	if it, ok := m.findItem(m.detail.key); ok {
-		appendMuted(it.ScoreLabel())
-		if it.ItemScore != nil {
-			appendMuted("Score by " + orPlaceholder(it.ItemScore.AssessedBy, "?") + " · " + shortDate(it.ItemScore.AssessedAt))
-			if it.ItemScore.Reason != "" {
-				appendMuted("Score reason: " + it.ItemScore.Reason)
+	appendMuted("you: " + m.reviewer)
+	if it, ok := m.findItem(m.detail.key); ok && it.ItemScore != nil {
+		lines = append(lines, muted.Bold(true).Render("Score by "+singleLine(orPlaceholder(it.ItemScore.AssessedBy, "?"))), "")
+		label := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(true)
+		body := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(false)
+		makeDimension := func(name, detail string) []string {
+			text := label.Render(name+":") + " " + body.Render(singleLine(detail))
+			return strings.Split(ansi.Wrap(text, maxInt(width, 1), ""), "\n")
+		}
+		var blocks [][]string
+		if it.ItemScore.Value == nil {
+			blocks = append(blocks, makeDimension("Unassessed", it.ItemScore.Reason))
+		} else {
+			dimensions := scoreDimensions(it.Kind)
+			for i, dimension := range dimensions {
+				var next *scoreDimensionSpec
+				if i+1 < len(dimensions) {
+					next = &dimensions[i+1]
+				}
+				blocks = append(blocks, makeDimension(dimension.label, scoreDimensionText(it.ItemScore, dimension, next)))
 			}
-			if it.ItemScore.Suggestion != "" {
-				appendMuted("Suggested next check: " + it.ItemScore.Suggestion)
+		}
+		budget := m.detailBodyHeight() - len(lines) - maxInt(len(blocks)-1, 0)
+		if !m.sideBySide() {
+			budget -= 2 // leave one content row and its divider above the stacked form
+		}
+		limits := make([]int, len(blocks))
+		for i := range limits {
+			limits[i] = 1
+		}
+		remaining := maxInt(budget-len(blocks), 0)
+		for remaining > 0 {
+			grew := false
+			for i, block := range blocks {
+				if limits[i] < len(block) {
+					limits[i]++
+					remaining--
+					grew = true
+					if remaining == 0 {
+						break
+					}
+				}
 			}
-			if it.ItemScore.SnapshotID != "" {
-				appendMuted("Score source: snapshot " + it.ItemScore.SnapshotID[:minInt(len(it.ItemScore.SnapshotID), 12)])
+			if !grew {
+				break
+			}
+		}
+		for i, block := range blocks {
+			if i > 0 {
+				lines = append(lines, "")
+			}
+			count := minInt(limits[i], len(block))
+			lines = append(lines, block[:count]...)
+			if count < len(block) {
+				last := len(lines) - 1
+				lines[last] = ansi.Truncate(lines[last], maxInt(width-1, 1), "") + "…"
 			}
 		}
 	}
-
-	appendMuted("you: " + m.reviewer)
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], width, "…")
 	}
@@ -581,6 +672,7 @@ func (m model) itemView() string {
 	w, h := m.detailInnerWidth(), m.detailBodyHeight()
 	title := fmt.Sprintf("%s #%d", m.detail.key.Kind, m.detail.key.Number)
 	meta := []string{}
+	scoreMark := cardMark{}
 	if m.notificationPR.open {
 		it := m.detail.item
 		if it.Title != "" {
@@ -595,6 +687,7 @@ func (m model) itemView() string {
 		}
 	} else if it, ok := m.findItem(m.detail.key); ok {
 		title += " · " + it.Title
+		scoreMark = itemScoreMark(it)
 		labels := "no labels"
 		if len(it.Labels) > 0 {
 			labels = strings.Join(it.Labels, ", ")
@@ -615,11 +708,6 @@ func (m model) itemView() string {
 
 		state := lipgloss.NewStyle().Foreground(lipgloss.Color(stateColor)).Render(singleLine(stateValue))
 		meta = append(meta, author, state, mutedText(singleLine(labels)), mutedText("updated "+singleLine(shortDate(it.UpdatedAt))))
-		if value, ok := it.ScoreValue(); ok {
-			meta = append(meta, lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true).Render(it.ScoreLabel()))
-		} else {
-			meta = append(meta, mutedText(it.ScoreLabel()))
-		}
 	}
 
 	if !m.notificationPR.open {
@@ -629,10 +717,20 @@ func (m model) itemView() string {
 		}
 	}
 
-	itemTitle := ansi.Truncate(singleLine(title), w, "…")
+	titleWidth := w
+	scoreWidth := lipgloss.Width(scoreMark.text)
+	showScore := scoreMark.text != "" && scoreWidth+2 < w
+	if showScore {
+		titleWidth -= scoreWidth + 1
+	}
+	itemTitle := ansi.Truncate(singleLine(title), titleWidth, "…")
 	heading := lipgloss.NewStyle().Bold(true).Render(itemTitle)
 	if styled, ok := styledItemHeading(itemTitle, lipgloss.Color(currentTheme.Foreground), nil); ok {
 		heading = styled
+	}
+	if showScore {
+		badge := lipgloss.NewStyle().Foreground(lipgloss.Color(scoreMark.color)).Bold(true).Render(scoreMark.text)
+		heading += strings.Repeat(" ", maxInt(w-ansi.StringWidth(heading)-scoreWidth, 1)) + badge
 	}
 	header := heading + "\n" + ansi.Truncate(strings.Join(meta, mutedText(" · ")), w, "…")
 	tabs := m.detail.TabBar(w, m.form.focused == fieldContent || m.detail.full)

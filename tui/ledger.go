@@ -44,11 +44,12 @@ type Item struct {
 }
 
 type ItemScore struct {
-	Rubric     string `json:"rubric"`
-	Value      *int   `json:"value"`
-	Reason     string `json:"reason"`
-	Suggestion string `json:"suggestion"`
-	SnapshotID string `json:"snapshot_id"`
+	Rubric     string         `json:"rubric"`
+	Value      *int           `json:"value"`
+	Dimensions map[string]int `json:"dimensions"`
+	Reason     string         `json:"reason"`
+	Suggestion string         `json:"suggestion"`
+	SnapshotID string         `json:"snapshot_id"`
 	Revision   struct {
 		UpdatedAt string `json:"updated_at"`
 		HeadSHA   string `json:"head_sha"`

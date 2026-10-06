@@ -8,12 +8,16 @@ For a number, `bin/item-score` verifies one immutable snapshot and its objects o
 
 ```sh
 bin/item-score --expected-repo OWNER/REPO set --kind issue --number N --snapshot SNAPSHOT \
-  --clarity 2 --support 1 --actionability 1 --reason '...' --suggestion '...' --by 'agent:NAME'
+  --clarity 2 --support 1 --actionability 1 \
+  --reason 'Clarity 2: Trigger and expected result are clear. Support 1: One useful example is given. Actionability 1: A focused next check is possible.' \
+  --suggestion '...' --by 'agent:NAME'
 bin/item-score --expected-repo OWNER/REPO set --kind pr --number N --snapshot SNAPSHOT \
-  --correctness 1 --safeguards 1 --reviewability 1 --reason '...' --suggestion '...' --by 'agent:NAME'
+  --correctness 1 --safeguards 1 --reviewability 1 \
+  --reason 'Correctness 1: The approach is plausible with one unresolved case. Safeguards 1: A partial check is visible. Reviewability 1: The change is focused.' \
+  --suggestion '...' --by 'agent:NAME'
 bin/item-score --expected-repo OWNER/REPO set --kind issue --number N --unassessed \
   --reason 'Selected body unavailable' --by 'agent:NAME'
 bin/item-score --expected-repo OWNER/REPO show --kind issue --number N
 ```
 
-The score is stored as its own `item_score` object in the ledger, with rubric version, dimension marks, reason, suggestion, snapshot ID, source revision and assessor. It does not alter `action`, `confidence`, `reviewed` or action proposals. The TUI shows **Score —** for unassessed items, colors 0–2 red, 3 yellow and 4–5 green, and exposes the reason in the item panel. Settings → Automations → Scoring copies a bounded local pass prompt; it is not a background process or a GitHub automation setting.
+The score is stored as its own `item_score` object in the ledger, with rubric version, dimension marks, reason, suggestion, snapshot ID, source revision and assessor. It does not alter `action`, `confidence`, `reviewed` or action proposals. The TUI aligns the score at the right of item card and item view titles, shows **Score —** for unassessed items, and colors 0–2 red, 3 yellow and 4–5 green. The item form shows the assessor and three separate dimension explanations; the full saved reason and source remain available through `bin/item-score show` and copied item context. Settings → Automations → Scoring copies a bounded local pass prompt; it is not a background process or a GitHub automation setting.

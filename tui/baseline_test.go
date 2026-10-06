@@ -93,28 +93,87 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
 	it := m.items[0]
 	it.UpdatedAt = "2026-10-06T00:00:00Z"
-	for _, value := range []int{0, 2, 3, 4, 5} {
-		score := &ItemScore{Rubric: "item-quality-v1", Value: &value, Reason: "Clear symptom; one check remains", Suggestion: "Try the narrow terminal case", SnapshotID: strings.Repeat("a", 64)}
+	for _, marks := range []struct{ clarity, support, actionability int }{{0, 0, 0}, {1, 1, 0}, {1, 1, 1}, {2, 1, 1}, {2, 2, 1}} {
+		value := marks.clarity + marks.support + marks.actionability
+		score := &ItemScore{Rubric: "item-quality-v1", Value: &value, Dimensions: map[string]int{"clarity": marks.clarity, "support": marks.support, "actionability": marks.actionability},
+			Reason:     fmt.Sprintf("Clarity %d: Symptom is described. Support %d: One terminal context is known. Actionability %d: Request exact resize steps. Comments complete; none recorded.", marks.clarity, marks.support, marks.actionability),
+			Suggestion: "Try the narrow terminal case", SnapshotID: strings.Repeat("a", 64), AssessedBy: "agent:tester"}
 		score.Revision.UpdatedAt = it.UpdatedAt
 		it.ItemScore = score
 		m.items[0] = it
 		m.detail.SetItem(it)
 
 		styled := lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true).Render(fmt.Sprintf("Score %d/5", value))
-		if !strings.Contains((listItem{Item: it}).Description(), styled) || !strings.Contains(markedCard("#1 first", (listItem{Item: it}).Description(), cardMark{}, false, 100), styled) {
-			t.Fatalf("score %d lost its card color", value)
+		li := listItem{Item: it}
+		card := markedCardWithRight(li.Title(), li.Description(), li.Mark(), itemScoreMark(it), false, 68)
+		cardLines := strings.Split(card, "\n")
+		if !strings.Contains(cardLines[1], styled) || !strings.HasSuffix(strings.TrimSpace(ansi.Strip(cardLines[1])), it.ScoreLabel()) ||
+			ansi.StringWidth(cardLines[1]) != 68 || strings.Contains(cardLines[2], it.ScoreLabel()) {
+			t.Fatalf("score %d was not right-aligned on the card title: %q", value, card)
 		}
-		if !strings.Contains(m.itemView(), fmt.Sprintf("Score %d/5", value)) || !strings.Contains(m.formPanel(60), "Score reason: Clear symptom") ||
-			!strings.Contains(m.formPanel(60), "Score source: snapshot") || !strings.Contains(m.itemFooter()[0].hints[0].desc, fmt.Sprintf("Score %d/5", value)) {
-			t.Fatalf("score %d or its reasoning was missing from the item", value)
+		list := newItemList([]Item{it}, "Scores", 68, 10)
+		var rendered strings.Builder
+		(cardDelegate{}).Render(&rendered, list, 0, list.Items()[0])
+		if !strings.Contains(strings.Split(rendered.String(), "\n")[1], styled) {
+			t.Fatal("item list delegate dropped the title-row score")
 		}
-		if copied := m.itemBlock(it, EnrichedItem{}, false); !strings.Contains(copied, "Score reason: Clear symptom") || !strings.Contains(copied, score.SnapshotID) {
+		viewLines := strings.Split(m.itemView(), "\n")
+		if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(viewLines[0])), it.ScoreLabel()) || ansi.StringWidth(viewLines[0]) != m.detailInnerWidth() ||
+			strings.Contains(viewLines[1], it.ScoreLabel()) || !strings.Contains(m.itemFooter()[0].hints[0].desc, it.ScoreLabel()) {
+			t.Fatalf("score %d was not right-aligned on the item title", value)
+		}
+		form := m.formPanel(60)
+		plain := ansi.Strip(form)
+		if !strings.Contains(plain, "you: tester") || strings.Index(plain, "you: tester") > strings.Index(plain, "Score by agent:tester") ||
+			!strings.Contains(plain, "Score by agent:tester\n\nClarity:") ||
+			!strings.Contains(plain, "\n\nSupport:") || !strings.Contains(plain, "\n\nActionability:") || strings.Contains(plain, "Score reason:") ||
+			strings.Contains(plain, "Suggested next check") || strings.Contains(plain, "Score source:") || strings.Contains(plain, it.ScoreLabel()) {
+			t.Fatalf("score %d form details had the wrong order or extra fields: %q", value, plain)
+		}
+		if copied := m.itemBlock(it, EnrichedItem{}, false); !strings.Contains(copied, "Score reason: Clarity") || !strings.Contains(copied, score.SnapshotID) {
 			t.Fatal("copied item context omitted the score basis or source")
 		}
 	}
+	it.Title = strings.Repeat("Long item title ", 12)
+	li := listItem{Item: it}
+	for _, selected := range []bool{false, true} {
+		card := markedCardWithRight(li.Title(), li.Description(), li.Mark(), itemScoreMark(it), selected, 35)
+		row := strings.Split(card, "\n")[1]
+		if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(row)), it.ScoreLabel()) || ansi.StringWidth(row) != 35 || !strings.Contains(ansi.Strip(row), "#1") {
+			t.Fatalf("long title displaced the right-aligned score: %q", row)
+		}
+	}
+	m.items[0] = it
+	m.detail.SetItem(it)
+	itemHeading := strings.Split(m.itemView(), "\n")[0]
+	if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(itemHeading)), it.ScoreLabel()) || ansi.StringWidth(itemHeading) != m.detailInnerWidth() {
+		t.Fatal("long item title displaced the score in the item menu")
+	}
+	prValue := 1
+	pr := Item{Kind: "pr", Number: 18, UpdatedAt: it.UpdatedAt, ItemScore: &ItemScore{Rubric: "item-quality-v1", Value: &prValue,
+		Dimensions: map[string]int{"correctness": 0, "safeguards": 0, "reviewability": 1}, AssessedBy: "agent:tester",
+		Reason: "Correctness 0: the diff counts runes, which does not solve terminal cell width for wide or combining characters in issue #13. Safeguards 0: no matching edge-case handling or test is visible. Reviewability 1: the nine-line change is focused. Summary, comments, files and diff complete; no checks captured."}}
+	pr.ItemScore.Revision.UpdatedAt = pr.UpdatedAt
+	m.items = append(m.items, pr)
+	m.detail.SetItem(pr)
+	prForm := m.formPanel(60)
+	prPlain := ansi.Strip(prForm)
+	if !strings.Contains(prPlain, "Correctness: 0/2 · the diff counts runes") || !strings.Contains(prPlain, "\n\nSafeguards: 0/2") ||
+		!strings.Contains(prPlain, "\n\nReviewability: 1/1 · the nine-line change is focused.") || strings.Contains(prPlain, "Summary, comments, files and diff complete") {
+		t.Fatalf("PR score categories were not separated from coverage notes: %q", prPlain)
+	}
+	compact := m.formPanel(m.formPanelWidth())
+	if lipgloss.Height(compact) > m.detailBodyHeight() || !strings.Contains(ansi.Strip(compact), "Correctness:") ||
+		!strings.Contains(ansi.Strip(compact), "Safeguards:") || !strings.Contains(ansi.Strip(compact), "Reviewability:") || !strings.Contains(ansi.Strip(compact), "…") {
+		t.Fatalf("long score reasons could not fit the visible form pane: %q", ansi.Strip(compact))
+	}
+	if !strings.Contains(prForm, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted)).Bold(true).Render("Score by agent:tester")) ||
+		!strings.Contains(prForm, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(true).Render("Correctness:")) {
+		t.Fatal("score title or category label lost its bold style")
+	}
 
 	it.UpdatedAt = "2026-10-07T00:00:00Z"
-	if _, current := it.ScoreValue(); current || !strings.Contains(ansi.Strip((listItem{Item: it}).Description()), "Score — (stale)") {
+	if _, current := it.ScoreValue(); current || itemScoreMark(it).text != "Score — (stale)" {
 		t.Fatal("a later item revision kept displaying the old score as current")
 	}
 }

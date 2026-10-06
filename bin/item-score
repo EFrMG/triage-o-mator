@@ -84,6 +84,24 @@ def dimensions_for(args):
     return values
 
 
+def validate_dimension_reason(kind, dimensions, reason):
+    markers = [(name.capitalize(), f"{name.capitalize()} {dimensions[name]}:") for name, _ in DIMENSIONS[kind]]
+    positions = []
+    cursor = 0
+    for label, marker in markers:
+        position = reason.casefold().find(marker.casefold(), cursor)
+        if position < 0 or not positions and position != 0:
+            raise ValueError(f"numeric reason must start with {markers[0][1]} and explain {label} in rubric order")
+
+        positions.append(position)
+        cursor = position + len(marker)
+
+    for index, (label, marker) in enumerate(markers):
+        end = positions[index + 1] if index + 1 < len(positions) else len(reason)
+        if not reason[positions[index] + len(marker):end].strip():
+            raise ValueError(f"numeric reason must explain {label}")
+
+
 def main():
     args = parser().parse_args()
     if args.expected_repo != REPO:
@@ -120,6 +138,7 @@ def main():
                 raise ValueError("a numeric score requires --snapshot")
 
             dimensions = dimensions_for(args)
+            validate_dimension_reason(args.kind, dimensions, args.reason.strip())
             record, source_repository = selected_record(args.kind, args.number, args.snapshot, args.host)
             score = dict(rubric=RUBRIC, value=sum(dimensions.values()), dimensions=dimensions, reason=args.reason.strip(),
                          suggestion=args.suggestion.strip(), snapshot_id=args.snapshot, source_repository=source_repository,

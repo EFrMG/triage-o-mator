@@ -7,7 +7,6 @@ import (
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/paginator"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 )
 
 // listItem adapts Item to bubbles/list's item interface.
@@ -29,11 +28,6 @@ func (li listItem) Title() string {
 }
 
 func (li listItem) Description() string {
-	score := mutedText(li.ScoreLabel())
-	if value, ok := li.ScoreValue(); ok {
-		score = lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true).Render(li.ScoreLabel())
-	}
-
 	comments := "comments"
 	if li.CommentsCount == 1 {
 		comments = "comment"
@@ -41,7 +35,7 @@ func (li listItem) Description() string {
 
 	// An unsaved draft says so in its mark, in place of the decision it will replace.
 	if li.unsaved {
-		return fmt.Sprintf("%s · %s · updated %s · %d %s", score, li.Kind, shortDate(li.UpdatedAt), li.CommentsCount, comments)
+		return fmt.Sprintf("%s · updated %s · %d %s", li.Kind, shortDate(li.UpdatedAt), li.CommentsCount, comments)
 	}
 
 	status := "untriaged"
@@ -54,7 +48,15 @@ func (li listItem) Description() string {
 	}
 
 	// The decision comes first, after the card's [agent] / [human] mark, so a narrow pane cuts the dates rather than the call.
-	return fmt.Sprintf("%s · %s · %s · updated %s · %d %s", score, status, li.Kind, shortDate(li.UpdatedAt), li.CommentsCount, comments)
+	return fmt.Sprintf("%s · %s · updated %s · %d %s", status, li.Kind, shortDate(li.UpdatedAt), li.CommentsCount, comments)
+}
+
+func itemScoreMark(item Item) cardMark {
+	if value, ok := item.ScoreValue(); ok {
+		return cardMark{text: item.ScoreLabel(), color: itemScoreColor(value)}
+	}
+
+	return cardMark{text: item.ScoreLabel(), color: currentTheme.Muted}
 }
 
 func itemScoreColor(value int) string {
@@ -108,6 +110,11 @@ func (cardDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	var mark cardMark
 	if marked, ok := item.(interface{ Mark() cardMark }); ok {
 		mark = marked.Mark()
+	}
+
+	if li, ok := item.(listItem); ok {
+		fmt.Fprint(w, markedCardWithRight(entry.Title(), entry.Description(), mark, itemScoreMark(li.Item), index == m.Index(), m.Width()))
+		return
 	}
 
 	fmt.Fprint(w, markedCard(entry.Title(), entry.Description(), mark, index == m.Index(), m.Width()))

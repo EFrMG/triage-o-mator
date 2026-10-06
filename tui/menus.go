@@ -71,14 +71,21 @@ type cardMark struct {
 // markedCard draws one entry across the full width of its pane, flush with the pane's borders: first line bold (accent when selected), second muted, with mark leading that second line. The selected one is filled with the selection background across all four rows, framed by low-contrast accent lines drawn at the outer edge of its top and bottom rows (▔ and ▁), so the fill reaches them without the half-row gap a mid-row ─ would leave.
 // The mark is drawn as its own span on the same background, since a styled span inside the line would end the line's style at its reset.
 func markedCard(first, second string, mark cardMark, selected bool, width int) string {
+	return markedCardWithRight(first, second, mark, cardMark{}, selected, width)
+}
+
+// markedCardWithRight reserves space on the title row for a short badge while preserving the standard card layout and selected background.
+func markedCardWithRight(first, second string, mark, right cardMark, selected bool, width int) string {
 	width = maxInt(width, 6)
 	inner := width - 4
 	firstStyle := lipgloss.NewStyle().Width(width).Padding(0, 2).Bold(true)
 	secondStyle := lipgloss.NewStyle().Padding(0, 2).Foreground(lipgloss.Color(currentTheme.Muted))
 	markStyle := lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color(mark.color)).Bold(true)
 	top, bottom := strings.Repeat(" ", width), strings.Repeat(" ", width)
+	var selectedBackground color.Color
 	if selected {
 		bg := themeOpacity(currentTheme.Selection, opacityMedium)
+		selectedBackground = bg
 		firstStyle = firstStyle.Foreground(focusedBorderColor).Background(bg)
 		secondStyle = secondStyle.Foreground(lipgloss.Color(currentTheme.Foreground)).Background(bg)
 		markStyle = markStyle.Background(bg)
@@ -94,8 +101,14 @@ func markedCard(first, second string, mark cardMark, selected bool, width int) s
 		secondLine = lead + secondStyle.Width(rest).PaddingLeft(1).Render(ansi.Truncate(second, rest-3, "…"))
 	}
 
+	firstWidth := inner
+	rightWidth := lipgloss.Width(right.text)
+	showRight := right.text != "" && rightWidth+2 < inner
+	if showRight {
+		firstWidth -= rightWidth + 1
+	}
 	if _, _, _, item := itemHeadingParts(ansi.Strip(first)); item {
-		first = ansi.Truncate(sanitize(first), inner, "…")
+		first = ansi.Truncate(sanitize(first), firstWidth, "…")
 		foreground := color.Color(lipgloss.Color(currentTheme.Foreground))
 		var background color.Color
 		if selected {
@@ -107,7 +120,17 @@ func markedCard(first, second string, mark cardMark, selected bool, width int) s
 			first = styled
 		}
 	} else {
-		first = ansi.Truncate(first, inner, "…")
+		first = ansi.Truncate(first, firstWidth, "…")
+	}
+	if showRight {
+		badge := lipgloss.NewStyle().Foreground(lipgloss.Color(right.color)).Bold(true)
+		if selectedBackground != nil {
+			badge = badge.Background(selectedBackground)
+		}
+		first += strings.Repeat(" ", maxInt(inner-ansi.StringWidth(first)-rightWidth, 1)) + badge.Render(right.text)
+		if selectedBackground != nil {
+			first = continueStyleAfterReset(first, focusedBorderColor, selectedBackground)
+		}
 	}
 
 	return top + "\n" + firstStyle.Render(first) + "\n" + secondLine + "\n" + bottom

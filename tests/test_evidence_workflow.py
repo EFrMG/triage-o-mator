@@ -53,8 +53,12 @@ class EvidenceTests(Workspace):
         selected = self.cache("fetch", "--kind", "issue", "--number", "2", "--profile", "discussion")
         calls = len(self.calls())
         args = ("--expected-repo", "owner/repo", "set", "--kind", "issue", "--number", "2")
+        unclear = self.run_cli("item-score", *args, "--snapshot", selected["snapshot_id"], "--clarity", "2", "--support", "1",
+                               "--actionability", "1", "--reason", "The case looks good", "--by", "agent:tester", ok=False)
+        self.assertIn("numeric reason must start with Clarity 2:", unclear.stderr)
+        self.assertIsNone(self.ledger()["issue", 2].get("item_score"))
         scored = self.json_cli("item-score", *args, "--snapshot", selected["snapshot_id"], "--clarity", "2", "--support", "1",
-                               "--actionability", "1", "--reason", "Clear report with a missing check", "--by", "agent:tester")
+                               "--actionability", "1", "--reason", "Clarity 2: Goal is clear. Support 1: One example is present. Actionability 1: Check the named case.", "--by", "agent:tester")
         self.assertEqual(scored["score"]["value"], 4)
         self.assertEqual(scored["score"]["dimensions"], dict(clarity=2, support=1, actionability=1))
         self.assertEqual(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")["current"], True)
@@ -67,7 +71,7 @@ class EvidenceTests(Workspace):
         self.assertFalse(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")["current"])
 
         rejected = self.run_cli("item-score", *args, "--snapshot", selected["snapshot_id"], "--clarity", "2", "--support", "2",
-                                "--actionability", "1", "--reason", "Wrong revision", "--by", "agent:tester", ok=False)
+                                "--actionability", "1", "--reason", "Clarity 2: Goal is clear. Support 2: Reproduction is complete. Actionability 1: Check it.", "--by", "agent:tester", ok=False)
         self.assertIn("selected evidence revision differs", rejected.stderr)
         self.assertEqual(self.ledger()["issue", 2]["item_score"]["value"], 4)
 
@@ -83,7 +87,8 @@ class EvidenceTests(Workspace):
         partial = self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "discussion")
         incomplete = self.run_cli("item-score", "--expected-repo", "owner/repo", "set", "--kind", "pr", "--number", "1",
                                   "--snapshot", partial["snapshot_id"], "--correctness", "1", "--safeguards", "1", "--reviewability", "1",
-                                  "--reason", "Selected diff is missing", "--by", "agent:tester", ok=False)
+                                  "--reason", "Correctness 1: A material question remains. Safeguards 1: A partial check exists. Reviewability 1: Scope is focused.",
+                                  "--by", "agent:tester", ok=False)
         self.assertIn("complete files, diff", incomplete.stderr)
         self.assertIsNone(self.ledger()["pr", 1].get("item_score"))
         wrong_repo = self.run_cli("item-score", "--expected-repo", "other/repo", "show", "--kind", "pr", "--number", "1", ok=False)

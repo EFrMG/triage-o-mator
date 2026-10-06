@@ -520,7 +520,7 @@ def execute(repo, kind, number, items, all_pending, operation, approval, automat
                 raise ValueError("write outcome uncertain; inspect GitHub and the saved record")
             completed_batch[value["request_id"]] = value["target"]
 
-    return dict(results=results) if all_pending or items else results[0]
+    return dict(results=results)
 
 
 def reject(repo, kind, number, checkpoint, by, reason):
@@ -660,6 +660,9 @@ def main():
         state = local_state(repo)
         result = dict(repository=repo, rows=[row(value, state) for value in all_proposals(repo)], requests=0)
     elif args.command == "review" or args.command == "execute" and not args.publish:
+        if args.command == "execute" and (args.approve or args.automation):
+            raise ValueError("--approve and --automation only apply with --publish; without it execute is a dry run")
+
         result = review(repo, args.kind, args.number, args.item, args.all, args.operation)
     elif args.command == "execute":
         if not args.approve:

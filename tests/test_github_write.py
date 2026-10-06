@@ -202,7 +202,7 @@ class WriteTests(Workspace):
         self.assertEqual(self.write_calls(), [])
 
         outcome = self.json_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1",
-                                "--publish", "--approve", review["approval"])
+                                "--publish", "--approve", review["approval"])["results"][0]
         self.assertEqual(outcome["status"], "executed")
         self.assertEqual(outcome["outcome"]["state_change"]["state"], "open")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "POST", "PATCH"])
@@ -231,7 +231,7 @@ class WriteTests(Workspace):
         self.run_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1",
                      "--publish", "--approve", review["approval"], ok=False)
         closed = self.json_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1",
-                               "--publish", "--approve", second_review["approval"])
+                               "--publish", "--approve", second_review["approval"])["results"][0]
         self.assertEqual(closed["outcome"]["state_change"]["state"], "closed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "POST", "PATCH", "GET", "POST", "PATCH"])
 
@@ -476,7 +476,7 @@ class ClosureWriteTests(Workspace):
         self.assertEqual(self.write_calls(), [])
 
         outcome = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
-                                "--publish", "--approve", reviewed["approval"])
+                                "--publish", "--approve", reviewed["approval"])["results"][0]
         self.assertEqual(outcome["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
         self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
@@ -570,7 +570,7 @@ class ClosureWriteTests(Workspace):
         fresh = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
         self.assertNotEqual(fresh["approval"], reviewed["approval"])
         result = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
-                               "--publish", "--approve", fresh["approval"])
+                               "--publish", "--approve", fresh["approval"])["results"][0]
         self.assertEqual(result["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST"])
         self.assertFalse(self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"][0]["needs_attention"])

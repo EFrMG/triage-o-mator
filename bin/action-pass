@@ -91,7 +91,7 @@ def run(keys, preview_sha256):
             raise ValueError("action proposal changed after the selected preview; stop before writing")
 
         outcome = script("action-proposals", "--expected-repo", REPO, "execute", *target_args, "--publish", "--approve", reviewed["approval"], "--automation")
-        results.append(outcome)
+        results.extend(outcome["results"])
 
     return dict(repository=REPO, results=results)
 

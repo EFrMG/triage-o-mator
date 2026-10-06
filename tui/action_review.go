@@ -205,14 +205,20 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.notifications.actionReview = nil
 	case "q":
 		return m.requestQuit()
-	case "j", "down":
-		review.scroll++
-	case "k", "up":
-		review.scroll = maxInt(review.scroll-1, 0)
-	case "ctrl+d":
-		review.scroll += maxInt(m.mainHeight()/2, 1)
-	case "ctrl+u":
-		review.scroll = maxInt(review.scroll-maxInt(m.mainHeight()/2, 1), 0)
+	case "j", "down", "k", "up", "ctrl+d", "ctrl+u":
+		switch msg.String() {
+		case "j", "down":
+			review.scroll++
+		case "k", "up":
+			review.scroll--
+		case "ctrl+d":
+			review.scroll += maxInt(m.mainHeight()/2, 1)
+		case "ctrl+u":
+			review.scroll -= maxInt(m.mainHeight()/2, 1)
+		}
+		// The viewport clamps to the rendered proposal, so no scroll steps accumulate beyond its last line.
+		vp := m.actionReviewViewport()
+		review.scroll = vp.YOffset()
 	case "[", "]":
 		if review.context == nil {
 			return m, nil
@@ -297,6 +303,12 @@ func (m model) actionReviewView() string {
 	if review == nil {
 		return ""
 	}
+	footer := proposalRevisionFooter(autoCloseRow{UpdatedAt: review.row.UpdatedAt, HeadSHA: review.row.HeadSHA}, maxInt(m.cardWidth()-1, 1))
+	return m.actionReviewViewport().View() + "\n" + inset(mutedText(footer))
+}
+
+func (m model) actionReviewViewport() viewport.Model {
+	review := m.notifications.actionReview
 	row := review.row
 	styles := newProposalReviewStyles()
 	width := maxInt(m.menuWidth()-4, 1)
@@ -390,6 +402,5 @@ func (m model) actionReviewView() string {
 	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(maxInt(m.mainHeight()-1, 1)))
 	vp.SetContent(b.String())
 	vp.SetYOffset(review.scroll)
-	footer := proposalRevisionFooter(autoCloseRow{UpdatedAt: row.UpdatedAt, HeadSHA: row.HeadSHA}, maxInt(m.cardWidth()-1, 1))
-	return vp.View() + "\n" + inset(styles.muted.Render(footer))
+	return vp
 }

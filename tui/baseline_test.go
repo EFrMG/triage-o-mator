@@ -2581,6 +2581,19 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 		}
 		last = at
 	}
+	m = baselineSend(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	for range 200 {
+		m = baselineSend(m, tea.KeyPressMsg{Text: "j"})
+	}
+	bottom := m.notifications.actionReview.scroll
+	if bottom == 0 {
+		t.Fatal("proposal never scrolled to its last line")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "k"})
+	if m.notifications.actionReview.scroll != bottom-1 {
+		t.Fatal("proposal kept invisible scroll steps beyond its last line")
+	}
+	m.notifications.actionReview.scroll = 0
 	_, reviewCmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
 	if reviewCmd == nil {
 		t.Fatal("current proposal did not prepare exact review")

@@ -8,9 +8,9 @@ Well, it is not as productive when the Issues and Pull Requests pile up. Maintai
 
 Tooling to work through a GitHub issue / PR backlog too large for one person to read cold: a terminal UI, `triage-o-mator`, on top of a set of small scripts that do the actual work.
 
-The backlog gets a first pass of categorization done in batches, by you or by an AI Agent, and whoever's triaging gets a fast, git-tracked way to check and correct that first pass before anyone acts on it.
+The backlog gets a first pass of triage done in batches, by you or by an AI Agent, and whoever's triaging gets a fast, git-tracked way to check and correct that first pass before anyone acts on it.
 
-It reads issues and PRs via `gh` and writes categorization decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI; publishing defaults to dry-run and never follows automatically from a triage decision.
+It reads issues and PRs via `gh` and writes triage decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI; publishing defaults to dry-run and never follows automatically from a triage decision.
 
 > Developed with the [omacom/omarchy](https://github.com/omacom/omarchy) backlog in mind, while supporting other GitHub repositories. Omarchy is a public proof-of-concept target, not an existing deployment.
 
@@ -68,7 +68,7 @@ Mouse controls work alongside the keyboard keys.
 
 ![Selecting and reading backlog items](captures/flow-1.webp)
 
-2. **Make a first pass, then review it.** Propose zero or more labels from the repository's GitHub catalog, suggest an action when assessed, and give a short reason and confidence. A label-first pass can leave Action blank for later assessment. Save a decision for later review or confirm one you have checked yourself. An agent can prepare a batch from copied item or list context; inspect its suggestions in **Batches**, then save them individually or apply the rest as unreviewed decisions. **Pending Review** is where a person verifies and revises those decisions. Reviewed items stay in **All Items** and groups; editing one removes its old confirmation. Saving or reviewing a decision does not itself write to GitHub; the repository-enabled labeling pass may apply proposed labels separately, including from unreviewed decisions.
+2. **Make a first pass, then review it.** Propose zero or more labels from the repository's GitHub catalog, suggest an action when assessed, and give a short reason and confidence. A label-first pass can leave Action blank for later assessment. Save a decision for later review or confirm one you have checked yourself. An agent can prepare a batch from copied item or list context; inspect its suggestions in **Batches**, then save them individually or apply the rest as unreviewed decisions. **All Items** is where a person verifies and revises those decisions: search for an item, then confirm or correct its saved call. Reviewed items stay there and in groups; editing one removes its old confirmation. Saving or reviewing a decision does not itself write to GitHub; the repository-enabled labeling pass may apply proposed labels separately, including from unreviewed decisions.
 
 ![Saving and reviewing triage decisions](captures/flow-2.webp)
 

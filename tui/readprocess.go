@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-// Cancellable evidence, corpus and local-brief readers use this lifecycle. Kill the process group, including gh when present, without deleting committed script checkpoints. Legacy reads and ledger writers are deliberately unaffected.
+// Cancellable evidence, corpus and local-brief readers use this lifecycle. Kill the process group, including gh when present, without deleting committed script checkpoints. Direct reads and ledger writers are deliberately unaffected.
 type readProcess struct {
 	mu        sync.Mutex
 	cmd       *exec.Cmd

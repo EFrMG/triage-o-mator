@@ -705,7 +705,7 @@ func (m model) itemView() string {
 
 		author := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Info)).Render(singleLine(orPlaceholder(it.Author, "?")))
 		stateValue := it.State
-		if !m.detail.loading && m.detail.loadErr == nil && !m.detail.blockLegacy && m.detail.enriched.Evidence == nil && m.detail.enriched.State != "" {
+		if !m.detail.loading && m.detail.loadErr == nil && !m.detail.blockDirect && m.detail.enriched.Evidence == nil && m.detail.enriched.State != "" {
 			stateValue = m.detail.enriched.State
 		}
 		stateColor := currentTheme.Muted
@@ -934,7 +934,7 @@ func (m model) minimumHeight() int {
 	return 24
 }
 
-// switchBusy gates legacy work without cancellation/reply identities. Explicit evidence/corpus processes are stopped on switch and their stale replies are rejected. Unsaved drafts still require discard confirmation.
+// switchBusy gates direct reads and writes without cancellation/reply identities. Explicit evidence/corpus processes are stopped on switch and their stale replies are rejected. Unsaved drafts still require discard confirmation.
 func (m model) switchBusy() string {
 	if m.settings.busy || m.settingsEditorChanged() {
 		return "save or discard the Settings draft first."

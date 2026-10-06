@@ -1,11 +1,11 @@
-"""Explicit compatibility enrichment options for multi-item consumers. Defaults stay legacy."""
+"""Explicit compatibility enrichment options for multi-item consumers. Defaults stay direct GitHub reads."""
 
 from _evidence import DEFAULT_MAX_AGE
 from _triage import enrich_item
 
 
 def add_cache_arguments(parser):
-    parser.add_argument("--cache-mode", choices=("offline", "cache-preferred", "refresh"), help="use shared evidence instead of legacy enrichment")
+    parser.add_argument("--cache-mode", choices=("offline", "cache-preferred", "refresh"), help="use shared evidence instead of direct enrichment")
     parser.add_argument("--snapshot", help="fixed snapshot for every selected item; requires --cache-mode offline")
     parser.add_argument("--host", default="github.com", help="explicit host for cache mode only")
     parser.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE, help="cache freshness window in seconds")
@@ -30,7 +30,7 @@ def enrich_selected(rec, args):
     if not args.cache_mode:
         return enrich_item(rec, include_diff=args.diff)
 
-    # Keep the legacy path independent of cache initialization and its dependencies.
+    # Keep the direct path independent of cache initialization and its dependencies.
     from _reader import enrich_cached
     from _acquire import ReadFailure
 

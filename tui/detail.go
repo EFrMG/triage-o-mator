@@ -61,7 +61,7 @@ type detailModel struct {
 	loadErr          error
 	cache            map[Key]EnrichedItem
 	generation       uint64
-	blockLegacy      bool
+	blockDirect      bool
 	notificationOnly bool
 }
 
@@ -73,7 +73,7 @@ func newDetailModel() detailModel {
 // Returns true if this item hasn't been enriched yet (caller should dispatch enrichItemCmd).
 func (d *detailModel) SetItem(it Item) (needsFetch bool) {
 	d.generation++
-	d.blockLegacy = false
+	d.blockDirect = false
 	d.key, d.item = it.Key(), it
 	d.enriched = EnrichedItem{}
 	d.sections = []detailSection{{name: "Body", kind: markdownSection}}
@@ -130,8 +130,8 @@ func (d *detailModel) populate(e EnrichedItem) {
 }
 
 func (d *detailModel) OnEnriched(msg enrichedMsg) {
-	if msg.key != d.key || d.enriched.Evidence != nil || d.blockLegacy {
-		// A legacy read started before opening a fixed packet must not replace its recorded evidence.
+	if msg.key != d.key || d.enriched.Evidence != nil || d.blockDirect {
+		// A direct read started before opening a fixed packet must not replace its recorded evidence.
 		return
 	}
 
@@ -246,7 +246,7 @@ func (d *detailModel) ToggleActiveSection() (needsDiffFetch bool) {
 
 // NeedsActiveDiff reports (once) that the active tab is a Diff not fetched yet, marking the fetch as requested.
 func (d *detailModel) NeedsActiveDiff() bool {
-	if len(d.sections) == 0 || d.enriched.Evidence != nil || d.blockLegacy {
+	if len(d.sections) == 0 || d.enriched.Evidence != nil || d.blockDirect {
 		return false
 	}
 
@@ -428,7 +428,7 @@ func (m model) enrichDetailCmd(withDiff bool) tea.Cmd {
 
 // refreshLiveDetail invalidates live details, but fetches them immediately only while the item is open. Fixed evidence views stay untouched.
 func (m *model) refreshLiveDetail() tea.Cmd {
-	if m.detail.key.Number <= 0 || m.detail.blockLegacy || m.detail.enriched.Evidence != nil {
+	if m.detail.key.Number <= 0 || m.detail.blockDirect || m.detail.enriched.Evidence != nil {
 		return nil
 	}
 

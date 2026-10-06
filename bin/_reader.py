@@ -1,4 +1,4 @@
-"""One explicit cache-aware evidence reader; compatibility consumers opt in without changing legacy defaults."""
+"""One explicit cache-aware evidence reader; compatibility consumers opt in without changing the direct-read defaults."""
 
 import json
 

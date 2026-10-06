@@ -133,7 +133,7 @@ def main():
     ap.add_argument("--brief", help="path to the dated batch brief, required with --mark-briefed")
     ap.add_argument("--unbriefed", action="store_true", help="exclude members of batches already screened into briefs")
     ap.add_argument("--key", action="append", default=[], metavar="KIND:NUMBER", help="with --remove: an item to drop, e.g. issue:12 (repeatable)")
-    ap.add_argument("--cache-mode", choices=("offline", "cache-preferred", "refresh"), help="opt into cached evidence; omitted keeps legacy GitHub enrichment")
+    ap.add_argument("--cache-mode", choices=("offline", "cache-preferred", "refresh"), help="opt into cached evidence; omitted keeps direct GitHub enrichment")
     ap.add_argument("--snapshot", help="use one fixed snapshot; requires --cache-mode offline and every selected item in that snapshot")
     ap.add_argument("--host", default="github.com")
     ap.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE)
@@ -216,7 +216,7 @@ def main():
     template_path = BATCHES_DIR / f"{batch_id}.decisions.jsonl"
 
     print(
-        f"Enriching {len(selected)} items ({args.cache_mode or 'legacy GitHub reads'})...",
+        f"Enriching {len(selected)} items ({args.cache_mode or 'direct GitHub reads'})...",
         file=sys.stderr,
     )
     items, decisions = [], []

@@ -27,7 +27,7 @@ func (m model) openNotificationItemAt(key Key, section int) (tea.Model, tea.Cmd)
 	m.detail = newDetailModel()
 	m.detail.SetItem(Item{Kind: key.Kind, Number: key.Number})
 	m.detail.full = true
-	m.detail.blockLegacy = true
+	m.detail.blockDirect = true
 	m.detail.notificationOnly = true
 	m.detail.loading = true
 	m.detail.JumpSection(section)

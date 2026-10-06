@@ -5,7 +5,7 @@ Fetch current state, full body/comments (and, for PRs, diff) for a single issue/
 Usage:
     bin/enrich-one --kind issue|pr --number N [--diff]
 
-The default remains bin/batch's legacy `enrich_item()` path. Explicit --cache-mode opts into the shared evidence reader, preserving available compatibility fields (including --diff) and adding diagnostics. Remaining consumers have not migrated yet.
+The default remains bin/batch's direct `enrich_item()` path, which reads GitHub through `gh` on every call. Explicit --cache-mode opts into the shared evidence reader, preserving available compatibility fields (including --diff) and adding diagnostics. Remaining consumers have not migrated yet.
 """
 
 import argparse
@@ -23,7 +23,7 @@ def main():
     ap.add_argument("--kind", choices=["issue", "pr"], required=True)
     ap.add_argument("--number", type=int, required=True)
     ap.add_argument("--diff", action="store_true", help="also fetch PR diff text")
-    ap.add_argument("--cache-mode", choices=("offline", "cache-preferred", "refresh"), help="opt into the shared evidence reader; legacy behavior is unchanged when omitted")
+    ap.add_argument("--cache-mode", choices=("offline", "cache-preferred", "refresh"), help="opt into the shared evidence reader; direct GitHub reads are unchanged when omitted")
     ap.add_argument("--host", default="github.com", help="explicit host for cache mode only")
     ap.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE, help="cache freshness window in seconds")
     ap.add_argument("--request-budget", type=int, default=100)
@@ -50,7 +50,7 @@ def main():
         return
 
     if args.host != "github.com":
-        ap.error("--host requires --cache-mode; legacy enrichment is not host-aware")
+        ap.error("--host requires --cache-mode; direct enrichment is not host-aware")
 
     rec = enrich_item(
         {"number": args.number, "kind": args.kind}, include_diff=args.diff

@@ -1,4 +1,4 @@
-"""Optional Reposition bridge; legacy cache commands never import that package."""
+"""Optional Reposition bridge; ordinary cache commands never import that package."""
 
 import argparse
 import hashlib

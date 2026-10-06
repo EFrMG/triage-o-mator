@@ -183,7 +183,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notifications.suggestionOffset = maxInt((len(m.notifications.suggestions)-1)/suggestedActionPageSize*suggestedActionPageSize, 0)
 			}
 		}
-		if !m.notificationPR.open && m.detail.key.Number > 0 && !m.detail.blockLegacy && m.detail.enriched.Evidence == nil {
+		if !m.notificationPR.open && m.detail.key.Number > 0 && !m.detail.blockDirect && m.detail.enriched.Evidence == nil {
 			if it, ok := m.findItem(m.detail.key); ok {
 				m.detail.item.State = it.State
 			}
@@ -229,7 +229,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.root != "" && (msg.root != m.installRoot || msg.repo != m.repo || msg.generation != m.detail.generation || msg.key != m.detail.key) {
 			return m, nil
 		}
-		if m.detail.blockLegacy || m.detail.enriched.Evidence != nil {
+		if m.detail.blockDirect || m.detail.enriched.Evidence != nil {
 			return m, nil
 		}
 

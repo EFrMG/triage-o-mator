@@ -222,11 +222,6 @@ func (m model) yankActionProposal(row actionProposalRow) (string, string) {
 	return b.String(), what
 }
 
-func (m model) yankNotificationProposal(row autoCloseRow) (string, string) {
-	return m.yankActionProposal(actionProposalRow{Kind: "pr", Number: row.Number, Operation: "close", Status: row.Status,
-		Target: row.Target, Checkpoint: row.Checkpoint, Inputs: row.Inputs})
-}
-
 func (m model) yankActionSuggestion(item Item) (string, string) {
 	what := fmt.Sprintf("%s #%d action suggestion", item.Kind, item.Number)
 	var b strings.Builder

@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 type autoCloseContext struct {
@@ -44,14 +42,6 @@ type autoCloseItemContext struct {
 	Requests int `json:"requests"`
 }
 
-type autoCloseContextMsg struct {
-	root, repo, checkpoint string
-	generation             uint64
-	number                 int
-	context                autoCloseContext
-	err                    error
-}
-
 func readAutoCloseContext(root, repo string, number int, checkpoint string, offset int, contextCheckpoint string) (autoCloseContext, error) {
 	args := []string{"--expected-repo", repo, "context", "--kind", "pr", "--number", strconv.Itoa(number), "--checkpoint", checkpoint, "--offset", strconv.Itoa(offset)}
 	if contextCheckpoint != "" {
@@ -72,48 +62,6 @@ func readAutoCloseContext(root, repo string, number int, checkpoint string, offs
 		return autoCloseContext{}, fmt.Errorf("proposal context identity or status mismatch")
 	}
 	return context, nil
-}
-
-func autoCloseContextCmd(root, repo string, generation uint64, number int, checkpoint string, offset int, contextCheckpoint string) tea.Cmd {
-	return func() tea.Msg {
-		context, err := readAutoCloseContext(root, repo, number, checkpoint, offset, contextCheckpoint)
-		return autoCloseContextMsg{root: root, repo: repo, generation: generation, number: number, checkpoint: checkpoint, context: context, err: err}
-	}
-}
-
-func (m model) beginAutoCloseContext(number int, checkpoint string, offset int, contextCheckpoint string) (tea.Model, tea.Cmd) {
-	m.notifications.contextBusy = true
-	m.notifications.contextError = ""
-	m.notifications.context = nil
-	m.notifications.notesOpen = false
-	m.notifications.notesBusy = false
-	m.notifications.notesText = ""
-	m.notifications.notesError = ""
-	m.notifications.notesScroll = 0
-	m.notifications.notesRequest++
-	return m, autoCloseContextCmd(m.installRoot, m.repo, m.notificationsGeneration, number, checkpoint, offset, contextCheckpoint)
-}
-
-func (m model) finishAutoCloseContext(msg autoCloseContextMsg) (tea.Model, tea.Cmd) {
-	if !m.notifications.open || m.notifications.review == nil || msg.root != m.installRoot || msg.repo != m.repo || msg.generation != m.notificationsGeneration ||
-		len(m.notifications.review.Plan.Proposals) != 1 || m.notifications.review.Plan.Proposals[0].Number != msg.number ||
-		m.notifications.review.Plan.Proposals[0].Checkpoint != msg.checkpoint {
-		return m, nil
-	}
-	m.notifications.contextBusy = false
-	if msg.err != nil {
-		m.notifications.contextError = "Local proposal context changed or is unavailable. Reopen Notifications to retry."
-		m.recordError("Proposal context read unavailable", msg.err)
-		return m, nil
-	}
-	row := m.notifications.review.Plan.Proposals[0]
-	if msg.context.Current && (row.Inputs == nil || msg.context.ItemContext.Checkpoint != row.Inputs.ContextCheckpoint) {
-		m.notifications.contextError = "Local context response differs from the saved proposal. Reopen Notifications."
-		return m, nil
-	}
-	m.notifications.context = &msg.context
-	m.notifications.reviewScroll = 0
-	return m, nil
 }
 
 func contextField(fields map[string]json.RawMessage, name string) string {
@@ -224,9 +172,6 @@ func (c autoCloseContext) guidanceBlocks() []guidanceBlock {
 }
 
 func (n notificationsUI) proposalContext(row autoCloseRow) *autoCloseContext {
-	if n.context != nil && n.context.Number == row.Number && n.context.ProposalCheckpoint == row.Checkpoint {
-		return n.context
-	}
 	if n.review != nil {
 		if context, ok := n.review.Contexts[row.Number]; ok && context.ProposalCheckpoint == row.Checkpoint {
 			return &context

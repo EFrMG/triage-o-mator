@@ -135,30 +135,6 @@ func autoCloseNotesCmd(root, repo, kind string, generation, request uint64, numb
 	}
 }
 
-func (m model) toggleAutoCloseNotes(row autoCloseRow) (tea.Model, tea.Cmd) {
-	if m.notifications.notesOpen {
-		m.notifications.notesOpen = false
-		m.notifications.notesRequest++
-		return m, nil
-	}
-	context := m.notifications.proposalContext(row)
-	if context == nil || m.notifications.contextBusy {
-		m.status = "Read local context before opening its notes."
-		return m, nil
-	}
-	if !hasExpandableProposalNotes(context) {
-		m.status = "Full local notes are already shown in the proposal."
-		return m, nil
-	}
-	m.notifications.notesOpen = true
-	m.notifications.notesBusy = true
-	m.notifications.notesError = ""
-	m.notifications.notesScroll = 0
-	m.notifications.notesRequest++
-	return m, autoCloseNotesCmd(m.installRoot, m.repo, "pr", m.notificationsGeneration, m.notifications.notesRequest,
-		row.Number, row.Checkpoint, context.ItemContext.Checkpoint, proposalNotes(context))
-}
-
 func (m model) toggleActionNotes(row actionProposalRow) (tea.Model, tea.Cmd) {
 	if m.notifications.notesOpen {
 		m.notifications.notesOpen = false
@@ -188,23 +164,9 @@ func (m model) finishAutoCloseNotes(msg autoCloseNotesMsg) (tea.Model, tea.Cmd) 
 		msg.generation != m.notificationsGeneration || msg.request != m.notifications.notesRequest {
 		return m, nil
 	}
-	contextCheckpoint := ""
-	if m.notifications.actionReview != nil {
-		review := m.notifications.actionReview
-		if msg.kind != review.row.Kind || msg.number != review.row.Number || msg.proposalCheckpoint != review.row.Checkpoint || review.context == nil {
-			return m, nil
-		}
-		contextCheckpoint = review.context.ItemContext.Checkpoint
-	} else if m.notifications.review != nil && len(m.notifications.review.Plan.Proposals) == 1 {
-		row := m.notifications.review.Plan.Proposals[0]
-		if msg.kind != "pr" || msg.number != row.Number || msg.proposalCheckpoint != row.Checkpoint {
-			return m, nil
-		}
-		if context := m.notifications.proposalContext(row); context != nil {
-			contextCheckpoint = context.ItemContext.Checkpoint
-		}
-	}
-	if contextCheckpoint == "" || contextCheckpoint != msg.contextCheckpoint {
+	review := m.notifications.actionReview
+	if review == nil || review.context == nil || msg.kind != review.row.Kind || msg.number != review.row.Number || msg.proposalCheckpoint != review.row.Checkpoint ||
+		review.context.ItemContext.Checkpoint == "" || review.context.ItemContext.Checkpoint != msg.contextCheckpoint {
 		return m, nil
 	}
 	m.notifications.notesBusy = false

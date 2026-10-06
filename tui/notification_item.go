@@ -171,20 +171,6 @@ func (m model) openNotificationSource(choice notificationChoice, source string) 
 		return m, nil
 	}
 	switch source {
-	case "proposal":
-		if choice.proposal >= 0 {
-			row := m.notifications.proposals.Rows[choice.proposal]
-			m.notifications.review = &autoCloseReview{}
-			m.notifications.review.Plan.Repository = m.repo
-			m.notifications.review.Plan.Proposals = []autoCloseRow{row}
-			m.notifications.reviewKey = ""
-			m.notifications.reviewScroll = 0
-			m.notifications.notesOpen = false
-			m.notifications.notesBusy = false
-			m.notifications.notesText = ""
-			m.notifications.notesError = ""
-			return m.beginAutoCloseContext(row.Number, row.Checkpoint, 0, "")
-		}
 	case "item":
 		return m.openNotificationItem(choice.key)
 	case "watch":

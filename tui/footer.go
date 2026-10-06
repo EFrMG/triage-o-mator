@@ -182,7 +182,7 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{settings, group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 	case m.notificationPR.open:
 		back := "back to Notifications"
-		if m.notifications.review != nil {
+		if m.notifications.actionReview != nil {
 			back = "back to proposal"
 		}
 		read := group("Item", bind("previous tab", keys.TabPrev), bind("next tab", keys.TabNext), hint{"Tab/Shift-Tab", "tabs"}, hint{"1/2/3/4", "jump to tab"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, bind("", keys.Track))
@@ -242,65 +242,10 @@ func (m model) contextFooterGroups() []footerGroup {
 			return []footerGroup{action, group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}
 		if m.notifications.review != nil {
-			if m.notifications.notesOpen {
-				return []footerGroup{group("Local notes", hint{"j/k Ctrl-D/U", "scroll"}, hint{"m or Esc", "close"}), group("Navigation", hint{"q", "quit"})}
-			}
 			if m.notifications.reviewBusy {
-				if m.notifications.review.Approval != "" {
-					return []footerGroup{group("PR closures", hint{"", "publishing approved comments and closures…"})}
-				}
-				return []footerGroup{group("Proposal", hint{"", "preparing exact review…"}), group("Navigation", hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
+				return []footerGroup{group("PR closures", hint{"", "publishing approved comments and closures…"})}
 			}
-			name := "Proposal"
-			if len(m.notifications.review.Plan.Proposals) == 1 {
-				status := m.notifications.review.Plan.Proposals[0].Status
-				if status == "executed" || status == "uncertain" {
-					name = "Action outcome"
-				}
-			}
-			proposal := group(name, hint{"j/k Ctrl-D/U", "scroll"})
-			if len(m.notifications.review.Plan.Proposals) == 1 {
-				proposal.hints = append(proposal.hints, hint{"Enter/l", "View item"}, hint{"y", "copy for agent"})
-				if row := m.notifications.review.Plan.Proposals[0]; !m.notifications.contextBusy && hasExpandableProposalNotes(m.notifications.proposalContext(row)) {
-					proposal.hints = append(proposal.hints, hint{"m", "full notes"})
-				}
-				if m.notifications.review.Plan.Proposals[0].Status == "pending" && m.notifications.review.Plan.Proposals[0].Inputs != nil {
-					proposal.hints = append(proposal.hints, hint{"e", "edit proposal"})
-					if m.notifications.review.Plan.Proposals[0].DecisionQuestion != "" {
-						proposal.hints = append(proposal.hints, hint{"r", "answer question"})
-					}
-				}
-				if choice, ok := m.notifications.proposalChoice(m.notifications.review.Plan.Proposals[0].Number); ok && m.notifications.reviewKey == "" {
-					if choice.attention >= 0 {
-						proposal.hints = append(proposal.hints, hint{"t", "saved discussion"})
-					}
-					if choice.closure >= 0 {
-						proposal.hints = append(proposal.hints, hint{"i", "closure history"})
-					}
-				}
-			}
-			if m.notifications.reviewKey != "" {
-				proposal.hints = append(proposal.hints, hint{m.notifications.reviewKey, "approve and execute"})
-			} else if len(m.notifications.review.Plan.Proposals) == 1 {
-				row := m.notifications.review.Plan.Proposals[0]
-				if row.Active && (row.DecisionQuestion == "" || row.DecisionResolution != nil) {
-					proposal.hints = append(proposal.hints, hint{"a", "approve and close"})
-				}
-				for _, row := range m.notifications.proposals.Rows {
-					if row.Active {
-						proposal.hints = append(proposal.hints, hint{"A", "review all"})
-						break
-					}
-				}
-			}
-			if len(m.notifications.review.Plan.Proposals) == 1 {
-				dismiss := "dismiss"
-				if m.notifications.review.Plan.Proposals[0].Status == "pending" {
-					dismiss = "reject & dismiss"
-					proposal.hints = append(proposal.hints, bind("", keys.RejectEditor))
-				}
-				proposal.hints = append(proposal.hints, hint{"w", "track comments"}, hint{"d", dismiss})
-			}
+			proposal := group("Proposal", hint{"j/k Ctrl-D/U", "scroll"}, hint{m.notifications.reviewKey, "approve and execute"})
 			return []footerGroup{proposal, group("Navigation", bind("dataset", keys.Corpus), hint{"Esc/h", "back to Notifications"}, hint{"q", "quit"})}
 		}
 		if m.notifications.reviewBusy {

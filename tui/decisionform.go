@@ -187,7 +187,7 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 
 	act := -1
 	for i, a := range f.taxonomy.SelectableActions() {
-		if (a == "close" || a == "close-duplicate") && f.taxonomy.OperationFor(a) == "close" {
+		if a == "close" && f.taxonomy.OperationFor(a) == "close" {
 			act = i
 		}
 	}

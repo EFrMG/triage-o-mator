@@ -120,29 +120,10 @@ def load_taxonomy():
 READY_LABEL = "ready"
 MERGE_READY_CATEGORY = "merge-ready"
 
-# Retired default action titles, kept only so they can be recognized: older installs own a taxonomy copy that still lists them, saved decisions may name them, and `taxonomy-settings simplify-actions` uses this table to replace them. New installs get none of these names; tui/taxonomy.go mirrors this table.
-LEGACY_ACTION_OPERATIONS = {
-    "no-action-needed": "none",
-    "comment-request-info": "comment",
-    "comment-feedback": "comment",
-    "comment-explain-close": "close",
-    "close-duplicate": "close",
-    "close-stale": "close",
-    "close-out-of-scope": "close",
-    "close-resolved": "close",
-    "close-with-explanation": "close",
-    "reopen-with-explanation": "reopen",
-}
-
-
 def action_operation(taxonomy, action):
-    """Resolve a local action title to a GitHub write type, including older install defaults."""
-    operations = taxonomy.get("action_operations", {})
-    if action in operations:
-        operation = operations[action]
-        return operation if operation in ("comment", "close", "reopen", "none") else ""
-
-    return LEGACY_ACTION_OPERATIONS.get(action, "")
+    """Resolve a local action title to its GitHub write type, or "" when the taxonomy gives it none."""
+    operation = taxonomy.get("action_operations", {}).get(action)
+    return operation if operation in ("comment", "close", "reopen", "none") else ""
 
 
 def load_jsonl(path):

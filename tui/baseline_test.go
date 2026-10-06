@@ -23,7 +23,7 @@ func baselineItems() []Item {
 }
 
 func baselineTaxonomy() Taxonomy {
-	return Taxonomy{IssueCategories: []string{"bug"}, PRCategories: []string{"merge-ready"}, Actions: []string{"no-action-needed"}, Confidence: []string{"low", "medium", "high"}}
+	return Taxonomy{IssueCategories: []string{"bug"}, PRCategories: []string{"merge-ready"}, Actions: []string{"none"}, ActionOperations: map[string]string{"none": "none"}, Confidence: []string{"low", "medium", "high"}}
 }
 
 func baselineSend(m model, msg tea.Msg) model {
@@ -696,7 +696,7 @@ func TestBaselineScriptsUseSelectedInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := runScript(relativeRoot, "apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "no-action-needed", "--reason", "selected install", "--by", "tester"); err != nil {
+	if _, err := runScript(relativeRoot, "apply", "--number", "1", "--kind", "issue", "--category", "bug", "--action", "none", "--reason", "selected install", "--by", "tester"); err != nil {
 		t.Fatal(err)
 	}
 	if got := baselineLedgerRow(t, selectedRoot)["reason"]; got != "selected install" {
@@ -2665,12 +2665,12 @@ func TestStagedActionReviewChecksContextBeforeExactApproval(t *testing.T) {
 import json, pathlib, sys
 args = sys.argv[1:]
 answer = pathlib.Path("answered-action").read_text() if pathlib.Path("answered-action").exists() else None
-row = dict(kind="issue", number=1, title="Needs reproduction", target="https://github.com/owner/repo/issues/1", action="comment-request-info", operation="comment", comment="Could you share steps to reproduce?", updated_at="2026-10-04T01:00:00Z", checkpoint="action-2" if answer else "action-1", status="pending", active=True, decision_question="Should this request be sent?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Discussion not acquired"]))
+row = dict(kind="issue", number=1, title="Needs reproduction", target="https://github.com/owner/repo/issues/1", action="comment", operation="comment", comment="Could you share steps to reproduce?", updated_at="2026-10-04T01:00:00Z", checkpoint="action-2" if answer else "action-1", status="pending", active=True, decision_question="Should this request be sent?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Discussion not acquired"]))
 if answer:
     row["decision_resolution"] = dict(by="maintainer", at="2026-10-04T02:00:00Z", reason=answer, held_checkpoint="action-1")
 if "context" in args:
     stale = pathlib.Path("stale-action").exists()
-    context = dict(repository="owner/repo", item=dict(kind="issue", number=1), checkpoint="ctx-a", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(action="comment-request-info", reason="Missing reproduction"))])
+    context = dict(repository="owner/repo", item=dict(kind="issue", number=1), checkpoint="ctx-a", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(action="comment", reason="Missing reproduction"))])
     print(json.dumps(dict(repository="owner/repo", kind="issue", number=1, proposal_checkpoint=row["checkpoint"], current=not stale, reason="local guidance changed" if stale else None, item_context=context, requests=0)))
 elif "answer" in args:
     answer = args[args.index("--answer") + 1]
@@ -2689,7 +2689,7 @@ else:
 	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	row := actionProposalRow{Kind: "issue", Number: 1, Title: "Needs reproduction", Target: "https://github.com/owner/repo/issues/1", Action: "comment-request-info", Operation: "comment", Comment: "Could you share steps to reproduce?", UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "action-1", Status: "pending", Active: true, Needs: true, Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}, DecisionQuestion: "Should this request be sent?"}
+	row := actionProposalRow{Kind: "issue", Number: 1, Title: "Needs reproduction", Target: "https://github.com/owner/repo/issues/1", Action: "comment", Operation: "comment", Comment: "Could you share steps to reproduce?", UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "action-1", Status: "pending", Active: true, Needs: true, Inputs: &autoCloseInputs{ContextCheckpoint: "ctx-a"}, DecisionQuestion: "Should this request be sent?"}
 	if err := json.Unmarshal([]byte(`{"context_checkpoint":"ctx-a","evidence":[{"kind":"issue","number":1,"snapshot_id":"snapshot-1","components":{"summary":{"status":"complete"}}}]}`), row.Inputs); err != nil {
 		t.Fatal(err)
 	}

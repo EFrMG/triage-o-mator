@@ -47,24 +47,8 @@ func (t Taxonomy) CategoriesFor(kind string) []string {
 }
 
 func (t Taxonomy) OperationFor(action string) string {
-	if operation, found := t.ActionOperations[action]; found {
-		if slices.Contains(actionOperations, operation) {
-			return operation
-		}
-
-		return ""
-	}
-
-	// Older installs own their taxonomy copy and have no action_operations map. These names already describe supported writes; they mirror LEGACY_ACTION_OPERATIONS in bin/_triage.py.
-	switch action {
-	case "comment-request-info", "comment-feedback":
-		return "comment"
-	case "comment-explain-close", "close-duplicate", "close-stale", "close-out-of-scope", "close-resolved", "close-with-explanation":
-		return "close"
-	case "reopen-with-explanation":
-		return "reopen"
-	case "no-action-needed":
-		return "none"
+	if operation := t.ActionOperations[action]; slices.Contains(actionOperations, operation) {
+		return operation
 	}
 
 	return ""

@@ -84,7 +84,7 @@ class CandidateTests(Workspace):
 
 class GroupTests(Workspace):
     def test_ready_group_never_changes_member_decision(self):
-        row = dict(item(1, "Related issue"), category="bug", action="no-action-needed", confidence="medium", reason="Proposal", reviewed=False)
+        row = dict(item(1, "Related issue"), category="bug", action="none", confidence="medium", reason="Proposal", reviewed=False)
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         ledger.write_text(json.dumps(row) + "\n")
         original = ledger.read_bytes()

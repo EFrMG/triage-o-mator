@@ -84,10 +84,9 @@ def list_briefs():
         raise ValueError(f"more than {MAX_BRIEFS} briefs; narrow or archive the report directory")
 
     rows = [record(path) for path in paths]
-    group_order = {"group": 0, "batch": 1}
+    # Newest first within each menu section; in Groups & batches, group briefs come before batch briefs.
     rows.sort(key=lambda row: (row["date"], row["id"]), reverse=True)
-    rows.sort(key=lambda row: ("master", "item", "work").index(row["section"]))
-    rows.sort(key=lambda row: group_order.get(row["type"], 0) if row["section"] == "work" else -1)
+    rows.sort(key=lambda row: (("master", "item", "work").index(row["section"]), row["type"] == "batch"))
     return rows
 
 

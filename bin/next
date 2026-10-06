@@ -45,7 +45,7 @@ def batch_states(by_key):
         items = load_jsonl(items_path)
         keys = [(r["kind"], r["number"]) for r in items]
         rows = load_jsonl(BATCHES_DIR / f"{batch_id}.decisions.jsonl")
-        filled = [r for r in rows if r.get("action") or r.get("proposed_labels")]
+        filled = [r for r in rows if has_decision(r)]
         waiting = [r for r in filled if not has_decision(by_key.get((r["kind"], r["number"])) or {})]
         done = sum(1 for k in keys if has_decision(by_key.get(k) or {}))
         states.append(dict(id=batch_id, items=len(keys), filled=len(filled), waiting=len(waiting), done=done,

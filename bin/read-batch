@@ -16,7 +16,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import BATCHES_DIR, here, load_jsonl
+from _triage import BATCHES_DIR, decision_text, has_decision, here, load_jsonl
 
 RULE = "=" * 100
 
@@ -77,8 +77,7 @@ def main():
         decisions = {(d["kind"], d["number"]): d for d in load_jsonl(path.with_name(path.name.replace(".items.", ".decisions.")))}
         for item in items:
             d = decisions.get((item["kind"], item["number"]), {})
-            labels = ", ".join(d.get("proposed_labels") or []) or "no labels"
-            proposal = f"{labels}/{d.get('action') or 'action not assessed'} {d.get('confidence', '')}" if d.get("action") or d.get("proposed_labels") else "(blank)"
+            proposal = f"{decision_text(d)} {d.get('confidence', '')}".strip() if has_decision(d) else "(blank)"
             print(f"{item['kind']:5} #{item['number']:<6} {proposal:45} {item['title']}")
 
         return

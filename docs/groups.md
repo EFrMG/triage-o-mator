@@ -11,7 +11,7 @@ Groups are how organized work reaches lead maintainers. The intended flow is:
 1. **Draft:** a contributor or an agent following [`prompts/organize-groups.md`](../prompts/organize-groups.md) gathers items behind one decision. The description gives the question, recommendation and evidence; member notes state each item's role.
 2. **Review and hand back:** the contributor edits the draft and selects members with `y` or `Y` in **Groups**. The copied handoff points the agent to a fresh `bin/group export GROUP_ID --format json`. The agent reads current guidance and earlier objections, then reports a no-action outcome or prepares an explained closure proposal for a selected PR. Already-triaged members remain in scope when selected.
 3. **Ready:** a contributor may set a checked group `ready` for maintainers. This does not review its members or approve a later GitHub action. Agents leave their prepared groups in `draft`.
-4. **Maintainers:** `bin/report` lists ready groups first and flags unreviewed members. [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) gives a short overview or a focused case for a decision; `bin/group export` gives the packet.
+4. **Maintainers:** `bin/report` lists ready groups first and flags unreviewed members. [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) gives a short overview or group brief for a decision; `bin/group export` gives the packet. Saved group briefs appear above batch briefs in the TUI's **Briefs → Groups & batches** view.
 5. **Archived:** after the decision, archive the group for reference. Delete only mistaken groups.
 
 ## TUI behavior

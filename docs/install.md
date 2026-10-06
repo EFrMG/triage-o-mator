@@ -45,6 +45,7 @@ target-repo/
     data/<owner>/<repo>/cache|local/                   ignored (includes the per-repo automatic download preference)
     reports/<owner>/<repo>/<date>.md                   tracked report
     reports/<owner>/<repo>/<date>-batch-<id>-brief.md  tracked batch brief
+    reports/<owner>/<repo>/<date>-<kind>-<N>-brief.md   tracked item brief
     reports/<owner>/<repo>/<date>-master-brief.md      tracked master brief
     .gitignore                               generated tracked
     .triage-install.json                     generated ignored (machine-local: where the tool lives)

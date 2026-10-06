@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "action-proposals"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "action-proposals"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -87,6 +87,80 @@ func baselineModel(t *testing.T, root string) model {
 	m := newModel(root, "owner/repo", taxonomy, "tester", items)
 	m = baselineSend(m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	return baselineSend(m, fetchSyncDoneMsg{})
+}
+
+func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
+	root := baselineRoot(t)
+	reports := filepath.Join(root, "reports", "owner", "repo")
+	if err := os.MkdirAll(reports, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"2026-10-06-master-brief.md":                 "# Master decisions\n\n**Recommendation:** Review the current cases.\n",
+		"2026-10-06-pr-42-brief.md":                  "# PR 42\n\n## Recommendation\n\n```go\nreturn true\n```\n",
+		"2026-10-05-group-related-brief.md":          "# Related reports\n",
+		"2026-10-06-batch-b20261006-000001-brief.md": "# Recent batch\n",
+	} {
+		if err := os.WriteFile(filepath.Join(reports, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m := baselineModel(t, root)
+	foundBriefsRow := false
+	for y := 0; y < m.height; y++ {
+		foundBriefsRow = foundBriefsRow || m.mouseSidebarRow(y) == briefsIndex
+	}
+	if !foundBriefsRow {
+		t.Fatal("Briefs sidebar row has no mouse target")
+	}
+
+	next, cmd := m.openBriefs()
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("Briefs did not request a list")
+	}
+	m = baselineSend(m, cmd())
+	if len(m.briefs.records) != 4 || m.briefs.section != 0 || len(m.briefsRows(1)) != 1 || len(m.briefsRows(2)) != 2 ||
+		m.briefsRows(2)[0].Type != "group" || m.briefsRows(2)[1].Type != "batch" {
+		t.Fatalf("unexpected Briefs sections: %+v", m.briefs.records)
+	}
+	menu := ansi.Strip(m.briefsView())
+	if !strings.Contains(menu, "Master (1)") || !strings.Contains(menu, "Items (1)") || !strings.Contains(menu, "Groups & batches (2)") {
+		t.Fatalf("Briefs menu omitted a section: %q", menu)
+	}
+	m.briefs.section = 2
+	work := ansi.Strip(m.briefsView())
+	if !strings.Contains(work, "Related reports") || strings.Index(work, "Related reports") > strings.Index(work, "Recent batch") {
+		t.Fatalf("group brief did not precede the batch brief: %q", work)
+	}
+
+	m = baselineSend(m, mouseKey("2"))
+	next, cmd = m.Update(mouseKey("enter"))
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("Item brief did not request Markdown")
+	}
+	m = baselineSend(m, cmd())
+	if !m.briefs.reading || m.briefs.document == nil || !strings.Contains(ansi.Strip(m.briefs.viewport.View()), "return true") {
+		t.Fatalf("item brief Markdown was not rendered: %q", m.briefs.viewport.View())
+	}
+	if !strings.Contains(ansi.Strip(m.briefsView()), "PR 42") {
+		t.Fatal("Briefs reader lost the item heading")
+	}
+
+	stale := briefsMsg{root: root, repo: "owner/repo", generation: m.briefsGeneration, read: m.briefs.document}
+	m.briefsGeneration++
+	m.briefs.document = nil
+	m = baselineSend(m, stale)
+	if m.briefs.document != nil {
+		t.Fatal("late brief content replaced a newer read")
+	}
+	m.switchRepo("other/repo")
+	m = baselineSend(m, stale)
+	if m.briefs.open || m.briefs.document != nil {
+		t.Fatal("late brief content crossed the repository switch")
+	}
 }
 
 func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {

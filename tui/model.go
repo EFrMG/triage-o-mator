@@ -48,10 +48,13 @@ type model struct {
 	// pendingApply counts concurrent decision writes and undo commands; batch applies use batches.busy.
 	pendingApply int
 
-	items   []Item
-	groups  groupUI
-	batches batchUI
-	dups    dupUI
+	items            []Item
+	groups           groupUI
+	batches          batchUI
+	briefs           briefsUI
+	briefsLifecycle  *readLifecycle
+	briefsGeneration uint64
+	dups             dupUI
 	// similar caches bin/similar's duplicate candidates per item for the session (titles barely change, and each lookup is a subprocess).
 	similar map[Key][]dupCandidate
 	// notDuplicates are the pairs a human ruled out with bin/not-duplicate, re-read whenever one is added.
@@ -264,6 +267,11 @@ func (m *model) enterSidebarSelection() tea.Cmd {
 		return m.openPairs()
 	case batchesIndex:
 		next, cmd := m.openBatches()
+		*m = next.(model)
+
+		return cmd
+	case briefsIndex:
+		next, cmd := m.openBriefs()
 		*m = next.(model)
 
 		return cmd
@@ -501,6 +509,7 @@ func (m *model) layout() {
 	m.layoutGroupEdit()
 	m.layoutSettingsEditor()
 	m.layoutSettingsDefaults()
+	m.layoutBriefs()
 	listW, _ := m.panelWidths()
 	if m.listReady {
 		m.list.SetSize(listW, maxInt(m.mainHeight()-listHeaderHeight, 1))
@@ -877,6 +886,8 @@ func (m model) bodyView() string {
 		body = m.groupsView()
 	case m.batches.open:
 		body = m.batchesView()
+	case m.briefs.open:
+		body = m.briefsView()
 	case m.dups.open:
 		body = m.dupsView()
 	case m.corpus.open:
@@ -956,6 +967,9 @@ func (m *model) switchInstall(root, repo string) tea.Cmd {
 
 // switchRepo points the TUI at repo's own data folder, dropping every per-repo cache (ledger, content, duplicates, groups, batches), and fetches it.
 func (m *model) switchRepo(repo string) tea.Cmd {
+	m.briefsLifecycle.stop()
+	m.briefsGeneration++
+	m.briefs = briefsUI{}
 	m.notificationsLifecycle.stop()
 	m.notificationsGeneration++
 	m.notifications = notificationsUI{}

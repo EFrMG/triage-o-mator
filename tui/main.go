@@ -1,6 +1,6 @@
 // Command triage-o-mator is a terminal UI for browsing and triaging the issue/PR backlog managed by the bin/ scripts.
 // It never writes data/<owner>/<repo>/ledger.jsonl directly: every mutation shells out to bin/apply; and every GitHub call it makes is read-only (fetch / sync / enrich-one).
-// See tui/ghproc.go for the complete list of subprocesses it runs.
+// See tui/ghproc.go and tui/readprocess.go for script execution.
 package main
 
 import (

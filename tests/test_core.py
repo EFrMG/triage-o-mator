@@ -546,6 +546,39 @@ class LedgerTests(Workspace):
         self.run_cli("fetch")
         self.run_cli("sync")
 
+    def test_brief_reader_groups_files_and_preserves_item_markdown(self):
+        self.sync()
+        reports = self.root / "reports/owner/repo"
+        reports.mkdir(parents=True)
+        files = {
+            "2026-10-06-master-brief.md": "# Master decisions\n",
+            "2026-10-06-pr-42-brief.md": "# PR 42\n\n**Recommendation:** Review\n\n```go\nreturn true\n```\n",
+            "2026-10-05-group-related-brief.md": "# Related reports\n",
+            "2026-10-06-batch-b20261006-000001-brief.md": "# Recent batch\n",
+            "2026-10-06.md": "# Generated report\n",
+        }
+        for name, content in files.items():
+            (reports / name).write_text(content)
+
+        outside = self.root / "outside.md"
+        outside.write_text("# Foreign brief\n")
+        (reports / "2026-10-06-issue-99-brief.md").symlink_to(outside)
+        calls_before = len(self.calls())
+        rows = self.json_cli("briefs", "--expected-repo", "owner/repo", "list")["records"]
+        self.assertEqual([(row["section"], row["type"]) for row in rows],
+                         [("master", "master"), ("item", "pr"), ("work", "group"), ("work", "batch")])
+        brief = self.json_cli("briefs", "--expected-repo", "owner/repo", "read", "2026-10-06-pr-42-brief.md")
+        self.assertIn("```go\nreturn true\n```", brief["content"])
+        self.assertEqual(len(self.calls()), calls_before)
+        self.run_cli("briefs", "--expected-repo", "other/repo", "list", ok=False)
+        self.run_cli("briefs", "read", "2026-10-06-issue-99-brief.md", ok=False)
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--action", "no-action-needed", "--reason", "Needs review", "--by", "agent:triage")
+        before = self.json_cli("next", "--json")["suggestions"]
+        self.assertTrue(any("Write a detailed brief for issue #1" in row["what"] for row in before))
+        (reports / "2026-10-06-issue-1-brief.md").write_text("# Issue 1\n")
+        after = self.json_cli("next", "--json")["suggestions"]
+        self.assertFalse(any("Write a detailed brief for issue #1" in row["what"] for row in after))
+
     def test_fetch_sync_and_agent_proposal(self):
         self.sync()
         self.assertEqual(len(self.ledger()), 2)

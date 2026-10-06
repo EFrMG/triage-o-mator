@@ -2,7 +2,7 @@
 
 **Use when** someone asks to combine several batch or focused maintainer briefs into one master brief, or `bin/next` suggests it. Read [PLAYBOOK.md](PLAYBOOK.md) first. This is a synthesis of existing briefs, not another pass through the whole issue and PR backlog.
 
-**Produces** a short `reports/<owner>/<repo>/<date>-master-brief.md` for the named input set. It does not change the ledger, review decisions, batch coverage, or GitHub state. If that filename already belongs to another input set, use a short subject in the filename rather than replacing it.
+**Produces** a short `reports/<owner>/<repo>/<date>-master-brief.md` for the named input set. It does not change the ledger, review decisions, batch coverage, or GitHub state. If that filename already belongs to another input set, use `<date>-master-<subject>-brief.md` rather than replacing it.
 
 ## 1. Fix the input set
 
@@ -14,7 +14,7 @@ Read each brief in full. Treat its linked issue and PR sources as evidence leads
 
 Choose the most relevant maintainer decisions from the inputs, with no minimum and usually no more than three to five. Prefer consequence, timeliness, and a clear next step; Item Score describes quality and readiness, not priority. An old unresolved thread needs a current reason for maintainer attention to survive the cut. Merge duplicate discussions into one decision. Resolve conflicting recommendations by reading the relevant evidence or hold the call when the conflict remains. The result may consist entirely of issue follow-ups or may have no new decision. A source brief may contribute nothing to the final selection without being treated as unfinished.
 
-Use the same human-facing shape as [maintainer-brief.md](maintainer-brief.md): a dated title and short scope line, then numbered decisions with direct item links, decisive facts, the strongest material hesitation, and **Next:** one action or hold. Mention a source brief only when it helps a maintainer navigate to more detail. Keep selection mechanics, batch IDs, hashes, and tool state out of the prose. Do not add an audit appendix. A short final sentence may name a cross-cutting pattern or risk if it changes what the maintainer should do.
+Use the same human-facing shape as [maintainer-brief.md](maintainer-brief.md): a dated title and short scope line, then numbered decisions with direct item links, decisive facts, the strongest material hesitation, and **Next:** one action or hold. Normalize each selected-repository item to [PLAYBOOK.md](PLAYBOOK.md)'s canonical issue or PR link on its first mention, even when input briefs used different labels. Mention a source brief only when it helps a maintainer navigate to more detail. Keep selection mechanics, batch IDs, hashes, and tool state out of the prose. Do not add an audit appendix. A short final sentence may name a cross-cutting pattern or risk if it changes what the maintainer should do.
 
 ## 3. Hand over
 

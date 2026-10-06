@@ -388,6 +388,14 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("save & approve", keys.Confirm)), group("Navigation", bind("back", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.groups.open:
 		return m.groupFooter()
+	case m.briefs.open:
+		if m.briefs.busy {
+			return []footerGroup{group("Briefs", hint{"", "reading…"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+		}
+		if m.briefs.reading {
+			return []footerGroup{group("Brief", hint{"j/k", "scroll"}, hint{"Ctrl-D/U", "page"}, hint{"r", "reload"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
+		}
+		return []footerGroup{group("Briefs", hint{"H/L", "section"}, hint{"j/k", "select"}, hint{"Enter", "read"}, hint{"r", "reload"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
 	case m.dups.open:
 		return []footerGroup{
 			group("Duplicate", bind("mark as duplicate", keys.MarkDup), bind("", keys.SwapDup), bind("", keys.Tick), bind("group ticked", keys.Group)),

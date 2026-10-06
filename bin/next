@@ -11,6 +11,7 @@ Each suggestion says who should do it: [agent] steps prepare evidence or proposa
 
 import argparse
 import json
+import re
 import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -25,6 +26,7 @@ from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, has
 STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
 CODE_REVIEW_CATEGORIES = ("merge-ready", "trivial", "needs-revision", "needs-maintainer-call")
+ITEM_BRIEF_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-(issue|pr)-([1-9]\d*)-brief\.md$")
 
 
 def hours_since(iso):
@@ -107,6 +109,12 @@ def suggestions(ledger):
         add("human", f"Review {len(pending)} triaged decisions ({closes} suggest closing)",
             f"TUI: All Items (search {sample}, a confirms a saved call); or bin/export-csv --pending-review, edit, bin/import-csv --by <you>",
             "review remains separate from repository-enabled label automation and action-write approval")
+        item_briefs = {match.group(1, 2) for path in REPORTS_DIR.glob("*-brief.md") if (match := ITEM_BRIEF_RE.fullmatch(path.name))}
+        target = next((row for row in pending if (row["kind"], str(row["number"])) not in item_briefs), None)
+        if target is not None:
+            add("agent", f"Write a detailed brief for {target['kind']} #{target['number']}",
+                f"prompts/item-brief.md (selected {target['kind']} #{target['number']})",
+                "a focused case can help a maintainer resolve an unreviewed call")
 
     unreviewed_code = [r for r in open_items if r["kind"] == "pr" and (r.get("category") in CODE_REVIEW_CATEGORIES or any(name in CODE_REVIEW_CATEGORIES for name in r.get("proposed_labels") or []))
                        and not r["reviewed"] and not (r.get("agent_notes") or "").strip()]

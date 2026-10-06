@@ -80,6 +80,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishGroupHandoff(msg)
 	case batchesLoadedMsg:
 		return m.onBatchesLoaded(msg)
+	case briefsMsg:
+		return m.finishBriefs(msg)
 	case similarLoadedMsg:
 		return m.onSimilarLoaded(msg)
 	case pairsLoadedMsg:
@@ -393,6 +395,8 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.batches.size, cmd = m.batches.size.Update(msg)
 		return m, cmd
+	case m.briefs.open:
+		return m, nil
 	case m.dups.open:
 		return m, nil
 	case m.editingRepo:
@@ -438,6 +442,7 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Modal states intercept every key, in priority order, before any global keybinding; otherwise, typing "r" (or "q", "a", "h", "?", ...) into a text field would trigger refresh, quit, approve, back, etc. instead of being typed. ForceQuit is the one exception: it must always work.
 	if key.Matches(msg, keys.ForceQuit) {
+		m.briefsLifecycle.stop()
 		m.notificationsLifecycle.stop()
 		m.actionHistoryLifecycle.stop()
 		m.attentionLifecycle.stop()
@@ -488,7 +493,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleCorpusKey(msg)
 	}
 
-	if (key.Matches(msg, keys.Yank) || key.Matches(msg, keys.YankAll)) && !m.typingText() && !m.themePicker.open && !m.editingRepo {
+	if (key.Matches(msg, keys.Yank) || key.Matches(msg, keys.YankAll)) && !m.typingText() && !m.themePicker.open && !m.editingRepo && !m.briefs.open {
 		if m.groups.open && m.groups.detail {
 			if m.groups.busy {
 				return m, nil
@@ -511,6 +516,9 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.batches.open {
 		return m.handleBatchKey(msg)
+	}
+	if m.briefs.open {
+		return m.handleBriefsKey(msg)
 	}
 
 	if m.dups.open {

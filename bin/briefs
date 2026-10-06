@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""List and read this install's saved maintainer briefs without a GitHub request."""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
+from _triage import REPO, REPORTS_DIR, WORK_ROOT
+
+
+DATE = r"\d{4}-\d{2}-\d{2}"
+MASTER = re.compile(rf"^({DATE})-(?:master(?:-[A-Za-z0-9_-]+)?-brief|brief|polished)\.md$")
+ITEM = re.compile(rf"^({DATE})-(issue|pr)-(\d+)-brief\.md$")
+GROUP = re.compile(rf"^({DATE})-(?:ready-groups|group-[A-Za-z0-9_-]+)-brief\.md$")
+BATCH = re.compile(rf"^({DATE})-batch-b\d{{8}}-\d{{6}}(?:-\d+)?-brief\.md$")
+MAX_BRIEFS = 5000
+MAX_BRIEF_BYTES = 1024 * 1024
+
+
+def category(name):
+    if match := MASTER.fullmatch(name):
+        return "master", "master", match.group(1)
+
+    if match := ITEM.fullmatch(name):
+        return "item", match.group(2), match.group(1)
+
+    if match := GROUP.fullmatch(name):
+        return "work", "group", match.group(1)
+
+    if match := BATCH.fullmatch(name):
+        return "work", "batch", match.group(1)
+
+    return None
+
+
+def heading(path):
+    with path.open(encoding="utf-8", errors="replace") as source:
+        for _ in range(20):
+            line = source.readline(4096)
+            if not line:
+                break
+
+            if line.startswith("# "):
+                title = re.sub(r"[\x00-\x1f\x7f]", " ", line[2:]).strip()
+                if title:
+                    return title[:240]
+
+    return path.stem.replace("-", " ")
+
+
+def record(path):
+    kind = category(path.name)
+    if kind is None or path.is_symlink() or not path.is_file():
+        raise ValueError("brief path is missing or outside the supported report names")
+
+    section, brief_type, date = kind
+    return dict(id=path.name, section=section, type=brief_type, date=date, title=heading(path))
+
+
+def reports_dir():
+    if not REPORTS_DIR.resolve().is_relative_to(WORK_ROOT.resolve()):
+        raise ValueError("reports path leaves this install")
+
+    return REPORTS_DIR
+
+
+def list_briefs():
+    directory = reports_dir()
+    if not directory.is_dir():
+        return []
+
+    paths = [
+        path for path in directory.iterdir()
+        if category(path.name) is not None and path.is_file() and not path.is_symlink()
+    ]
+    if len(paths) > MAX_BRIEFS:
+        raise ValueError(f"more than {MAX_BRIEFS} briefs; narrow or archive the report directory")
+
+    rows = [record(path) for path in paths]
+    group_order = {"group": 0, "batch": 1}
+    rows.sort(key=lambda row: (row["date"], row["id"]), reverse=True)
+    rows.sort(key=lambda row: ("master", "item", "work").index(row["section"]))
+    rows.sort(key=lambda row: group_order.get(row["type"], 0) if row["section"] == "work" else -1)
+    return rows
+
+
+def read_brief(name):
+    if Path(name).name != name or category(name) is None:
+        raise ValueError("invalid brief ID")
+
+    path = reports_dir() / name
+    row = record(path)
+    if path.stat().st_size > MAX_BRIEF_BYTES:
+        raise ValueError("brief exceeds the 1 MiB reader limit")
+
+    content = path.read_text(encoding="utf-8")
+    if not content.strip():
+        raise ValueError("brief is empty")
+
+    return dict(record=row, content=content)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-repo", help="refuse a changed install target")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("list", help="list supported master, item, group and batch briefs")
+    read = commands.add_parser("read", help="read one supported brief by filename")
+    read.add_argument("id")
+    args = parser.parse_args()
+    if args.expected_repo is not None and args.expected_repo != REPO:
+        parser.error("configured repository does not match --expected-repo")
+
+    if args.command == "list":
+        result = dict(schema_version=1, repository=REPO, records=list_briefs())
+    else:
+        result = dict(schema_version=1, repository=REPO, **read_brief(args.id))
+
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, UnicodeError, ValueError) as error:
+        sys.exit(f"error: {error}")

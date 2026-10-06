@@ -10,8 +10,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// rowCount is len(tabs) real tabs plus Batches, Groups, Possible Duplicates, Notifications, Settings, and Switch Repo.
-func rowCount() int { return len(tabs) + 6 }
+// rowCount is len(tabs) real tabs plus Batches, Briefs, Groups, Possible Duplicates, Notifications, Settings, and Switch Repo.
+func rowCount() int { return len(tabs) + 7 }
 
 type sidebarModel struct {
 	selected int
@@ -56,6 +56,7 @@ func (s sidebarModel) View(focused bool) string {
 
 	// ≡ rather than ▤: most fonts draw ▤ from a fallback font, offset to the right and crowding the text.
 	renderRow(batchesIndex, withCount("≡ Batches", s.batchCount))
+	renderRow(briefsIndex, "¶ Briefs")
 	renderRow(groupsIndex, withCount("◇ Groups", s.groupCount))
 	renderRow(pairsIndex, withCount("≈ Possible Duplicates", s.pairCount))
 	renderRow(notificationsIndex, withCount("! Notifications", s.notificationCount))

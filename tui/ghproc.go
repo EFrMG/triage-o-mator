@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// runScript is the only way the TUI runs bin/* scripts (callers live here, in groups.go, batches.go, and duplicates.go); it never runs gh itself. It never touches the ledger directly: every mutation goes through bin/apply, matching the "only the scripts mutate the ledger" rule.
+// runScript is the way the TUI runs ordinary bin/* scripts; cancellable read-only commands use runReadScript in readprocess.go. It never runs gh itself. It never touches the ledger directly: every mutation goes through bin/apply, matching the "only the scripts mutate the ledger" rule.
 // Only stdout is returned, since several scripts print JSON there while progress, notices, and warnings go to stderr; stderr is surfaced in the error when the script fails.
 
 func runScript(installRoot, name string, args ...string) (string, error) {

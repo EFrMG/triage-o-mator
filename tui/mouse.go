@@ -217,7 +217,7 @@ func (m model) mouseMainX() int {
 }
 
 func (m model) mouseHasSidebar() bool {
-	return m.width >= 100 && !m.noInstall() && !m.comment.open && !m.lastError.open && !m.themePicker.open && !m.notificationPR.open && !m.dups.open && (m.groups.open || m.batches.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.settings.open || m.focus != FocusDetail)
+	return m.width >= 100 && !m.noInstall() && !m.comment.open && !m.lastError.open && !m.themePicker.open && !m.notificationPR.open && !m.dups.open && (m.groups.open || m.batches.open || m.briefs.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.settings.open || m.focus != FocusDetail)
 }
 
 func (m model) mouseSidebarRow(y int) int {
@@ -230,11 +230,11 @@ func (m model) mouseSidebarRow(y int) int {
 	switch {
 	case row >= 0 && row < len(tabs):
 		return row
-	case row >= len(tabs)+1 && row < len(tabs)+5:
+	case row >= len(tabs)+1 && row < len(tabs)+6:
 		return row - 1
-	case row == len(tabs)+6:
-		return settingsIndex
 	case row == len(tabs)+7:
+		return settingsIndex
+	case row == len(tabs)+8:
 		return switchRepoIndex
 	}
 
@@ -309,7 +309,7 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 	if m.settings.open && (m.settings.editor != nil || m.settings.defaults != nil) {
 		return m, nil
 	}
-	if m.notificationPR.open || m.focus == FocusDetail && !m.groups.open && !m.batches.open && !m.dups.open && !m.notifications.open && !m.attention.open && !m.actionHistory.open && !m.corpus.open {
+	if m.notificationPR.open || m.focus == FocusDetail && !m.groups.open && !m.batches.open && !m.briefs.open && !m.dups.open && !m.notifications.open && !m.attention.open && !m.actionHistory.open && !m.corpus.open {
 		return m.clickDetail(event, repeat)
 	}
 	if m.dups.open {
@@ -322,11 +322,11 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 			if m.groups.editing != "" || m.batches.editing {
 				return m, nil
 			}
-			for i := 0; i < 4 && (m.groups.open || m.batches.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.settings.open || m.editingRepo); i++ {
+			for i := 0; i < 4 && (m.groups.open || m.batches.open || m.briefs.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.settings.open || m.editingRepo); i++ {
 				next, _ := m.mousePress("esc")
 				m = next.(model)
 			}
-			if m.groups.open || m.batches.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.settings.open || m.editingRepo {
+			if m.groups.open || m.batches.open || m.briefs.open || m.notifications.open || m.attention.open || m.actionHistory.open || m.corpus.open || m.settings.open || m.editingRepo {
 				return m, nil
 			}
 			m.sidebar.selected = row
@@ -373,6 +373,8 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 		return m.clickGroups(event, repeat)
 	case m.batches.open:
 		return m.clickBatches(event, repeat)
+	case m.briefs.open:
+		return m.clickBriefs(event, repeat)
 	case m.notifications.open:
 		return m.clickNotifications(event, repeat)
 	case m.attention.open, m.actionHistory.open:
@@ -846,7 +848,7 @@ func (m model) handleMouseWheel(event tea.Mouse) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.focus == FocusDetail && !m.groups.open && !m.batches.open && !m.dups.open && !m.notifications.open && !m.attention.open && !m.actionHistory.open {
+	if m.focus == FocusDetail && !m.groups.open && !m.batches.open && !m.briefs.open && !m.dups.open && !m.notifications.open && !m.attention.open && !m.actionHistory.open {
 		formX := 2 + m.detail.width + 3
 		formY := 6 + m.detail.height + 2
 		if !m.detail.full && !m.notificationPR.open && m.form.focused == fieldReason && (m.sideBySide() && event.X >= formX || !m.sideBySide() && event.Y >= formY) {

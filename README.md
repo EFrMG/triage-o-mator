@@ -90,7 +90,7 @@ Mouse controls work alongside the keyboard keys.
 
 ![Approving a GitHub comment or state change](captures/flow-6.webp)
 
-7. **Hand work to maintainers.** Export a group or batch for a review packet, and gather ready groups and human-reviewed decisions into a dated Markdown report. An agent can also screen successive batches into short briefs and [polish selected briefs](prompts/polish-briefs.md) into one concise master brief. Screening does not review the items or approve a GitHub action.
+7. **Hand work to maintainers.** Export a group or batch for a review packet, and gather ready groups and human-reviewed decisions into a dated Markdown report. An agent can also screen successive batches into short briefs, write a [detailed item brief](prompts/item-brief.md), and [polish selected briefs](prompts/polish-briefs.md) into one master brief. Read saved briefs in the **Briefs** menu. Screening does not review the items or approve a GitHub action.
 
 ![Agent wrote a maintainer brief](captures/agent-writing-maintainer-brief.png)
 
@@ -131,6 +131,7 @@ bin/batch 25
 bin/batch 25 --include-triaged --unbriefed --order updated
 bin/apply data/<owner>/<repo>/batches/<id>.decisions.jsonl --only-untriaged
 bin/report
+bin/briefs list
 ```
 
 After screening a whole batch, save its dated batch brief and use `bin/batch --mark-briefed ID --brief PATH`. The checkpoint lets the next `--unbriefed` pass skip every member of that batch, including members the brief did not feature. A brief can say that no maintainer call surfaced. `bin/next` suggests the next pass or [polishing selected briefs](prompts/polish-briefs.md); it does not run either step automatically.
@@ -146,7 +147,7 @@ After screening a whole batch, save its dated batch brief and use `bin/batch --m
 | Preview and apply proposed labels               | `bin/item-labels`                                                              |
 | Propose and publish actions                     | `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus`                  |
 | Score selected issues and PRs                   | `bin/item-score`                                                               |
-| See progress and handoffs                       | `bin/stats`, `bin/next`, `bin/report`                                          |
+| See progress and handoffs                       | `bin/stats`, `bin/next`, `bin/report`, `bin/briefs`                            |
 
 The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md) and [comment publishing guide](docs/comment-plus.md) cover the commands and their limits.
 
@@ -177,6 +178,7 @@ Turning automatic download ON installs the optional engine from the checked-in, 
 | “assess this edited group”                      | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons        |
 | “review an appeal”                              | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment             |
 | “brief the maintainers” or “polish the report”  | [Maintainer brief](prompts/maintainer-brief.md)                                                   | A short overview or focused decision brief   |
+| “brief issue #N” or “brief PR #N”               | [Item brief](prompts/item-brief.md)                                                               | A detailed case and recommendation           |
 | “polish these briefs” or “write a master brief” | [Polish briefs](prompts/polish-briefs.md)                                                         | A short synthesis of selected briefs         |
 | “score these items” or “run a scoring pass”     | [Score selected items](prompts/score-items.md)                                                    | A bounded, source-bound quality score        |
 

@@ -96,13 +96,14 @@ func (m *model) updateUntriagedView() {
 	m.status = "Showing " + m.tabName(untriagedTab) + "."
 }
 
-// The non-tab sidebar rows follow the real tabs: Batches, Groups, Possible Duplicates, Notifications, Settings, and Switch Repo.
+// The non-tab sidebar rows follow the real tabs: Batches, Briefs, Groups, Possible Duplicates, Notifications, Settings, and Switch Repo.
 // Overview isn't a tab at all: it is what the main area shows by default before any tab is entered (see model.View).
 var (
 	batchesIndex       = len(tabs)
-	groupsIndex        = len(tabs) + 1
-	pairsIndex         = len(tabs) + 2
-	notificationsIndex = len(tabs) + 3
-	settingsIndex      = len(tabs) + 4
-	switchRepoIndex    = len(tabs) + 5
+	briefsIndex        = len(tabs) + 1
+	groupsIndex        = len(tabs) + 2
+	pairsIndex         = len(tabs) + 3
+	notificationsIndex = len(tabs) + 4
+	settingsIndex      = len(tabs) + 5
+	switchRepoIndex    = len(tabs) + 6
 )

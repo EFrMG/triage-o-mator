@@ -14,7 +14,7 @@
    - Add `--diff` when the batch has PRs you may propose as `ready` to merge. Without the diff you haven't read the code, and those calls aren't allowed (rule 6 below).
    - Keep batches to 25–40 items you can actually read. Bigger batches just get skimmed.
    - To reuse downloaded evidence, add `--cache-mode offline` (never fetches), `cache-preferred`, or `refresh`. Defaults are unchanged. Cached packets pin each item's snapshot and report missing/partial/stale components; inspect those diagnostics before deciding. See [evidence modes](../docs/evidence-reference.md#acquisition-and-read-modes).
-5. Inspect `bin/label-catalog show` and the selected repository's `config/taxonomy.json`. If the label catalog is pending, run `bin/label-catalog sync` before proposing labels. It reads definitions without changing GitHub.
+5. Inspect `bin/label-catalog show` and the selected repository's `config/taxonomy.json`. If the label catalog is pending, run `bin/label-catalog sync --expected-repo OWNER/REPO` before proposing labels. It reads definitions without changing GitHub.
 
 ## 2. Read every item
 

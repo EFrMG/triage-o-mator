@@ -207,7 +207,7 @@ def mark_read(names, apply, preview_sha256):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--expected-repo", help="refuse a changed install target")
+    parser.add_argument("--expected-repo", help="refuse a changed install target; required by mark-read --apply")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="list supported master, item, group and batch briefs")
     read = commands.add_parser("read", help="read one supported brief by filename")
@@ -224,6 +224,9 @@ def main():
     args = parser.parse_args()
     if args.expected_repo is not None and args.expected_repo != REPO:
         parser.error("configured repository does not match --expected-repo")
+
+    if args.command == "mark-read" and args.apply and args.expected_repo is None:
+        parser.error("mark-read --apply requires --expected-repo")
 
     if args.command == "list":
         result = dict(schema_version=1, repository=REPO, records=list_briefs())

@@ -553,7 +553,7 @@ class LedgerTests(Workspace):
         self.assertEqual((large["source_count"], large["target_decisions"]), (16, 10))
         batch_name = "2026-10-06-batch-b20261006-000016-brief.md"
         batch_preview = self.json_cli("briefs", "mark-read", batch_name)
-        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", batch_preview["preview_sha256"], batch_name)
+        self.json_cli("briefs", "--expected-repo", "owner/repo", "mark-read", "--apply", "--preview-sha256", batch_preview["preview_sha256"], batch_name)
         self.assertEqual(self.json_cli("briefs", "plan", "--all")["source_count"], 15)
         self.assertEqual(self.json_cli("briefs", "plan", "--all", "--include-read")["source_count"], 16)
         self.assertTrue((reports / (Path(batch_name).stem + "_READ.md")).exists())
@@ -564,11 +564,11 @@ class LedgerTests(Workspace):
         self.assertEqual(preview["renames"][0]["target"], Path(pr_name).stem + "_READ.md")
         self.assertTrue((reports / pr_name).exists())
         (reports / pr_name).write_text(brief["content"] + "Changed after preview.\n")
-        self.run_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], pr_name, ok=False)
+        self.run_cli("briefs", "--expected-repo", "owner/repo", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], pr_name, ok=False)
         self.assertTrue((reports / pr_name).exists())
         preview = self.json_cli("briefs", "mark-read", pr_name)
         self.run_cli("briefs", "--expected-repo", "other/repo", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], pr_name, ok=False)
-        applied = self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], pr_name)
+        applied = self.json_cli("briefs", "--expected-repo", "owner/repo", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], pr_name)
         self.assertTrue(applied["applied"])
         self.assertFalse((reports / pr_name).exists())
         self.assertIn("Changed after preview.", (reports / (Path(pr_name).stem + "_READ.md")).read_text())
@@ -592,7 +592,7 @@ class LedgerTests(Workspace):
         self.assertFalse(any("Write a detailed brief for issue #1" in row["what"] for row in after))
         issue_name = "2026-10-06-issue-1-brief.md"
         preview = self.json_cli("briefs", "mark-read", issue_name)
-        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], issue_name)
+        self.json_cli("briefs", "--expected-repo", "owner/repo", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], issue_name)
         archived = self.json_cli("next", "--json")["suggestions"]
         self.assertFalse(any("Write a detailed brief for issue #1" in row["what"] for row in archived))
 
@@ -688,7 +688,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.assertFalse(any("Write today's maintainer report" in row["what"] for row in second))
         batch_name = "2026-10-06-batch-b20261006-000001-brief.md"
         preview = self.json_cli("briefs", "mark-read", batch_name)
-        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], batch_name)
+        self.json_cli("briefs", "--expected-repo", "owner/repo", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], batch_name)
         after_read = self.json_cli("next", "--json")["suggestions"]
         self.assertTrue(any("Delete finished batch b20261006-000001" in row["what"] for row in after_read))
         self.assertFalse(any("Polish selected batch briefs" in row["what"] for row in after_read))
@@ -699,7 +699,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         master_name = f"{datetime.now(timezone.utc).date().isoformat()}-master-brief.md"
         (reports / master_name).write_text("# Master brief\n")
         preview = self.json_cli("briefs", "mark-read", master_name)
-        self.json_cli("briefs", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], master_name)
+        self.json_cli("briefs", "--expected-repo", "owner/repo", "mark-read", "--apply", "--preview-sha256", preview["preview_sha256"], master_name)
         self.assertFalse(any("Polish selected batch briefs" in row["what"] for row in self.json_cli("next", "--json")["suggestions"]))
 
     def test_sync_preserves_proposals(self):

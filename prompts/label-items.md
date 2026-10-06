@@ -4,7 +4,7 @@
 
 ## 1. Pin the scope
 
-1. Read `config/repo`, `bin/label-catalog show`, and `bin/item-labels status --expected-repo OWNER/REPO`. If the catalog is pending, `bin/label-catalog sync` reads label definitions from GitHub. If Labeling is OFF, prepare proposals but stop before a GitHub write; a person can turn it back ON in Settings → Automations for this repository.
+1. Read `config/repo`, `bin/label-catalog show`, and `bin/item-labels status --expected-repo OWNER/REPO`. If the catalog is pending, `bin/label-catalog sync --expected-repo OWNER/REPO` reads label definitions from GitHub. If Labeling is OFF, prepare proposals but stop before a GitHub write; a person can turn it back ON in Settings → Automations for this repository.
 2. Use the person's item selection or batch size. For an open backlog, start with `bin/batch 25 --unlabeled-first --include-triaged` so items with no observed GitHub labels come first, including ones that already have an Action. This is a priority hint based on the ledger's last observation; it is not proof that an item is still unlabeled on GitHub. Use `--kind issue|pr` or `--cache-mode offline|cache-preferred|refresh` when the request or evidence plan calls for it.
 
 ## 2. Propose labels

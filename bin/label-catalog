@@ -15,11 +15,13 @@ from _triage import REPO, TAXONOMY_PATH
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["show", "sync"])
-    parser.add_argument("--expected-repo", help="refuse if the selected repository changed")
+    parser.add_argument("--expected-repo", help="refuse if the selected repository changed; required by a saved sync")
     parser.add_argument("--dry-run", action="store_true", help="preview a sync without saving it")
     args = parser.parse_args()
     if args.expected_repo is not None and args.expected_repo != REPO:
         parser.error("configured repository does not match --expected-repo")
+    if args.command == "sync" and not args.dry_run and args.expected_repo is None:
+        parser.error("sync requires --expected-repo unless it is a --dry-run")
     if args.command == "show" and args.dry_run:
         parser.error("--dry-run requires sync")
 

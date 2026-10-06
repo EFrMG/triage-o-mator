@@ -135,6 +135,8 @@ For a requested reassessment from imported closure history through explicit enro
 ## 12. Hand reviewed work to maintainers
 
 - `bin/report` gathers ready groups and individual human-reviewed decisions. An agent following [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) can turn that report into a concise maintainer brief.
+- To screen the backlog for brief-worthy items, an agent can create a briefing batch with `bin/batch 25 --include-triaged --unbriefed --order updated`, inspect all its members, and save one dated batch brief. `bin/batch --mark-briefed ID --brief reports/<owner>/<repo>/<date>-batch-ID-brief.md` then records the whole batch as screened, even when the brief names no item. Another agent can use `--unbriefed` to continue from the remaining items. Add `--cache-mode offline` when the evidence is already saved and no GitHub read is wanted.
+- [`prompts/polish-briefs.md`](../prompts/polish-briefs.md) takes a selected set of batch briefs and writes a short master brief. The TUI currently shows batch and `bin/next` progress; writing and marking these briefs uses the agent playbooks and CLI.
 - Exporting or reporting does not act on GitHub. Labeling, approving, and merging remain separate work.
 
 ### Publish approved GitHub actions

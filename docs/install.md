@@ -39,16 +39,19 @@ target-repo/
     config/theme.local                                 ignored
     data/<owner>/<repo>/ledger.jsonl                   tracked
     data/<owner>/<repo>/groups/, not-duplicates.jsonl  tracked
+    data/<owner>/<repo>/briefed-batches/               tracked batch screening checkpoints
     data/<owner>/<repo>/action-proposals/            tracked proposals
     data/<owner>/<repo>/raw|batches|exports/           ignored
     data/<owner>/<repo>/cache|local/                   ignored (includes the per-repo automatic download preference)
-    reports/<owner>/<repo>/<date>.md                   tracked
+    reports/<owner>/<repo>/<date>.md                   tracked report
+    reports/<owner>/<repo>/<date>-batch-<id>-brief.md  tracked batch brief
+    reports/<owner>/<repo>/<date>-master-brief.md      tracked master brief
     .gitignore                               generated tracked
     .triage-install.json                     generated ignored (machine-local: where the tool lives)
 
 ```
 
-The install carries `AGENTS.md` and `CLAUDE.md`, both leading to the same playbook. Decisions, groups, duplicate verdicts, reports and taxonomy are committed. Symlinks, the install marker, working files and cache are ignored; preserve the cache separately when retained evidence depends on it.
+The install carries `AGENTS.md` and `CLAUDE.md`, both leading to the same playbook. Decisions, groups, duplicate verdicts, batch briefing checkpoints, reports and taxonomy are committed. Symlinks, the install marker, working files and cache are ignored; preserve the cache separately when retained evidence depends on it.
 
 A tracked install creates the target repository's `AGENTS.md` when it is missing, even if that repository already has a `CLAUDE.md`; the existing `CLAUDE.md` stays untouched. Editing an existing `AGENTS.md` still asks for confirmation unless you pass `--yes`. Use `--no-agents-md` to skip the target file, or `--agents-md` to add it in solo mode.
 

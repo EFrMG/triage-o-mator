@@ -3,10 +3,12 @@
 Pull the next batch of open items and enrich them with full body text (and, for PRs, diff stats) so an agent has enough context to categorize them without re-fetching anything by hand. By default only untriaged items are selected.
 
 Usage:
-    bin/batch [N] [--kind issue|pr] [--order oldest|newest] [--unlabeled-first] [--include-triaged] [--group ID] [--diff]
+    bin/batch [N] [--kind issue|pr] [--order oldest|newest|updated] [--unlabeled-first] [--include-triaged] [--group ID] [--diff]
     bin/batch --delete BATCH_ID
     bin/batch --remove BATCH_ID --key issue:N [--key pr:M ...]
+    bin/batch --mark-briefed BATCH_ID --brief reports/<owner>/<repo>/<date>-batch-BATCH_ID-brief.md
     bin/batch [N] --cache-mode offline|cache-preferred|refresh [--snapshot ID]
+    bin/batch [N] --include-triaged --unbriefed
 
 Writes:
     data/<owner>/<repo>/batches/<batch_id>.items.jsonl       full context, one item per line, including `duplicate_candidates` (the top title matches from bin/similar, minus pairs already ruled out; leads to check, not proof)
@@ -22,6 +24,8 @@ The template has proposed_labels/action/confidence/reason blanked out; choose on
 
 --delete removes a batch's two working files. Decisions already applied from it stay in the ledger (still stamped with its batch_id); only unapplied proposals in its decisions file are lost.
 
+--mark-briefed records that every member of a batch was screened for a dated batch brief; the brief may contain no highlighted decision. --unbriefed skips members of marked batches, even after their disposable batch files are deleted, and makes the new batch a briefing pass rather than a triage proposal pass. The checkpoint does not review ledger decisions or approve GitHub writes.
+
 The triage-o-mator TUI runs this same script from its Batches screen (n creates, d deletes) and reads both files back, so batches made either way appear in the same list.
 """
 
@@ -33,6 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 import _notdupes
+from _briefed import batch_path, briefed_keys, save_briefed
 from _groups import load_group
 from _storage import atomic_writer
 from _similar import TitleIndex
@@ -50,6 +55,9 @@ def remove_items(batch_id, keys):
     """Drop items from a batch's items and decisions files, rewriting each file whole so a reader never sees half of it."""
     if not BATCH_ID_RE.match(batch_id):
         sys.exit(f"error: {batch_id!r} is not a batch ID (expected e.g. b20260919-000341)")
+
+    if batch_path(batch_id).exists():
+        sys.exit(f"error: batch {batch_id} is already briefed; its screened membership cannot change")
 
     wanted = set()
     for value in keys:
@@ -111,9 +119,9 @@ def main():
     ap.add_argument("--kind", choices=["issue", "pr"], help="restrict to one kind")
     ap.add_argument(
         "--order",
-        choices=["oldest", "newest"],
+        choices=["oldest", "newest", "updated"],
         default="oldest",
-        help="oldest-first clears backlog; newest-first keeps up with new inflow",
+        help="oldest-first clears backlog; newest-first follows creation time; updated-first surfaces recent activity",
     )
     ap.add_argument("--unlabeled-first", action="store_true", help="select items with no observed GitHub labels before labeled items")
     ap.add_argument("--include-triaged", action="store_true", help="include open items that already have a decision, for a label-first pass")
@@ -121,6 +129,9 @@ def main():
     ap.add_argument("--diff", action="store_true", help="include each PR's full diff (one more GitHub call per PR)")
     ap.add_argument("--delete", metavar="BATCH_ID", help="delete a batch's items and decisions files instead of creating one")
     ap.add_argument("--remove", metavar="BATCH_ID", help="drop the --key items from this batch instead of creating one")
+    ap.add_argument("--mark-briefed", metavar="BATCH_ID", help="record that a complete batch was screened into a brief")
+    ap.add_argument("--brief", help="path to the dated batch brief, required with --mark-briefed")
+    ap.add_argument("--unbriefed", action="store_true", help="exclude members of batches already screened into briefs")
     ap.add_argument("--key", action="append", default=[], metavar="KIND:NUMBER", help="with --remove: an item to drop, e.g. issue:12 (repeatable)")
     ap.add_argument("--cache-mode", choices=("offline", "cache-preferred", "refresh"), help="opt into cached evidence; omitted keeps legacy GitHub enrichment")
     ap.add_argument("--snapshot", help="use one fixed snapshot; requires --cache-mode offline and every selected item in that snapshot")
@@ -128,8 +139,11 @@ def main():
     ap.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE)
     ap.add_argument("--request-budget", type=int, default=100, help="maximum requests per selected item in cache mode")
     args = ap.parse_args()
-    if args.remove is not None and args.delete is not None:
+    if sum(value is not None for value in (args.remove, args.delete, args.mark_briefed)) > 1:
         ap.error("choose only one batch operation")
+
+    if bool(args.mark_briefed) != bool(args.brief):
+        ap.error("--mark-briefed and --brief must be used together")
 
     if args.snapshot and args.cache_mode != "offline":
         ap.error("--snapshot requires --cache-mode offline")
@@ -153,11 +167,27 @@ def main():
 
         return
 
+    if args.mark_briefed is not None:
+        if not BATCH_ID_RE.fullmatch(args.mark_briefed):
+            ap.error("invalid batch ID")
+
+        items_path = BATCHES_DIR / f"{args.mark_briefed}.items.jsonl"
+        if not items_path.exists():
+            ap.error(f"no batch {args.mark_briefed} in {BATCHES_DIR}")
+
+        record = save_briefed(args.mark_briefed, [json.loads(line) for line in items_path.read_text().splitlines() if line.strip()], args.brief)
+        print(f"Briefed batch {record['batch_id']}: {len(record['member_keys'])} items screened into {record['brief']}")
+
+        return
+
     if args.n < 1:
         ap.error("batch size must be positive")
 
     ledger = load_ledger()
     candidates = [r for r in ledger if r["state"] == "open" and (args.include_triaged or not has_decision(r))]
+    if args.unbriefed:
+        covered = briefed_keys()
+        candidates = [r for r in candidates if f"{r['kind']}:{r['number']}" not in covered]
     if args.group:
         group = load_group(args.group)
         members = {(m["kind"], m["number"]): m for m in group["members"]}
@@ -166,7 +196,10 @@ def main():
     if args.kind:
         candidates = [r for r in candidates if r["kind"] == args.kind]
 
-    candidates.sort(key=lambda r: r["created_at"], reverse=(args.order == "newest"))
+    if args.order == "updated":
+        candidates.sort(key=lambda r: (r["updated_at"], r["created_at"], r["kind"], r["number"]), reverse=True)
+    else:
+        candidates.sort(key=lambda r: r["created_at"], reverse=(args.order == "newest"))
     if args.unlabeled_first:
         candidates.sort(key=lambda r: bool(r.get("labels")))
     selected = candidates[: args.n]
@@ -203,6 +236,9 @@ def main():
             enriched = enrich_item(dict(rec), include_diff=args.diff)
 
         enriched["duplicate_candidates"] = verdicts.candidates(index, (rec["kind"], rec["number"]), top=CANDIDATES_PER_ITEM)
+        if args.unbriefed:
+            enriched["briefing_batch"] = True
+
         if args.group:
             enriched["group"] = {k: group[k] for k in ("id", "title", "description", "assignee", "status", "revision")}
             enriched["group_member_notes"] = members[(rec["kind"], rec["number"])]["notes"]

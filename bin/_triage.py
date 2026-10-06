@@ -216,11 +216,14 @@ def run_gh(args, **kwargs):
 
 
 def new_batch_id():
-    """Reserve a batch ID by exclusively creating its items file, so two batches started in the same second (e.g. from the TUI and a script) never share, and overwrite, each other's files. A clash gets a -2, -3, ... suffix, which still sorts after the plain ID."""
+    """Reserve a batch ID by exclusively creating its items file, avoiding IDs retained by briefed batch checkpoints after disposable files are deleted."""
     BATCHES_DIR.mkdir(parents=True, exist_ok=True)
     base = "b" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     for n in range(1, 1000):
         batch_id = base if n == 1 else f"{base}-{n}"
+        if (DATA_DIR / "briefed-batches" / f"{batch_id}.json").exists():
+            continue
+
         try:
             (BATCHES_DIR / f"{batch_id}.items.jsonl").open("x").close()
 

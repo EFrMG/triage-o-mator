@@ -17,6 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _groups import list_groups
+from _briefed import briefed_keys, load_records
 from _similar import TitleIndex
 from _notdupes import TitleVerdicts
 from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, has_decision, load_jsonl, load_ledger, load_taxonomy
@@ -40,12 +41,14 @@ def batch_states(by_key):
     states = []
     for items_path in sorted(BATCHES_DIR.glob("*.items.jsonl")):
         batch_id = items_path.name[: -len(".items.jsonl")]
-        keys = [(r["kind"], r["number"]) for r in load_jsonl(items_path)]
+        items = load_jsonl(items_path)
+        keys = [(r["kind"], r["number"]) for r in items]
         rows = load_jsonl(BATCHES_DIR / f"{batch_id}.decisions.jsonl")
         filled = [r for r in rows if r.get("action") or r.get("proposed_labels")]
         waiting = [r for r in filled if not has_decision(by_key.get((r["kind"], r["number"])) or {})]
         done = sum(1 for k in keys if has_decision(by_key.get(k) or {}))
-        states.append(dict(id=batch_id, items=len(keys), filled=len(filled), waiting=len(waiting), done=done))
+        states.append(dict(id=batch_id, items=len(keys), filled=len(filled), waiting=len(waiting), done=done,
+                           briefing=bool(items) and all(r.get("briefing_batch") is True for r in items)))
 
     return states
 
@@ -53,6 +56,8 @@ def batch_states(by_key):
 def suggestions(ledger):
     by_key = {(r["kind"], r["number"]): r for r in ledger}
     open_items = [r for r in ledger if r["state"] == "open"]
+    briefed_batches = load_records()
+    covered_keys = briefed_keys(briefed_batches)
     out = []
 
     def add(who, what, do, why):
@@ -66,8 +71,20 @@ def suggestions(ledger):
         add("agent", "Refresh the ledger from GitHub", "bin/fetch && bin/sync",
             "never synced" if age is None else f"last sync was {age:.0f}h ago")
 
-    for b in batch_states(by_key):
-        if b["filled"] == 0 and b["done"] < b["items"]:
+    batches = batch_states(by_key)
+    for b in batches:
+        if b["items"] == 0:
+            add("human", f"Delete empty batch {b['id']}", f"bin/batch --delete {b['id']}",
+                "no members remain to screen")
+        elif b["briefing"]:
+            if b["id"] not in briefed_batches:
+                add("agent", f"Brief screening batch {b['id']} ({b['items']} items)",
+                    f"prompts/maintainer-brief.md (batch {b['id']}; then bin/batch --mark-briefed {b['id']} --brief reports/{REPO}/<date>-batch-{b['id']}-brief.md)",
+                    "screen every member and include only warranted calls or issue follow-ups; zero is valid")
+            else:
+                add("human", f"Delete briefed batch {b['id']}", f"bin/batch --delete {b['id']} (or d d in the TUI's Batches)",
+                    "the batch screening checkpoint and brief are saved")
+        elif b["filled"] == 0 and b["done"] < b["items"]:
             add("agent", f"Fill in batch {b['id']} ({b['items']} items)", "prompts/auto-triage.md (batch already made: skip creating one)",
                 "its decisions file is still blank")
         elif b["waiting"]:
@@ -75,8 +92,13 @@ def suggestions(ledger):
                 f"TUI: Batches -> {b['id']} (review one by one, or A to apply the rest as unreviewed); or bin/apply data/{REPO}/batches/{b['id']}.decisions.jsonl --only-untriaged",
                 "proposals only reach the review queue once applied")
         elif b["done"] == b["items"]:
-            add("human", f"Delete finished batch {b['id']}", f"bin/batch --delete {b['id']} (or d d in the TUI's Batches)",
-                "every item in it is in the ledger")
+            if b["id"] not in briefed_batches:
+                add("agent", f"Brief finished batch {b['id']} ({b['items']} items)",
+                    f"prompts/maintainer-brief.md (batch {b['id']}; then bin/batch --mark-briefed {b['id']} --brief reports/{REPO}/<date>-batch-{b['id']}-brief.md)",
+                    "screen the whole batch; include warranted calls or issue follow-ups, even if there are none")
+            else:
+                add("human", f"Delete finished batch {b['id']}", f"bin/batch --delete {b['id']} (or d d in the TUI's Batches)",
+                    "every item is in the ledger and the batch has a brief")
 
     pending = [r for r in open_items if has_decision(r) and not r["reviewed"]]
     if pending:
@@ -167,10 +189,22 @@ def suggestions(ledger):
         add("agent", f"Triage the backlog ({len(untriaged)} untriaged open items)", "prompts/auto-triage.md with bin/batch 25",
             "oldest first clears the longest-waiting reports")
 
-    reports = sorted(REPORTS_DIR.glob("*.md"))
-    if not reports or reports[-1].stem != date.today().isoformat():
+    unbriefed_open = [r for r in open_items if f"{r['kind']}:{r['number']}" not in covered_keys]
+    if unbriefed_open and not any(b["id"] not in briefed_batches for b in batches):
+        add("agent", f"Screen the next batch of {len(unbriefed_open)} not-yet-briefed open items",
+            "bin/batch 25 --include-triaged --unbriefed --order updated; prompts/maintainer-brief.md",
+            "each completed batch gets one concise brief, then its members leave the briefing queue")
+
+    master_brief = REPORTS_DIR / f"{date.today().isoformat()}-master-brief.md"
+    if len(briefed_batches) >= 2 and not master_brief.exists():
+        add("agent", f"Polish selected batch briefs ({len(briefed_batches)} available)",
+            "prompts/polish-briefs.md (select two to ten batch briefs)",
+            "surface the most relevant decisions from completed batch passes")
+
+    report = REPORTS_DIR / f"{date.today().isoformat()}.md"
+    if not report.exists():
         add("agent", "Write today's maintainer report", "prompts/maintainer-brief.md (runs bin/report)",
-            "no report yet today" if reports else "no report yet")
+            "no report yet today" if any(REPORTS_DIR.glob("*.md")) else "no report yet")
 
     return out
 

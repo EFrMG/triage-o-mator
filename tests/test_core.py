@@ -579,6 +579,63 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.run_cli("batch", "2", "--include-triaged", "--unlabeled-first")
         newest = next(iter(set((self.root / "data/owner/repo/batches").glob("*.items.jsonl")) - before_batches))
         self.assertEqual({json.loads(line)["number"] for line in newest.read_text().splitlines()}, {1, 2})
+        rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+        for current in rows:
+            current["updated_at"] = "2026-10-06T00:00:00Z" if current["number"] == 1 else "2026-09-22T00:00:00Z"
+
+        ledger_path.write_text("".join(json.dumps(current) + "\n" for current in rows))
+        before_updated = set((self.root / "data/owner/repo/batches").glob("*.items.jsonl"))
+        self.run_cli("batch", "1", "--include-triaged", "--order", "updated")
+        updated = next(iter(set((self.root / "data/owner/repo/batches").glob("*.items.jsonl")) - before_updated))
+        self.assertEqual(json.loads(updated.read_text().splitlines()[0])["number"], 1)
+
+        brief = self.root / "reports/owner/repo" / f"2026-10-06-batch-{batch.name.removesuffix('.items.jsonl')}-brief.md"
+        brief.parent.mkdir(parents=True, exist_ok=True)
+        brief.write_text("# Screened batch\n")
+        self.run_cli("batch", "--mark-briefed", batch.name.removesuffix(".items.jsonl"), "--brief", str(brief))
+        self.run_cli("batch", "--remove", batch.name.removesuffix(".items.jsonl"), "--key", "issue:2", ok=False)
+        self.run_cli("batch", "--delete", batch.name.removesuffix(".items.jsonl"))
+        existing = set((self.root / "data/owner/repo/batches").glob("*.items.jsonl"))
+        next_batch = self.run_cli("batch", "2", "--include-triaged", "--unbriefed")
+        self.assertIn("1 items", next_batch.stdout)
+        new_items = next(iter(set((self.root / "data/owner/repo/batches").glob("*.items.jsonl")) - existing))
+        screened = json.loads(new_items.read_text().splitlines()[0])
+        self.assertEqual(screened["number"], 1)
+        self.assertTrue(screened["briefing_batch"])
+        next_steps = self.json_cli("next", "--json")["suggestions"]
+        self.assertTrue(any(f"Brief screening batch {new_items.name.removesuffix('.items.jsonl')}" in row["what"] for row in next_steps), next_steps)
+
+    def test_finished_batches_need_briefs_before_next_suggests_deletion_and_polish(self):
+        self.sync()
+        batches = self.root / "data/owner/repo/batches"
+        reports = self.root / "reports/owner/repo"
+        batches.mkdir(parents=True, exist_ok=True)
+        reports.mkdir(parents=True, exist_ok=True)
+
+        for number in (1, 2):
+            batch_id = f"b20261006-00000{number}"
+            (batches / f"{batch_id}.items.jsonl").write_text(json.dumps(dict(kind="issue", number=number)) + "\n")
+            (batches / f"{batch_id}.decisions.jsonl").write_text("")
+            self.run_cli("apply", "--number", str(number), "--kind", "issue", "--action", "no-action-needed",
+                         "--reason", "Assessed", "--by", "agent:triage")
+
+        first = self.json_cli("next", "--json")["suggestions"]
+        self.assertTrue(any("Brief finished batch b20261006-000001" in row["what"] for row in first))
+        self.assertFalse(any("Delete finished batch b20261006-000001" in row["what"] for row in first))
+        missing = reports / "2026-10-06-batch-b20261006-000001-brief.md"
+        self.run_cli("batch", "--mark-briefed", "b20261006-000001", "--brief", str(missing), ok=False)
+        self.assertFalse((self.root / "data/owner/repo/briefed-batches/b20261006-000001.json").exists())
+
+        for number in (1, 2):
+            brief = reports / f"2026-10-06-batch-b20261006-00000{number}-brief.md"
+            brief.write_text("# Batch brief\n")
+            self.run_cli("batch", "--mark-briefed", f"b20261006-00000{number}", "--brief", str(brief))
+
+        (reports / f"{datetime.now(timezone.utc).date().isoformat()}.md").write_text("# Report\n")
+        second = self.json_cli("next", "--json")["suggestions"]
+        self.assertTrue(any("Delete finished batch b20261006-000001" in row["what"] for row in second))
+        self.assertTrue(any("Polish selected batch briefs (2 available)" in row["what"] for row in second))
+        self.assertFalse(any("Write today's maintainer report" in row["what"] for row in second))
 
     def test_sync_preserves_proposals(self):
         self.sync()

@@ -51,6 +51,7 @@ GITIGNORE_TAIL = """
 # Local group locking and atomic-write temporary files.
 /data/*/*/groups/.lock
 /data/*/*/groups/.group-*
+/data/*/*/briefed-batches/local/
 
 # Per-checkout UI preference.
 /config/theme.local

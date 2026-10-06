@@ -374,7 +374,7 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 	case m.batches.open:
 		return m.clickBatches(event, repeat)
 	case m.briefs.open:
-		return m.clickBriefs(event, repeat)
+		return m.clickBriefs(event)
 	case m.notifications.open:
 		return m.clickNotifications(event, repeat)
 	case m.attention.open, m.actionHistory.open:

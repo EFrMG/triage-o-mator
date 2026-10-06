@@ -597,7 +597,7 @@ func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) clickBriefs(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
+func (m model) clickBriefs(event tea.Mouse) (tea.Model, tea.Cmd) {
 	if m.briefs.markPreview != nil {
 		return m, nil
 	}
@@ -609,7 +609,7 @@ func (m model) clickBriefs(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
 		if index < 0 {
 			return m, nil
 		}
-		repeat = m.mouseTargetRepeat(fmt.Sprintf("brief-item:%s:%d", m.briefs.items[index].Kind, m.briefs.items[index].Number))
+		repeat := m.mouseTargetRepeat(fmt.Sprintf("brief-item:%s:%d", m.briefs.items[index].Kind, m.briefs.items[index].Number))
 		if m.briefs.cardSelected == index && repeat {
 			return m.handleBriefsKey(mouseKey("enter"))
 		}
@@ -637,7 +637,7 @@ func (m model) clickBriefs(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
 	if index < 0 {
 		return m, nil
 	}
-	repeat = m.mouseTargetRepeat("brief:" + rows[index].ID)
+	repeat := m.mouseTargetRepeat("brief:" + rows[index].ID)
 	if m.briefs.selected[m.briefs.section] != index {
 		m.briefs.selected[m.briefs.section] = index
 		if event.Button != tea.MouseRight {

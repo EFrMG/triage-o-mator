@@ -43,8 +43,6 @@ sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never res
 from _triage import LEDGER_PATH, REPO, TRIAGE_DEFAULTS, action_operation, has_decision, here, load_jsonl, load_ledger, load_taxonomy, now_iso, save_ledger
 from _storage import locked
 
-REQUIRED = {"number", "kind", "action"}
-
 DECISION_FIELDS = ("proposed_labels", "action", "confidence", "reason")
 REVIEW_FIELDS = ("reviewed", "reviewed_by", "reviewed_at")
 
@@ -164,7 +162,7 @@ def main():
 
         if undo:
             decisions = [{"number": args.number, "kind": args.kind}]
-        elif args.approve and (args.action or args.proposed_labels is not None or args.replace_proposed_labels):
+        elif args.action or args.proposed_labels is not None or args.replace_proposed_labels:
             decisions = [
                 {
                     "number": args.number,
@@ -177,19 +175,8 @@ def main():
             ]
         elif args.approve:
             decisions = [{"number": args.number, "kind": args.kind}]
-        elif args.agent_notes is not None and not args.action and args.proposed_labels is None and not args.replace_proposed_labels:
+        elif args.agent_notes is not None:
             decisions = [{"number": args.number, "kind": args.kind, "agent_notes": args.agent_notes, "notes_only": True}]
-        elif args.action or args.proposed_labels is not None or args.replace_proposed_labels:
-            decisions = [
-                {
-                    "number": args.number,
-                    "kind": args.kind,
-                    **({"proposed_labels": args.proposed_labels or []} if args.proposed_labels is not None or args.replace_proposed_labels else {}),
-                    **({"action": args.action} if args.action is not None else {}),
-                    **({"confidence": args.confidence} if args.confidence is not None else {}),
-                    **({"reason": args.reason} if args.reason is not None else {}),
-                }
-            ]
         else:
             sys.exit(
                 "error: --number requires --action, --proposed-label, --approve, or --agent-notes"
@@ -214,7 +201,7 @@ def main():
         by_key = {(r["kind"], r["number"]): r for r in ledger}
 
         ts = now_iso()
-        applied, missing, blank, kept, warnings, nothing = 0, [], [], [], [], []
+        applied, blank, kept, warnings, nothing = 0, [], [], [], []
 
         for d in decisions:
             key = (d.get("kind"), d.get("number"))
@@ -262,11 +249,6 @@ def main():
 
             if "action" not in d:
                 d = {**d, "action": rec.get("action") or ""}
-
-            if not REQUIRED.issubset(d):
-                missing.append(d)
-
-                continue
 
             if not d.get("action") and not d.get("proposed_labels"):
                 blank.append((d["kind"], d["number"]))
@@ -349,9 +331,6 @@ def main():
         print(
             f"Kept {len(kept)} existing decisions (--only-untriaged): {kept[:10]}{' ...' if len(kept) > 10 else ''}"
         )
-
-    if missing:
-        print(f"Skipped {len(missing)} rows missing required fields.")
 
     for w in warnings:
         print(f"warning: {w}")

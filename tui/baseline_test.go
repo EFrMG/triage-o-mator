@@ -419,7 +419,7 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 		t.Fatal("default actions still include labeling or unsupported advice")
 	}
 	custom := Taxonomy{Actions: []string{"request logs", "archive", "escalate-maintainer"}, ActionOperations: map[string]string{"request logs": "comment", "archive": "close"}}
-	if !slices.Equal(custom.SelectableActions(), custom.Actions[:2]) || !(Item{Action: "archive"}).CloseCandidate(custom) || (Item{Action: "request logs"}).CloseCandidate(custom) {
+	if !slices.Equal(custom.SelectableActions(), custom.Actions[:2]) || custom.OperationFor("archive") != "close" || custom.OperationFor("request logs") != "comment" {
 		t.Fatal("custom titles did not retain their concrete GitHub operations")
 	}
 	m.sidebar.selected = settingsIndex
@@ -1812,7 +1812,7 @@ else:
 		}
 	}
 
-	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
+	next, _ = m.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
 	m = next.(model)
 	if !m.comment.open || m.comment.rejectionCheckpoint != strings.Repeat("a", 64) {
 		t.Fatal("d did not open the comment composer for rejection")

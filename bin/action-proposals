@@ -7,7 +7,6 @@ import re
 import subprocess
 import sys
 import uuid
-from contextlib import nullcontext
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -286,8 +285,7 @@ def propose(args, repo):
     path = proposal_path(args.kind, args.number)
     if path.parent.is_symlink():
         raise ValueError("invalid action proposal directory")
-    guard = DATA_DIR / "action-proposals" / f"pr-{args.number}-selection" if args.kind == "pr" else path
-    with (locked(guard) if args.kind == "pr" else nullcontext()), locked(path):
+    with locked(path):
         if path.exists():
             previous = load(path, repo)
             receipt = DATA_DIR / "writes" / (previous["request_id"] + ".json")

@@ -105,8 +105,7 @@ func automationToggleCmd(root, repo string, request uint64, before, after bool) 
 			msg.err = fmt.Errorf("labeling policy changed; refresh Automations")
 			return msg
 		}
-		out, err = runScript(root, "item-labels", operation, "--expected-repo", repo, "--apply", "--preview-sha256", plan.PreviewSHA256)
-		if err != nil {
+		if _, err = runScript(root, "item-labels", operation, "--expected-repo", repo, "--apply", "--preview-sha256", plan.PreviewSHA256); err != nil {
 			msg.err = err
 			return msg
 		}

@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _storage import atomic_writer, locked
-from _triage import CONFIG_DIR, DATA_DIR, REPO, has_decision, load_ledger, load_taxonomy, now_iso
+from _triage import CONFIG_DIR, DATA_DIR, REPO, load_ledger, load_taxonomy, now_iso
 
 
 POLICY_PATH = CONFIG_DIR / "label-application.json"
@@ -169,7 +169,7 @@ def candidates(saved, limit, selected_keys=()):
         if selected and key not in selected:
             continue
         prior = saved["items"].get(key, {})
-        if row.get("state") != "open" or (not has_decision(row) and not (prior.get("managed") or prior.get("pending"))):
+        if row.get("state") != "open":
             continue
         if row.get("proposed_labels") or prior.get("managed") or prior.get("pending"):
             chosen.append((key, row))

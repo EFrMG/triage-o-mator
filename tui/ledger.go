@@ -111,10 +111,6 @@ func (i Item) MergeReadyHighConfidence() bool {
 	return i.Kind == "pr" && slices.Contains(i.ProposedLabels, readyLabel) && i.Confidence == "high" && !i.Reviewed
 }
 
-func (i Item) CloseCandidate(taxonomy Taxonomy) bool {
-	return !i.Reviewed && taxonomy.OperationFor(i.Action) == "close"
-}
-
 // LoadLedger reads repo's ledger, data/<owner>/<repo>/ledger.jsonl.
 // Missing file -> empty slice.
 func LoadLedger(installRoot, repo string) ([]Item, error) {

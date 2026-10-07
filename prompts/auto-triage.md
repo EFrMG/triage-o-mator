@@ -2,7 +2,7 @@
 
 **Use when** someone asks to "triage 25 issues", "run a triage pass", "triage today's new PRs", "fill in batch b2026…", or `bin/next` suggests it.
 
-**Produces** proposed `proposed_labels` / `action` / `confidence` / `reason` (and, where there is more to say, `agent_notes`) for a batch of untriaged items, applied to the ledger as **unreviewed** decisions for a human to confirm. `proposed_labels` is a list of GitHub label names, separate from the item's observed `labels`; saving it does not write labels to GitHub. A separately enabled [labeling pass](label-items.md) may apply those labels before ledger review. You never mark anything reviewed; see [PLAYBOOK.md](PLAYBOOK.md), "Ground rules".
+**Produces** attributed `proposed_labels` / `action` / `confidence` / `reason` (and, where there is more to say, `agent_notes`) for a batch of untriaged items. `proposed_labels` is a list of GitHub label names, separate from the item's observed `labels`; saving it does not write labels to GitHub. A separately enabled [labeling pass](label-items.md) may apply them. An item enters Pending review only through an explicit, reasoned `bin/review-request mark`; see [PLAYBOOK.md](PLAYBOOK.md), "Ground rules".
 
 For a large backlog, finish one bounded batch and record its ID, applied keys, skipped keys and evidence gaps before creating the next. `bin/batch` selects untriaged open items by default, so repeated passes can work through them; the count in `bin/next` is a lead, not a coverage checkpoint. Batch briefing has its own screening checkpoint in [maintainer-brief.md](maintainer-brief.md).
 
@@ -42,7 +42,7 @@ Use only label names in the observed catalog and active actions in `config/taxon
 
 1. Fill in `data/<owner>/<repo>/batches/<id>.decisions.jsonl`: one JSON object per line, same order, same keys (`number`, `kind`, `proposed_labels`, `action`, `confidence`, `reason`, `agent_notes`, `proposed_by`). Do not edit the items file. A label-first pass may leave `action` blank until later assessment; `bin/apply` skips rows with both no proposed labels and no action. Use `[]` for no proposed labels, and never invent a name absent from the catalog.
 2. Check it: `bin/apply <file> --only-untriaged --dry-run`. Fix every unrecognized or unmapped action warning.
-3. Apply: `bin/apply <file> --only-untriaged`. `--only-untriaged` makes sure you never overwrite a decision another contributor saved in the meantime. Never pass `--reviewed`.
+3. Apply: `bin/apply <file> --only-untriaged`. `--only-untriaged` makes sure you never overwrite a decision another contributor saved in the meantime. Flag a selected item separately with `bin/review-request` only when it needs a person's attention; a public security-sensitive report or a consequential project decision may justify that, but ordinary triage does not.
    - If the person who asked wants to check the proposals first, skip this step. They'll see them in the TUI's **Batches** screen.
 4. Don't commit. The ledger diff belongs to the contributor who asked; they review it and commit it.
 

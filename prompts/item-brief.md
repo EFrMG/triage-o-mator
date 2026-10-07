@@ -38,8 +38,8 @@ Keep the body human-facing. Do not append an audit document, snapshot manifest o
 <Strongest counterargument, gap and specific check.>
 ```
 
-An Item Score describes quality and readiness, not priority or approval. A proposed ledger decision remains unreviewed until a human confirms it; even a reviewed decision does not authorize a GitHub write.
+An Item Score describes quality and readiness, not priority or approval. A brief does not add an item to Pending review or authorize a GitHub write.
 
 ## 3. Hand over
 
-Save the brief without committing it. Reply with its path, recommendation and material uncertainty. The contributor who asked reviews and commits it. Do not edit the ledger, code or PR diff, mark a decision reviewed, or publish to GitHub from this playbook.
+Save the brief without committing it. If its evidence makes the item crucial to a current project decision or identifies a public security-sensitive report needing attention, use `bin/review-request mark --expected-repo OWNER/REPO --kind KIND --number N --by agent:NAME --reason 'Short reason'`. Keep exploit details out of the flag reason, and do not mark routine briefs. Reply with the brief's path, recommendation, material uncertainty and whether you flagged the item. The contributor who asked reviews and commits it. Do not edit the triage decision, code or PR diff, or publish to GitHub from this playbook.

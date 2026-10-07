@@ -1,6 +1,6 @@
 # Item Score
 
-Item Score is a local, source-bound 0–5 assessment of an issue's clarity and actionability or a PR's correctness, safeguards and reviewability. It is separate from the item's priority, triage confidence, evidence coverage, human review and approval of an exact GitHub write. A high score never means a PR may be merged or an issue may be closed.
+Item Score is a local, source-bound 0–5 assessment of an issue's clarity and actionability or a PR's correctness, safeguards and reviewability. It is separate from the item's priority, triage confidence, evidence coverage, explicit Pending review and approval of an exact GitHub write. A high score never means a PR may be merged or an issue may be closed.
 
 The [scoring playbook](../prompts/score-items.md) gives the point anchors. Issue points are clarity (0–2), support (0–2) and actionability (0–1). PR points are correctness (0–2), safeguards (0–2) and reviewability (0–1). The score's reason must explain each mark, the strongest concern and any gap. A suggestion names one next check or decision; it does not change the ledger action.
 
@@ -20,4 +20,4 @@ bin/item-score --expected-repo OWNER/REPO set --kind issue --number N --unassess
 bin/item-score --expected-repo OWNER/REPO show --kind issue --number N
 ```
 
-The score is stored as its own `item_score` object in the ledger, with rubric version, dimension marks, reason, suggestion, snapshot ID, source revision and assessor. It does not alter `action`, `confidence`, `reviewed` or action proposals. The TUI aligns the score at the right of item card and item view titles, shows **Score —** for unassessed items, and colors 0–2 red, 3 yellow and 4–5 green. The item form shows the assessor and three separate dimension explanations; the full saved reason and source remain available through `bin/item-score show` and copied item context. Settings → Automations → Scoring copies a bounded local pass prompt; it is not a background process or a GitHub automation setting.
+The score is stored as its own `item_score` object in the ledger, with rubric version, dimension marks, reason, suggestion, snapshot ID, source revision and assessor. It does not alter `action`, `confidence`, an explicit Pending review request or action proposals. The TUI aligns the score at the right of item card and item view titles, shows **Score —** for unassessed items, and colors 0–2 red, 3 yellow and 4–5 green. The item form shows the assessor and three separate dimension explanations; the full saved reason and source remain available through `bin/item-score show` and copied item context. Settings → Automations → Scoring copies a bounded local pass prompt; it is not a background process or a GitHub automation setting.

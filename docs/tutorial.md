@@ -9,18 +9,18 @@ cd /path/to/your/repository
 ./triage-o-mator/bin/triage-o-mator
 ```
 
-Saves, approvals and group edits change your repository's git-tracked ledger and groups for real. To practice, work on a throwaway branch (`git switch -c tutorial`) and drop it afterwards.
+Decision saves, review requests and group edits change your repository's git-tracked ledger and groups for real. To practice, work on a throwaway branch (`git switch -c tutorial`) and drop it afterwards.
 
 ## A focused review loop
 
 - **Human first:** Record a decision or notes for a named PR ([step 5](#5-record-a-decision)). Ask an agent to assess it with current `item-context` and selected evidence using the [closure prompt](../prompts/recommend-closure.md). It reports why the PR should stay open or saves a closure proposal. In **Notifications**, inspect the exact comment and context, edit with `e`, reject with `d`, or review and approve with `a`. The next agent pass reads any rejection.
 - **Agent first:** Ask an agent to prepare a focused draft group. Edit it in **Groups**, then use `y` for ticked or hovered members, or `Y` for all, to copy a handoff. The agent reads a fresh export and assesses the selected members, including already-triaged ones. Review any resulting PR proposals in **Notifications**.
 
-Group `ready`, ledger `reviewed` and approval to publish an exact GitHub action are separate choices. Changed guidance requires a fresh proposal and review. A saved write attempt needs [reconciliation](comment-plus.md#saved-action-proposals) before another action.
+Group `ready`, an explicit Pending review request and approval to publish an exact GitHub action are separate choices. Changed guidance requires a fresh proposal and review. A saved write attempt needs [reconciliation](comment-plus.md#saved-action-proposals) before another action.
 
 ## 1. Start from the overview
 
-- The overview shows triage and review progress and suggestions from `bin/next`, marked `[agent]` or `[human]` according to who should do them.
+- The overview shows open triage progress, the number of explicit Pending review requests and suggestions from `bin/next`, marked `[agent]` or `[human]` according to who should do them.
 - `j`/`k` move, `Enter` opens, and `Esc` goes back. The breadcrumb in the top border shows where you are.
 - `g`/`G` jump to the top or bottom; `Ctrl-D`/`Ctrl-U` move half a page. `h`/`l` or the arrow keys go back or open the selection.
 - `t` opens the theme picker, where `/` searches the theme names.
@@ -34,11 +34,11 @@ Terminals smaller than 60×24 show a resize prompt.
 
 - `r` fetches changed issues and PRs from GitHub and syncs them into the ledger. The app also checks tracked comments during this normal refresh.
 - `R` performs a full fetch. An incremental fetch cannot detect an issue or PR that was deleted or transferred; the next full fetch, run automatically at least daily or manually with `R`, marks items missing from the open list closed.
-- Refreshes are read-only against GitHub and preserve local decisions and review history.
+- Refreshes are read-only against GitHub and preserve local decisions and Pending review requests.
 
 ## 3. Choose what to work on
 
-- The sidebar has lists for untriaged items, merge-ready PRs, and all items. Batches, groups, possible duplicates, Notifications, Settings, and repository switching follow them. Notifications also gathers suggested actions before an exact proposal exists.
+- The sidebar has lists for untriaged items, explicitly Pending review items, merge-ready PRs, and all items. Pending review can include closed items. Batches, groups, possible duplicates, Notifications, Settings, and repository switching follow them. Notifications also gathers suggested actions before an exact proposal exists.
 - Open **Untriaged**, then press `i` to cycle between issues, PRs, and both, or `O` to reverse the order between oldest and newest. The title and breadcrumb show both active choices.
 - Open **Batches** instead when you want to work through a prepared selection. Use `j`/`k` and `Enter` to select an item in either list.
 - `/` searches an item list by title words or `#number`.
@@ -62,8 +62,7 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 - `Tab`/`Shift-Tab` or `J`/`K` move between fields. On a choice, `l` opens all values; select with `Enter` or `l`, or close the list with `Esc` or `h`. Printable keys remain text while editing.
 - In most forms, `Ctrl-S` submits from any field; `Esc` cancels.
 - `s` saves through `bin/apply`, attributed to your `git config user.name`. An unchanged placeholder decision or an empty reason needs a second `s`. After saving, you return to the list on the next item.
-- `S` saves and approves when you are ready to confirm the decision yourself. It records your decision and human review together and returns to the list. Untouched defaults or an empty reason need a second `S`; this shortcut has no GitHub side effects.
-- While typing the reason, `Enter` saves and approves. `s` and `S` are ordinary letters there; to save for later review instead, press `Tab` then `s`. `Ctrl-S` remains an optional save-for-review alias while typing.
+- While typing the reason, `Enter` saves. `s` is an ordinary letter there; `Ctrl-S` also saves while typing.
 - Unsaved edits are kept as drafts while you look at other items, marked `unsaved` in yellow in the lists; `q` warns before discarding them.
 
 ## 6. Let an agent prepare a batch
@@ -71,22 +70,23 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 - On any screen, `y` copies what is in front of you as Markdown: the item you have open, the ones you ticked, or the one under the cursor. `Y` copies the whole screen's worth, such as a list, batch, or group. If no clipboard tool is available, the status line shows the export file it wrote instead.
 - Paste that context into your agent's chat and ask it to investigate, or ask it to "triage 10 items but don't apply them, I'll check them in the TUI." The copied block names the repository, install, and commands needed to read more.
 - Open the result under **Batches**. Each item is prefilled with the agent's proposal and notes.
-- `s` saves a proposal for review, including any changes you make. `S` saves and approves a proposal you have checked. An unchanged proposal retains its original author, with you recorded as reviewer; a changed proposal becomes your revised decision. Agent notes are preserved either way.
-- `A` twice applies every remaining proposal as an unreviewed agent decision. Already-triaged items are kept, and the applied calls remain available in **All Items**.
+- `s` saves a proposal, including any changes you make. An unchanged proposal retains its original author; a changed proposal becomes your revised decision. Agent notes are preserved either way.
+- `A` twice applies every remaining proposal as an attributed local agent decision. Already-triaged items are kept, and the applied calls remain available in **All Items**.
 - `n` in **Batches** makes a new batch; `Enter` on its last field creates it.
 - In the new-batch form, choose a group to restrict the batch to that group's untriaged open members.
 - `d` twice deletes a finished batch. Decisions already recorded in the ledger remain; unapplied proposals are lost. Batch files are ignored working copies, so Git cannot restore them.
 
-## 7. Review proposed decisions
+## 7. Use Pending review for explicit attention
 
-Human review distinguishes an agent's proposal from a decision you stand behind. Check the recommendation, its evidence, and any uncertainty before approving it. You can save and approve your own decision with `S`; a second reviewer is not required.
+Saving a triage decision does not put it in Pending review. An agent or person marks a named item with a short reason when a consequential project choice, a brief finding or a public security-sensitive report needs human attention:
 
-A saved decision is a proposed call until a human marks it reviewed. Review records the confirmation in the ledger; it does not label, comment on, close, approve, or merge anything on GitHub. Both unreviewed and reviewed calls remain available in **All Items** and their groups; `bin/report` also lists reviewed calls under **Human-reviewed, ready to act**. **Settings → Automations → Labeling** controls whether an agent may run the separate proposed-label pass for this repository. It is ON by default; press `y` on its card to copy the agent prompt, or toggle it OFF with Enter. The separate [Item Score](item-score.md) assesses an item's quality/readiness from saved evidence; press `y` on Scoring to copy its bounded pass prompt.
+```sh
+bin/review-request mark --expected-repo OWNER/REPO --kind issue --number 123 --by agent:NAME --reason 'Maintainer decision needed'
+```
 
-- In **All Items**, `a` marks the saved decision in front of you reviewed. This confirms the ledger call; it does not approve a GitHub write. Search for a named item, or use `bin/export-csv --pending-review` for a larger review pass.
-- If the form has unsaved edits, `a` warns that it will approve the saved decision. Use `S` to save and approve the edited call together, or `s` to save it for later review. Editing a reviewed decision later removes its review because the confirmation applied to the old call.
-- `u` undoes one step: first the approval, then the decision. Right after `a`, it acts on the item you just approved.
-- `Space` ticks items in any list, so `a`, `u`, and other actions work on all of them at once.
+Keep exploit details out of the flag reason. The **Pending review** tab lists flagged items and their reasons, including items with no triage decision and closed items. Press `a` twice on one or up to 20 ticked items to clear their requests. Clearing a flag is not approval of a triage call or GitHub write. An agent may clear only its own request through `bin/review-request clear`; a person may clear any request. `bin/export-csv --pending-review` exports the currently flagged rows for inspection; change the flag through its owning command.
+
+`u` twice clears a saved decision while keeping notes and any explicit Pending review request. **Settings → Automations → Labeling** controls the separate proposed-label pass and is ON by default. **Hold actions for Pending review** defaults to OFF; turn it ON if flagged items should stage otherwise executable action proposals for a person. The separate [Item Score](item-score.md) assesses an item's quality and readiness from saved evidence; press `y` on Scoring to copy its bounded pass prompt.
 
 ## 8. Resolve likely duplicates
 
@@ -126,15 +126,15 @@ Counts describe saved outcomes, not complete or current coverage. Custom corpus 
 - On a single closure proposal, `a` prepares exact review after local context loads; press `a` again to publish. On the list, tick PR closures with `Space` and press `a` to review the selected set, or `A` to review all active closures, including viewed ones. One selected closure opens the shared action reader; for two or more, press the same review key again to approve the batch. An uncertain outcome stops execution. On a pending proposal, `d` opens the Comments floating window for an optional rejection reason, while `D` opens it directly in `$EDITOR`. After editing, press `Ctrl-S` to reject the proposal and dismiss its notification together. `Esc` cancels before submission. Rejection is attributed and shared, leaves the proposal in history, and prevents approval; an empty reason is allowed. On other notifications, `d` only dismisses the local presentation.
 - Press `e` on a single pending closure proposal to edit its exact comment before approval. `Ctrl-E` opens the draft in `$EDITOR`, and `Ctrl-S` saves the replacement. A failed save keeps the draft. Saving returns to the new proposal for review; an older approval or selected-set plan cannot execute it. The selected evidence and human context remain pinned, and a changed context or prior write attempt stops the edit.
 
-Opening the notification list and retained cards makes no GitHub request. Reading does not mark activity viewed, resolve an appeal, or approve a decision. A refreshed PR and its retained card can describe different moments.
+Opening the notification list and retained cards makes no GitHub request. Reading does not mark activity viewed, resolve an appeal, or clear a Pending review request. A refreshed PR and its retained card can describe different moments.
 
 After explicitly enrolling and polling a closed-PR watch through [the watch commands](appeal-evidence.md#explicit-closed-pr-watches), its saved activity also appears here. Check the original rationale, observed state, source gaps, and last successful check together through the [offline CLI](appeal-evidence.md#needs-attention-bounded-offline-readers) when a full reassessment is needed. Activity is a review lead, not a confirmed appeal.
 
 For a requested reassessment from imported closure history through explicit enrollment and source review, follow [review-appeal](../prompts/review-appeal.md). No replacement PR is required; the workflow reports a local reassessment and leaves GitHub actions to separately authorized work.
 
-## 12. Hand reviewed work to maintainers
+## 12. Hand selected work to maintainers
 
-- `bin/report` gathers ready groups and individual human-reviewed decisions. An agent following [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) can turn that report into a concise maintainer brief.
+- `bin/report` gathers ready groups, explicit Pending review requests and suggested actions. An agent following [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) can turn that report into a concise maintainer brief.
 - To screen the backlog for brief-worthy items, an agent can create a briefing batch with `bin/batch 25 --include-triaged --unbriefed --order updated`, inspect all its members, and save one dated batch brief. `bin/batch --mark-briefed ID --brief reports/<owner>/<repo>/<date>-batch-ID-brief.md` then records the whole batch as screened, even when the brief names no item. Another agent can use `--unbriefed` to continue from the remaining items. Add `--cache-mode offline` when the evidence is already saved and no GitHub read is wanted.
 - [`prompts/polish-briefs.md`](../prompts/polish-briefs.md) takes a selected set of batch briefs and writes a short master brief. Writing and marking briefs uses the agent playbooks and CLI.
 - **Briefs** shows saved Markdown for the selected repository in **Master**, **Items**, and **Groups & batches**; group briefs appear above batch briefs. Use `H`/`L` or `1`–`3` to choose a section, `j`/`k` to choose a brief, and `Enter` to read it. In a brief, `Enter` or `l` lists its linked local issues and PRs; opening a card shows the item, and `Esc` returns to the brief. On the brief list, `Space` ticks briefs across sections and `d` previews each filename changing from `NAME.md` to `NAME_READ.md`; press `d` again to confirm or `Esc` to cancel. A read-marked brief stays on disk but leaves all three menus. `r` reloads saved files. For a deeper issue or PR case with code excerpts and a recommendation, follow [`prompts/item-brief.md`](../prompts/item-brief.md).

@@ -1,6 +1,6 @@
 # Score selected items
 
-**Use when** someone asks for a bounded Item Score pass on named issues, PRs or a selected batch. Read [PLAYBOOK.md](PLAYBOOK.md) first. This pass writes only local `item_score` records through `bin/item-score`; it never changes a triage decision, marks it reviewed, or acts on GitHub.
+**Use when** someone asks for a bounded Item Score pass on named issues, PRs or a selected batch. Read [PLAYBOOK.md](PLAYBOOK.md) first. This pass writes only local `item_score` records through `bin/item-score`; it never changes a triage decision, adds an item to Pending review, or acts on GitHub.
 
 ## 1. Fix the scope and evidence
 
@@ -8,7 +8,7 @@ Use the named items or one existing batch as the scope. Score at most 20 keys in
 
 ## 2. Apply the 0–5 quality/readiness rubric
 
-Score the item's own presentation and proposed solution at the selected revision. Each dimension needs a short reason. A high score means the item is well formed and ready for a maintainer decision; it does not mean high priority, high triage confidence, complete evidence, human review or permission to write on GitHub.
+Score the item's own presentation and proposed solution at the selected revision. Each dimension needs a short reason. A high score means the item is well formed and ready for a maintainer decision; it does not mean high priority, high triage confidence, complete evidence, an explicit Pending review request or permission to write on GitHub.
 
 | Issue dimension | 0                                                      | 1                                                                    | 2                                                                                                                 |
 | --------------- | ------------------------------------------------------ | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -30,4 +30,4 @@ Use **unassessed** when the issue body or PR diff is missing, corrupt, partial o
 
 For each numeric result, use `bin/item-score --expected-repo OWNER/REPO set --kind issue|pr --number N --snapshot ID --by NAME --reason '...' --suggestion '...'` with the issue flags `--clarity 0..2 --support 0..2 --actionability 0..1`, or the PR flags `--correctness 0..2 --safeguards 0..2 --reviewability 0..1`. Write the reason as one sentence per dimension, in rubric order, starting `Clarity 1: ... Support 1: ... Actionability 1: ...` for issues or the corresponding PR names and marks. Put a strongest contrary fact in the relevant dimension sentence; put any separate coverage note after the three sentences. This lets the TUI show one concise explanation per dimension. The suggestion names one next check or decision, never an automatic action. Use `--unassessed --reason '...'` without dimensions or snapshot when the gate fails. The script verifies immutable evidence and writes under the ledger lock.
 
-Report a table of item, score or unassessed, short reason, snapshot/revision, gap and suggested next check. For a multi-pass batch, also report its total, completed and remaining keys; an unassessed result counts as processed but preserves its evidence gap. Distinguish a score from the saved triage decision, human review and any separate exact GitHub action approval. Do not change code or PR diffs.
+Report a table of item, score or unassessed, short reason, snapshot/revision, gap and suggested next check. For a multi-pass batch, also report its total, completed and remaining keys; an unassessed result counts as processed but preserves its evidence gap. Distinguish a score from the saved triage decision, explicit Pending review and any separate exact GitHub action approval. Do not change code or PR diffs.

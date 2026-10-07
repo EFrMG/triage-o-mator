@@ -1,8 +1,8 @@
 # Review groups
 
-A group is a named set of issues and PRs with shared context and individual membership notes. Items can belong to several groups, while their proposed labels, recommendations, confidence, and human review status remain in the item ledger.
+A group is a named set of issues and PRs with shared context and individual membership notes. Items can belong to several groups, while their proposed labels, recommendations, confidence, and explicit Pending review request remain in the item ledger.
 
-Groups are stored as one JSON file per group under `data/<owner>/<repo>/groups/`. These files are permanent project data: include them in your normal Git review and commit workflow. Exported packets in `data/<owner>/<repo>/exports/` are disposable snapshots that can be regenerated. Creating a group or setting it to `ready` never changes any item's decision or approval.
+Groups are stored as one JSON file per group under `data/<owner>/<repo>/groups/`. These files are permanent project data: include them in your normal Git review and commit workflow. Exported packets in `data/<owner>/<repo>/exports/` are disposable snapshots that can be regenerated. Creating a group or setting it to `ready` never changes any item's decision or explicit Pending review request.
 
 ## From draft to maintainers
 
@@ -11,7 +11,7 @@ Groups are how organized work reaches lead maintainers. The intended flow is:
 1. **Draft:** a contributor or an agent following [`prompts/organize-groups.md`](../prompts/organize-groups.md) gathers items behind one decision. The description gives the question, recommendation and evidence; member notes state each item's role.
 2. **Review and hand back:** the contributor edits the draft and selects members with `y` or `Y` in **Groups**. The copied handoff points the agent to a fresh `bin/group export GROUP_ID --format json`. The agent reads current guidance and earlier objections, then reports a no-action outcome or prepares an explained closure proposal for a selected PR. Already-triaged members remain in scope when selected.
 3. **Ready:** a contributor may set a checked group `ready` for maintainers. This does not review its members or approve a later GitHub action. Agents leave their prepared groups in `draft`.
-4. **Maintainers:** `bin/report` lists ready groups first and flags unreviewed members. [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) gives a short overview or group brief for a decision; `bin/group export` gives the packet. Saved group briefs appear above batch briefs in the TUI's **Briefs → Groups & batches** view.
+4. **Maintainers:** `bin/report` lists ready groups first and shows members explicitly Pending review. [`prompts/maintainer-brief.md`](../prompts/maintainer-brief.md) gives a short overview or group brief for a decision; `bin/group export` gives the packet. Saved group briefs appear above batch briefs in the TUI's **Briefs → Groups & batches** view.
 5. **Archived:** after the decision, archive the group for reference. Delete only mistaken groups.
 
 ## TUI behavior
@@ -52,7 +52,7 @@ For a mistaken group only, run `bin/group show GROUP_ID` to get its current revi
 
 `bin/batch --group` selects only that group's untriaged open items, respecting the existing size, kind, and ordering filters. The enriched context includes the group title, description, assignee, status, revision, and membership notes; decision templates and `bin/apply` remain unchanged. `bin/report` includes group summaries.
 
-`export --enrich` fetches bodies and comments; `--diff` implies enrichment and adds PR diffs. These remain read-only GitHub calls. Without those flags, exports work offline and use current ledger facts. Missing ledger references are explicitly marked, not silently dropped. A packet contains all members, including closed and reviewed items.
+`export --enrich` fetches bodies and comments; `--diff` implies enrichment and adds PR diffs. These remain read-only GitHub calls. Without those flags, exports work offline and use current ledger facts. Missing ledger references are explicitly marked, not silently dropped. A packet contains all members, including closed items and members Pending review.
 
 Each exported item also carries its local context revision, projected ledger guidance and IDs of its relevant non-archived groups. The selected group's notes remain in `group`; any other relevant groups appear once in `related_groups`, with their revisions, membership notes and attribution. Markdown shows the revisions and other group guidance without repeating shared notes for every member, and omits empty optional ledger fields; JSON preserves the complete structured packet. This context uses local records only, including when explicit enrichment is requested; a saved packet does not claim that later edits or GitHub activity were included.
 

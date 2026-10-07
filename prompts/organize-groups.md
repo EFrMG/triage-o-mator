@@ -2,7 +2,7 @@
 
 **Use when** someone asks to "organize groups", "prepare something maintainers can decide on", "group the duplicates of #N", "collect everything about suspend", or `bin/next` suggests it. For a maintainer's edited group handed back for proposals, follow [the selected-member handoff](#after-review-prepare-proposals-for-selected-members) below.
 
-**Produces** draft review groups (`data/<owner>/<repo>/groups/*.json`, via `bin/group`). Each one gathers related issues and PRs around **one decision** a lead maintainer can make in a single sitting, with the evidence already laid out. Groups never change item decisions or approval, and you never mark a group `ready` or delete one (`bin/group delete`): a contributor does both, after checking the group (see `docs/groups.md`). If a group you made is wrong, fix it in place or say so; removing a record someone else may be working from is theirs to decide. An edited group handoff produces recommendations for its explicitly selected members, not a change to the group's status.
+**Produces** draft review groups (`data/<owner>/<repo>/groups/*.json`, via `bin/group`). Each one gathers related issues and PRs around **one decision** a lead maintainer can make in a single sitting, with the evidence already laid out. Groups never change item decisions or explicit Pending review requests, and you never mark a group `ready` or delete one (`bin/group delete`): a contributor does both, after checking the group (see `docs/groups.md`). If a group you made is wrong, fix it in place or say so; removing a record someone else may be working from is theirs to decide. An edited group handoff produces recommendations for its explicitly selected members, not a change to the group's status.
 
 ## What a good group looks like
 
@@ -42,7 +42,7 @@ Titles only get you leads. Read each selected candidate's local guidance with `b
 
   ```
   Decision needed: <one question>.
-  Recommendation (agent, unreviewed): <what you'd do and why, one or two sentences>.
+  Recommendation (agent): <what you'd do and why, one or two sentences>.
   Evidence: <the facts that matter: versions, who tested what, what maintainers already said>.
   Suggested order: read #A first, then #B.
   ```
@@ -94,4 +94,4 @@ A contributor may edit the group and copy a proposal handoff from the TUI's Grou
 
 For each selected member, compare the current decision and reviewer notes with the group guidance. An earlier rejection, even without a reason, is feedback to address rather than a fresh chance to make the same suggestion. A recorded write outcome reports what happened to an action, not whether its reasoning was sound. If human guidance conflicts, show the disagreement and hold the proposal until a maintainer resolves it through an attributed ledger decision or group member note. Explain that resolution in any subsequent proposal; neither recency nor group status decides the conflict.
 
-For each selected PR, follow [Recommend PRs for closure](recommend-closure.md) with the exported `GROUP_ID` and all member checkpoints. Inspect selected evidence within your bounded budget, report gaps and prepare an explained closure proposal only when justified. For a selected issue, or a PR that should remain open, report the reason and evidence or uncertainty in the handoff without creating an executable proposal. Leave an agent-prepared group in `draft`; a person chooses `ready`, reviews ledger decisions and separately approves any exact GitHub action.
+For each selected PR, follow [Recommend PRs for closure](recommend-closure.md) with the exported `GROUP_ID` and all member checkpoints. Inspect selected evidence within your bounded budget, report gaps and prepare an explained closure proposal only when justified. For a selected issue, or a PR that should remain open, report the reason and evidence or uncertainty in the handoff without creating an executable proposal. Leave an agent-prepared group in `draft`; a person chooses `ready` and separately approves any exact GitHub action.

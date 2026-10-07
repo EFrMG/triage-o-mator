@@ -8,17 +8,17 @@ Well, it is not as productive when the Issues and Pull Requests pile up. Maintai
 
 Tooling to work through a GitHub issue / PR backlog too large for one person to read cold: a terminal UI, `triage-o-mator`, on top of a set of small scripts that do the actual work.
 
-The backlog gets a first pass of triage done in batches, by you or by an AI Agent, and whoever's triaging gets a fast, git-tracked way to check and correct that first pass before anyone acts on it.
+The backlog gets a first pass of triage done in batches, by you or by an AI Agent. Saved calls, explicit requests for human attention, and action proposals remain separate records.
 
 It reads issues and PRs via `gh` and writes triage decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI; publishing defaults to dry-run and never follows automatically from a triage decision.
 
 > Developed with the [omacom/omarchy](https://github.com/omacom/omarchy) backlog in mind, while supporting other GitHub repositories. Omarchy is a public proof-of-concept target, not an existing deployment.
 
-One installs it **into the repository you triage**: this checkout provides the program, while each target repository own `triage-o-mator/`, directory with its ledger, groups, automated proposals, reports and taxonomy. Reviewed decisions and group guidance can travel through ordinary Git pull requests. Batches and evidence caches are local working data. Using it solo is also possible.
+One installs it **into the repository you triage**: this checkout provides the program, while each target repository owns a `triage-o-mator/` directory with its ledger, groups, automated proposals, reports and taxonomy. Decisions, review requests and group guidance can travel through ordinary Git pull requests. Batches and evidence caches are local working data. Using it solo is also possible.
 
 ## How it works
 
-The ledger records local decisions and human review. Groups collect related items; the cache keeps versioned GitHub data for offline analysis. An agent reads current guidance and evidence before explaining a recommendation or saving an exact action proposal.
+The ledger records local decisions and explicit Pending review requests. Groups collect related items; the cache keeps versioned GitHub data for offline analysis. An agent reads current guidance and evidence before explaining a recommendation or saving an exact action proposal.
 
 ```mermaid
 flowchart LR
@@ -35,7 +35,7 @@ flowchart LR
 
 **Notifications** shows the target, comment, human guidance and evidence gaps for a staged proposal. A reviewer can edit, reject with an optional attributed reason, or approve the exact GitHub write. A separately enabled repository action pass can execute an eligible proposal after its own preview and rechecks. Rejection stays available to the next agent pass; changed guidance requires a fresh proposal and review.
 
-Group `ready`, ledger `reviewed`, and authorization for a GitHub write are separate states.
+Group `ready`, an item's Pending review request, and authorization for a GitHub write are separate states.
 
 An item first enters the ledger when observed open. Later syncs retain its row after closure and preserve its decision history.
 
@@ -63,41 +63,25 @@ Mouse controls work alongside the keyboard keys.
 
 0. **Get oriented and refresh.** The overview shows the current repository, triage and review progress, and suggestions from `bin/next`. Refresh changed issues and PRs, or run a full refresh when needed. This does not overwrite local decisions.
 
-![Overview and backlog refresh](captures/flow-0.webp)
-
 1. **Choose and read the work.** Open **Untriaged** or a prepared **Batch**; filter issues and PRs, change the age order, search, or select several items for one action. Open an item to read its body, agent notes, comments and PR diff. You are able to copy short handoffs for Agents throughout most menus.
 
-![Selecting and reading backlog items](captures/flow-1.webp)
+2. **Make a first pass and flag important items.** Propose zero or more labels from the repository's GitHub catalog, suggest an action when assessed, and give a short reason and confidence. A label-first pass can leave Action blank. An agent can prepare a batch from copied item or list context; inspect its suggestions in **Batches**, then save them individually or apply the rest as local decisions. **All Items** lets a person revise any call. An agent can explicitly mark an item **Pending review** with a short reason when it needs human attention, such as a consequential project decision or a public security-sensitive report. Saving a decision alone does not add it there. Clearing the flag leaves the decision and any GitHub action approvals unchanged.
 
-2. **Make a first pass, then review it.** Propose zero or more labels from the repository's GitHub catalog, suggest an action when assessed, and give a short reason and confidence. A label-first pass can leave Action blank for later assessment. Save a decision for later review or confirm one you have checked yourself. An agent can prepare a batch from copied item or list context; inspect its suggestions in **Batches**, then save them individually or apply the rest as unreviewed decisions. **All Items** is where a person verifies and revises those decisions: search for an item, then confirm or correct its saved call. Reviewed items stay there and in groups; editing one removes its old confirmation. Saving or reviewing a decision does not itself write to GitHub; the repository-enabled labeling pass may apply proposed labels separately, including from unreviewed decisions.
-
-![Saving and reviewing triage decisions](captures/flow-2.webp)
-
-3. **Compare, group and hand work back to an agent.** **Possible Duplicates** offers pairs to inspect; compare both sides before recording a duplicate or ruling out a false match. An agent can prepare a focused draft **Group** of related items. Edit its description and member notes, then use `y` for selected members or `Y` for all to copy a current handoff. The agent prepares recommendations only for those members, including ones already triaged. A person can mark a checked group `ready` for maintainers; that does not approve its members' decisions or later actions.
-
-![Comparing candidates and organizing a group](captures/flow-3.webp)
+3. **Compare, group and hand work back to an agent.** **Possible Duplicates** offers pairs to inspect; compare both sides before recording a duplicate or ruling out a false match. An agent can prepare a focused draft **Group** of related items. Edit its description and member notes, then use `y` for selected members or `Y` for all to copy a current handoff. The agent prepares recommendations only for those members, including ones already triaged. A person can mark a checked group `ready` for maintainers; that does not approve later GitHub actions.
 
 4. **Local dataset** freezes the open backlog and downloads descriptions, discussions, PR files, diffs and closing links. Press `f`, then turn automatic download **ON**, running then and after startup or backlog refreshes. An Agent therefore can search without having to fetch GH and bloat its context with irrelevant data (while taking longer), while also taking from past saved observations. Missing, partial or old evidence remains visible.
 
-![Downloading a local evidence dataset](captures/flow-4.webp)
-
-5. **Review proposals and follow-up in Notifications.** A PR closure proposal shows its explanatory comment, relevant human guidance, earlier objections and selected evidence gaps. Approve, edit, or reject it with an optional reason. Edits need fresh review; a rejection remains in shared history for the next agent pass. You can also track issue and PR comments in this menu; it separates items needing attention from past activity; `viewing` and `dismissing` rows does not confirm appeals, nor approve decisions.
-
-![Reviewing notifications and follow-up activity](captures/flow-5.webp)
+5. **Review proposals and follow-up in Notifications.** A PR closure proposal shows its explanatory comment, relevant human guidance, earlier objections and selected evidence gaps. Approve, edit, or reject it with an optional reason. Edits need fresh review; a rejection remains in shared history for the next agent pass. You can also track issue and PR comments in this menu; it separates items needing attention from past activity. Viewing and dismissing rows does not confirm appeals or clear Pending review requests.
 
 6. **Publish an approved GitHub action.** Compose a comment, or close or reopen an item with one as well. Bulk actions show every target before publication; an uncertain result stops the remaining actions for inspection.
 
-> GitHub PR approval and merging are not supported. Labeling is ON by default under Settings → Automations, but its bounded pass starts only when an agent or person requests it. It reads proposed labels independently of the suggested action and review status.
+> GitHub PR approval and merging are not supported. Labeling is ON by default under Settings → Automations, but its bounded pass starts only when an agent or person requests it. It reads proposed labels independently of the suggested action and Pending review. Settings can optionally hold direct action execution for Pending review items; that hold defaults to OFF.
 
-![Approving a GitHub comment or state change](captures/flow-6.webp)
-
-7. **Hand work to maintainers.** Export a group or batch for a review packet, and gather ready groups and human-reviewed decisions into a dated Markdown report. An agent can also screen successive batches into short briefs, write a [detailed item brief](prompts/item-brief.md), and [polish selected briefs](prompts/polish-briefs.md) into one master brief. Read saved briefs in the **Briefs** menu. Screening does not review the items or approve a GitHub action.
+7. **Hand work to maintainers.** Export a group or batch for a decision packet, and gather ready groups, Pending review requests and suggested actions into a dated Markdown report. An agent can also screen successive batches into short briefs, write a [detailed item brief](prompts/item-brief.md), and [polish selected briefs](prompts/polish-briefs.md) into one master brief. Read saved briefs in the **Briefs** menu. A brief may justify an explicit Pending review request; screening alone does not flag items or approve a GitHub action.
 
 ![Agent wrote a maintainer brief](captures/agent-writing-maintainer-brief.png)
 
 8. **Switch repositories when needed.** Each have its own taxonomy, ledger, batches, groups, exports and reports. The TUI asks about unsaved drafts before switching and rejects late read replies.
-
-![Switching between repository installs](captures/flow-8.webp)
 
 ## Working from a fork
 
@@ -115,7 +99,7 @@ The paths below are relative to an install: `data/<owner>/<repo>/ledger.jsonl`, 
 
 ### Local records
 
-Each ledger row separates observed GitHub labels from proposed labels, and records a recommended action, confidence and reason, plus triage attribution and optional agent notes. Separate review fields record whether a person confirmed the call and any reviewer notes; [the playbook](prompts/PLAYBOOK.md#two-stage-review) explains the distinction. Each install owns its [taxonomy.json](config/taxonomy.json); [taxonomy guidance](docs/taxonomy.md) explains how to use it.
+Each ledger row separates observed GitHub labels from proposed labels, and records a recommended action, confidence and reason, plus triage attribution and optional agent and maintainer notes. An optional `review_request` records why an item needs human attention; [the playbook](prompts/PLAYBOOK.md#explicit-pending-review) explains it. Each install owns its [taxonomy.json](config/taxonomy.json); [taxonomy guidance](docs/taxonomy.md) explains how to use it.
 
 The ledger and other transactional records use atomic replacement; reports and CSV exports do not. See [local storage and recovery](docs/storage.md).
 
@@ -138,12 +122,13 @@ bin/briefs plan --all
 
 After screening a whole batch, save its dated batch brief and use `bin/batch --mark-briefed ID --brief PATH`. The checkpoint lets the next `--unbriefed` pass skip every member of that batch, including members the brief did not feature. A brief can say that no maintainer call surfaced. `bin/next` suggests the next pass or [polishing selected briefs](prompts/polish-briefs.md); it does not run either step automatically.
 
-`bin/briefs plan` returns the selected batch brief paths and a calculated master-brief size target. Use `--all` for every visible batch brief, `--all --include-read` to include briefs archived from the TUI, or repeat `--brief FILENAME` for an exact set. `bin/briefs mark-read NAME.md` previews a rename to `NAME_READ.md`; applying it requires `--expected-repo OWNER/REPO --apply --preview-sha256 HASH` from that preview. The rename leaves the Markdown intact and removes the brief from the TUI menus. It does not change ledger review or GitHub state.
+`bin/briefs plan` returns the selected batch brief paths and a calculated master-brief size target. Use `--all` for every visible batch brief, `--all --include-read` to include briefs archived from the TUI, or repeat `--brief FILENAME` for an exact set. `bin/briefs mark-read NAME.md` previews a rename to `NAME_READ.md`; applying it requires `--expected-repo OWNER/REPO --apply --preview-sha256 HASH` from that preview. The rename leaves the Markdown intact and removes the brief from the TUI menus. It does not change Pending review or GitHub state.
 
 | Task                                            | Commands                                                                       |
 | ----------------------------------------------- | ------------------------------------------------------------------------------ |
 | Install and refresh                             | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                 |
-| Prepare and review decisions                    | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv` |
+| Prepare and edit decisions                      | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv` |
+| Flag items for human attention                  | `bin/review-request`                                                           |
 | Compare and group                               | `bin/similar`, `bin/not-duplicate`, `bin/group`                                |
 | Read guidance and evidence                      | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |
 | Edit action settings                            | `bin/taxonomy-settings`, `bin/action-policy`                                   |
@@ -169,25 +154,25 @@ Turning automatic download ON installs the optional engine from the checked-in, 
 
 [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) is linked into each install as its agent instructions. Ask in plain words; the matching task prompt explains what to read and what may be saved.
 
-| Ask                                             | Prompt                                                                                            | Result                                       |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| “triage 25 issues”                              | [Auto triage](prompts/auto-triage.md)                                                             | Unreviewed batch proposals                   |
-| “label the backlog”                             | [Label items](prompts/label-items.md)                                                             | Bounded proposed-label pass                  |
-| “run an action pass”                            | [Automated actions](prompts/automated-actions.md)                                                 | Staged proposals or recorded write outcomes  |
-| “prepare offline analysis”                      | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps             |
-| “is #N a duplicate?”                            | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal             |
-| “review PR #N”                                  | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and an unreviewed decision |
-| “recommend PR closures”                         | [Recommend PR closures](prompts/recommend-closure.md)                                             | Pending, unapproved PR closure proposals     |
-| “organize these items”                          | [Organize groups](prompts/organize-groups.md)                                                     | Draft maintainer groups                      |
-| “assess this edited group”                      | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons        |
-| “review an appeal”                              | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment             |
-| “brief the maintainers” or “polish the report”  | [Maintainer brief](prompts/maintainer-brief.md)                                                   | A short overview or focused decision brief   |
-| “brief issue #N” or “brief PR #N”               | [Item brief](prompts/item-brief.md)                                                               | A detailed case and recommendation           |
-| “polish these briefs” or “write a master brief” | [Polish briefs](prompts/polish-briefs.md)                                                         | A short synthesis of selected briefs         |
-| “score these items” or “run a scoring pass”     | [Score selected items](prompts/score-items.md)                                                    | A bounded, source-bound quality score        |
+| Ask                                             | Prompt                                                                                            | Result                                      |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| “triage 25 issues”                              | [Auto triage](prompts/auto-triage.md)                                                             | Attributed local batch decisions            |
+| “label the backlog”                             | [Label items](prompts/label-items.md)                                                             | Bounded proposed-label pass                 |
+| “run an action pass”                            | [Automated actions](prompts/automated-actions.md)                                                 | Staged proposals or recorded write outcomes |
+| “prepare offline analysis”                      | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps            |
+| “is #N a duplicate?”                            | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal            |
+| “review PR #N”                                  | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and a local decision      |
+| “recommend PR closures”                         | [Recommend PR closures](prompts/recommend-closure.md)                                             | Pending, unapproved PR closure proposals    |
+| “organize these items”                          | [Organize groups](prompts/organize-groups.md)                                                     | Draft maintainer groups                     |
+| “assess this edited group”                      | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons       |
+| “review an appeal”                              | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment            |
+| “brief the maintainers” or “polish the report”  | [Maintainer brief](prompts/maintainer-brief.md)                                                   | A short overview or focused decision brief  |
+| “brief issue #N” or “brief PR #N”               | [Item brief](prompts/item-brief.md)                                                               | A detailed case and recommendation          |
+| “polish these briefs” or “write a master brief” | [Polish briefs](prompts/polish-briefs.md)                                                         | A short synthesis of selected briefs        |
+| “score these items” or “run a scoring pass”     | [Score selected items](prompts/score-items.md)                                                    | A bounded, source-bound quality score       |
 
 > [!IMPORTANT]
-> Agents propose; humans confirm ledger review. Repository-enabled bounded passes can separately apply labels or execute eligible actions.
+> Agents save attributed local decisions. Pending review is an explicit request for attention. Repository-enabled bounded passes can separately apply labels or execute eligible actions.
 
 For large backlogs, run task playbooks in bounded selections. Triage advances through untriaged batches, and maintainer briefing records a durable screened-batch checkpoint. Labeling records per-item outcomes; scoring stores revision-bound item scores. Duplicate comparisons, code review, closure recommendations and action preparation need an exact completed-and-remaining key handoff between passes. Their candidate lists and `bin/next` counts are not whole-backlog coverage records.
 

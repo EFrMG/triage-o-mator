@@ -2,7 +2,7 @@
 
 **Use when** someone asks to "review PR #N", "code-review the merge-ready PRs", "which PRs are actually safe to merge?", or `bin/next` suggests code review.
 
-**Produces** a code review in the ledger's `agent_notes`. For an untriaged PR it also adds a decision (proposed labels / action / confidence / reason) based on the code. Everything is applied as **unreviewed**. Nothing is posted to GitHub: the review is for the human reviewer and the maintainer who merges.
+**Produces** a code review in the ledger's `agent_notes`. For an untriaged PR it also adds a local decision (proposed labels / action / confidence / reason) based on the code. Nothing is posted to GitHub: the review is for maintainers deciding what to do next.
 
 ## 1. Pick the PRs
 
@@ -110,7 +110,7 @@ Reviewer: the one thing a human should check first.
 
   If your verdict differs from the current decision, the notes' `Verdict:` line says so. The human reviewer decides.
 
-Never pass `--reviewed`, never post anything to GitHub, and don't commit.
+If the review uncovers a crucial project decision or a public security-sensitive report needing a person, use `bin/review-request mark` with a short reason; ordinary code reviews do not enter that queue. Never post anything to GitHub or commit from this playbook.
 
 ## 8. Report back
 

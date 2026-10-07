@@ -250,11 +250,24 @@ def current_score(rec):
     if not isinstance(score, dict) or score.get("rubric") != SCORE_RUBRIC or type(score.get("value")) is not int or not 0 <= score["value"] <= 5:
         return None
 
-    revision = score.get("revision")
-    if not isinstance(revision, dict) or not revision.get("updated_at") or revision["updated_at"] != rec.get("updated_at"):
+    if not score_assessment_current(rec):
         return None
 
     return score["value"]
+
+
+def score_assessment_current(rec):
+    """A numeric or unassessed result covers the ledger revision it examined; legacy unbound results are due for another pass."""
+    score = rec.get("item_score")
+    if not isinstance(score, dict) or score.get("rubric") != SCORE_RUBRIC:
+        return False
+
+    value = score.get("value")
+    if value is not None and (type(value) is not int or not 0 <= value <= 5):
+        return False
+
+    revision = score.get("revision")
+    return isinstance(revision, dict) and bool(revision.get("updated_at")) and revision["updated_at"] == rec.get("updated_at")
 
 
 def merge_ready(rec):

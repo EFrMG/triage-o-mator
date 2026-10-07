@@ -7,10 +7,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _assessment_evidence import selected_item
 from _cache import EvidenceCache
 from _evidence import repository, validate_payload
 from _storage import locked
-from _triage import LEDGER_PATH, REPO, SCORE_RUBRIC, current_score, load_ledger, now_iso, save_ledger
+from _triage import LEDGER_PATH, REPO, SCORE_RUBRIC, current_score, load_ledger, now_iso, save_ledger, score_assessment_current
 
 
 DIMENSIONS = {
@@ -31,12 +32,12 @@ def parser():
     setting = commands.choices["set"]
     setting.add_argument("--snapshot")
     setting.add_argument("--host", default="github.com")
-    setting.add_argument("--unassessed", action="store_true")
+    setting.add_argument("--unassessed", action="store_true", help="record a gap instead of a number; --snapshot may pin incomplete evidence")
     for dimensions in DIMENSIONS.values():
         for name, _ in dimensions:
             setting.add_argument("--" + name, type=int)
-    setting.add_argument("--reason", required=True)
-    setting.add_argument("--suggestion", default="")
+    setting.add_argument("--reason", required=True, help="rubric explanation or evidence gap (max 500 characters)")
+    setting.add_argument("--suggestion", default="", help="one next check or decision (max 250 characters)")
     setting.add_argument("--by", required=True)
     return ap
 
@@ -120,6 +121,7 @@ def main():
 
         score = row.get("item_score")
         print(json.dumps(dict(repository=REPO, kind=args.kind, number=args.number, score=score, current=current_score(row) is not None,
+                              assessment_current=score_assessment_current(row),
                               ledger_updated_at=row.get("updated_at")), ensure_ascii=False, indent=2))
         return
 
@@ -130,11 +132,15 @@ def main():
 
     try:
         if args.unassessed:
-            if args.snapshot or any(getattr(args, name) is not None for dimensions in DIMENSIONS.values() for name, _ in dimensions):
-                raise ValueError("unassessed entries have no numeric dimensions or snapshot")
+            if any(getattr(args, name) is not None for dimensions in DIMENSIONS.values() for name, _ in dimensions):
+                raise ValueError("unassessed entries have no numeric dimensions")
+
+            source = selected_item(args.kind, args.number, args.snapshot, host=args.host) if args.snapshot else None
 
             score = dict(rubric=SCORE_RUBRIC, value=None, dimensions={}, reason=args.reason.strip(), suggestion=args.suggestion.strip(),
-                         snapshot_id=None, source_repository=None, revision=None, coverage={}, assessed_at=now_iso(), assessed_by=args.by.strip())
+                         snapshot_id=args.snapshot, source_repository=source["repository"] if source else None,
+                         revision=source["revision"] if source else None, coverage=source["coverage"] if source else {},
+                         assessed_at=now_iso(), assessed_by=args.by.strip())
         else:
             if not args.snapshot:
                 raise ValueError("a numeric score requires --snapshot")
@@ -152,6 +158,8 @@ def main():
             row = next((row for row in ledger if (row["kind"], row["number"]) == (args.kind, args.number)), None)
             if row is None:
                 raise ValueError("item is absent from the ledger")
+            if args.unassessed and not args.snapshot:
+                score["revision"] = dict(updated_at=row.get("updated_at"), base_sha=None, head_sha=None)
             if score["revision"] is not None and score["revision"]["updated_at"] != row.get("updated_at"):
                 raise ValueError("selected evidence revision differs from the ledger; sync or choose current evidence")
 

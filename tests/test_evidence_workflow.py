@@ -161,7 +161,15 @@ class EvidenceTests(Workspace):
         shown = self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")
         self.assertIsNone(shown["score"]["value"])
         self.assertFalse(shown["current"])
+        self.assertTrue(shown["assessment_current"])
+        self.assertEqual(shown["score"]["revision"]["updated_at"], "2026-09-23T01:00:00Z")
         self.assertEqual(len(self.calls()), calls)
+
+        changed = self.ledger()["issue", 2]
+        changed["updated_at"] = "2026-09-24T01:00:00Z"
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(changed) + "\n")
+        self.assertFalse(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")["assessment_current"])
+        self.assertTrue(any("Score a bounded selection of 1" in row["what"] for row in self.json_cli("next", "--json")["suggestions"]))
 
         pr = item(1, "A contribution", kind="pr")
         pr["updated_at"] = summary()["updated_at"]
@@ -173,6 +181,13 @@ class EvidenceTests(Workspace):
                                   "--by", "agent:tester", ok=False)
         self.assertIn("complete files, diff", incomplete.stderr)
         self.assertIsNone(self.ledger()["pr", 1].get("item_score"))
+        self.json_cli("item-score", "--expected-repo", "owner/repo", "set", "--kind", "pr", "--number", "1",
+                      "--snapshot", partial["snapshot_id"], "--unassessed", "--reason", "PR code evidence is incomplete", "--by", "agent:tester")
+        partial_score = self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "pr", "--number", "1")
+        self.assertTrue(partial_score["assessment_current"])
+        self.assertEqual(partial_score["score"]["snapshot_id"], partial["snapshot_id"])
+        self.assertEqual(partial_score["score"]["revision"]["head_sha"], "b" * 40)
+        self.assertNotEqual(partial_score["score"]["coverage"].get("diff"), "complete")
         wrong_repo = self.run_cli("item-score", "--expected-repo", "other/repo", "show", "--kind", "pr", "--number", "1", ok=False)
         self.assertIn("selected repository changed", wrong_repo.stderr)
 

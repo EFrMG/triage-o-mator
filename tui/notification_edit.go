@@ -22,7 +22,7 @@ type proposalEditDoneMsg struct {
 func (m model) editProposalCmd() tea.Cmd {
 	root, repo, generation := m.installRoot, m.repo, m.notificationsGeneration
 	checkpoint, key := m.comment.proposalEditCheckpoint, m.comment.key
-	comment, by := m.comment.text.Value(), m.reviewer
+	comment, by := m.comment.text.Value(), m.contributor
 
 	return func() tea.Msg {
 		msg := proposalEditDoneMsg{root: root, repo: repo, generation: generation, checkpoint: checkpoint, key: key, comment: comment}

@@ -17,20 +17,19 @@ type groupHandoffPacket struct {
 }
 
 type groupHandoffItem struct {
-	Kind              string   `json:"kind"`
-	Number            int      `json:"number"`
-	Title             string   `json:"title"`
-	State             string   `json:"state"`
-	ProposedLabels    []string `json:"proposed_labels"`
-	Action            string   `json:"action"`
-	Confidence        string   `json:"confidence"`
-	Reason            string   `json:"reason"`
-	TriagedBy         string   `json:"triaged_by"`
-	AgentNotes        string   `json:"agent_notes"`
-	Reviewed          bool     `json:"reviewed"`
-	ReviewedBy        string   `json:"reviewed_by"`
-	ReviewerNotes     string   `json:"reviewer_notes"`
-	MissingFromLedger bool     `json:"missing_from_ledger"`
+	Kind              string         `json:"kind"`
+	Number            int            `json:"number"`
+	Title             string         `json:"title"`
+	State             string         `json:"state"`
+	ProposedLabels    []string       `json:"proposed_labels"`
+	Action            string         `json:"action"`
+	Confidence        string         `json:"confidence"`
+	Reason            string         `json:"reason"`
+	TriagedBy         string         `json:"triaged_by"`
+	AgentNotes        string         `json:"agent_notes"`
+	ReviewRequest     *ReviewRequest `json:"review_request"`
+	MaintainerNotes   string         `json:"maintainer_notes"`
+	MissingFromLedger bool           `json:"missing_from_ledger"`
 	LocalContext      struct {
 		Checkpoint       string   `json:"checkpoint"`
 		RelevantGroupIDs []string `json:"relevant_group_ids"`
@@ -195,16 +194,10 @@ func groupHandoffText(header string, msg groupHandoffMsg) string {
 			} else {
 				b.WriteString("- No local triage decision recorded.\n")
 			}
-			if item.Reviewed {
-				reviewer := item.ReviewedBy
-				if reviewer == "" {
-					reviewer = "(unknown)"
-				}
-				fmt.Fprintf(&b, "- Human review: confirmed by %s\n", reviewer)
-			} else {
-				b.WriteString("- Human review: unreviewed\n")
+			if item.ReviewRequest != nil {
+				fmt.Fprintf(&b, "- Pending review requested by %s: %s\n", item.ReviewRequest.By, item.ReviewRequest.Reason)
 			}
-			handoffValue(&b, "Reviewer note", item.ReviewerNotes)
+			handoffValue(&b, "Maintainer note", item.MaintainerNotes)
 			handoffValue(&b, "Agent note", item.AgentNotes)
 		}
 		by := member.UpdatedBy

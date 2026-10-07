@@ -58,12 +58,23 @@ func untriagedOpen(items []Item) []Item {
 
 const (
 	untriagedTab = iota
+	pendingReviewTab
 	mergeReadyTab
 	allItemsTab
 )
 
 var tabs = []Tab{
 	{Name: "Untriaged", Filter: func(items []Item, _ Taxonomy) []Item { return untriagedOpen(items) }},
+	{Name: "Pending review", Filter: func(items []Item, _ Taxonomy) []Item {
+		var out []Item
+		for _, it := range items {
+			if it.PendingReview() {
+				out = append(out, it)
+			}
+		}
+
+		return byCreatedAtAsc(out)
+	}},
 	{Name: "Merge-Ready PRs", Filter: func(items []Item, _ Taxonomy) []Item {
 		var out []Item
 		for _, it := range openOnly(items) {

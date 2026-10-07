@@ -114,8 +114,8 @@ func WriteRepo(installRoot, repo string) error {
 	return os.WriteFile(filepath.Join(installRoot, "config", "repo"), []byte(repo+"\n"), 0o644)
 }
 
-// ReviewerName is the identity passed as --by to bin/apply, prefering git's configured user.name (never the account email) over the bare OS username.
-func ReviewerName() string {
+// ContributorName is the identity passed as --by to bin/apply, preferring git's configured user.name (never the account email) over the bare OS username.
+func ContributorName() string {
 	if out, err := exec.Command("git", "config", "user.name").Output(); err == nil {
 		if name := strings.TrimSpace(string(out)); name != "" {
 			return name
@@ -126,5 +126,5 @@ func ReviewerName() string {
 		return u.Username
 	}
 
-	return "reviewer"
+	return "contributor"
 }

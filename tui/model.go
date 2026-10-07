@@ -43,7 +43,7 @@ type model struct {
 	installRoot             string
 	repo                    string
 	taxonomy                Taxonomy
-	reviewer                string
+	contributor             string
 
 	// pendingApply counts concurrent decision writes and undo commands; batch applies use batches.busy.
 	pendingApply int
@@ -112,9 +112,8 @@ type model struct {
 
 	// confirmQuit is set when quitting with unsaved drafts pending, so a second explicit quit is required rather than silently discarding them.
 	confirmQuit bool
-	// confirmSave / confirmApprove arm a second save shortcut / a press after a warning (saving untouched defaults or an empty reason; approving while edits are unsaved). confirmSaveApproval distinguishes saving from saving and approving so switching operations needs a fresh confirmation.
-	confirmSave, confirmApprove bool
-	confirmSaveApproval         bool
+	// confirmSave arms a second save shortcut after untouched defaults or an empty reason.
+	confirmSave bool
 
 	focus Focus
 
@@ -141,18 +140,16 @@ type model struct {
 	nextSteps []nextStep
 	nextErr   error
 
-	// ticked holds the items ticked with Space in the list on screen; listConfirm is the list action ("a", "d") whose second press will act.
-	ticked      map[Key]bool
-	listConfirm string
-	// lastStep is what the last approval, or approval taken back, acted on, so a u right after it undoes the next layer on those items (undo.go) rather than on the hovered one. Any key but u forgets it.
-	lastStep               []Key
+	// ticked holds the items ticked with Space in the list on screen; listConfirm is the list action whose second press will act.
+	ticked                 map[Key]bool
+	listConfirm            string
 	lastMouseX, lastMouseY int
 	lastMouseAt            time.Time
 	lastMouseTarget        string
 	lastMouseTargetAt      time.Time
 }
 
-func newModel(installRoot, repo string, taxonomy Taxonomy, reviewer string, items []Item) model {
+func newModel(installRoot, repo string, taxonomy Taxonomy, contributor string, items []Item) model {
 	repoInput := textinput.New()
 	repoInput.Prompt = ""
 	repoInput.Placeholder = "filter, owner/repo, or /path/to/an/install"
@@ -177,7 +174,7 @@ func newModel(installRoot, repo string, taxonomy Taxonomy, reviewer string, item
 		overview:    true,
 		repo:        repo,
 		taxonomy:    taxonomy,
-		reviewer:    reviewer,
+		contributor: contributor,
 		items:       items,
 		sidebar:     newSidebar(),
 		detail:      newDetailModel(),
@@ -404,7 +401,7 @@ func toListItems(items []Item) []list.Item {
 
 // openItem loads it into the detail panel and decision form: the ledger's decision first, then a batch proposal for an untriaged item, then any unsaved draft on top. The returned command fetches whatever the item still needs: its body/comments and its duplicate candidates.
 func (m *model) openItem(it Item) tea.Cmd {
-	m.confirmSave, m.confirmApprove = false, false
+	m.confirmSave = false
 	if p, ok := m.activeProposal(it.Key()); ok && it.Untriaged() && it.AgentNotes == "" {
 		it.AgentNotes = p.AgentNotes
 	}
@@ -579,7 +576,7 @@ func scoreDimensionText(score *ItemScore, spec scoreDimensionSpec, next *scoreDi
 	return result
 }
 
-// formPanel is the decision form, its attribution, the current reviewer and any separate score breakdown.
+// formPanel is the decision form, its attribution, the current contributor and any separate score breakdown.
 func (m model) formPanel(width int) string {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
 	lines := append(strings.Split(m.form.View(width), "\n"), "")
@@ -594,15 +591,13 @@ func (m model) formPanel(width int) string {
 			triaged += " · " + it.BatchID
 		}
 
-		reviewed := "not reviewed yet"
-		if it.Reviewed {
-			reviewed = "reviewed by " + orPlaceholder(it.ReviewedBy, "?") + " · " + shortDate(it.ReviewedAt)
-		}
-
 		appendMuted(triaged)
-		appendMuted(reviewed)
 	}
-	appendMuted("you: " + m.reviewer)
+	if it, ok := m.findItem(m.detail.key); ok && it.ReviewRequest != nil {
+		appendMuted("Pending review by " + it.ReviewRequest.By + " · " + shortDate(it.ReviewRequest.At))
+		appendMuted(it.ReviewRequest.Reason)
+	}
+	appendMuted("you: " + m.contributor)
 	if it, ok := m.findItem(m.detail.key); ok && it.ItemScore != nil {
 		lines = append(lines, "")
 		lines = append(lines, muted.Bold(true).Render("Score by "+singleLine(orPlaceholder(it.ItemScore.AssessedBy, "?"))), "")

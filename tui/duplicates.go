@@ -173,7 +173,7 @@ func (m *model) closeDuplicates(toDetail bool) tea.Cmd {
 
 func (m model) handleDupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Saving can warn here as it does in the item (untouched defaults, no reason); any other key takes the warning back.
-	if m.confirmSave && !key.Matches(msg, keys.Save, keys.SaveApprove) {
+	if m.confirmSave && !key.Matches(msg, keys.Save) {
 		m.confirmSave = false
 		m.status = ""
 	}
@@ -228,8 +228,6 @@ func (m model) handleDupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.openFromDuplicates(m.selectedDupKey())
 	case key.Matches(msg, keys.Save):
 		return m.saveFromDuplicates()
-	case key.Matches(msg, keys.SaveApprove):
-		return m.saveDuplicateDecision(true)
 	case key.Matches(msg, keys.Open):
 		if it, ok := m.findItem(m.selectedDupKey()); ok {
 			m.status = "Opening " + it.URL + "…"
@@ -305,7 +303,7 @@ func (m model) handleDupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.groups.busy = true
 		m.status = "Creating duplicate-review group…"
 
-		return m, dupGroupCmd(m.installRoot, m.dups.source, title, members, m.reviewer)
+		return m, dupGroupCmd(m.installRoot, m.dups.source, title, members, m.contributor)
 	}
 
 	return m, nil
@@ -395,17 +393,17 @@ func (m model) openFromDuplicates(key Key) (tea.Model, tea.Cmd) {
 
 // saveFromDuplicates saves the decision in the form without leaving the screen, as long as it belongs to an item on it: m prefills one here, and the comparison is where you are when it's ready to save.
 func (m model) saveFromDuplicates() (tea.Model, tea.Cmd) {
-	return m.saveDuplicateDecision(false)
+	return m.saveDuplicateDecision()
 }
 
-func (m model) saveDuplicateDecision(approve bool) (tea.Model, tea.Cmd) {
+func (m model) saveDuplicateDecision() (tea.Model, tea.Cmd) {
 	if !m.onDupScreen(m.detail.key) {
 		m.status = "Nothing to save here. Select a candidate to mark or open an item to decide on it."
 
 		return m, nil
 	}
 
-	return m.requestDecisionSave(approve)
+	return m.requestDecisionSave()
 }
 
 // onDupScreen reports whether key is one of the items on this screen: the original on top, or one of its candidates.
@@ -544,11 +542,9 @@ func (m model) dupItemState(it Item) string {
 	return dupTriage(it)
 }
 
-// dupTriage is an item's decision in a few words: untriaged, or triaged or reviewed with its labels/action.
+// dupTriage is an item's decision in a few words, separate from its Pending review request.
 func dupTriage(it Item) string {
 	switch {
-	case it.Reviewed:
-		return "reviewed: " + it.DecisionLabel() + "/" + it.Action
 	case !it.Untriaged():
 		return "triaged: " + it.DecisionLabel() + "/" + it.Action
 	}
@@ -763,7 +759,7 @@ func (m model) requestRuleOutPair() (tea.Model, tea.Cmd) {
 	m.listConfirm = ""
 	m.status = fmt.Sprintf("#%d and #%d aren't duplicates: recorded.", hovered.original.Number, hovered.newer.Number)
 
-	return m, tea.Batch(ruleOutCmd(m.installRoot, m.repo, hovered.newer.Kind, hovered.newer.Number, hovered.original.Number, m.reviewer), pairsCmd(m.installRoot, m.repo))
+	return m, tea.Batch(ruleOutCmd(m.installRoot, m.repo, hovered.newer.Kind, hovered.newer.Number, hovered.original.Number, m.contributor), pairsCmd(m.installRoot, m.repo))
 }
 
 // requestRuleOutCandidate does the same from a comparison, for the hovered candidate against the item on top.
@@ -785,7 +781,7 @@ func (m model) requestRuleOutCandidate(c dupCandidate) (tea.Model, tea.Cmd) {
 	m.dups.confirm = ""
 	m.status = fmt.Sprintf("#%d and #%d aren't duplicates: recorded.", m.dups.source.Number, c.Number)
 
-	return m, ruleOutCmd(m.installRoot, m.repo, c.Kind, c.Number, m.dups.source.Number, m.reviewer)
+	return m, ruleOutCmd(m.installRoot, m.repo, c.Kind, c.Number, m.dups.source.Number, m.contributor)
 }
 
 // requestClearHandledPairs drops every pair already resolved, on a second D: they stay out until the view is opened again, which recomputes them anyway.

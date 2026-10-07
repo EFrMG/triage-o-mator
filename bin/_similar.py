@@ -126,6 +126,6 @@ def candidate(rec, score):
         "state": rec.get("state", ""),
         "proposed_labels": rec.get("proposed_labels") or [],
         "action": rec.get("action", ""),
-        "reviewed": bool(rec.get("reviewed")),
+        "pending_review": bool(rec.get("review_request")),
         "score": round(score, 3),
     }

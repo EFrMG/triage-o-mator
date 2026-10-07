@@ -59,8 +59,11 @@ func progressBar(n, total, width int) string {
 }
 
 func (m model) overviewView() string {
-	open, triaged, reviewed := 0, 0, 0
+	open, triaged, pendingReview := 0, 0, 0
 	for _, it := range m.items {
+		if it.PendingReview() {
+			pendingReview++
+		}
 		if it.State != "open" {
 			continue
 		}
@@ -70,9 +73,6 @@ func (m model) overviewView() string {
 			triaged++
 		}
 
-		if it.Reviewed {
-			reviewed++
-		}
 	}
 
 	pct := func(n int) float64 {
@@ -87,10 +87,10 @@ func (m model) overviewView() string {
 	bar := minInt(40, maxInt(width-32, 10))
 	heading := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n\n", ansi.Truncate(titleBar(m.repo, "", width)+"  "+fmt.Sprintf("%d items · %d open · you: %s", len(m.items), open, m.reviewer), width, "…"))
+	fmt.Fprintf(&b, "%s\n\n", ansi.Truncate(titleBar(m.repo, "", width)+"  "+fmt.Sprintf("%d items · %d open · you: %s", len(m.items), open, m.contributor), width, "…"))
 	fmt.Fprintf(&b, "%-10s %s %5d  %s\n\n", "Triaged", progressBar(triaged, open, bar), triaged, mutedText(fmt.Sprintf("%.0f%%", pct(triaged))))
-	fmt.Fprintf(&b, "%-10s %s %5d  %s\n\n", "Reviewed", progressBar(reviewed, open, bar), reviewed, mutedText(fmt.Sprintf("%.0f%%", pct(reviewed))))
-	fmt.Fprintf(&b, "%-10s %s\n", "Backlog", mutedText(fmt.Sprintf("%d untriaged, %d awaiting review", open-triaged, triaged-reviewed)))
+	fmt.Fprintf(&b, "%-10s %d explicitly flagged items\n\n", "Pending", pendingReview)
+	fmt.Fprintf(&b, "%-10s %s\n", "Backlog", mutedText(fmt.Sprintf("%d untriaged open items", open-triaged)))
 	if len(m.drafts) > 0 {
 		fmt.Fprintf(&b, "\n%s\n", lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render(fmt.Sprintf("Your unsaved decisions this session: %d", len(m.drafts))))
 	}

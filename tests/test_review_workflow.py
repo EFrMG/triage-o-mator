@@ -84,7 +84,7 @@ class CandidateTests(Workspace):
 
 class GroupTests(Workspace):
     def test_ready_group_never_changes_member_decision(self):
-        row = dict(item(1, "Related issue"), action="none", confidence="medium", reason="Proposal", reviewed=False)
+        row = dict(item(1, "Related issue"), action="none", confidence="medium", reason="Proposal")
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         ledger.write_text(json.dumps(row) + "\n")
         original = ledger.read_bytes()
@@ -93,13 +93,13 @@ class GroupTests(Workspace):
         self.run_cli("group", "add", group["id"], "--kind", "issue", "--number", "1", "--by", "operator")
         self.run_cli("group", "update", group["id"], "--status", "ready", "--by", "operator")
         self.assertEqual(ledger.read_bytes(), original)
-        self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
+        self.assertEqual(self.ledger()[("issue", 1)]["action"], "none")
         self.assertEqual(self.calls(), [])
 
     def test_group_export_carries_shared_context_and_missing_members(self):
         first = dict(item(1, "First fix", "pr"), action="keep-open", confidence="high",
                      reason="Wait for the dependency", triaged_by="maintainer", agent_notes="Agent comparison",
-                     reviewed=True, reviewed_by="reviewer", reviewer_notes="Check compatibility")
+                     maintainer_notes="Check compatibility")
         second = item(2, "Related issue")
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         ledger.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
@@ -119,7 +119,7 @@ class GroupTests(Workspace):
 
         self.assertEqual(packet["group"]["revision"], 3)
         self.assertEqual(context["context_revision"], direct["context_revision"])
-        self.assertEqual(context["ledger"]["reviewer_notes"], "Check compatibility")
+        self.assertEqual(context["ledger"]["maintainer_notes"], "Check compatibility")
         self.assertEqual(context["relevant_group_ids"], sorted((group["id"], other["id"])))
         self.assertEqual([entry["id"] for entry in packet["related_groups"]], [other["id"]])
         self.assertEqual(packet["related_groups"][0]["members"][0]["notes"], "Wait until version 2")
@@ -160,8 +160,7 @@ class ItemContextTests(Workspace):
 
         row = dict(item(1, "Keep this change", "pr"), action="keep-open", confidence="high",
                    reason="Maintainer wants the work", triaged_by="maintainer", triaged_at="2026-09-29T00:00:00Z",
-                   agent_notes="Agent comparison", reviewed=True, reviewed_by="reviewer", reviewed_at="2026-09-29T01:00:00Z",
-                   reviewer_notes="Wait for the dependency", last_synced_at="2026-09-29T02:00:00Z")
+                   agent_notes="Agent comparison", maintainer_notes="Wait for the dependency", last_synced_at="2026-09-29T02:00:00Z")
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         ledger.write_text(json.dumps(row) + "\n")
         notes = "é" * 300
@@ -171,8 +170,7 @@ class ItemContextTests(Workspace):
         first = self.context("read", "--kind", "pr", "--number", "1", "--limit", "2")
         self.assertEqual(first["requests"], 0)
         self.assertTrue(first["ledger_present"])
-        self.assertEqual(first["rows"][0]["fields"]["reviewed"], True)
-        self.assertEqual(first["rows"][0]["fields"]["reviewer_notes"]["preview"], "Wait for the dependency")
+        self.assertEqual(first["rows"][0]["fields"]["maintainer_notes"]["preview"], "Wait for the dependency")
         self.assertEqual(first["rows"][1]["revision"], 2)
         self.assertEqual(first["pagination"]["omitted_after"], 1)
         self.context("read", "--kind", "pr", "--number", "1", "--offset", "2", ok=False)
@@ -276,7 +274,7 @@ class ProposalFeedbackTests(Workspace):
 
     def test_rejection_retains_exact_proposal_and_never_publishes(self):
         ledger = self.root / "data/owner/repo/ledger.jsonl"
-        ledger.write_text(json.dumps(dict(item(1, "An older fix", "pr"), reviewed=True, reviewed_by="maintainer")) + "\n")
+        ledger.write_text(json.dumps(item(1, "An older fix", "pr")) + "\n")
         original = ledger.read_bytes()
         pending = self.propose(1, "--evidence-gap", "No selected cache snapshot")
         reviewed = self.closure("review", "--number", "1")
@@ -324,7 +322,7 @@ class ProposalFeedbackTests(Workspace):
 
     def test_group_handoff_reconsideration_retains_objection_and_attribution(self):
         ledger = self.root / "data/owner/repo/ledger.jsonl"
-        ledger.write_text(json.dumps(dict(item(1, "An older fix", "pr"), reviewer_notes="Keep compatibility in view", reviewed=True)) +
+        ledger.write_text(json.dumps(dict(item(1, "An older fix", "pr"), maintainer_notes="Keep compatibility in view")) +
                           "\n" + json.dumps(item(2, "Related report")) + "\n")
         original = ledger.read_bytes()
         group = self.json_cli("group", "create", "--title", "Compare fixes", "--by", "maintainer")
@@ -339,7 +337,7 @@ class ProposalFeedbackTests(Workspace):
         initial = self.propose(1, *handoff(), "--evidence-gap", "No selected snapshot")
         shown = self.closure("context", "--number", "1", "--checkpoint", initial["checkpoint"])
         self.assertTrue(shown["current"])
-        self.assertEqual(shown["item_context"]["rows"][0]["fields"]["reviewer_notes"]["preview"], "Keep compatibility in view")
+        self.assertEqual(shown["item_context"]["rows"][0]["fields"]["maintainer_notes"]["preview"], "Keep compatibility in view")
         self.assertEqual(shown["requests"], 0)
         rejected = self.closure("reject", "--number", "1", "--checkpoint", initial["checkpoint"],
                                    "--by", "maintainer", "--reason", "Do not close until compatibility is resolved")

@@ -6,7 +6,7 @@ Usage:
     bin/report            writes reports/<owner>/<repo>/<date>.md and prints it
     bin/report --stdout    print only, don't write a file
 
-Written for lead maintainers first: groups contributors marked ready, then human-reviewed decisions ready to act on, then the review queue and backlog. "[notes]" marks items whose ledger row has agent_notes (a code review or duplicate comparison) worth reading before acting.
+Written for lead maintainers first: groups contributors marked ready, explicitly requested Pending review items, then suggested actions and the backlog. "[notes]" marks items whose ledger row has agent_notes (a code review or duplicate comparison) worth reading before acting.
 """
 
 import argparse
@@ -41,12 +41,12 @@ def ready_groups_section(groups, by_key):
     if not ready:
         return []
 
-    lines = [f"## Ready for maintainers ({len(ready)} group{'' if len(ready) == 1 else 's'})", "", "Marked ready by contributors. Readiness means the group is organized for a decision, not that every member's decision was human-reviewed; unreviewed members are called out.", ""]
+    lines = [f"## Ready for maintainers ({len(ready)} group{'' if len(ready) == 1 else 's'})", "", "Marked ready by contributors. Readiness means the group is organized for a decision; member decisions and GitHub writes remain separate.", ""]
     for g in ready:
         members = [(m, by_key.get((m["kind"], m["number"]))) for m in g["members"]]
-        unreviewed = sum(1 for _, r in members if r and has_decision(r) and not r.get("reviewed"))
+        pending = sum(1 for _, r in members if r and r.get("review_request"))
         untriaged = sum(1 for _, r in members if r and not has_decision(r))
-        flags = ", ".join(x for x in (f"{unreviewed} unreviewed" if unreviewed else "", f"{untriaged} untriaged" if untriaged else "") if x)
+        flags = ", ".join(x for x in (f"{pending} pending review" if pending else "", f"{untriaged} untriaged" if untriaged else "") if x)
         lines.append(f"### {g['title']}")
         lines.append("")
         lines.append(f"Assignee: {g['assignee'] or '(unassigned)'} · {len(members)} items{' · ' + flags if flags else ''} · ID: `{g['id']}` (`bin/group export {g['id']}`)")
@@ -61,9 +61,9 @@ def ready_groups_section(groups, by_key):
                 continue
 
             decision = f"`{decision_text(r)}` {r['confidence']}".strip() if has_decision(r) else "untriaged"
-            review = "reviewed" if r.get("reviewed") else "not reviewed"
+            review = "pending review" if r.get("review_request") else ""
             note = f": {m['notes'].strip()}" if m["notes"].strip() else ""
-            lines.append(f"- [{r['kind']} #{r['number']}]({r['url']}) {r['title']} ({r['state']}; {decision}; {review}){notes_mark(r)}{note}")
+            lines.append(f"- [{r['kind']} #{r['number']}]({r['url']}) {r['title']} ({r['state']}; {decision}{'; ' + review if review else ''}){notes_mark(r)}{note}")
 
         lines.append("")
 
@@ -77,8 +77,7 @@ def render(ledger):
     prs = [r for r in open_items if r["kind"] == "pr"]
     triaged = [r for r in open_items if has_decision(r)]
     untriaged = [r for r in open_items if not has_decision(r)]
-    reviewed = [r for r in triaged if r["reviewed"]]
-    pending_review = [r for r in triaged if not r["reviewed"]]
+    pending_review = [r for r in ledger if r.get("review_request")]
 
     lines = []
     lines.append(f"# Repository triage report. {date.today().isoformat()}")
@@ -93,10 +92,7 @@ def render(ledger):
     lines.append(
         f"- Triaged: **{len(triaged)}** ({pct(len(triaged), len(open_items))})"
     )
-    lines.append(
-        f"- Human-reviewed: **{len(reviewed)}** ({pct(len(reviewed), len(open_items))})"
-    )
-    lines.append(f"- Awaiting human review: **{len(pending_review)}**")
+    lines.append(f"- Pending review (explicit requests): **{len(pending_review)}**")
     lines.append(f"- Untriaged backlog: **{len(untriaged)}**")
     lines.append("")
 
@@ -104,11 +100,23 @@ def render(ledger):
     by_key = {(r["kind"], r["number"]): r for r in ledger}
     lines += ready_groups_section(groups, by_key)
 
-    actionable = [r for r in reviewed if action_operation(taxonomy, r["action"]) not in ("", "none")]
-    if actionable:
-        lines.append(f"## Human-reviewed, ready to act ({len(actionable)})")
+    if pending_review:
+        lines.append(f"## Pending review ({len(pending_review)})")
         lines.append("")
-        lines.append("Decisions a human confirmed. Nothing here has been done on GitHub yet.")
+        lines.append("Items explicitly flagged for a person's attention. The request is not a ledger verdict or GitHub write approval.")
+        lines.append("")
+        for r in sorted(pending_review, key=lambda r: r["review_request"]["at"])[:ACT_LIMIT]:
+            request = r["review_request"]
+            lines.append(item_line(r, f" — {request['reason']} (requested by {request['by']})"))
+        if len(pending_review) > ACT_LIMIT:
+            lines.append(f"- ...and {len(pending_review) - ACT_LIMIT} more")
+        lines.append("")
+
+    actionable = [r for r in triaged if action_operation(taxonomy, r["action"]) not in ("", "none")]
+    if actionable:
+        lines.append(f"## Suggested actions ({len(actionable)})")
+        lines.append("")
+        lines.append("Local suggestions. Their exact GitHub writes use separate proposals, repository policy and approvals.")
         lines.append("")
         by_action = {}
         for r in actionable:
@@ -118,16 +126,16 @@ def render(ledger):
             lines.append(f"### {action} ({len(items)})")
             lines.append("")
             for r in sorted(items, key=lambda r: r["created_at"])[:ACT_LIMIT]:
-                lines.append(item_line(r, f" — {r['reason']} (reviewed by {r['reviewed_by'] or '?'})"))
+                lines.append(item_line(r, f" — {r['reason']}"))
 
             if len(items) > ACT_LIMIT:
                 lines.append(f"- ...and {len(items) - ACT_LIMIT} more")
 
             lines.append("")
 
-    unmapped = [r for r in reviewed if r["action"] and not action_operation(taxonomy, r["action"])]
+    unmapped = [r for r in triaged if r["action"] and not action_operation(taxonomy, r["action"])]
     if unmapped:
-        lines.append(f"## Reviewed actions without a GitHub operation ({len(unmapped)})")
+        lines.append(f"## Saved actions without a GitHub operation ({len(unmapped)})")
         lines.append("")
         lines.append("These saved decisions remain readable. Map their action titles in Settings before treating them as GitHub write recommendations.")
         lines.append("")
@@ -150,34 +158,22 @@ def render(ledger):
                 lines.append(f"| {name} | {n} | {pct(n, len(items))} |")
             lines.append("")
 
-    if pending_review:
-        lines.append("## Awaiting human review, by recommended action")
-        lines.append("")
-        by_action = Counter(r["action"] or "(not assessed)" for r in pending_review)
-        lines.append("| action | count |")
-        lines.append("|---|---|")
-        for action, n in by_action.most_common():
-            lines.append(f"| {action} | {n} |")
-
-        lines.append("")
-
-    merge_ready = [
+    merge_ready_items = [
         r
         for r in prs
         if merge_ready(r)
         and r["confidence"] == "high"
-        and not r["reviewed"]
     ]
-    if merge_ready:
+    if merge_ready_items:
         lines.append(
-            f"## High-confidence merge-ready PRs awaiting review ({len(merge_ready)})"
+            f"## High-confidence merge-ready PR suggestions ({len(merge_ready_items)})"
         )
         lines.append("")
-        for r in sorted(merge_ready, key=lambda r: r["created_at"])[:30]:
+        for r in sorted(merge_ready_items, key=lambda r: r["created_at"])[:30]:
             lines.append(item_line(r, f" — {r['reason']}"))
 
-        if len(merge_ready) > 30:
-            lines.append(f"- ...and {len(merge_ready) - 30} more")
+        if len(merge_ready_items) > 30:
+            lines.append(f"- ...and {len(merge_ready_items) - 30} more")
 
         lines.append("")
 
@@ -185,10 +181,9 @@ def render(ledger):
         r
         for r in open_items
         if action_operation(taxonomy, r["action"]) == "close"
-        and not r["reviewed"]
     ]
     if close_candidates:
-        lines.append(f"## Close candidates awaiting review ({len(close_candidates)})")
+        lines.append(f"## Close suggestions ({len(close_candidates)})")
         lines.append("")
         for r in sorted(close_candidates, key=lambda r: r["created_at"])[:30]:
             lines.append(item_line(r, f" — `{r['action']}`: {r['reason']}"))
@@ -224,11 +219,10 @@ def render(ledger):
         lines.append("")
 
     triagers = Counter(r["triaged_by"] or "(unknown)" for r in triaged)
-    reviewers = Counter(r["reviewed_by"] or "(unknown)" for r in reviewed)
-    if triagers or reviewers:
-        lines += ["## Contributors (open items)", "", "| who | triaged | reviewed |", "|---|---|---|"]
-        for who in sorted(set(triagers) | set(reviewers), key=lambda w: -(triagers[w] + reviewers[w])):
-            lines.append(f"| {who} | {triagers[who]} | {reviewers[who]} |")
+    if triagers:
+        lines += ["## Contributors (open items)", "", "| who | triaged |", "|---|---|"]
+        for who, count in triagers.most_common():
+            lines.append(f"| {who} | {count} |")
 
         lines.append("")
 

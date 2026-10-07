@@ -9,18 +9,19 @@ import (
 
 type automationsUI struct {
 	loaded, labelingEnabled bool
+	pendingReviewHold       bool
 	pending, paused         []string
 	actions                 []automationAction
 }
 
-// automationCard is one row of Settings → Automations: Labeling, Scoring, then one card per action type.
+// automationCard is one row of Settings → Automations: Labeling, Scoring, the Pending review hold, then one card per action type.
 type automationCard struct {
 	kind   string
 	action automationAction
 }
 
 func (m model) automationCards() []automationCard {
-	cards := []automationCard{{kind: "labeling"}, {kind: "scoring"}}
+	cards := []automationCard{{kind: "labeling"}, {kind: "scoring"}, {kind: "review-hold"}}
 	for _, action := range m.settings.automations.actions {
 		cards = append(cards, automationCard{kind: "action", action: action})
 	}
@@ -43,8 +44,9 @@ type automationAction struct {
 }
 
 type actionPolicyStatus struct {
-	Repository string             `json:"repository"`
-	Actions    []automationAction `json:"actions"`
+	Repository        string             `json:"repository"`
+	Actions           []automationAction `json:"actions"`
+	PendingReviewHold bool               `json:"pending_review_hold"`
 }
 
 type actionPolicyPlan struct {
@@ -159,6 +161,36 @@ func automationActionCmd(root, repo string, request uint64, action, operation, d
 	}
 }
 
+func automationReviewHoldCmd(root, repo string, request uint64, before, after bool) tea.Cmd {
+	return func() tea.Msg {
+		msg := automationMsg{root: root, repo: repo, request: request, operation: "review-hold"}
+		mode := "off"
+		if after {
+			mode = "on"
+		}
+		out, err := runScript(root, "action-policy", "hold", "--expected-repo", repo, "--enabled", mode)
+		if err != nil {
+			msg.err = err
+			return msg
+		}
+		var plan automationPlan
+		if err := json.Unmarshal([]byte(out), &plan); err != nil {
+			msg.err = err
+			return msg
+		}
+		if plan.Repository != repo || plan.Operation != "pending-review-hold" || plan.Before != before || plan.After != after || plan.PreviewSHA256 == "" {
+			msg.err = fmt.Errorf("pending review action setting changed; refresh Automations")
+			return msg
+		}
+		if _, err := runScript(root, "action-policy", "hold", "--expected-repo", repo, "--enabled", mode, "--apply", "--preview-sha256", plan.PreviewSHA256); err != nil {
+			msg.err = err
+			return msg
+		}
+		msg.err = readAutomationStatus(root, repo, &msg)
+		return msg
+	}
+}
+
 func (m model) automationsView() string {
 	state := "Loading…"
 	labeling := "Reading repository setting…"
@@ -185,10 +217,19 @@ func (m model) automationsView() string {
 			cards = append(cards, [2]string{"Labeling", labeling})
 		case "scoring":
 			cards = append(cards, [2]string{"Scoring", "Local · 0–5 quality/readiness · y copies a bounded pass prompt"})
+		case "review-hold":
+			summary := "OFF · Pending review does not change direct action eligibility"
+			if m.settings.automations.pendingReviewHold {
+				summary = "ON · Pending review stages otherwise executable actions"
+			}
+			cards = append(cards, [2]string{"Hold actions for Pending review", summary})
 		default:
 			summary := "STAGE · Suggested " + card.action.Operation + " waits in Notifications"
 			if card.action.Mode == "execute" {
 				summary = "EXECUTE · Agent pass may publish a checked " + card.action.Operation
+				if m.settings.automations.pendingReviewHold {
+					summary += " · Pending review items stage"
+				}
 			}
 			if card.action.StaleSetting {
 				summary += " · Prior setting expired after action edit"
@@ -207,7 +248,7 @@ func (m model) labelingPrompt() string {
 	return m.yankHeader("Labeling automation") + fmt.Sprintf(`
 Please run one bounded labeling pass for %s from %s.
 
-Follow prompts/label-items.md. Start with open items lacking observed labels, including items that already have a decision. Read their evidence, propose only names in this repository's observed GitHub label catalog, and leave Action unassessed unless you have separately evaluated it. Do not mark decisions reviewed.
+Follow prompts/label-items.md. Start with open items lacking observed labels, including items that already have a decision. Read their evidence, propose only names in this repository's observed GitHub label catalog, and leave Action unassessed unless you have separately evaluated it. Use bin/review-request only for an item that needs explicit human attention, with a short reason.
 
 Item labeling is currently %s for this repository. If it is OFF, prepare proposals and stop before a GitHub write. If it is ON, preview the exact selected item keys and additions or removals, inspect that list, then run only that matching bounded plan. Revalidate, record outcomes, stop on an uncertain write, and respect later human corrections. Report item keys, labels changed, skipped items, and any gaps. Refresh the ledger before using applied labels to suggest actions.
 `, m.repo, m.installRoot, setting)
@@ -217,7 +258,7 @@ func (m model) scoringPrompt() string {
 	return m.yankHeader("Item scoring") + fmt.Sprintf(`
 Please score a bounded selection for %s from %s.
 
-Follow prompts/score-items.md. Score at most 20 named issues and PRs per pass; for a larger selected batch, continue in passes of at most 20 and report completed and remaining keys. Read selected immutable evidence offline, score quality/readiness with separate issue and PR dimensions, and record a reason and one suggested next check. Leave missing or unverifiable cases unassessed. Save each result through bin/item-score and report the score, source snapshot/revision and gaps. Do not change triage decisions, mark them reviewed, act on GitHub, or change code or PR diffs.
+Follow prompts/score-items.md. Score at most 20 named issues and PRs per pass; for a larger selected batch, continue in passes of at most 20 and report completed and remaining keys. Read selected immutable evidence offline, score quality/readiness with separate issue and PR dimensions, and record a reason and one suggested next check. Leave missing or unverifiable cases unassessed. Save each result through bin/item-score and report the score, source snapshot/revision and gaps. Do not change triage decisions, act on GitHub, or change code or PR diffs.
 `, m.repo, m.installRoot)
 }
 
@@ -225,7 +266,7 @@ func (m model) actionPrompt(action automationAction) string {
 	return m.yankHeader("Automated action pass") + fmt.Sprintf(`
 Please prepare one bounded %s action pass for %s from %s.
 
-Follow prompts/automated-actions.md. Ask me for selected item keys when the scope is unclear, then choose a bounded script budget yourself and use saved evidence first. Read each item's saved decision, human guidance, earlier objections and selected evidence. Draft the exact public comment in a UTF-8 file, then save the proposal through bin/action-proposals for any writing operation. Do not mark the ledger decision reviewed.
+Follow prompts/automated-actions.md. Ask me for selected item keys when the scope is unclear, then choose a bounded script budget yourself and use saved evidence first. Read each item's saved decision, human guidance, earlier objections and selected evidence. Draft the exact public comment in a UTF-8 file, then save the proposal through bin/action-proposals for any writing operation. Pending review is not action approval; this repository may separately choose to hold direct actions for flagged items.
 
 This repository currently sets %s to %s. Preview only the named keys with bin/action-pass and inspect the exact target, operation, comment, evidence and mode. Run only that matching preview. Stage any disputed or incomplete item for a person even if the type is configured to execute. Stop on an uncertain write and report each outcome. Do not change code or PR diffs.
 `, action.Name, m.repo, m.installRoot, action.Name, action.Mode)
@@ -272,6 +313,10 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, automationActionCmd(m.installRoot, m.repo, m.settings.request, action.Name, action.Operation, action.DefinitionSHA256, action.Mode, after)
 		}
+		if card.kind == "review-hold" {
+			before := m.settings.automations.pendingReviewHold
+			return m, automationReviewHoldCmd(m.installRoot, m.repo, m.settings.request, before, !before)
+		}
 		before := m.settings.automations.labelingEnabled
 		return m, automationToggleCmd(m.installRoot, m.repo, m.settings.request, before, !before)
 	case "y":
@@ -279,6 +324,10 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if card.kind == "scoring" {
 			m.status = "Taking Item scoring prompt…"
 			return m, yankCmd(m.installRoot, m.repo, "Item scoring prompt", m.scoringPrompt())
+		}
+		if card.kind == "review-hold" {
+			m.status = "This repository's Pending review action hold is shown on the card."
+			return m, nil
 		}
 		if !m.settings.automations.loaded {
 			m.status = "Reading this repository's automation setting…"
@@ -313,8 +362,8 @@ func (m model) finishAutomation(msg automationMsg) (tea.Model, tea.Cmd) {
 			actions = append(actions, action)
 		}
 	}
-	m.settings.automations = automationsUI{loaded: true, labelingEnabled: msg.status.Enabled, pending: msg.status.Pending, paused: msg.status.Paused, actions: actions}
-	m.settings.selected = minInt(m.settings.selected, 1+len(actions))
+	m.settings.automations = automationsUI{loaded: true, labelingEnabled: msg.status.Enabled, pendingReviewHold: msg.actions.PendingReviewHold, pending: msg.status.Pending, paused: msg.status.Paused, actions: actions}
+	m.settings.selected = minInt(m.settings.selected, 2+len(actions))
 	if msg.operation == "toggle" {
 		state := "OFF"
 		if msg.status.Enabled {
@@ -323,6 +372,8 @@ func (m model) finishAutomation(msg automationMsg) (tea.Model, tea.Cmd) {
 		m.status = "Labeling automation is " + state + " for " + m.repo + "."
 	} else if msg.operation == "action" {
 		m.status = "Action policy updated for " + m.repo + "."
+	} else if msg.operation == "review-hold" {
+		m.status = "Pending review action hold updated for " + m.repo + "."
 	}
 	return m, nil
 }

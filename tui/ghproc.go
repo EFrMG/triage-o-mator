@@ -226,22 +226,17 @@ func enrichItemCmd(installRoot, repo string, key Key, generation uint64, withDif
 	}
 }
 
-// applyDoneMsg reports the result of an apply (decision save or approve).
+// applyDoneMsg reports the result of a decision save.
 type applyDoneMsg struct {
 	root, repo string
 	snapshot   *decisionSnapshot
-	approval   bool
 	key        Key
-	// count is set for a bulk approval of ticked items (key is then unset); approved holds the approved items either way.
-	count    int
-	approved []Key
-	err      error
+	err        error
 }
 
 // applyDecisionCmd saves one decision; batchID, when set, stamps it with the batch it was made in (bin/apply defaults to "tui").
 // agentNotes, when non-empty, carries a batch proposal's notes into the ledger along with the decision saved from it; empty leaves the item's existing notes alone.
-// reviewedBy records an explicit human confirmation with the save; by remains the decision author, which can be the author of an unchanged batch proposal.
-func applyDecisionCmd(installRoot, repo string, key Key, proposedLabels []string, replaceLabels bool, action, confidence, reason, agentNotes, by, batchID, reviewedBy string) tea.Cmd {
+func applyDecisionCmd(installRoot, repo string, key Key, proposedLabels []string, replaceLabels bool, action, confidence, reason, agentNotes, by, batchID string) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{
 			"--expected-repo", repo,
@@ -268,21 +263,9 @@ func applyDecisionCmd(installRoot, repo string, key Key, proposedLabels []string
 			args = append(args, "--agent-notes", agentNotes)
 		}
 
-		if reviewedBy != "" {
-			args = append(args, "--reviewed", "--reviewed-by", reviewedBy)
-		}
-
 		_, err := runScript(installRoot, "apply", args...)
 
-		return applyDoneMsg{root: installRoot, repo: repo, key: key, err: err, approval: reviewedBy != "", approved: []Key{key}}
-	}
-}
-
-func approveCmd(installRoot, repo string, key Key, by string) tea.Cmd {
-	return func() tea.Msg {
-		_, err := runScript(installRoot, "apply", "--expected-repo", repo, "--number", strconv.Itoa(key.Number), "--kind", key.Kind, "--approve", "--by", by)
-
-		return applyDoneMsg{root: installRoot, repo: repo, key: key, err: err, approval: true, approved: []Key{key}}
+		return applyDoneMsg{root: installRoot, repo: repo, key: key, err: err}
 	}
 }
 

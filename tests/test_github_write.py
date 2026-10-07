@@ -52,7 +52,7 @@ elif method == "POST" and kind == "issues" and comments:
     if number == "1" and hook.exists():
         ledger = root.parent / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[1]["reviewer_notes"] = "Changed while the selected set was running"
+        rows[1]["maintainer_notes"] = "Changed while the selected set was running"
         ledger.write_text("\\n".join(json.dumps(row) for row in rows) + "\\n")
         hook.unlink()
     print(json.dumps(dict(id=42, html_url=f"https://github.com/owner/repo/issues/{number}#issuecomment-42")))
@@ -123,7 +123,7 @@ class WriteTests(Workspace):
         live["updated_at"] = timestamp
         (self.mock / "item.json").write_text(json.dumps(live))
         decision = dict(item(1, "Needs a reproduction"), action="comment", confidence="medium",
-                        reason="The report lacks steps", reviewed=False)
+                        reason="The report lacks steps")
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         ledger.write_text(json.dumps(decision) + "\n")
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "issue", "--number", "1")
@@ -154,7 +154,7 @@ class WriteTests(Workspace):
                                  "--checkpoint", saved["checkpoint"], "--by", "maintainer", "--reason", "Ask for the version too")
         self.assertEqual(rejected["status"], "rejected")
         self.assertEqual(self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")["feedback_count"], 1)
-        self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
+        self.assertIsNone(self.ledger()[("issue", 1)].get("review_request"))
         self.assertEqual(self.write_calls(), [])
 
         refreshed = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
@@ -179,7 +179,7 @@ class WriteTests(Workspace):
         live.update(state="closed", updated_at=timestamp)
         (self.mock / "item.json").write_text(json.dumps(live))
         decision = dict(item(1, "Closed too early"), state="closed", action="reopen",
-                        confidence="high", reason="The reported behavior still reproduces", reviewed=False)
+                        confidence="high", reason="The reported behavior still reproduces")
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
         args = ("--expected-repo", "owner/repo")
         context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
@@ -287,7 +287,7 @@ class ClosureWriteTests(Workspace):
         super().setUp()
         (self.mock / "gh").write_text(CLOSE_GH)
         ledger = self.root / "data/owner/repo/ledger.jsonl"
-        ledger.write_text("\n".join(json.dumps(dict(item(number, f"PR {number}", "pr"), reviewer_notes="Initial guidance")) for number in (1, 2)) + "\n")
+        ledger.write_text("\n".join(json.dumps(dict(item(number, f"PR {number}", "pr"), maintainer_notes="Initial guidance")) for number in (1, 2)) + "\n")
         for number in (1, 2):
             target = f"https://github.com/owner/repo/pull/{number}"
             (self.mock / f"issues-{number}.json").write_text(json.dumps(dict(number=number, html_url=target, state="open",
@@ -388,6 +388,21 @@ class ClosureWriteTests(Workspace):
 
         preview = self.json_cli("action-pass", "preview", *selected)
         self.assertEqual(preview["plan"]["items"][0]["mode"], "execute")
+        self.json_cli("review-request", "mark", "--expected-repo", "owner/repo", "--kind", "pr", "--number", "1", "--by", "agent:triage", "--reason", "Important maintainer decision")
+        self.assertEqual(self.json_cli("action-pass", "preview", *selected)["plan"]["items"][0]["mode"], "execute")
+        hold = self.json_cli("action-policy", "hold", "--expected-repo", "owner/repo", "--enabled", "on")
+        self.json_cli("action-policy", "hold", "--expected-repo", "owner/repo", "--enabled", "on", "--apply", "--preview-sha256", hold["preview_sha256"])
+        self.run_cli("action-pass", "run", *selected, "--preview-sha256", preview["preview_sha256"], ok=False)
+        held = self.json_cli("action-pass", "preview", *selected)
+        self.assertEqual(held["plan"]["items"][0]["mode"], "stage")
+        self.assertTrue(held["plan"]["items"][0]["held_for_review"])
+        self.assertEqual(self.json_cli("action-pass", "run", *selected, "--preview-sha256", held["preview_sha256"])["results"][0]["status"], "staged")
+        direct = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
+        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1", "--publish", "--approve", direct["approval"], "--automation", ok=False)
+        self.assertEqual(self.write_calls(), [])
+        release = self.json_cli("action-policy", "hold", "--expected-repo", "owner/repo", "--enabled", "off")
+        self.json_cli("action-policy", "hold", "--expected-repo", "owner/repo", "--enabled", "off", "--apply", "--preview-sha256", release["preview_sha256"])
+        preview = self.json_cli("action-pass", "preview", *selected)
         result = self.json_cli("action-pass", "run", *selected, "--preview-sha256", preview["preview_sha256"])
         self.assertEqual(result["results"][0]["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
@@ -425,7 +440,7 @@ class ClosureWriteTests(Workspace):
                                   "--checkpoint", held["checkpoint"], "--by", "maintainer", "--answer", "Yes, #2 covers the same behavior")
         self.assertEqual(answered["decision_question"], "Does #2 fully replace this PR?")
         self.assertEqual(answered["decision_resolution"]["by"], "maintainer")
-        self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
+        self.assertIsNone(self.ledger()[("pr", 1)].get("review_request"))
         self.assertEqual(self.json_cli("action-pass", "preview", *selected)["plan"]["items"][0]["mode"], "stage")
         reviewed = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
         exact = reviewed["plan"]["proposals"][0]
@@ -441,7 +456,7 @@ class ClosureWriteTests(Workspace):
                                 "--publish", "--approve", reviewed["approval"])["results"][0]
         self.assertEqual(outcome["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST", "PATCH"])
-        self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
+        self.assertIsNone(self.ledger()[("pr", 1)].get("review_request"))
 
     def test_policy_routes_pr_comment_without_creating_a_closure_proposal(self):
         write_gh = (self.mock / "gh").read_text()
@@ -483,7 +498,7 @@ class ClosureWriteTests(Workspace):
                                  "--checkpoint", held["checkpoint"], "--by", "maintainer", "--answer", "Send focused feedback now")
         self.assertEqual(answered["decision_resolution"]["by"], "maintainer")
         self.assertEqual(answered["decision_question"], "Should this feedback be sent now?")
-        self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
+        self.assertIsNone(self.ledger()[("pr", 1)].get("review_request"))
         preview = self.json_cli("action-pass", "preview", *selection)
         self.assertEqual(preview["plan"]["items"][0]["mode"], "stage")
         self.assertEqual(self.json_cli("action-pass", "run", *selection, "--preview-sha256", preview["preview_sha256"])["results"][0]["status"], "staged")
@@ -511,7 +526,7 @@ class ClosureWriteTests(Workspace):
         self.assertEqual(result["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST"])
         self.assertFalse(self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"][0]["needs_attention"])
-        self.assertFalse(self.ledger()[("pr", 1)].get("reviewed", False))
+        self.assertIsNone(self.ledger()[("pr", 1)].get("review_request"))
         self.assertEqual(self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")["feedback_count"], 1)
 
     def test_changed_guidance_requires_fresh_review_and_approval(self):
@@ -519,7 +534,7 @@ class ClosureWriteTests(Workspace):
         old = self.closure("review", "--number", "1")
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[0]["reviewer_notes"] = "Keep open for compatibility"
+        rows[0]["maintainer_notes"] = "Keep open for compatibility"
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
 
         self.closure("review", "--number", "1", ok=False)
@@ -547,7 +562,7 @@ class ClosureWriteTests(Workspace):
 
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[0]["reviewer_notes"] = "Old API concern resolved; closure may proceed"
+        rows[0]["maintainer_notes"] = "Old API concern resolved; closure may proceed"
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         fresh = self.propose(1, "--replace-checkpoint", rejected["checkpoint"],
                              "--reconsideration-reason", "Maintainer resolved the old API concern in local guidance")
@@ -673,7 +688,7 @@ class ClosureWriteTests(Workspace):
         before = self.write_calls()
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[0]["reviewer_notes"] = "Changed after the write attempt"
+        rows[0]["maintainer_notes"] = "Changed after the write attempt"
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
 
         self.closure("review", "--number", "1", ok=False)
@@ -694,7 +709,7 @@ class ClosureWriteTests(Workspace):
         pending = self.propose(1, *handoff_args())
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[1]["reviewer_notes"] = "Prefer the other fix"
+        rows[1]["maintainer_notes"] = "Prefer the other fix"
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         context_status = self.closure("context", "--number", "1", "--checkpoint", pending["checkpoint"])
         self.assertFalse(context_status["current"])

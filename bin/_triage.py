@@ -64,10 +64,8 @@ FIELDS = [
     "triaged_by",
     "batch_id",
     "agent_notes",
-    "reviewed",
-    "reviewed_by",
-    "reviewed_at",
-    "reviewer_notes",
+    "review_request",
+    "maintainer_notes",
     "first_seen_at",
     "last_synced_at",
 ]
@@ -81,10 +79,8 @@ TRIAGE_DEFAULTS = {
     "triaged_by": "",
     "batch_id": "",
     "agent_notes": "",
-    "reviewed": False,
-    "reviewed_by": "",
-    "reviewed_at": "",
-    "reviewer_notes": "",
+    "review_request": None,
+    "maintainer_notes": "",
 }
 
 
@@ -175,12 +171,20 @@ def save_jsonl(path, records, field_order=None):
 
 
 def load_ledger():
-    return load_jsonl(LEDGER_PATH)
+    records = load_jsonl(LEDGER_PATH)
+    for rec in records:
+        review_request(rec)
+
+    return records
 
 
 def save_ledger(records):
     """Atomically publish records; callers must hold locked(LEDGER_PATH) across the preceding read and update too."""
     records = sorted(records, key=lambda r: (r.get("kind", ""), r.get("number", 0)))
+    for rec in records:
+        for field in ("reviewed", "reviewed_by", "reviewed_at", "reviewer_notes"):
+            rec.pop(field, None)
+
     save_jsonl(LEDGER_PATH, records)
 
 
@@ -190,6 +194,21 @@ def ledger_key(rec):
 
 ITEM_KEY_RE = re.compile(r"(issue|pr):([1-9][0-9]*)")
 UTC_TIMESTAMP_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+
+
+def review_request(rec):
+    request = rec.get("review_request")
+    if request is None:
+        return None
+
+    if (not isinstance(request, dict) or set(request) != {"by", "at", "reason"} or
+            any(not isinstance(request[field], str) or not request[field].strip() for field in request) or
+            len(request["by"].encode("utf-8")) > 200 or len(request["reason"].encode("utf-8")) > 500 or
+            any(ord(char) < 32 or ord(char) == 127 for char in request["by"] + request["reason"]) or
+            not UTC_TIMESTAMP_RE.fullmatch(request["at"])):
+        raise ValueError("invalid Pending review request in ledger")
+
+    return request
 
 
 def item_url(host, repo, kind, number):

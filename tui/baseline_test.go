@@ -32,7 +32,7 @@ func baselineSend(m model, msg tea.Msg) model {
 }
 
 func baselineRow(number int) string {
-	row := map[string]any{"number": number, "kind": "issue", "state": "open", "title": "issue", "url": "https://github.com/owner/repo/issues/1", "author": "author", "created_at": "2026-01-01T00:00:00Z", "updated_at": "", "labels": []string{}, "comments_count": 0, "action": "", "confidence": "", "reason": "", "reviewed": false}
+	row := map[string]any{"number": number, "kind": "issue", "state": "open", "title": "issue", "url": "https://github.com/owner/repo/issues/1", "author": "author", "created_at": "2026-01-01T00:00:00Z", "updated_at": "", "labels": []string{}, "comments_count": 0, "action": "", "confidence": "", "reason": ""}
 	data, _ := json.Marshal(row)
 	return string(data) + "\n"
 }
@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "action-proposals"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -497,7 +497,7 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	if cmd == nil || !m.settings.busy {
 		t.Fatal("Ctrl-P did not request a live GitHub preview")
 	}
-	plan := labelDefinitionPlan{Repository: m.repo, Operation: "edit", Current: &GitHubLabel{ID: 1, Name: "bug", Description: "Something is broken", Color: "ff0000"}, Proposed: GitHubLabel{Name: "defect", Description: "A reproducible defect", Color: "ff0000"}, PreviewSHA256: "reviewed-preview"}
+	plan := labelDefinitionPlan{Repository: m.repo, Operation: "edit", Current: &GitHubLabel{ID: 1, Name: "bug", Description: "Something is broken", Color: "ff0000"}, Proposed: GitHubLabel{Name: "defect", Description: "A reproducible defect", Color: "ff0000"}, PreviewSHA256: "settings-preview"}
 	m = baselineSend(m, settingsPreviewMsg{root: root, repo: m.repo, request: m.settings.request, name: "defect", description: "A reproducible defect", plan: plan})
 	preview := m.settingsDraftPreview(m.settings.editor.preview.Width())
 	plain := ansi.Strip(preview)
@@ -651,8 +651,21 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	if m.settings.selected != 2 || m.settings.automations.actions[0].Name != "comment" {
-		t.Fatal("first writing action did not appear after Scoring")
+	if m.settings.selected != 2 || m.settings.automations.pendingReviewHold {
+		t.Fatal("Pending review action hold did not default to OFF after Scoring")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("Pending review hold card could not be changed")
+	}
+	m = baselineSend(m, cmd().(automationMsg))
+	if !m.settings.automations.pendingReviewHold {
+		t.Fatal("Pending review action hold did not turn on for the selected repository")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.settings.selected != 3 || m.settings.automations.actions[0].Name != "comment" {
+		t.Fatal("first writing action did not appear after Pending review hold")
 	}
 	if prompt := m.actionPrompt(m.settings.automations.actions[0]); !strings.Contains(prompt, "prompts/automated-actions.md") || !strings.Contains(prompt, "comment") || !strings.Contains(prompt, m.repo) {
 		t.Fatal("action prompt lacked selected type, repository or playbook")
@@ -1012,34 +1025,47 @@ func TestBaselineCommentStateComesFromLedgerRefresh(t *testing.T) {
 	}
 }
 
-func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
-	for _, approve := range []bool{false, true} {
-		t.Run(map[bool]string{false: "proposal", true: "approval"}[approve], func(t *testing.T) {
-			root := baselineRoot(t)
-			m := baselineModel(t, root)
-			m.activateTab(untriagedTab)
-			m.selectCurrentListItem()
-			m.form.ApplyProposal(proposal{Action: "none", Confidence: "medium", Reason: "Reviewed source", ProposedBy: "agent:triage"})
-			shortcut := "s"
-			if approve {
-				shortcut = "S"
-			}
-			next, cmd := m.Update(tea.KeyPressMsg{Text: shortcut})
-			if cmd == nil {
-				t.Fatal("save produced no script command")
-			}
-			_ = baselineSend(next.(model), cmd())
-			row := baselineLedgerRow(t, root)
-			if row["reviewed"] != approve || row["action"] != "none" {
-				t.Fatalf("saved decision = %v", row)
-			}
-			if approve && row["reviewed_by"] != "tester" {
-				t.Fatal("human approval lost its reviewer")
-			}
-		})
+func TestBaselineSaveAndExplicitPendingReviewAreSeparate(t *testing.T) {
+	root := baselineRoot(t)
+	m := baselineModel(t, root)
+	m.activateTab(untriagedTab)
+	m.selectCurrentListItem()
+	m.form.ApplyProposal(proposal{Action: "none", Confidence: "medium", Reason: "Checked source", ProposedBy: "agent:triage"})
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "s"})
+	if cmd == nil {
+		t.Fatal("save produced no script command")
+	}
+	_ = baselineSend(next.(model), cmd())
+	row := baselineLedgerRow(t, root)
+	if row["action"] != "none" || row["review_request"] != nil {
+		t.Fatalf("saved decision entered Pending review: %v", row)
+	}
+	if _, err := runScript(root, "review-request", "mark", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--by", "agent:triage", "--reason", "Important design decision"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := LoadLedger(root, "owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed := tabs[pendingReviewTab].Filter(items, Taxonomy{}); len(listed) != 1 || listed[0].ReviewRequest.Reason != "Important design decision" {
+		t.Fatalf("explicit request did not enter Pending review: %+v", listed)
+	}
+	m = baselineModel(t, root)
+	m.activateTab(pendingReviewTab)
+	next, cmd = m.requestReviewClear(m.listTargets())
+	if cmd != nil || !strings.Contains(next.(model).status, "Press a again") {
+		t.Fatal("clear did not require confirmation")
+	}
+	next, cmd = next.(model).requestReviewClear(next.(model).listTargets())
+	if cmd == nil {
+		t.Fatal("confirmed request did not use its owning script")
+	}
+	m = baselineSend(next.(model), cmd().(reviewClearDoneMsg))
+	if m.items[0].ReviewRequest != nil || baselineLedgerRow(t, root)["action"] != "none" {
+		t.Fatal("clearing Pending review changed the decision or left the request")
 	}
 
-	root := baselineRoot(t)
+	root = baselineRoot(t)
 	taxonomy, err := LoadTaxonomy(root)
 	if err != nil {
 		t.Fatal(err)
@@ -1053,7 +1079,7 @@ func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := baselineModel(t, root)
+	m = baselineModel(t, root)
 	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
 	m.form.FocusField(fieldLabels)
@@ -1074,16 +1100,16 @@ func TestBaselineSaveAndHumanApprovalAreSeparate(t *testing.T) {
 		t.Fatal("Backspace did not leave action assessment pending")
 	}
 	m.form.reason.SetValue("Confirmed bug")
-	_, cmd := m.requestSave()
+	_, cmd = m.requestSave()
 	if cmd == nil {
 		t.Fatal("label decision produced no save command")
 	}
 	if result := cmd().(applyDoneMsg); result.err != nil {
 		t.Fatal(result.err)
 	}
-	row := baselineLedgerRow(t, root)
-	if row["action"] != "" || !slices.Equal(row["proposed_labels"].([]any), []any{"bug", "needs-info"}) || row["reviewed"] != false {
-		t.Fatalf("new label decision did not stay separate from the action and review: %v", row)
+	row = baselineLedgerRow(t, root)
+	if row["action"] != "" || !slices.Equal(row["proposed_labels"].([]any), []any{"bug", "needs-info"}) || row["review_request"] != nil {
+		t.Fatalf("new label decision did not stay separate from the action and explicit review request: %v", row)
 	}
 }
 
@@ -1145,7 +1171,6 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 		t.Fatal(err)
 	}
 	row["action"], row["confidence"], row["reason"] = "none", "", reason
-	row["reviewed"], row["reviewed_by"] = true, "tester"
 	data, err := json.Marshal(row)
 	if err != nil {
 		t.Fatal(err)
@@ -1178,8 +1203,8 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 	if result := cmd().(applyDoneMsg); result.err != nil {
 		t.Fatal(result.err)
 	}
-	if got := baselineLedgerRow(t, root); got["reason"] != reason || got["confidence"] != "" || got["reviewed"] != true {
-		t.Fatalf("saved long reason or original approval changed: %v", got)
+	if got := baselineLedgerRow(t, root); got["reason"] != reason || got["confidence"] != "" {
+		t.Fatalf("saved long reason changed: %v", got)
 	}
 }
 
@@ -2045,7 +2070,7 @@ func TestGroupEditFloatingFieldsStayBoundedAndSave(t *testing.T) {
 	}
 
 	m := baselineModel(t, root)
-	m.reviewer = "maintainer"
+	m.contributor = "maintainer"
 	m.groups = groupUI{open: true, records: []Group{g}}
 	m = baselineSend(m, tea.WindowSizeMsg{Width: 80, Height: 28})
 	next, cmd := m.Update(tea.KeyPressMsg{Text: "e"})
@@ -2128,9 +2153,10 @@ func TestGroupHandoffCopiesCurrentEditedContextForSelectedMembers(t *testing.T) 
 	if err := json.Unmarshal([]byte(baselineRow(1)), &pr); err != nil {
 		t.Fatal(err)
 	}
-	pr["kind"], pr["number"], pr["title"] = "pr", 3, "Reviewed candidate"
+	pr["kind"], pr["number"], pr["title"] = "pr", 3, "Selected candidate"
 	pr["url"], pr["action"], pr["confidence"] = "https://github.com/owner/repo/pull/3", "keep-open", "high"
-	pr["reason"], pr["reviewed"], pr["reviewed_by"], pr["reviewer_notes"] = "Maintainer guidance", true, "maintainer", "Check compatibility first"
+	pr["reason"], pr["maintainer_notes"] = "Maintainer guidance", "Check compatibility first"
+	pr["review_request"] = map[string]string{"by": "agent:helper", "at": "2026-09-29T00:00:00Z", "reason": "Check project compatibility"}
 	prJSON, err := json.Marshal(pr)
 	if err != nil {
 		t.Fatal(err)
@@ -2157,7 +2183,7 @@ func TestGroupHandoffCopiesCurrentEditedContextForSelectedMembers(t *testing.T) 
 	g = call("update", g.ID, "--revision", strconv.Itoa(g.Revision), "--description", "Maintainer edited the group question", "--by", "maintainer")
 
 	m := baselineModel(t, root)
-	m.reviewer = "maintainer"
+	m.contributor = "maintainer"
 	m.groups = groupUI{open: true, detail: true, records: []Group{g}, member: 0, ticked: map[Key]bool{{Kind: "pr", Number: 3}: true}}
 	next, cmd := m.Update(tea.KeyPressMsg{Text: "e"})
 	m = next.(model)
@@ -2205,7 +2231,7 @@ func TestGroupHandoffCopiesCurrentEditedContextForSelectedMembers(t *testing.T) 
 	}
 	text := groupHandoffText(m.yankHeader("group handoff"), handoff)
 	scope := strings.SplitN(text, "Assess these members", 2)[0]
-	for _, expected := range []string{"- pr #3", "Maintainer edited the group question", "Maintainer wants the candidate reconsidered", "Check compatibility first", "Human review: confirmed by maintainer", "#### issue #2", "Current member checkpoints"} {
+	for _, expected := range []string{"- pr #3", "Maintainer edited the group question", "Maintainer wants the candidate reconsidered", "Check compatibility first", "Pending review requested by agent:helper", "#### issue #2", "Current member checkpoints"} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("edited context missing from group handoff: %s", expected)
 		}
@@ -2374,9 +2400,14 @@ func TestCompletedOutcomesStayVisibleAndRejectedProposalsLeaveNotifications(t *t
 	}
 }
 
-func TestSuggestedActionsLiveInNotificationsWithoutSeparateReviewTabs(t *testing.T) {
-	if len(tabs) != 3 || tabs[0].Name != "Untriaged" || tabs[1].Name != "Merge-Ready PRs" || tabs[2].Name != "All Items" {
-		t.Fatal("separate Pending Review or Close Candidates menu remains")
+func TestSuggestedActionsAndExplicitPendingReviewHaveSeparateTabs(t *testing.T) {
+	if len(tabs) != 4 || tabs[0].Name != "Untriaged" || tabs[1].Name != "Pending review" || tabs[2].Name != "Merge-Ready PRs" || tabs[3].Name != "All Items" {
+		t.Fatal("the explicit Pending review tab is missing or an action tab returned")
+	}
+	flagged := []Item{{Kind: "issue", Number: 7, State: "closed", ReviewRequest: &ReviewRequest{By: "agent:triage", At: "2026-10-07T00:00:00Z", Reason: "Check impact"}},
+		{Kind: "issue", Number: 8, State: "open", Action: "close"}}
+	if listed := tabs[pendingReviewTab].Filter(flagged, Taxonomy{}); len(listed) != 1 || listed[0].Number != 7 {
+		t.Fatalf("Pending review did not follow the explicit flag independent of state or triage: %+v", listed)
 	}
 	ready := []Item{{Kind: "pr", Number: 1, State: "open", ProposedLabels: []string{"ready"}, Confidence: "high"}, {Kind: "issue", Number: 2, State: "open", ProposedLabels: []string{"ready"}, Confidence: "high"},
 		{Kind: "pr", Number: 4, State: "open", ProposedLabels: []string{"ready"}, Confidence: "medium"}}
@@ -2488,7 +2519,7 @@ row = dict(kind="pr", operation="close", number=3, title="Fixture PR", target="h
 if "context" in args:
     stale = pathlib.Path("stale-context").exists()
     omitted = 30 if pathlib.Path("long-context").exists() else 0
-    item = dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-2" if stale else "ctx-1", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(action=dict(preview="keep-open", omitted_bytes=0), reviewer_notes=dict(preview="Check compatibility", omitted_bytes=omitted), reviewed=True)), dict(kind="group", id="group:g1", fields=dict(title=dict(preview="Compatibility review", omitted_bytes=0), status=dict(preview="draft", omitted_bytes=0), description=dict(preview="Compare alternatives", omitted_bytes=0))), dict(kind="member", id="member:g1:pr:3", selected=True, fields=dict(notes=dict(preview="Keep the old API", omitted_bytes=0)))])
+    item = dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-2" if stale else "ctx-1", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(action=dict(preview="keep-open", omitted_bytes=0), maintainer_notes=dict(preview="Check compatibility", omitted_bytes=omitted))), dict(kind="group", id="group:g1", fields=dict(title=dict(preview="Compatibility review", omitted_bytes=0), status=dict(preview="draft", omitted_bytes=0), description=dict(preview="Compare alternatives", omitted_bytes=0))), dict(kind="member", id="member:g1:pr:3", selected=True, fields=dict(notes=dict(preview="Keep the old API", omitted_bytes=0)))])
     print(json.dumps(dict(repository="owner/repo", kind="pr", number=3, proposal_checkpoint="proposal-1", current=not stale, reason="local context changed" if stale else None, item_context=item, latest_rejection=dict(by="maintainer", at="2026-09-29T00:00:00Z", reason="Earlier objection", proposal_checkpoint="older"), requests=0)))
 elif "review" in args:
     print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="fresh-approval")))
@@ -2501,7 +2532,7 @@ else:
 	sourceScript := `#!/usr/bin/env python3
 import json
 text = "Check compatibility across all supported versions"
-print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-1", row="ledger", field="reviewer_notes", text=text, bytes=dict(offset=0, returned=len(text.encode())), continuation=None, requests=0)))
+print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-1", row="ledger", field="maintainer_notes", text=text, bytes=dict(offset=0, returned=len(text.encode())), continuation=None, requests=0)))
 `
 	if err := os.WriteFile(filepath.Join(root, "bin", "item-context"), []byte(sourceScript), 0o755); err != nil {
 		t.Fatal(err)
@@ -2686,7 +2717,7 @@ else:
 	}
 	m := baselineModel(t, root)
 	m.height = 80
-	m.reviewer = "maintainer"
+	m.contributor = "maintainer"
 	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{row}}}
 	choice := m.notifications.choices()[0]
 	if choice.actionProposal != 0 || choice.key != (Key{Kind: "issue", Number: 1}) {
@@ -2795,7 +2826,7 @@ else:
 	}
 	row := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Older change", Target: "https://github.com/owner/repo/pull/3", Comment: "This PR is superseded by #4.", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "closure-1", Status: "pending", Active: true, DecisionQuestion: "Does #4 replace this PR?", Inputs: proposalInputs{ContextCheckpoint: "ctx-a"}}
 	m := baselineModel(t, root)
-	m.reviewer = "maintainer"
+	m.contributor = "maintainer"
 	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{row}}}
 	choice, ok := m.notifications.actionProposalChoice(Key{Kind: "pr", Number: 3})
 	if !ok {

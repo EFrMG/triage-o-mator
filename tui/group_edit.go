@@ -213,7 +213,7 @@ func (m model) saveGroupEdit() (tea.Model, tea.Cmd) {
 		}
 		m.groups.busy = true
 		m.status = "Creating group…"
-		return m, groupsCmd(m.installRoot, "create", "--title", e.title.Value(), "--description", e.description.Value(), "--assignee", e.assignee.Value(), "--by", m.reviewer)
+		return m, groupsCmd(m.installRoot, "create", "--title", e.title.Value(), "--description", e.description.Value(), "--assignee", e.assignee.Value(), "--by", m.contributor)
 	}
 
 	g := m.selectedGroup()
@@ -230,7 +230,7 @@ func (m model) saveGroupEdit() (tea.Model, tea.Cmd) {
 	}
 
 	args := []string{"update", e.groupID, "--revision", strconv.Itoa(e.revision), "--title", e.title.Value(),
-		"--description", e.description.Value(), "--status", e.status, "--assignee", e.assignee.Value(), "--by", m.reviewer}
+		"--description", e.description.Value(), "--status", e.status, "--assignee", e.assignee.Value(), "--by", m.contributor}
 	m.groups.busy = true
 	m.status = "Saving group…"
 	return m, groupsCmd(m.installRoot, args...)

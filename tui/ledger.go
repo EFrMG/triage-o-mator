@@ -15,31 +15,29 @@ import (
 // Item mirrors one row of data/<owner>/<repo>/ledger.jsonl (bin/_triage.py's FIELDS).
 // The TUI only reads ledger records; owning scripts such as bin/apply and bin/item-score write them.
 type Item struct {
-	Number         int        `json:"number"`
-	Kind           string     `json:"kind"`
-	State          string     `json:"state"`
-	Title          string     `json:"title"`
-	URL            string     `json:"url"`
-	Author         string     `json:"author"`
-	CreatedAt      string     `json:"created_at"`
-	UpdatedAt      string     `json:"updated_at"`
-	Labels         []string   `json:"labels"`
-	ProposedLabels []string   `json:"proposed_labels"`
-	CommentsCount  int        `json:"comments_count"`
-	ItemScore      *ItemScore `json:"item_score"`
-	Action         string     `json:"action"`
-	Confidence     string     `json:"confidence"`
-	Reason         string     `json:"reason"`
-	TriagedAt      string     `json:"triaged_at"`
-	TriagedBy      string     `json:"triaged_by"`
-	BatchID        string     `json:"batch_id"`
-	AgentNotes     string     `json:"agent_notes"`
-	Reviewed       bool       `json:"reviewed"`
-	ReviewedBy     string     `json:"reviewed_by"`
-	ReviewedAt     string     `json:"reviewed_at"`
-	ReviewerNotes  string     `json:"reviewer_notes"`
-	FirstSeenAt    string     `json:"first_seen_at"`
-	LastSyncedAt   string     `json:"last_synced_at"`
+	Number          int            `json:"number"`
+	Kind            string         `json:"kind"`
+	State           string         `json:"state"`
+	Title           string         `json:"title"`
+	URL             string         `json:"url"`
+	Author          string         `json:"author"`
+	CreatedAt       string         `json:"created_at"`
+	UpdatedAt       string         `json:"updated_at"`
+	Labels          []string       `json:"labels"`
+	ProposedLabels  []string       `json:"proposed_labels"`
+	CommentsCount   int            `json:"comments_count"`
+	ItemScore       *ItemScore     `json:"item_score"`
+	Action          string         `json:"action"`
+	Confidence      string         `json:"confidence"`
+	Reason          string         `json:"reason"`
+	TriagedAt       string         `json:"triaged_at"`
+	TriagedBy       string         `json:"triaged_by"`
+	BatchID         string         `json:"batch_id"`
+	AgentNotes      string         `json:"agent_notes"`
+	ReviewRequest   *ReviewRequest `json:"review_request"`
+	MaintainerNotes string         `json:"maintainer_notes"`
+	FirstSeenAt     string         `json:"first_seen_at"`
+	LastSyncedAt    string         `json:"last_synced_at"`
 }
 
 type ItemScore struct {
@@ -55,6 +53,12 @@ type ItemScore struct {
 	} `json:"revision"`
 	AssessedAt string `json:"assessed_at"`
 	AssessedBy string `json:"assessed_by"`
+}
+
+type ReviewRequest struct {
+	By     string `json:"by"`
+	At     string `json:"at"`
+	Reason string `json:"reason"`
 }
 
 // Key uniquely identifies an item by (kind, number), matching bin/_triage.py's ledger_key().
@@ -105,13 +109,13 @@ func (i Item) ByAgent() bool {
 	return i.TriagedBy == "agent" || strings.HasPrefix(i.TriagedBy, "agent:")
 }
 
-func (i Item) PendingReview() bool { return !i.Untriaged() && !i.Reviewed }
+func (i Item) PendingReview() bool { return i.ReviewRequest != nil }
 
 // readyLabel mirrors READY_LABEL in bin/_triage.py: on a PR the `ready` starter label means its code was read and nothing blocks merging.
 const readyLabel = "ready"
 
 func (i Item) MergeReadyHighConfidence() bool {
-	return i.Kind == "pr" && slices.Contains(i.ProposedLabels, readyLabel) && i.Confidence == "high" && !i.Reviewed
+	return i.Kind == "pr" && slices.Contains(i.ProposedLabels, readyLabel) && i.Confidence == "high"
 }
 
 // LoadLedger reads repo's ledger, data/<owner>/<repo>/ledger.jsonl.
@@ -160,6 +164,10 @@ func decodeJSONLItems(f *os.File) ([]Item, error) {
 		var item Item
 		if err := json.Unmarshal(line, &item); err != nil {
 			return nil, fmt.Errorf("line %d: %w", lineNo, err)
+		}
+		if item.ReviewRequest != nil && (strings.TrimSpace(item.ReviewRequest.By) == "" ||
+			strings.TrimSpace(item.ReviewRequest.At) == "" || strings.TrimSpace(item.ReviewRequest.Reason) == "") {
+			return nil, fmt.Errorf("line %d: invalid Pending review request", lineNo)
 		}
 
 		items = append(items, item)

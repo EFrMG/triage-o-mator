@@ -46,7 +46,8 @@ func proposalNotes(context *actionProposalContext) []proposalNote {
 		switch row.Kind {
 		case "ledger":
 			add(row.ID, row.Fields, "reason", "Decision reason")
-			add(row.ID, row.Fields, "reviewer_notes", "Reviewer notes")
+			add(row.ID, row.Fields, "maintainer_notes", "Maintainer notes")
+			add(row.ID, row.Fields, "pending_review_reason", "Pending review reason")
 			add(row.ID, row.Fields, "agent_notes", "Agent notes")
 		case "group":
 			add(row.ID, row.Fields, "description", "Group guidance · "+contextField(row.Fields, "title"))

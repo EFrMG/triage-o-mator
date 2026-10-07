@@ -171,6 +171,9 @@ func (m model) contextFooterGroups() []footerGroup {
 			if card.kind == "scoring" {
 				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}
+			if card.kind == "review-hold" {
+				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle Pending review hold"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+			}
 			if card.kind == "action" {
 				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle action mode"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}
@@ -358,7 +361,7 @@ func (m model) contextFooterGroups() []footerGroup {
 	case m.dups.open:
 		return []footerGroup{
 			group("Duplicate", bind("mark as duplicate", keys.MarkDup), bind("", keys.SwapDup), bind("", keys.Tick), bind("group ticked", keys.Group)),
-			group("Item", bind("read", keys.Enter), bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Open), bind("", keys.Reopen, keys.ReopenEditor)),
+			group("Item", bind("read", keys.Enter), bind("", keys.Save), bind("", keys.Open), bind("", keys.Reopen, keys.ReopenEditor)),
 			group("Select", bind("move", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom)),
 			group("Menus", bind("", keys.Theme)),
 			m.navigationGroup(),
@@ -385,7 +388,13 @@ func (m model) contextFooterGroups() []footerGroup {
 	}
 
 	// An item list: list actions apply to the ticked items, or the hovered one.
-	items := group("Items", bind("", keys.Approve), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Undo), bind("", keys.Group), bind("", keys.QuickGroup), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.Yank, keys.YankAll))
+	items := group("Items", bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Undo), bind("", keys.Group), bind("", keys.QuickGroup), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.Yank, keys.YankAll))
+	for _, target := range m.listTargets() {
+		if target.PendingReview() {
+			items.hints = append(items.hints, bind("", keys.ReviewClear))
+			break
+		}
+	}
 	if len(m.ticked) > 0 {
 		items.name = fmt.Sprintf("%d ticked", len(m.ticked))
 	}
@@ -409,7 +418,10 @@ func (m model) itemFooter() []footerGroup {
 			score = lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true).Render(score)
 		}
 	}
-	item := group("Item", hint{"", score}, bind("", keys.Save), bind("", keys.SaveApprove), bind("", keys.Approve), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Close, keys.CloseEditor), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Yank))
+	item := group("Item", hint{"", score}, bind("", keys.Save), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Close, keys.CloseEditor), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Yank))
+	if it, ok := m.findItem(m.detail.key); ok && it.PendingReview() {
+		item.hints = append(item.hints, bind("", keys.ReviewClear))
+	}
 	tabAction := "tabs"
 	if m.sideBySide() {
 		tabAction = "tabs / form"

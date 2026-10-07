@@ -15,12 +15,12 @@ if not ledger:
 open_items = [r for r in ledger if r["state"] == "open"]
 by_kind = Counter(r["kind"] for r in open_items)
 triaged = sum(1 for r in open_items if has_decision(r))
-reviewed = sum(1 for r in open_items if r["reviewed"])
+pending_review = sum(1 for r in ledger if r.get("review_request"))
 
 print(
     f"Ledger total: {len(ledger)} (open: {len(open_items)}, closed: {len(ledger) - len(open_items)})"
 )
 print(f"Open by kind: {dict(by_kind)}")
 print(
-    f"Triaged: {triaged}/{len(open_items)}  |  Reviewed: {reviewed}/{len(open_items)}"
+    f"Triaged: {triaged}/{len(open_items)}  |  Pending review: {pending_review}"
 )

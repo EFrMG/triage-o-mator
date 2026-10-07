@@ -20,7 +20,7 @@ type proposalAnswerDoneMsg struct {
 func (m model) answerProposalCmd() tea.Cmd {
 	root, repo, generation := m.installRoot, m.repo, m.notificationsGeneration
 	choice, checkpoint := m.comment.answerChoice, m.comment.answerCheckpoint
-	answer, by := m.comment.text.Value(), m.reviewer
+	answer, by := m.comment.text.Value(), m.contributor
 	args := []string{"--expected-repo", repo, "answer", "--kind", choice.key.Kind, "--number", strconv.Itoa(choice.key.Number), "--checkpoint", checkpoint, "--by", by, "--answer", answer}
 	row := m.notifications.actions.Rows[choice.actionProposal]
 	target, comment := row.Target, row.Comment

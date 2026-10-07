@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Export the ledger to CSV for manual review in a spreadsheet.
+Export the ledger to CSV for editing local decisions in a spreadsheet.
 
 Usage:
     bin/export-csv [--open-only] [--pending-review]
     -> data/<owner>/<repo>/exports/ledger-<date>.csv
 
-Edit proposed_labels (a JSON list), action, confidence, reason, reviewed, reviewed_by or reviewer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. Keep `number`, `kind`, and `review_revision` intact; the revision rejects stale rows.
+Edit proposed_labels (a JSON list), action, confidence, reason or maintainer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. The review_request column is read-only; use bin/review-request to change Pending review. Keep `number`, `kind`, and `row_revision` intact; the revision rejects stale rows.
 """
 
 import argparse
@@ -17,8 +17,8 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import EXPORTS_DIR, FIELDS, has_decision, load_ledger
-from _csv_revision import review_revision
+from _triage import EXPORTS_DIR, FIELDS, load_ledger
+from _row_revision import row_revision
 
 
 def main():
@@ -27,7 +27,7 @@ def main():
     ap.add_argument(
         "--pending-review",
         action="store_true",
-        help="only triaged-but-unreviewed items",
+        help="only items explicitly marked Pending review",
     )
     args = ap.parse_args()
 
@@ -36,18 +36,19 @@ def main():
         ledger = [r for r in ledger if r["state"] == "open"]
 
     if args.pending_review:
-        ledger = [r for r in ledger if has_decision(r) and not r["reviewed"]]
+        ledger = [r for r in ledger if r.get("review_request")]
 
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = EXPORTS_DIR / f"ledger-{date.today().isoformat()}.csv"
     with out_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=[*FIELDS, "review_revision"], extrasaction="ignore")
+        writer = csv.DictWriter(f, fieldnames=[*FIELDS, "row_revision"], extrasaction="ignore")
         writer.writeheader()
         for rec in ledger:
             row = dict(rec)
-            row["review_revision"] = review_revision(rec)
+            row["row_revision"] = row_revision(rec)
             row["labels"] = ",".join(row.get("labels") or [])
             row["proposed_labels"] = json.dumps(row.get("proposed_labels") or [], ensure_ascii=False)
+            row["review_request"] = json.dumps(row.get("review_request"), ensure_ascii=False)
             writer.writerow(row)
 
     print(f"Exported {len(ledger)} rows -> {out_path}")

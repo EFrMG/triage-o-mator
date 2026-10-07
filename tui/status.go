@@ -43,7 +43,7 @@ func isErrorStatus(s string) bool {
 
 // statusPinned reports whether the current status is still in force: a confirmation waiting for a second key press, or work still running that it describes.
 func (m model) statusPinned() bool {
-	return m.confirmQuit || m.confirmSave || m.confirmApprove || m.confirmSwitch || m.batches.confirm != "" || m.listConfirm != "" || m.groups.confirm != "" ||
+	return m.confirmQuit || m.confirmSave || m.confirmSwitch || m.batches.confirm != "" || m.listConfirm != "" || m.groups.confirm != "" ||
 		m.groups.busy || m.batches.busy || m.dups.busy || m.comment.busy
 }
 

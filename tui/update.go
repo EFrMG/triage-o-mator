@@ -68,6 +68,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case undoDoneMsg:
 		return m.onUndoDone(msg)
+	case reviewClearDoneMsg:
+		return m.onReviewClearDone(msg)
 	case sidebarCountsMsg:
 		return m.onSidebarCounts(msg)
 	case exportProgressMsg:
@@ -199,7 +201,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "Ready."
 		}
 
-		// Every save, approval and sync changes what's next.
+		// Every save and sync changes what's next.
 		return m, nextCmd(m.installRoot, m.repo)
 
 	case nextLoadedMsg:
@@ -272,57 +274,23 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.err != nil {
-			what := "Couldn't save the decision"
-			if msg.approval {
-				what = "Couldn't approve"
-			}
-
-			m.failErr(what, msg.err)
+			m.failErr("Couldn't save the decision", msg.err)
 
 			return m, nil
 		}
 
-		if !msg.approval || msg.snapshot != nil {
-			if draft, ok := m.drafts[msg.key]; ok && (msg.snapshot == nil || draft.Equal(*msg.snapshot)) {
-				delete(m.drafts, msg.key)
-			}
-
-			if m.detail.key == msg.key && (msg.snapshot == nil || m.form.Snapshot().Equal(*msg.snapshot)) {
-				m.form.saved = true
-				m.form.dirty = false
-				m.form.proposed = false
-				m.leaveSavedItem()
-			}
-
-			m.status = "Saved."
+		if draft, ok := m.drafts[msg.key]; ok && (msg.snapshot == nil || draft.Equal(*msg.snapshot)) {
+			delete(m.drafts, msg.key)
 		}
 
-		if msg.approval {
-			m.status = "Approved."
-			if msg.snapshot != nil {
-				m.status = "Saved and approved."
-			}
-			if msg.count > 1 {
-				m.status = fmt.Sprintf("Approved %d decisions.", msg.count)
-			}
-
-			m.clearTicks()
-			m.lastStep = msg.approved
-			for _, k := range msg.approved {
-				if k == m.detail.key && !m.form.dirty && !m.form.proposed {
-					// A clean form can follow our own approval on reload; drafts keep the revision they were based on.
-					m.form.saved = true
-				}
-			}
-			// Until the ledger reload lands, a u must already see these as approved.
-			for i := range m.items {
-				for _, k := range msg.approved {
-					if m.items[i].Key() == k {
-						m.items[i].Reviewed = true
-					}
-				}
-			}
+		if m.detail.key == msg.key && (msg.snapshot == nil || m.form.Snapshot().Equal(*msg.snapshot)) {
+			m.form.saved = true
+			m.form.dirty = false
+			m.form.proposed = false
+			m.leaveSavedItem()
 		}
+
+		m.status = "Saved."
 
 		return m, reloadLedgerCmd(m.installRoot, m.repo)
 	}
@@ -457,10 +425,6 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleQuitConfirmKey(msg)
 	}
 
-	if !key.Matches(msg, keys.Undo) {
-		m.lastStep = nil
-	}
-
 	if m.lastError.open {
 		return m.handleErrorKey(msg)
 	}
@@ -525,13 +489,8 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleDupKey(msg)
 	}
 
-	if m.confirmSave && !key.Matches(msg, keys.Save, keys.SaveApprove) && !m.typingReason() {
+	if m.confirmSave && !key.Matches(msg, keys.Save) && !m.typingReason() {
 		m.confirmSave = false
-		m.status = ""
-	}
-
-	if m.confirmApprove && (!key.Matches(msg, keys.Approve) || m.typingReason()) {
-		m.confirmApprove = false
 		m.status = ""
 	}
 
@@ -1015,8 +974,8 @@ func (m model) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// A list of duplicate pairs: the other item actions below need items.
 	case key.Matches(msg, keys.Tick):
 		m.toggleTick()
-	case key.Matches(msg, keys.Approve):
-		return m.requestListApprove()
+	case key.Matches(msg, keys.ReviewClear):
+		return m.requestReviewClear(m.listTargets())
 	case key.Matches(msg, keys.Reopen):
 		return m.openReopen(m.listTargets())
 	case key.Matches(msg, keys.ReopenEditor):
@@ -1067,7 +1026,7 @@ func (m model) handleReasonKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 	case key.Matches(msg, keys.Confirm):
-		return m.requestDecisionSave(true)
+		return m.requestDecisionSave()
 	case msg.String() == "ctrl+s":
 		return m.requestSave()
 	}
@@ -1177,10 +1136,10 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.detail.HalfPageUp()
 	case key.Matches(msg, keys.Save):
 		return m.requestSave()
-	case key.Matches(msg, keys.SaveApprove):
-		return m.requestDecisionSave(true)
-	case key.Matches(msg, keys.Approve):
-		return m.requestApprove()
+	case key.Matches(msg, keys.ReviewClear):
+		if it, ok := m.findItem(m.detail.key); ok {
+			return m.requestReviewClear([]Item{it})
+		}
 	case key.Matches(msg, keys.Undo):
 		if it, ok := m.findItem(m.detail.key); ok {
 			return m.requestUndo([]Item{it})
@@ -1233,16 +1192,10 @@ func formFieldIsEnum(f formField) bool {
 
 // requestSave saves the decision, but first warns (and requires a repeated save action) when the fields are still the untouched defaults or the reason is empty, so a stray keypress can't record "bug / no-action-needed / low" with no justification.
 func (m model) requestSave() (tea.Model, tea.Cmd) {
-	return m.requestDecisionSave(false)
+	return m.requestDecisionSave()
 }
 
-func (m model) requestDecisionSave(approve bool) (tea.Model, tea.Cmd) {
-	if approve && strings.TrimSpace(m.reviewer) == "" {
-		m.fail("Can't approve without a reviewer name. Set git config user.name and reopen the TUI.")
-
-		return m, nil
-	}
-
+func (m model) requestDecisionSave() (tea.Model, tea.Cmd) {
 	if bad := m.form.InvalidValues(); bad != "" {
 		m.fail("Can't save " + bad + ": not in config/taxonomy.json. Pick a value first.")
 
@@ -1263,19 +1216,12 @@ func (m model) requestDecisionSave(approve bool) (tea.Model, tea.Cmd) {
 		problems = append(problems, "no reason")
 	}
 
-	if len(problems) > 0 && (!m.confirmSave || m.confirmSaveApproval != approve) {
+	if len(problems) > 0 && !m.confirmSave {
 		m.confirmSave = true
-		m.confirmSaveApproval = approve
 		msg := strings.Join(problems, ", ")
 		action := "s again to save anyway."
 		if m.typingReason() {
-			action = "Ctrl-S again to save for review anyway."
-		}
-		if approve {
-			action = "S again to save and approve anyway."
-			if m.typingReason() {
-				action = "Enter again to save and approve anyway."
-			}
+			action = "Ctrl-S again to save anyway."
 		}
 
 		m.status = strings.ToUpper(msg[:1]) + msg[1:] + ": " + action
@@ -1286,45 +1232,20 @@ func (m model) requestDecisionSave(approve bool) (tea.Model, tea.Cmd) {
 	m.confirmSave = false
 
 	m.pendingApply++
-	return m, m.saveDecisionCmd(approve)
+	return m, m.saveDecisionCmd()
 }
 
-// requestApprove approves the saved decision. bin/apply --approve ignores the form, so unsaved edits need a second press to make clear they won't be part of what gets approved.
-func (m model) requestApprove() (tea.Model, tea.Cmd) {
-	it, ok := m.findItem(m.detail.key)
-	if !ok || it.Untriaged() {
-		m.status = "Nothing to approve yet. Save a decision first."
-
-		return m, nil
-	}
-
-	if m.form.dirty && !m.confirmApprove {
-		m.confirmApprove = true
-		m.status = fmt.Sprintf("Unsaved edits won't be approved. Press a again to approve the saved %s/%s, or S to save and approve your edits.", it.DecisionLabel(), it.Action)
-
-		return m, nil
-	}
-
-	m.confirmApprove = false
-
-	m.pendingApply++
-	return m, approveCmd(m.installRoot, m.repo, m.detail.key, m.reviewer)
-}
-
-func (m model) saveDecisionCmd(approve bool) tea.Cmd {
+func (m model) saveDecisionCmd() tea.Cmd {
 	snapshot := m.form.Snapshot()
-	by, reviewedBy := m.reviewer, ""
-	if approve {
-		reviewedBy = m.reviewer
-		if m.form.proposed && snapshot.Equal(m.form.proposalSnapshot) {
-			by = m.form.proposalBy
-			if by == "" {
-				by = "agent"
-			}
+	by := m.contributor
+	if m.form.proposed && snapshot.Equal(m.form.proposalSnapshot) {
+		by = m.form.proposalBy
+		if by == "" {
+			by = "agent"
 		}
 	}
 
-	cmd := applyDecisionCmd(m.installRoot, m.repo, m.detail.key, m.form.ProposedLabels(), m.form.ReplaceProposedLabels(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, by, m.activeBatch, reviewedBy)
+	cmd := applyDecisionCmd(m.installRoot, m.repo, m.detail.key, m.form.ProposedLabels(), m.form.ReplaceProposedLabels(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, by, m.activeBatch)
 
 	return func() tea.Msg { msg := cmd().(applyDoneMsg); msg.snapshot = &snapshot; return msg }
 }

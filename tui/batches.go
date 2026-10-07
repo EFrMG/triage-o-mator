@@ -216,7 +216,7 @@ func createBatchCmd(root, repo string, args []string) tea.Cmd {
 	}
 }
 
-// applyBatchCmd merges batches' filled-in proposals into the ledger as agent decisions (never reviewed), one batch after another, skipping items someone already triaged.
+// applyBatchCmd merges batches' filled-in proposals into the ledger as agent decisions, one batch after another, skipping items someone already triaged. Pending review remains an explicit separate request.
 func applyBatchCmd(root, repo string, ids ...string) tea.Cmd {
 	return func() tea.Msg {
 		applied, kept, warnings := 0, 0, 0
@@ -654,7 +654,7 @@ func (m model) requestApplyBatch(targets ...batchRecord) (tea.Model, tea.Cmd) {
 			from = fmt.Sprintf("%d ticked batches", len(ids))
 		}
 
-		m.status = fmt.Sprintf("Apply %d proposals from %s as unreviewed agent decisions? Press A again to confirm.", pending, from)
+		m.status = fmt.Sprintf("Apply %d proposals from %s as local agent decisions? Press A again to confirm.", pending, from)
 		if invalid > 0 {
 			m.status = fmt.Sprintf("Apply %d proposals from %s? %d use values not in the taxonomy and would be saved as-is. Press A again to confirm.", pending, from, invalid)
 		}

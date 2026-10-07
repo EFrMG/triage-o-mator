@@ -104,19 +104,11 @@ func (c actionProposalContext) guidanceBlocks() []guidanceBlock {
 					block.lines = append(block.lines, "No local triage decision yet")
 				} else {
 					block.lines = append(block.lines, "Call: "+call)
-					review := "Unreviewed"
-					if contextField(row.Fields, "reviewed") == "true" {
-						review = "Reviewed"
-						if by := contextField(row.Fields, "reviewed_by"); by != "" {
-							review += " by " + by
-						}
-					}
 					if by := contextField(row.Fields, "triaged_by"); by != "" {
-						review += " · proposed by " + by
+						block.lines = append(block.lines, "Proposed by "+by)
 					}
-					block.lines = append(block.lines, review)
 				}
-				for _, field := range []struct{ key, label string }{{"reason", "Reason"}, {"reviewer_notes", "Reviewer note"}, {"agent_notes", "Agent note"}} {
+				for _, field := range []struct{ key, label string }{{"reason", "Reason"}, {"maintainer_notes", "Maintainer note"}, {"agent_notes", "Agent note"}, {"pending_review_reason", "Pending review reason"}} {
 					if value := contextField(row.Fields, field.key); value != "" {
 						block.lines = append(block.lines, field.label+": "+contextExcerpt(value))
 					}

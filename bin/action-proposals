@@ -17,7 +17,7 @@ from _evidence import canonical, digest, validate_payload
 from _item_context import ContextIndex, read as read_item_context
 from _groups import load_group
 from _storage import atomic_writer, locked
-from _triage import DATA_DIR, UTC_TIMESTAMP_RE, action_operation, item_url, load_taxonomy, now_iso, parse_key, read_repo
+from _triage import DATA_DIR, UTC_TIMESTAMP_RE, action_operation, item_url, load_ledger, load_taxonomy, now_iso, parse_key, read_repo
 
 
 def save(path, value):
@@ -441,9 +441,12 @@ def automation_policy(repo, value):
     result = subprocess.run([str(Path(__file__).absolute().with_name("action-policy")), "status", "--expected-repo", repo], capture_output=True, text=True)
     if result.returncode:
         raise ValueError(result.stderr.strip() or "could not read action automation policy")
-    setting = next((row for row in json.loads(result.stdout)["actions"] if row["name"] == value["action"]), None)
+    policy = json.loads(result.stdout)
+    setting = next((row for row in policy["actions"] if row["name"] == value["action"]), None)
     if setting is None or setting["operation"] != value["operation"] or setting["mode"] != "execute" or not setting["configured"]:
         raise ValueError("selected action is not enabled for direct execution in this repository")
+    if policy["pending_review_hold"] and any(row.get("review_request") for row in load_ledger() if (row.get("kind"), row.get("number")) == (value["kind"], value["number"])):
+        raise ValueError("Pending review holds direct action execution for this repository")
 
     return setting["definition_sha256"]
 
@@ -659,7 +662,7 @@ def main():
         result = review(repo, args.kind, args.number, args.item, args.all, args.operation)
     elif args.command == "execute":
         if not args.approve:
-            raise ValueError("publishing needs the exact reviewed proposal approval")
+            raise ValueError("publishing needs approval of the exact action proposal")
         result = execute(repo, args.kind, args.number, args.item, args.all, args.operation, args.approve, args.automation)
     elif args.command == "reject":
         result = reject(repo, args.kind, args.number, args.checkpoint, args.by, args.reason)

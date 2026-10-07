@@ -276,7 +276,7 @@ func (m model) saveGroupForm() (tea.Model, tea.Cmd) {
 
 	m.groups.busy = true
 
-	return m, groupBulkCmd(m.installRoot, *g, "add", targets, m.groups.inputs[0].Value(), m.reviewer)
+	return m, groupBulkCmd(m.installRoot, *g, "add", targets, m.groups.inputs[0].Value(), m.contributor)
 }
 
 // groupStatuses are the values bin/group accepts, in the order the editor's Status field cycles through them.
@@ -451,7 +451,7 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.groups.member = maxInt(m.groups.member-len(targets), 0)
 		m.groups.previewOffset = 0
 
-		return m, groupBulkCmd(m.installRoot, *g, "remove", targets, "", m.reviewer)
+		return m, groupBulkCmd(m.installRoot, *g, "remove", targets, "", m.contributor)
 	case key.Matches(msg, keys.Export), key.Matches(msg, keys.ExportFull):
 		if g != nil {
 			args := []string{"export", g.ID}
@@ -606,19 +606,21 @@ func groupStatusMark(status string) cardMark {
 
 // groupSummary is a group card's second line: how far its members have come, who it's assigned to, and whether the items Groups was opened for are already in it.
 func (m model) groupSummary(g Group) string {
-	triaged, reviewed := 0, 0
+	triaged, pending := 0, 0
 	for _, member := range g.Members {
-		if it, ok := m.findItem(member.Key()); ok && !it.Untriaged() {
-			triaged++
-			if it.Reviewed {
-				reviewed++
+		if it, ok := m.findItem(member.Key()); ok {
+			if !it.Untriaged() {
+				triaged++
+			}
+			if it.PendingReview() {
+				pending++
 			}
 		}
 	}
 
 	parts := []string{pluralize(len(g.Members), "item", "items")}
 	if len(g.Members) > 0 {
-		parts = append(parts, fmt.Sprintf("%d triaged, %d reviewed", triaged, reviewed))
+		parts = append(parts, fmt.Sprintf("%d triaged, %d pending review", triaged, pending))
 	}
 
 	if g.Assignee != "" {
@@ -882,5 +884,5 @@ func (m model) quickAddLastGroup(keys []Key) (tea.Model, tea.Cmd) {
 	m.groups.busy = true
 	m.status = "Adding to last group…"
 
-	return m, quickAddGroupCmd(m.installRoot, m.lastGroupID, keys, m.reviewer)
+	return m, quickAddGroupCmd(m.installRoot, m.lastGroupID, keys, m.contributor)
 }

@@ -49,7 +49,7 @@ type decisionForm struct {
 	proposalNotes    string
 	proposalBy       string
 	proposalSnapshot decisionSnapshot
-	// Unlisted values from the ledger or a proposal stay visible and block saving until the reviewer picks supported values.
+	// Unlisted values from the ledger or a proposal stay visible and block saving until the contributor picks supported values.
 	badAction, badConfidence string
 	badLabels                []string
 	// pick is the list a choice field opens on Enter.
@@ -173,7 +173,7 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 	f.proposalSnapshot = f.Snapshot()
 }
 
-// MarkDuplicate prefills a matching GitHub label and a close operation, leaving confidence for the reviewer to set.
+// MarkDuplicate prefills a matching GitHub label and a close operation, leaving confidence for the contributor to set.
 func (f *decisionForm) MarkDuplicate(number int, title string) error {
 	label := "duplicate"
 
@@ -216,7 +216,7 @@ func (f *decisionForm) LoadItem(it Item) {
 	f.proposedLabels = slices.Clone(it.ProposedLabels)
 	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), it.Action)
 	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, it.Confidence)
-	hasDecision := !it.Untriaged() || it.Confidence != "" || it.Reason != "" || it.Reviewed
+	hasDecision := !it.Untriaged() || it.Confidence != "" || it.Reason != ""
 	if it.Action == "" {
 		f.actionIdx = -1
 	}

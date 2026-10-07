@@ -366,11 +366,17 @@ class LabelApplicationTests(Workspace):
         modes = {row["name"]: row for row in initial["actions"]}
         self.assertFalse(modes["none"]["writable"])
         self.assertTrue(all(row["mode"] == "stage" for row in modes.values()))
+        self.assertFalse(initial["pending_review_hold"])
         self.assertFalse((self.root / "config/action-automation.json").exists())
+
+        hold = self.json_cli("action-policy", "hold", *args, "--enabled", "on")
+        self.assertEqual((hold["before"], hold["after"]), (False, True))
+        self.json_cli("action-policy", "hold", *args, "--enabled", "on", "--apply", "--preview-sha256", hold["preview_sha256"])
+        self.assertTrue(self.json_cli("action-policy", "status", *args)["pending_review_hold"])
 
         proposal = self.json_cli("action-policy", "set", *args, "--action", "comment", "--mode", "execute")
         self.assertEqual(proposal["before"], "stage")
-        self.assertFalse((self.root / "config/action-automation.json").exists())
+        self.assertEqual({row["name"]: row["mode"] for row in self.json_cli("action-policy", "status", *args)["actions"]}["comment"], "stage")
         self.run_cli("action-policy", "set", *args, "--action", "close", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"], ok=False)
         self.json_cli("action-policy", "set", *args, "--action", "comment", "--mode", "execute", "--apply", "--preview-sha256", proposal["preview_sha256"])
         modes = {row["name"]: row for row in self.json_cli("action-policy", "status", *args)["actions"]}
@@ -389,6 +395,7 @@ class LabelApplicationTests(Workspace):
         (self.root / "config/repo").write_text("other/repo\n")
         other = self.json_cli("action-policy", "status", "--expected-repo", "other/repo")
         self.assertTrue(all(row["mode"] == "stage" for row in other["actions"]))
+        self.assertFalse(other["pending_review_hold"])
         self.run_cli("action-policy", "status", *args, ok=False)
 
     def test_enabled_bounded_pass_revalidates_and_respects_human_corrections(self):
@@ -432,8 +439,8 @@ print(json.dumps(live["labels"]))
         taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
         taxonomy_path.write_text(json.dumps(taxonomy))
         ledger_path = self.root / "data/owner/repo/ledger.jsonl"
-        first = dict(item(1, "Bug"), proposed_labels=["bug"], action="", confidence="high", reason="Agent proposal", reviewed=False, reviewed_by="", reviewed_at="")
-        second = dict(item(2, "Unlabeled"), proposed_labels=["bug"], action="", confidence="medium", reason="Agent proposal", reviewed=False, reviewed_by="", reviewed_at="")
+        first = dict(item(1, "Bug"), proposed_labels=["bug"], action="", confidence="high", reason="Agent proposal")
+        second = dict(item(2, "Unlabeled"), proposed_labels=["bug"], action="", confidence="medium", reason="Agent proposal")
         first["labels"] = ["manual"]
         ledger_path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
 
@@ -585,6 +592,7 @@ class LedgerTests(Workspace):
         self.run_cli("briefs", "--expected-repo", "other/repo", "list", ok=False)
         self.run_cli("briefs", "read", "2026-10-06-issue-99-brief.md", ok=False)
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--action", "none", "--reason", "Needs review", "--by", "agent:triage")
+        self.json_cli("review-request", "mark", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--by", "agent:triage", "--reason", "Important project decision")
         before = self.json_cli("next", "--json")["suggestions"]
         self.assertTrue(any("Write a detailed brief for issue #1" in row["what"] for row in before))
         (reports / "2026-10-06-issue-1-brief.md").write_text("# Issue 1\n")
@@ -599,7 +607,7 @@ class LedgerTests(Workspace):
     def test_fetch_sync_and_agent_proposal(self):
         self.sync()
         self.assertEqual(len(self.ledger()), 2)
-        self.assertTrue(all(not row["reviewed"] for row in self.ledger().values()))
+        self.assertTrue(all(row["review_request"] is None for row in self.ledger().values()))
 
         ledger_path = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
@@ -624,7 +632,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.run_cli("apply", *args)
         row = self.ledger()[("issue", 1)]
         self.assertEqual(row["triaged_by"], "agent:triage")
-        self.assertFalse(row["reviewed"])
+        self.assertIsNone(row["review_request"])
         before_batches = set((self.root / "data/owner/repo/batches").glob("*.items.jsonl"))
         self.run_cli("batch", "2", "--include-triaged", "--unlabeled-first")
         newest = next(iter(set((self.root / "data/owner/repo/batches").glob("*.items.jsonl")) - before_batches))
@@ -716,26 +724,40 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.run_cli("fetch", "--full")
         self.run_cli("sync")
         self.assertEqual(self.ledger()[("issue", 1)]["action"], "none")
-        self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
+        self.assertIsNone(self.ledger()[("issue", 1)]["review_request"])
         self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], ["bug"])
         self.assertIn("Triaged: 2/2", self.run_cli("stats").stdout)
         report = self.run_cli("report", "--stdout").stdout
         self.assertIn("Issue proposed labels", report)
         self.assertIn("| bug | 1 |", report)
-        self.run_cli("apply", "--number", "2", "--kind", "issue", "--approve", "--by", "human")
-        self.assertTrue(self.ledger()[("issue", 2)]["reviewed"])
+        self.json_cli("review-request", "mark", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "2", "--by", "agent:triage", "--reason", "Check the reported behavior")
+        self.assertEqual(self.ledger()[("issue", 2)]["review_request"]["reason"], "Check the reported behavior")
         self.run_cli("apply", "--number", "2", "--kind", "issue", "--replace-proposed-labels", "--action", "none", "--by", "human")
         self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], [])
-        self.assertFalse(self.ledger()[("issue", 2)]["reviewed"])
-        self.run_cli("apply", "--number", "1", "--kind", "issue", "--approve", "--by", "human")
+        self.assertIsNotNone(self.ledger()[("issue", 2)]["review_request"])
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--proposed-label", "bug", "--by", "agent:labels")
         self.assertEqual(self.ledger()[("issue", 1)]["action"], "none")
         self.assertEqual(self.ledger()[("issue", 1)]["proposed_labels"], ["bug"])
         self.assertEqual(self.ledger()[("issue", 1)]["confidence"], "high")
         self.assertEqual(self.ledger()[("issue", 1)]["reason"], "Existing call")
-        self.assertFalse(self.ledger()[("issue", 1)]["reviewed"])
+        self.assertIsNone(self.ledger()[("issue", 1)]["review_request"])
 
-    def test_csv_review_revisions_and_approval(self):
+        request = self.ledger()[("issue", 2)]["review_request"]
+        self.run_cli("review-request", "clear", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "2", "--by", "agent:other", ok=False)
+        self.run_cli("review-request", "clear", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "2", "--by", "human", "--expected-by", request["by"], "--expected-at", request["at"], "--expected-reason", "stale reason", ok=False)
+        self.json_cli("review-request", "clear", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "2", "--by", "human", "--expected-by", request["by"], "--expected-at", request["at"], "--expected-reason", request["reason"])
+        self.assertIsNone(self.ledger()[("issue", 2)]["review_request"])
+        self.assertEqual(self.ledger()[("issue", 2)]["action"], "none")
+
+        ledger_path = self.root / "data/owner/repo/ledger.jsonl"
+        rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+        rows[1]["review_request"] = {}
+        ledger_path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        before = ledger_path.read_bytes()
+        self.run_cli("review-request", "clear", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "2", "--by", "human", ok=False)
+        self.assertEqual(ledger_path.read_bytes(), before)
+
+    def test_csv_decision_revisions_and_explicit_review_request(self):
         self.sync()
         ledger_path = self.root / "data/owner/repo/ledger.jsonl"
         self.run_cli("export-csv")
@@ -745,16 +767,22 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
             reader = csv.DictReader(source)
             fields, rows = reader.fieldnames, list(reader)
 
-        rows[0].update(action="none", reviewed="true", reviewed_by="human")
+        rows[0].update(action="none", maintainer_notes="Check before changing the default")
         with csv_path.open("w", newline="") as out:
             writer = csv.DictWriter(out, fieldnames=fields)
             writer.writeheader()
             writer.writerows(rows)
 
         self.run_cli("import-csv", str(csv_path), "--by", "operator")
-        approved = self.ledger()[("issue", 1)]
-        self.assertTrue(approved["reviewed"])
-        self.assertEqual(approved["triaged_by"], "operator")
+        imported = self.ledger()[("issue", 1)]
+        self.assertIsNone(imported["review_request"])
+        self.assertEqual(imported["maintainer_notes"], "Check before changing the default")
+        self.assertEqual(imported["triaged_by"], "operator")
+
+        self.json_cli("review-request", "mark", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--by", "agent:triage", "--reason", "Project-wide default needs attention")
+        self.run_cli("export-csv", "--pending-review")
+        with csv_path.open(newline="") as source:
+            self.assertEqual(len(list(csv.DictReader(source))), 1)
 
         self.run_cli("export-csv")
         with csv_path.open(newline="") as source:
@@ -774,15 +802,14 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
             writer.writerows(rows)
         self.run_cli("import-csv", str(csv_path), "--by", "operator")
         changed = self.ledger()[("issue", 1)]
-        self.assertFalse(changed["reviewed"])
-        self.assertEqual((changed["reviewed_by"], changed["reviewed_at"]), ("", ""))
+        self.assertEqual(changed["review_request"]["reason"], "Project-wide default needs attention")
 
         self.run_cli("export-csv")
         with csv_path.open(newline="") as source:
             reader = csv.DictReader(source)
             fields, rows = reader.fieldnames, list(reader)
-        rows[0]["reviewer_notes"] = "Must not publish"
-        rows[1]["reviewer_notes"] = "Keep this"
+        rows[0]["maintainer_notes"] = "Must not publish"
+        rows[1]["maintainer_notes"] = "Keep this"
         with csv_path.open("w", newline="") as out:
             writer = csv.DictWriter(out, fieldnames=fields)
             writer.writeheader()
@@ -811,10 +838,10 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         storage.write_text(source)
         triage = self.root / "bin/_triage.py"
         source = triage.read_text()
-        self.assertIn("def load_ledger():\n    return load_jsonl(LEDGER_PATH)", source)
+        self.assertIn("def load_ledger():\n    records = load_jsonl(LEDGER_PATH)", source)
         source = source.replace(
-            "def load_ledger():\n    return load_jsonl(LEDGER_PATH)",
-            "def load_ledger():\n    os.write(int(os.environ['LEDGER_TEST_NOTIFY_FD']), b'R')\n    return load_jsonl(LEDGER_PATH)",
+            "def load_ledger():\n    records = load_jsonl(LEDGER_PATH)",
+            "def load_ledger():\n    os.write(int(os.environ['LEDGER_TEST_NOTIFY_FD']), b'R')\n    records = load_jsonl(LEDGER_PATH)",
         )
         triage.write_text(source)
 
@@ -833,7 +860,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
             writer = csv.DictWriter(out, fieldnames=reader.fieldnames)
             writer.writeheader()
             row = next(row for row in reader if row["kind"] == "issue" and row["number"] == "3")
-            row["reviewer_notes"] = "Separate note"
+            row["maintainer_notes"] = "Separate note"
             writer.writerow(row)
 
         read_fd, write_fd = os.pipe()
@@ -876,7 +903,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         ledger = self.ledger()
         self.assertEqual(ledger[("issue", 1)]["action"], "none")
         self.assertEqual(ledger[("issue", 2)]["action"], "none")
-        self.assertEqual(ledger[("issue", 3)]["reviewer_notes"], "Separate note")
+        self.assertEqual(ledger[("issue", 3)]["maintainer_notes"], "Separate note")
         self.assertEqual(ledger[("issue", 1)]["title"], "Fresh title")
         self.assertEqual(self.calls(), calls_before)
 

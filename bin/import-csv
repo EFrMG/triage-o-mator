@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Import a human-edited CSV from bin/export-csv with per-row stale-export checks.
+"""Import an edited CSV from bin/export-csv with per-row stale-export checks.
 
 Usage: bin/import-csv PATH [--by NAME]
 
-Editable columns: proposed_labels (a JSON list), action, confidence, reason, reviewed, reviewed_by, reviewer_notes.
-Keep kind, number, and review_revision from the export. Export again after any ledger change.
+Editable columns: proposed_labels (a JSON list), action, confidence, reason, maintainer_notes.
+Keep kind, number, and row_revision from the export. Use bin/review-request for Pending review. Export again after any ledger change.
 """
 
 import argparse
@@ -15,30 +15,17 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
-from _csv_revision import review_revision
-from _triage import LEDGER_PATH, REPO, has_decision, load_ledger, load_taxonomy, now_iso, observed_catalog, save_ledger
+from _row_revision import row_revision
+from _triage import LEDGER_PATH, load_ledger, load_taxonomy, now_iso, observed_catalog, save_ledger
 from _storage import locked
 
 DECISION = ("proposed_labels", "action", "confidence", "reason")
-EDITABLE = (*DECISION, "reviewed", "reviewed_by", "reviewer_notes")
-TRUE = {"true", "1", "yes", "y"}
-FALSE = {"false", "0", "no", "n", ""}
-REQUIRED = {"kind", "number", "review_revision"}
+EDITABLE = (*DECISION, "maintainer_notes")
+REQUIRED = {"kind", "number", "row_revision"}
 
 
 def fail(message):
     sys.exit(f"error: {message}")
-
-
-def parse_reviewed(value, line):
-    normalized = value.strip().lower()
-    if normalized in TRUE:
-        return True
-
-    if normalized in FALSE:
-        return False
-
-    fail(f"CSV row {line}: invalid reviewed value {value!r}")
 
 
 def parse_proposed_labels(value, line):
@@ -70,7 +57,6 @@ def main():
         catalog = observed_catalog(load_taxonomy())
         proposed = []
         seen = set()
-        approvals_cleared = 0
         with args.csv_path.open(newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             headers = reader.fieldnames or []
@@ -78,7 +64,7 @@ def main():
                 fail("duplicate CSV headers")
 
             if not REQUIRED.issubset(headers):
-                fail("CSV needs kind, number, and review_revision; make a fresh export")
+                fail("CSV needs kind, number, and row_revision; make a fresh export")
 
             for line, row in enumerate(reader, 2):
                 if None in row or any(value is None for value in row.values()):
@@ -97,15 +83,13 @@ def main():
                 if rec is None:
                     fail(f"CSV row {line}: {key} is not in the ledger")
 
-                if row["review_revision"] != review_revision(rec):
-                    fail(f"CSV row {line}: stale or missing review_revision for {key}; make a fresh export")
+                if row["row_revision"] != row_revision(rec):
+                    fail(f"CSV row {line}: stale or missing row_revision for {key}; make a fresh export")
 
                 updated = dict(rec)
                 for field in EDITABLE:
                     if field in row:
-                        if field == "reviewed":
-                            updated[field] = parse_reviewed(row[field], line)
-                        elif field == "proposed_labels":
+                        if field == "proposed_labels":
                             updated[field] = parse_proposed_labels(row[field], line)
                         else:
                             updated[field] = row[field]
@@ -134,25 +118,6 @@ def main():
                     updated["triaged_at"] = now_iso()
                     updated["batch_id"] = "csv:" + args.csv_path.stem
 
-                if rec["reviewed"] and decision_changed:
-                    updated["reviewed"] = False
-                    updated["reviewed_by"] = ""
-                    updated["reviewed_at"] = ""
-                    approvals_cleared += 1
-                elif updated["reviewed"]:
-                    if not has_decision(updated):
-                        fail(f"CSV row {line}: reviewed item needs proposed labels or an action")
-
-                    if not rec["reviewed"]:
-                        updated["reviewed_by"] = updated["reviewed_by"] or args.by
-                        updated["reviewed_at"] = now_iso()
-
-                    if not updated["reviewed_by"].strip():
-                        fail(f"CSV row {line}: reviewer name required")
-                else:
-                    updated["reviewed_by"] = ""
-                    updated["reviewed_at"] = ""
-
                 proposed.append((key, updated))
 
         changed = 0
@@ -165,8 +130,6 @@ def main():
             save_ledger(list(by_key.values()))
 
     print(f"Imported {args.csv_path.name}: {changed} rows changed.")
-    if approvals_cleared:
-        print(f"Cleared prior approval on {approvals_cleared} changed decision(s); export again to review them.")
 
 
 if __name__ == "__main__":

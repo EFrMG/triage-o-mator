@@ -32,6 +32,10 @@ def policy():
             if not isinstance(action, str) or not isinstance(setting, dict) or setting.get("mode") not in ("stage", "execute") or not isinstance(setting.get("definition_sha256"), str) or len(setting["definition_sha256"]) != 64:
                 raise ValueError("action automation setting is malformed")
 
+    holds = value.get("pending_review_holds", {})
+    if not isinstance(holds, dict) or any(not isinstance(repo, str) or type(enabled) is not bool for repo, enabled in holds.items()):
+        raise ValueError("pending review action policy is malformed")
+
     return value
 
 
@@ -55,7 +59,8 @@ def definitions():
 
 
 def status():
-    saved = policy()["repositories"].get(REPO, {})
+    value = policy()
+    saved = value["repositories"].get(REPO, {})
     rows = []
     for definition in definitions():
         stored = saved.get(definition["name"])
@@ -65,7 +70,7 @@ def status():
                      "stale_setting": stored is not None and not current,
                      "writable": definition["operation"] in OPERATIONS})
 
-    return {"repository": REPO, "actions": rows}
+    return {"repository": REPO, "actions": rows, "pending_review_hold": value.get("pending_review_holds", {}).get(REPO, False)}
 
 
 def plan(action, mode):
@@ -79,12 +84,20 @@ def plan(action, mode):
     return result
 
 
+def hold_plan(enabled):
+    result = {"repository": REPO, "operation": "pending-review-hold", "before": status()["pending_review_hold"], "after": enabled}
+    result["preview_sha256"] = value_digest(result)
+
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "set"))
+    parser.add_argument("command", choices=("status", "set", "hold"))
     parser.add_argument("--expected-repo", required=True)
     parser.add_argument("--action")
     parser.add_argument("--mode", choices=("stage", "execute"))
+    parser.add_argument("--enabled", choices=("on", "off"))
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--preview-sha256")
     args = parser.parse_args()
@@ -92,12 +105,12 @@ def main():
         raise ValueError("configured repository changed; reopen Automations")
 
     if args.command == "status":
-        if args.action or args.mode or args.apply or args.preview_sha256:
+        if args.action or args.mode or args.enabled or args.apply or args.preview_sha256:
             parser.error("status takes no change arguments")
 
         result = status()
-    else:
-        if not args.action or not args.mode or args.apply != bool(args.preview_sha256):
+    elif args.command == "set":
+        if not args.action or not args.mode or args.enabled or args.apply != bool(args.preview_sha256):
             parser.error("set requires --action and --mode; --apply requires --preview-sha256")
 
         with locked(POLICY_PATH):
@@ -108,6 +121,23 @@ def main():
 
                 saved = policy()
                 saved["repositories"].setdefault(REPO, {})[args.action] = {"mode": args.mode, "definition_sha256": result["definition_sha256"]}
+                with atomic_writer(POLICY_PATH) as out:
+                    out.write(json.dumps(saved, indent=2, ensure_ascii=False) + "\n")
+
+                result = status()
+
+    else:
+        if args.action or args.mode or args.enabled is None or args.apply != bool(args.preview_sha256):
+            parser.error("hold requires --enabled on|off; --apply requires --preview-sha256")
+
+        with locked(POLICY_PATH):
+            result = hold_plan(args.enabled == "on")
+            if args.apply:
+                if result["preview_sha256"] != args.preview_sha256:
+                    raise ValueError("pending review hold setting changed; preview Automations again")
+
+                saved = policy()
+                saved.setdefault("pending_review_holds", {})[REPO] = args.enabled == "on"
                 with atomic_writer(POLICY_PATH) as out:
                     out.write(json.dumps(saved, indent=2, ensure_ascii=False) + "\n")
 

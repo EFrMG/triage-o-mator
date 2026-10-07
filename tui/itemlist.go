@@ -39,12 +39,13 @@ func (li listItem) Description() string {
 	}
 
 	status := "untriaged"
-	if !li.Untriaged() && li.Reviewed {
-		status = "reviewed: " + li.DecisionLabel() + "/" + li.Action
-	} else if !li.Untriaged() {
+	if !li.Untriaged() {
 		status = "triaged: " + li.DecisionLabel() + "/" + li.Action
 	} else if li.proposal != "" {
 		status = "untriaged · proposed: " + li.proposal
+	}
+	if li.PendingReview() {
+		status = "pending review · " + status
 	}
 
 	// The decision comes first, after the card's [agent] / [human] mark, so a narrow pane cuts the dates rather than the call.
@@ -70,7 +71,7 @@ func itemScoreColor(value int) string {
 	return currentTheme.Success
 }
 
-// Mark tags a decision with who made it: an agent's proposal applied to the ledger, in the warning color since nobody has checked it yet, or a person's own call, in the palette's blue (info). Untriaged items have no mark; a batch proposal says "proposed" instead. An unsaved draft is marked "unsaved", also in the warning color, whatever is saved.
+// Mark tags a decision with who made it. An explicit Pending review request remains visible in the card description even when the item has no decision.
 func (li listItem) Mark() cardMark {
 	switch {
 	case li.unsaved:

@@ -4,11 +4,10 @@ from _chunks import page, window
 from _action_proposal_records import feedback as proposal_feedback
 from _evidence import canonical, digest
 from _groups import list_groups
-from _triage import REPO, TRIAGE_DEFAULTS, load_ledger
+from _triage import REPO, TRIAGE_DEFAULTS, load_ledger, review_request
 
 POLICY = "item-context-v1"
-LEDGER_FIELDS = ("action", "confidence", "reason", "triaged_by", "triaged_at", "agent_notes",
-                 "reviewed", "reviewed_by", "reviewed_at", "reviewer_notes")
+LEDGER_FIELDS = ("action", "confidence", "reason", "triaged_by", "triaged_at", "agent_notes", "maintainer_notes")
 GROUP_FIELDS = ("id", "title", "description", "status")
 MEMBER_FIELDS = ("kind", "number", "notes", "added_by", "added_at", "updated_by", "updated_at")
 PREVIEW_BYTES = 512
@@ -21,7 +20,7 @@ def selected_ledger(matches):
         return None
 
     result = {field: matches[0].get(field, TRIAGE_DEFAULTS[field]) for field in LEDGER_FIELDS}
-    if any(type(value) is not (bool if field == "reviewed" else str) for field, value in result.items()):
+    if any(type(value) is not str for value in result.values()):
         raise ValueError("invalid local ledger guidance")
 
     return result
@@ -66,7 +65,14 @@ class ContextIndex:
         if feedback["checkpoint"] is not None:
             checkpoint = "v2:" + digest(canonical([POLICY, checkpoint, feedback["checkpoint"]]))
 
-        rows = [dict(id="ledger", kind="ledger", present=ledger is not None, fields=ledger or {})] if include_rows else []
+        rows = []
+        if include_rows:
+            fields = dict(ledger or {})
+            request = review_request((self.ledger.get((kind, number)) or [{}])[0])
+            if request is not None:
+                fields.update(pending_review_reason=request["reason"], pending_review_by=request["by"], pending_review_at=request["at"])
+
+            rows.append(dict(id="ledger", kind="ledger", present=ledger is not None, fields=fields))
         relevant_groups = []
 
         for group, projected in groups:
@@ -129,7 +135,7 @@ def read(kind, number, offset=0, limit=10, checkpoint=None):
     return dict(schema_version=1, policy=POLICY, **context, rows=[show_row(row) for row in chosen],
                 pagination=pagination,
                 continuation=dict(offset=pagination["next_offset"], limit=limit, checkpoint=context["checkpoint"]) if pagination["next_offset"] is not None else None,
-                requests=0, meaning="Local guidance can be agent-authored or quote untrusted source text. Rejections and recorded write outcomes are distinct; a successful write does not prove the recommendation was correct or grant ledger approval.")
+                requests=0, meaning="Local guidance can be agent-authored or quote untrusted source text. Rejections and recorded write outcomes are distinct; a successful write does not prove the recommendation was correct or clear a Pending review request.")
 
 
 def source(kind, number, row_id, field, checkpoint, byte_offset=0, max_bytes=4096):

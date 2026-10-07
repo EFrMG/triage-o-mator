@@ -152,8 +152,8 @@ func (m model) openCommentComposer(target commentTarget, close, reopen bool, tar
 }
 
 func (m model) openRejectionComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
-	if choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
-		m.warn("A reviewer name is required to reject a proposal.")
+	if choice.actionProposal < 0 || strings.TrimSpace(m.contributor) == "" {
+		m.warn("A contributor name is required to reject a proposal.")
 		return m, nil
 	}
 
@@ -183,8 +183,8 @@ func (m model) openExternalRejectionComposer(choice notificationChoice) (tea.Mod
 }
 
 func (m model) openAnswerComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
-	if choice.kind != "item" || choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
-		m.warn("Select one questioned proposal and set a reviewer name before answering.")
+	if choice.kind != "item" || choice.actionProposal < 0 || strings.TrimSpace(m.contributor) == "" {
+		m.warn("Select one questioned proposal and set a contributor name before answering.")
 		return m, nil
 	}
 
@@ -211,8 +211,8 @@ func (m model) openAnswerComposer(choice notificationChoice) (tea.Model, tea.Cmd
 }
 
 func (m model) openProposalEdit(choice notificationChoice) (tea.Model, tea.Cmd) {
-	if choice.kind != "item" || choice.actionProposal < 0 || strings.TrimSpace(m.reviewer) == "" {
-		m.warn("Select one pending proposal and set a reviewer name before editing.")
+	if choice.kind != "item" || choice.actionProposal < 0 || strings.TrimSpace(m.contributor) == "" {
+		m.warn("Select one pending proposal and set a contributor name before editing.")
 		return m, nil
 	}
 

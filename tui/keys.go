@@ -35,10 +35,9 @@ type keyMap struct {
 
 	// Item actions: the open item, or in a list the ticked items (else the hovered one).
 	Save        key.Binding
-	SaveApprove key.Binding
+	ReviewClear key.Binding
 	Corpus      key.Binding
 	CorpusStop  key.Binding
-	Approve     key.Binding
 	MarkDup     key.Binding
 	Track       key.Binding
 	// SwapDup (M) is the one capital that isn't a bigger m: on the Duplicates screen it swaps the two sides, making the hovered candidate the original, so duplicates can be marked in either direction.
@@ -112,10 +111,9 @@ var keys = keyMap{
 	ErrorDetails:   key.NewBinding(key.WithKeys("!"), key.WithHelp("!", "last error")),
 
 	Save:           key.NewBinding(key.WithKeys("s", "ctrl+s"), key.WithHelp("s", "save")),
-	SaveApprove:    key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "save & approve")),
+	ReviewClear:    key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "clear review flag")),
 	Corpus:         key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "local dataset")),
 	CorpusStop:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "cancel download")),
-	Approve:        key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "approve")),
 	MarkDup:        key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "duplicates")),
 	Track:          key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "track comments")),
 	SwapDup:        key.NewBinding(key.WithKeys("M"), key.WithHelp("M", "make it the original")),

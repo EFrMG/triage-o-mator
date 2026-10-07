@@ -35,7 +35,7 @@ type notificationRejectionDoneMsg struct {
 func (m model) rejectNotificationCmd() tea.Cmd {
 	root, repo, generation := m.installRoot, m.repo, m.notificationsGeneration
 	choice, checkpoint := m.comment.rejectionChoice, m.comment.rejectionCheckpoint
-	reason, by := m.comment.text.Value(), m.reviewer
+	reason, by := m.comment.text.Value(), m.contributor
 	operations := m.notifications.itemOperations(repo, choice, "dismiss")
 
 	return func() tea.Msg {

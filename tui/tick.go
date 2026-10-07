@@ -9,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Space ticks items in a list; list actions (a, b, B, and d inside a batch) then act on every ticked item, or on the hovered one when nothing is ticked. Ticks belong to the list on screen: switching lists, or finishing a bulk action, clears them.
+// Space ticks items in a list; list actions (b, B, and d inside a batch) then act on every ticked item, or on the hovered one when nothing is ticked. Ticks belong to the list on screen: switching lists, or finishing a bulk action, clears them.
 
 var tickSuffix = regexp.MustCompile(` · \d+ ticked$`)
 
@@ -117,47 +117,6 @@ func describeTargets(items []Item) string {
 	return fmt.Sprintf("%d ticked items", len(items))
 }
 
-// requestListApprove approves the targets' saved decisions on a second a. From a list you haven't opened the items, so it always asks first, and it says what it skips.
-func (m model) requestListApprove() (tea.Model, tea.Cmd) {
-	targets := m.listTargets()
-	var approvable []Key
-	skipped := 0
-	for _, it := range targets {
-		if it.PendingReview() {
-			approvable = append(approvable, it.Key())
-		} else {
-			skipped++
-		}
-	}
-
-	if len(approvable) == 0 {
-		m.listConfirm = ""
-		m.status = "Nothing to approve: none of these has a saved, unreviewed decision."
-
-		return m, nil
-	}
-
-	if m.listConfirm != "a" {
-		m.listConfirm = "a"
-		what := describeTargets(targets)
-		if len(targets) == 1 {
-			what += " (" + targets[0].DecisionLabel() + "/" + targets[0].Action + ")"
-		}
-
-		m.status = fmt.Sprintf("Approve %s? Press a again.", what)
-		if skipped > 0 {
-			m.status = fmt.Sprintf("Approve %d saved decisions? %d untriaged or already reviewed will be skipped. Press a again.", len(approvable), skipped)
-		}
-
-		return m, nil
-	}
-
-	m.listConfirm = ""
-
-	m.pendingApply++
-	return m, approveKeysCmd(m.installRoot, m.repo, approvable, m.reviewer)
-}
-
 // requestBatchRemove drops the targets from the open batch (their proposals too) on a second d; the ledger is untouched.
 func (m model) requestBatchRemove() (tea.Model, tea.Cmd) {
 	b := m.batchByID(m.activeBatch)
@@ -190,16 +149,6 @@ func keyArgs(keys []Key) []string {
 	}
 
 	return args
-}
-
-// approveKeysCmd approves several saved decisions in one bin/apply call (one ledger write).
-func approveKeysCmd(root, repo string, keys []Key, by string) tea.Cmd {
-	return func() tea.Msg {
-		args := append([]string{"--expected-repo", repo, "--approve", "--by", by}, keyArgs(keys)...)
-		_, err := runScript(root, "apply", args...)
-
-		return applyDoneMsg{root: root, repo: repo, approval: true, count: len(keys), approved: keys, err: err}
-	}
 }
 
 func removeFromBatchCmd(root, repo, id string, keys []Key) tea.Cmd {

@@ -47,7 +47,7 @@ class EvidenceTests(Workspace):
         self.responses["repos/owner/repo/issues/2/comments?per_page=100&page=1"] = dict(data=[])
         row = item(2, issue["title"])
         row["updated_at"] = issue["updated_at"]
-        row.update(action="", confidence="", reviewed=False)
+        row.update(action="", confidence="")
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(row) + "\n")
 
         selected = self.cache("fetch", "--kind", "issue", "--number", "2", "--profile", "discussion")
@@ -63,7 +63,7 @@ class EvidenceTests(Workspace):
         self.assertEqual(scored["score"]["dimensions"], dict(clarity=2, support=1, actionability=1))
         self.assertEqual(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")["current"], True)
         self.assertEqual(len(self.calls()), calls)
-        self.assertFalse(self.ledger()["issue", 2]["reviewed"])
+        self.assertIsNone(self.ledger()["issue", 2]["review_request"])
 
         changed = self.ledger()["issue", 2]
         changed["updated_at"] = "2026-09-23T01:00:00Z"
@@ -238,7 +238,7 @@ except ReadFailure as error:
         self.run_cli("sync")
         row = self.ledger()[("pr", 1)]
         self.assertNotIn("body", row)
-        self.assertFalse(row["reviewed"])
+        self.assertIsNone(row["review_request"])
 
     def test_frozen_search_stays_offline(self):
         snapshot = self.import_inventory()

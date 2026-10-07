@@ -6,7 +6,7 @@ Usage:
     bin/next           numbered suggestions, most urgent first
     bin/next --json    the same, machine-readable, for agents
 
-Each suggestion says who should do it: [agent] steps prepare evidence or proposals within the requested scope and may run repository-enabled bounded labeling or action passes; [human] steps need a person for review, Settings changes, or exact write approval. A suggestion is not authorization for an unbounded download or an unconfigured write. It points at the exact command or prompts/<name>.md playbook to follow. This is the answer to "what could be done next?" in AGENTS.md.
+Each suggestion says who should do it: [agent] steps prepare evidence, local decisions or proposals within the requested scope and may run repository-enabled bounded labeling or action passes; [human] steps need a person for an explicit Pending review request, Settings changes, or exact write approval. A suggestion is not authorization for an unbounded download or an unconfigured write. It points at the exact command or prompts/<name>.md playbook to follow. This is the answer to "what could be done next?" in AGENTS.md.
 """
 
 import argparse
@@ -91,8 +91,8 @@ def suggestions(ledger):
                 "its decisions file is still blank")
         elif b["waiting"]:
             add("human", f"Check the {b['waiting']} agent proposals in batch {b['id']}",
-                f"TUI: Batches -> {b['id']} (review one by one, or A to apply the rest as unreviewed); or bin/apply data/{REPO}/batches/{b['id']}.decisions.jsonl --only-untriaged",
-                "proposals only reach the review queue once applied")
+                f"TUI: Batches -> {b['id']} (inspect one by one, or A to apply the rest); or bin/apply data/{REPO}/batches/{b['id']}.decisions.jsonl --only-untriaged",
+                "filled proposals have not reached the ledger")
         elif b["done"] == b["items"]:
             if b["id"] not in briefed_batches:
                 add("agent", f"Brief finished batch {b['id']} ({b['items']} items)",
@@ -102,26 +102,25 @@ def suggestions(ledger):
                 add("human", f"Delete finished batch {b['id']}", f"bin/batch --delete {b['id']} (or d d in the TUI's Batches)",
                     "every item is in the ledger and the batch has a brief")
 
-    pending = [r for r in open_items if has_decision(r) and not r["reviewed"]]
+    pending = [r for r in ledger if r.get("review_request")]
     if pending:
-        closes = sum(1 for r in pending if action_operation(taxonomy, r["action"]) == "close")
         sample = ", ".join(f"{r['kind']} #{r['number']}" for r in pending[:3])
-        add("human", f"Review {len(pending)} triaged decisions ({closes} suggest closing)",
-            f"TUI: All Items (search {sample}, a confirms a saved call); or bin/export-csv --pending-review, edit, bin/import-csv --by <you>",
-            "review remains separate from repository-enabled label automation and action-write approval")
+        add("human", f"Consider {len(pending)} explicit Pending review requests",
+            f"TUI: Pending review (e.g. {sample}); or bin/export-csv --pending-review",
+            "each request has an attributed reason; clearing it does not approve a decision or GitHub write")
         item_briefs = {match.group(2, 3) for path in REPORTS_DIR.glob("*-brief*") if (match := ITEM_BRIEF_RE.fullmatch(active_name(path.name)))}
         target = next((row for row in pending if (row["kind"], str(row["number"])) not in item_briefs), None)
         if target is not None:
             add("agent", f"Write a detailed brief for {target['kind']} #{target['number']}",
                 f"prompts/item-brief.md (selected {target['kind']} #{target['number']})",
-                "a focused case can help a maintainer resolve an unreviewed call")
+                "a focused case can help a maintainer consider the flagged item")
 
-    unreviewed_code = [r for r in open_items if r["kind"] == "pr" and (merge_ready(r) or any(name in CODE_REVIEW_LABELS for name in r.get("proposed_labels") or []))
-                       and not r["reviewed"] and not (r.get("agent_notes") or "").strip()]
-    if unreviewed_code:
-        marked = sum(1 for r in unreviewed_code if merge_ready(r))
-        sample = ", ".join(f"#{r['number']}" for r in sorted(unreviewed_code, key=lambda r: not merge_ready(r))[:5])
-        add("agent", f"Code-review {len(unreviewed_code)} triaged PRs nobody has read the diff of ({marked} marked ready to merge)",
+    code_queue = [r for r in open_items if r["kind"] == "pr" and (merge_ready(r) or any(name in CODE_REVIEW_LABELS for name in r.get("proposed_labels") or []))
+                  and not (r.get("agent_notes") or "").strip()]
+    if code_queue:
+        marked = sum(1 for r in code_queue if merge_ready(r))
+        sample = ", ".join(f"#{r['number']}" for r in sorted(code_queue, key=lambda r: not merge_ready(r))[:5])
+        add("agent", f"Code-review {len(code_queue)} triaged PRs with no agent notes ({marked} marked ready to merge)",
             f"prompts/review-pr.md (e.g. {sample})", "their code evidence has not been reviewed")
 
     open_prs = [r for r in open_items if r["kind"] == "pr"]
@@ -143,7 +142,7 @@ def suggestions(ledger):
     if unscored:
         add("agent", f"Score a bounded selection of {len(unscored)} new or stale items",
             "prompts/score-items.md (select up to 20 exact item keys and saved snapshots)",
-            "quality/readiness scores remain separate from triage confidence, review and GitHub approval")
+            "quality/readiness scores remain separate from triage confidence, Pending review and GitHub approval")
 
     pairs = [p for p in TitleVerdicts().pairs(TitleIndex(ledger), min_score=STRONG_PAIR)
              if not has_decision(by_key[(p["item"]["kind"], p["item"]["number"])])]
@@ -159,12 +158,6 @@ def suggestions(ledger):
         add("human", f"Finish group \"{g['title']}\" ({len(g['members'])} items) and mark it ready",
             f"TUI: b -> group -> e (status ready); or bin/group update {g['id']} --status ready --by <you>",
             "maintainers only see ready groups at the top of the report")
-
-    for g in ready:
-        unsettled = [m for m in g["members"] if not (by_key.get((m["kind"], m["number"])) or {}).get("reviewed")]
-        if unsettled:
-            add("human", f"Review the {len(unsettled)} unreviewed members of ready group \"{g['title']}\"",
-                "TUI: b -> group -> Enter -> open each member", "a ready group reads best when its decisions are confirmed")
 
     group_brief = REPORTS_DIR / f"{date.today().isoformat()}-ready-groups-brief.md"
     if ready and not saved_brief_exists(group_brief):
@@ -246,7 +239,7 @@ def main():
         print(f"{i}. [{s['who']}] {s['what']}\n   do:  {s['do']}\n   why: {s['why']}")
 
     if not items:
-        print("Nothing pending. Everything triaged is reviewed and every batch is applied.")
+        print("Nothing suggested from the current ledger and local records.")
 
 
 if __name__ == "__main__":

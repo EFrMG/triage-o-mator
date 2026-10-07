@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _action_proposal_records import direct_execution_eligible
 from _evidence import canonical, digest
-from _triage import REPO, action_operation, load_taxonomy, parse_key
+from _triage import REPO, action_operation, load_ledger, load_taxonomy, parse_key
 
 
 def script(name, *args):
@@ -40,6 +40,7 @@ def select(keys):
     policy = script("action-policy", "status", "--expected-repo", REPO)
     settings = {row["name"]: row for row in policy["actions"]}
     taxonomy = load_taxonomy()
+    ledger = {(item["kind"], item["number"]): item for item in load_ledger()}
     proposals = {(row["kind"], row["number"]): row for row in script("action-proposals", "--expected-repo", REPO, "list")["rows"]}
     chosen = []
     for kind, number in keys:
@@ -60,12 +61,14 @@ def select(keys):
             if exact["checkpoint"] != row["checkpoint"] or exact["comment"] != row["comment"]:
                 raise ValueError(f"{kind} #{number} changed during action preview")
 
-        eligible = direct_execution_eligible(row)
+        held = bool(policy["pending_review_hold"] and ledger.get((kind, number), {}).get("review_request"))
+        eligible = direct_execution_eligible(row) and not held
         mode = "execute" if setting["mode"] == "execute" and setting["configured"] and eligible else "stage"
         chosen.append(dict(kind=kind, number=number, action=row["action"], operation=operation, mode=mode,
                            policy_mode=setting["mode"], eligible=eligible, target=row["target"], comment=row["comment"],
                            proposal_checkpoint=row["checkpoint"], definition_sha256=setting["definition_sha256"],
-                           evidence_gaps=row["inputs"]["evidence_gaps"], decision_question=row.get("decision_question")))
+                           evidence_gaps=row["inputs"]["evidence_gaps"], decision_question=row.get("decision_question"),
+                           pending_review_hold=policy["pending_review_hold"], held_for_review=held))
 
     plan = dict(version=1, repository=REPO, operation="automated-actions", items=chosen)
     return dict(plan=plan, preview_sha256=digest(canonical(plan)), requests=0)

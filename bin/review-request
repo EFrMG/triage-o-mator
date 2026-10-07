@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Mark or clear one item's explicit Pending review request in the local ledger."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _storage import locked
+from _triage import LEDGER_PATH, REPO, load_ledger, now_iso, review_request, save_ledger
+
+
+def valid_text(value, limit):
+    return (isinstance(value, str) and bool(value.strip()) and len(value.encode("utf-8")) <= limit and
+            not any(ord(char) < 32 or ord(char) == 127 for char in value))
+
+
+def is_agent(value):
+    return value == "agent" or value.startswith("agent:")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("mark", "clear"))
+    parser.add_argument("--expected-repo", required=True)
+    parser.add_argument("--kind", choices=("issue", "pr"), required=True)
+    parser.add_argument("--number", type=int, required=True)
+    parser.add_argument("--by", required=True)
+    parser.add_argument("--reason", help="short reason for the Pending review request")
+    parser.add_argument("--expected-by")
+    parser.add_argument("--expected-at")
+    parser.add_argument("--expected-reason")
+    args = parser.parse_args()
+
+    if args.expected_repo != REPO or args.number < 1:
+        raise ValueError("repository or item changed; select the target again")
+
+    if not valid_text(args.by, 200):
+        raise ValueError("--by must name the person or agent")
+
+    if args.command == "mark" and not valid_text(args.reason, 500):
+        raise ValueError("mark requires a short --reason of at most 500 UTF-8 bytes")
+
+    if args.command == "clear" and args.reason is not None:
+        raise ValueError("clear does not take --reason")
+
+    expected = (args.expected_by, args.expected_at, args.expected_reason)
+    if args.command == "mark" and any(value is not None for value in expected):
+        raise ValueError("expected request fields apply only to clear")
+
+    if args.command == "clear" and any(value is not None for value in expected) and not all(value is not None for value in expected):
+        raise ValueError("supply all expected request fields together")
+
+    with locked(LEDGER_PATH):
+        ledger = load_ledger()
+        matches = [row for row in ledger if (row.get("kind"), row.get("number")) == (args.kind, args.number)]
+        if len(matches) != 1:
+            raise ValueError("selected item is absent or duplicated in the ledger; sync and inspect it")
+
+        row = matches[0]
+        current = review_request(row)
+
+        if current and is_agent(args.by) and current["by"] != args.by:
+            raise ValueError("an agent cannot replace or clear another contributor's review request")
+
+        if args.command == "clear" and args.expected_by is not None:
+            actual = (current["by"], current["at"], current["reason"]) if current else None
+            if actual != expected:
+                raise ValueError("review request changed; inspect it again")
+
+        if args.command == "mark":
+            if current and current["by"] == args.by and current["reason"] == args.reason:
+                changed = False
+            else:
+                row["review_request"] = {"by": args.by, "at": now_iso(), "reason": args.reason}
+                changed = True
+        else:
+            changed = current is not None
+            if changed:
+                row["review_request"] = None
+
+        if changed:
+            save_ledger(ledger)
+
+    print(json.dumps({"repository": REPO, "kind": args.kind, "number": args.number, "pending_review": args.command == "mark", "changed": changed}, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        sys.exit(f"error: {error}")

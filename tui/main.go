@@ -73,7 +73,7 @@ func pickerModel() (model, error) {
 		}
 	}
 
-	m := newModel("", "", Taxonomy{}, ReviewerName(), nil)
+	m := newModel("", "", Taxonomy{}, ContributorName(), nil)
 	m.codeRoot = root
 	m.openRepoPicker()
 
@@ -138,7 +138,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	m := newModel(installRoot, repo, taxonomy, ReviewerName(), items)
+	m := newModel(installRoot, repo, taxonomy, ContributorName(), items)
 	m.codeRoot, _ = CodeRoot() // where bin/install-to lives, for installing into another repository from Switch Repo
 
 	run(m)

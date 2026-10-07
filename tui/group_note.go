@@ -86,7 +86,7 @@ func (m model) handleGroupNoteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		group.Revision = note.revision
 		m.groups.busy = true
 		m.status = "Saving member note…"
-		return m, groupBulkCmd(m.installRoot, group, "add", []Key{note.member}, note.text.Value(), m.reviewer)
+		return m, groupBulkCmd(m.installRoot, group, "add", []Key{note.member}, note.text.Value(), m.contributor)
 	}
 
 	var cmd tea.Cmd

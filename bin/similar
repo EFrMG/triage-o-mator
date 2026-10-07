@@ -7,7 +7,7 @@ Usage:
     bin/similar --pairs [--min-score 0.5]
     bin/similar --query "suspend lid" [--top 20] [--min-score 0.1] [--include-closed]
 
-Prints one JSON object: the item plus a `candidates` list (number, kind, title, state, proposed_labels, action, reviewed, score), best first. Candidates are the same kind as the item unless --any-kind. Pairs ruled out with bin/not-duplicate are excluded before --top; --include-checked retains them with their recorded verdict.
+Prints one JSON object: the item plus a `candidates` list (number, kind, title, state, proposed_labels, action, pending_review, score), best first. Candidates are the same kind as the item unless --any-kind. Pairs ruled out with bin/not-duplicate are excluded before --top; --include-checked retains them with their recorded verdict.
 
 --enrich also fetches the body and comments of the item and every candidate from GitHub (read-only), producing exactly the input prompts/find-duplicates.md expects. Without it, nothing leaves the machine.
 

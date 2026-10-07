@@ -217,7 +217,7 @@ func (m model) scoringPrompt() string {
 	return m.yankHeader("Item scoring") + fmt.Sprintf(`
 Please score a bounded selection for %s from %s.
 
-Follow prompts/score-items.md. Use at most 20 named issues and PRs or the first 20 keys of one selected batch. Read selected immutable evidence offline, score quality/readiness with separate issue and PR dimensions, and record a reason and one suggested next check. Leave missing or unverifiable cases unassessed. Save each result through bin/item-score and report the score, source snapshot/revision and gaps. Do not change triage decisions, mark them reviewed, act on GitHub, or change code or PR diffs.
+Follow prompts/score-items.md. Score at most 20 named issues and PRs per pass; for a larger selected batch, continue in passes of at most 20 and report completed and remaining keys. Read selected immutable evidence offline, score quality/readiness with separate issue and PR dimensions, and record a reason and one suggested next check. Leave missing or unverifiable cases unassessed. Save each result through bin/item-score and report the score, source snapshot/revision and gaps. Do not change triage decisions, mark them reviewed, act on GitHub, or change code or PR diffs.
 `, m.repo, m.installRoot)
 }
 

@@ -128,7 +128,7 @@ def suggestions(ledger):
     if open_prs:
         add("agent", f"Assess a named PR for an explained closure proposal ({len(open_prs)} open PRs available)",
             "prompts/recommend-closure.md (select the PR; reuse cached evidence first)",
-            "a scoped recommendation can keep the PR open; a saved proposal needs exact approval before any GitHub write")
+            "a scoped recommendation can keep the PR open; a saved proposal is staged unless a separate action pass finds it eligible under repository policy")
 
     action_candidates = [r for r in ledger if action_operation(taxonomy, r.get("action")) in ("comment", "close", "reopen") and
                          (action_operation(taxonomy, r["action"]) == "reopen" and r["state"] == "closed" or r["state"] == "open")]

@@ -4,6 +4,8 @@
 
 **Produces** proposed `proposed_labels` / `action` / `confidence` / `reason` (and, where there is more to say, `agent_notes`) for a batch of untriaged items, applied to the ledger as **unreviewed** decisions for a human to confirm. `proposed_labels` is a list of GitHub label names, separate from the item's observed `labels`; saving it does not write labels to GitHub. A separately enabled [labeling pass](label-items.md) may apply those labels before ledger review. You never mark anything reviewed; see [PLAYBOOK.md](PLAYBOOK.md), "Ground rules".
 
+For a large backlog, finish one bounded batch and record its ID, applied keys, skipped keys and evidence gaps before creating the next. `bin/batch` selects untriaged open items by default, so repeated passes can work through them; the count in `bin/next` is a lead, not a coverage checkpoint. Batch briefing has its own screening checkpoint in [maintainer-brief.md](maintainer-brief.md).
+
 ## 1. Set up
 
 1. `bin/next`. If it says the ledger is stale, run `bin/fetch && bin/sync` first. If it names a batch whose decisions file is still blank, fill that one instead of creating another.

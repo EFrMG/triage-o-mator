@@ -18,7 +18,7 @@ One installs it **into the repository you triage**: this checkout provides the p
 
 ## How it works
 
-The ledger records local decisions and human review. Groups hold tangentially related items together; the cache keeps versioned GitHub data for offline analysis. An agent can start from different standpoints, while reading current guidance and evidence, then explains your concerns or proposes actions to be confirmed of execution.
+The ledger records local decisions and human review. Groups collect related items; the cache keeps versioned GitHub data for offline analysis. An agent reads current guidance and evidence before explaining a recommendation or saving an exact action proposal.
 
 ```mermaid
 flowchart LR
@@ -30,11 +30,12 @@ flowchart LR
     NOTICE -->|"edit"| REVIEW["Revised proposal<br/>needs fresh review"] --> NOTICE
     NOTICE -->|"reject"| FEEDBACK["Attributed feedback<br/>for the next pass"] --> CONTEXT
     NOTICE -->|"approve exact action"| WRITE["comment-plus<br/>publishes on GitHub"]
+    NOTICE -->|"eligible repository action pass"| WRITE
 ```
 
-**Notifications** shows the target, comment, human guidance and evidence gaps before approval. A reviewer can edit, reject with an optional attributed reason, or approve the upstream write action. Rejection stays available to the next agent pass; changed guidance requires a fresh proposal and review.
+**Notifications** shows the target, comment, human guidance and evidence gaps for a staged proposal. A reviewer can edit, reject with an optional attributed reason, or approve the exact GitHub write. A separately enabled repository action pass can execute an eligible proposal after its own preview and rechecks. Rejection stays available to the next agent pass; changed guidance requires a fresh proposal and review.
 
-Group `ready`, ledger `reviewed`, and approval to publish on GitHub while being the three main pillars in the flow: **similar items, human review, and agentic actionable proposals**.
+Group `ready`, ledger `reviewed`, and authorization for a GitHub write are separate states.
 
 An item first enters the ledger when observed open. Later syncs retain its row after closure and preserve its decision history.
 
@@ -186,7 +187,9 @@ Turning automatic download ON installs the optional engine from the checked-in, 
 | “score these items” or “run a scoring pass”     | [Score selected items](prompts/score-items.md)                                                    | A bounded, source-bound quality score        |
 
 > [!IMPORTANT]
-> Agents propose; humans review.
+> Agents propose; humans confirm ledger review. Repository-enabled bounded passes can separately apply labels or execute eligible actions.
+
+For large backlogs, run task playbooks in bounded selections. Triage advances through untriaged batches, and maintainer briefing records a durable screened-batch checkpoint. Labeling records per-item outcomes; scoring stores revision-bound item scores. Duplicate comparisons, code review, closure recommendations and action preparation need an exact completed-and-remaining key handoff between passes. Their candidate lists and `bin/next` counts are not whole-backlog coverage records.
 
 ### Working as a team
 

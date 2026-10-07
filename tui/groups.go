@@ -126,8 +126,7 @@ type exportProgressMsg struct {
 func exportGroupCmd(root string, args ...string) tea.Cmd {
 	return func() tea.Msg {
 		updates := make(chan tea.Msg)
-		var next tea.Cmd
-		next = func() tea.Msg { return <-updates }
+		next := func() tea.Msg { return <-updates }
 		go func() {
 			done := groupsRun(root, func(line string) { updates <- exportProgressMsg{line: line, next: next} }, args...)
 			updates <- done

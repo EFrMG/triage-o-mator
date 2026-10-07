@@ -72,10 +72,21 @@ class EvidenceTests(Workspace):
         self.assertTrue(all(row["current"] for row in shown["current"]))
         self.assertEqual(len(self.calls()), calls)
 
+        grouped = self.json_cli("group-assessment", "--expected-repo", "owner/repo", "record", "--scope-type", "topic",
+                                "--topic", "Related screen reports", "--evidence", f"issue:2:{snapshots[2]}",
+                                "--evidence", f"issue:3:{snapshots[3]}", "--outcome", "no-group",
+                                "--reason", "Trigger overlap is too uncertain for a maintainer group", "--by", "agent:tester")
+        self.assertIsNone(grouped["group"])
+        self.assertEqual(grouped["scope"]["member_keys"], ["issue:2", "issue:3"])
+        self.assertEqual(self.json_cli("group-assessment", "--expected-repo", "owner/repo", "list")["records"][0]["assessment_id"], grouped["assessment_id"])
+        self.assertEqual(len(self.calls()), calls)
+
         rows[1]["updated_at"] = "2026-10-07T00:00:00Z"
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         changed = self.json_cli("duplicate-assessment", "--expected-repo", "owner/repo", "show", saved["assessment_id"])
         self.assertEqual([row["current"] for row in changed["current"]], [True, False])
+        group_status = self.json_cli("group-assessment", "--expected-repo", "owner/repo", "show", grouped["assessment_id"])
+        self.assertEqual([row["ledger_revision_current"] for row in group_status["current"]["sources"]], [True, False])
         self.assertIn("high confidence requires", self.run_cli("duplicate-assessment", *args[:args.index("--confidence")],
                                                                   "--confidence", "high", *args[args.index("--shared"):], ok=False).stderr)
 

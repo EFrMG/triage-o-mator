@@ -69,6 +69,12 @@ class CandidateTests(Workspace):
         group = self.json_cli("group", "create-candidate", "--file", str(packet), "--candidate", sets[0]["id"], "--by", "agent:review")
         self.assertEqual(group["candidate_origin"]["policy"], "pr-candidate-sets-v2")
         self.assertEqual([member["number"] for member in group["members"]], [1, 2])
+        assessed = self.json_cli("group-assessment", "--expected-repo", "owner/repo", "record", "--scope-type", "candidate",
+                                 "--candidate-file", str(packet), "--candidate", sets[0]["id"], "--outcome", "created",
+                                 "--group-id", group["id"], "--reason", "These PRs need one comparison", "--by", "agent:review")
+        self.assertEqual(assessed["scope"]["suggestion"]["id"], group["candidate_origin"]["suggestion"]["id"])
+        self.assertEqual(assessed["group"]["revision"], group["revision"])
+        self.assertTrue(self.json_cli("group-assessment", "--expected-repo", "owner/repo", "show", assessed["assessment_id"])["current"]["group_current"])
         self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
 
         ledger = self.root / "data/owner/repo/ledger.jsonl"

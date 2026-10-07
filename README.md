@@ -124,19 +124,19 @@ After screening a whole batch, save its dated batch brief and use `bin/batch --m
 
 `bin/briefs plan` returns the selected batch brief paths, content digests, a plan checksum and a calculated master-brief size target. Use `--all` for every visible batch brief, `--all --include-read` to include briefs archived from the TUI, or repeat `--brief FILENAME` for an exact set. After writing the master, `bin/briefs --expected-repo OWNER/REPO record-master --master NAME.md --brief SOURCE.md ... --plan-sha256 HASH --by agent:NAME` saves its exact input set and content revisions in a tracked record. `bin/briefs mark-read NAME.md` previews a rename to `NAME_READ.md`; applying it requires `--expected-repo OWNER/REPO --apply --preview-sha256 HASH` from that preview. The rename leaves the Markdown intact and removes the brief from the TUI menus. It does not change Pending review or GitHub state.
 
-| Task                                            | Commands                                                                               |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Install and refresh                             | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                         |
-| Prepare and edit decisions                      | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv`         |
-| Flag items for human attention                  | `bin/review-request`                                                                   |
-| Compare and group                               | `bin/similar`, `bin/duplicate-assessment`, `bin/not-duplicate`, `bin/group`            |
-| Read guidance and evidence                      | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`                |
-| Edit action settings                            | `bin/taxonomy-settings`, `bin/action-policy`                                           |
-| Preview, initialize and reconcile GitHub labels | `bin/label-definitions`                                                                |
-| Record no-fit assessments and apply labels      | `bin/label-assessment`, `bin/item-labels`                                              |
-| Assess, propose and publish actions             | `bin/action-assessment`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus` |
-| Score and review selected issues and PRs        | `bin/item-score`, `bin/pr-assessment`                                                  |
-| See progress and handoffs                       | `bin/stats`, `bin/next`, `bin/report`, `bin/briefs`                                    |
+| Task                                            | Commands                                                                                            |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Install and refresh                             | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                                      |
+| Prepare and edit decisions                      | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv`                      |
+| Flag items for human attention                  | `bin/review-request`                                                                                |
+| Compare and group                               | `bin/similar`, `bin/duplicate-assessment`, `bin/not-duplicate`, `bin/group`, `bin/group-assessment` |
+| Read guidance and evidence                      | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`                             |
+| Edit action settings                            | `bin/taxonomy-settings`, `bin/action-policy`                                                        |
+| Preview, initialize and reconcile GitHub labels | `bin/label-definitions`                                                                             |
+| Record no-fit assessments and apply labels      | `bin/label-assessment`, `bin/item-labels`                                                           |
+| Assess, propose and publish actions             | `bin/action-assessment`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus`              |
+| Score and review selected issues and PRs        | `bin/item-score`, `bin/pr-assessment`                                                               |
+| See progress and handoffs                       | `bin/stats`, `bin/next`, `bin/report`, `bin/briefs`                                                 |
 
 The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md), [comment publishing guide](docs/comment-plus.md) and [item score guide](docs/item-score.md) cover the commands and their limits.
 

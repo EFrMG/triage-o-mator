@@ -41,6 +41,49 @@ class EvidenceTests(Workspace):
         self.assertEqual(len(self.calls()), count)
         self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
 
+    def test_duplicate_comparison_keeps_unresolved_pair_and_both_selected_revisions(self):
+        rows = []
+        snapshots = {}
+        for number in (2, 3):
+            issue = summary(kind="issue", number=number, title=f"Related report {number}")
+            self.responses[f"repos/owner/repo/issues/{number}"] = dict(data=issue)
+            self.responses[f"repos/owner/repo/issues/{number}/comments?per_page=100&page=1"] = dict(data=[])
+            row = item(number, issue["title"])
+            row["updated_at"] = issue["updated_at"]
+            rows.append(row)
+
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        for number in (2, 3):
+            snapshots[number] = self.cache("fetch", "--kind", "issue", "--number", str(number), "--profile", "discussion")["snapshot_id"]
+
+        calls = len(self.calls())
+        args = ("--expected-repo", "owner/repo", "record", "--evidence", f"issue:2:{snapshots[2]}",
+                "--evidence", f"issue:3:{snapshots[3]}", "--outcome", "unresolved", "--confidence", "low",
+                "--shared", "Both describe the same screen", "--difference", "The trigger is not established",
+                "--gap", "Need a reproduction from #3", "--by", "agent:tester")
+        saved = self.json_cli("duplicate-assessment", *args)
+        self.assertEqual(saved["pair"], dict(kind="issue", a=2, b=3))
+        self.assertEqual(saved["outcome"], "unresolved")
+        self.assertEqual(self.json_cli("duplicate-assessment", "--expected-repo", "owner/repo", "list")["records"][0]["assessment_id"], saved["assessment_id"])
+        self.assertEqual([row["snapshot_id"] for row in saved["evidence"]], [snapshots[2], snapshots[3]])
+        self.assertEqual(self.json_cli("duplicate-assessment", *args), saved)
+        shown = self.json_cli("duplicate-assessment", "--expected-repo", "owner/repo", "show", saved["assessment_id"])
+        self.assertTrue(all(row["current"] for row in shown["current"]))
+        self.assertEqual(len(self.calls()), calls)
+
+        rows[1]["updated_at"] = "2026-10-07T00:00:00Z"
+        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        changed = self.json_cli("duplicate-assessment", "--expected-repo", "owner/repo", "show", saved["assessment_id"])
+        self.assertEqual([row["current"] for row in changed["current"]], [True, False])
+        self.assertIn("high confidence requires", self.run_cli("duplicate-assessment", *args[:args.index("--confidence")],
+                                                                  "--confidence", "high", *args[args.index("--shared"):], ok=False).stderr)
+
+        self.json_cli("not-duplicate", "--key", "issue:2", "--key", "issue:3", "--by", "maintainer", "--note", "Different triggers")
+        duplicate = list(args)
+        duplicate[duplicate.index("unresolved")] = "duplicate"
+        self.assertIn("not-duplicate verdict", self.run_cli("duplicate-assessment", *duplicate, ok=False).stderr)
+
     def test_item_score_binds_numeric_assessment_to_verified_revision(self):
         issue = summary(kind="issue", number=2)
         self.responses["repos/owner/repo/issues/2"] = dict(data=issue)

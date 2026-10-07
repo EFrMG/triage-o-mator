@@ -43,6 +43,7 @@ target-repo/
     data/<owner>/<repo>/master-briefs/                tracked master brief input records
     data/<owner>/<repo>/action-proposals/            tracked proposals
     data/<owner>/<repo>/action-assessments/          tracked selected action assessments
+    data/<owner>/<repo>/duplicate-assessments/       tracked pair comparisons
     data/<owner>/<repo>/raw|batches|exports/           ignored
     data/<owner>/<repo>/cache|local/                   ignored (includes the per-repo automatic download preference)
     reports/<owner>/<repo>/<date>.md                   tracked report

@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""Checkpoint a substantive duplicate comparison against both selected evidence snapshots."""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _assessment_evidence import selected_item
+from _evidence import canonical, digest
+from _notdupes import checked, pair_key
+from _storage import atomic_writer, locked
+from _triage import DATA_DIR, REPO, load_ledger, now_iso, parse_key
+
+
+RECORDS = DATA_DIR / "duplicate-assessments"
+OUTCOMES = ("duplicate", "distinct", "competing", "unresolved")
+CONFIDENCE = ("low", "medium", "high")
+MAX_RECORDS = 5000
+MAX_RECORD_BYTES = 32768
+
+
+def evidence_argument(value):
+    parts = value.split(":", 2)
+    key = parse_key(":".join(parts[:2])) if len(parts) == 3 else None
+    if key is None or not re.fullmatch(r"[0-9a-f]{64}", parts[2]):
+        raise ValueError("use --evidence KIND:NUMBER:SNAPSHOT_ID twice")
+
+    return key, parts[2]
+
+
+def compare(args):
+    if len(args.evidence) != 2 or not args.by.strip() or not args.shared.strip() or not args.difference.strip():
+        raise ValueError("two selected evidence references, assessor, shared signal and difference are required")
+    if any(len(value) > 2000 for value in (args.shared, args.difference)) or len(args.by) > 200:
+        raise ValueError("comparison text is too long")
+    if len(args.gap) > 20 or any(not gap.strip() or len(gap) > 500 for gap in args.gap):
+        raise ValueError("evidence gaps must be short and bounded")
+
+    selected = dict(evidence_argument(value) for value in args.evidence)
+    if len(selected) != 2:
+        raise ValueError("select two distinct items")
+    keys = sorted(selected)
+    if keys[0][0] != keys[1][0]:
+        raise ValueError("duplicate comparison requires two items of the same kind")
+
+    pair = pair_key(keys[0][0], keys[0][1], keys[1][1])
+    if args.outcome == "duplicate" and pair in checked():
+        raise ValueError("a recorded not-duplicate verdict rules out this duplicate assessment")
+
+    ledger = {(row["kind"], row["number"]): row for row in load_ledger()}
+    references = []
+    gaps = list(args.gap)
+    for key in keys:
+        row = ledger.get(key)
+        if row is None:
+            raise ValueError(f"{key[0]}:{key[1]} is absent from the ledger")
+
+        reference = selected_item(*key, selected[key], host=args.host)
+        references.append(reference)
+        if reference["revision"]["updated_at"] != row.get("updated_at"):
+            gaps.append(f"{key[0]}:{key[1]}: selected revision differs from the ledger")
+
+        required = ("summary", "comments") if key[0] == "issue" else ("summary", "files", "diff")
+        for component in required:
+            if reference["coverage"].get(component) != "complete":
+                gaps.append(f"{key[0]}:{key[1]}: {component} is not complete")
+
+    if args.confidence == "high" and gaps:
+        raise ValueError("high confidence requires current, complete selected evidence and no declared gaps")
+
+    content = dict(repository=REPO, pair=dict(kind=pair[0], a=pair[1], b=pair[2]), outcome=args.outcome,
+                   confidence=args.confidence, shared=args.shared.strip(), difference=args.difference.strip(),
+                   evidence=references, gaps=gaps, assessed_by=args.by.strip())
+    assessment_id = digest(canonical(content))
+    path = RECORDS / f"{assessment_id}.json"
+    if RECORDS.is_symlink():
+        raise ValueError("invalid duplicate assessment directory")
+
+    with locked(RECORDS):
+        if path.exists() or path.is_symlink():
+            prior = read(assessment_id)
+            if all(prior.get(field) == content[field] for field in content):
+                return prior
+
+            raise ValueError("duplicate assessment ID has conflicting contents")
+
+        record = dict(schema_version=1, artifact="duplicate-assessment", assessment_id=assessment_id,
+                      assessed_at=now_iso(), **content)
+        record["checksum"] = digest(canonical(record))
+        RECORDS.mkdir(parents=True, exist_ok=True)
+        with atomic_writer(path) as output:
+            output.write(canonical(record) + "\n")
+
+    return record
+
+
+def read(assessment_id):
+    if not re.fullmatch(r"[0-9a-f]{64}", assessment_id):
+        raise ValueError("invalid duplicate assessment ID")
+
+    path = RECORDS / f"{assessment_id}.json"
+    if RECORDS.is_symlink() or path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_RECORD_BYTES:
+        raise ValueError("duplicate assessment is missing or invalid")
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    checksum = record.pop("checksum", None)
+    content = {field: record[field] for field in ("repository", "pair", "outcome", "confidence", "shared", "difference", "evidence", "gaps", "assessed_by")}
+    if (record.get("schema_version") != 1 or record.get("artifact") != "duplicate-assessment" or
+            record.get("repository") != REPO or record.get("assessment_id") != assessment_id or
+            digest(canonical(content)) != assessment_id or digest(canonical(record)) != checksum):
+        raise ValueError("duplicate assessment identity or contents changed")
+
+    record["checksum"] = checksum
+    return record
+
+
+def current(record):
+    ledger = {(row["kind"], row["number"]): row for row in load_ledger()}
+    return [dict(key=f"{reference['identity']['kind']}:{reference['identity']['number']}",
+                 current=reference["revision"]["updated_at"] == ledger.get((reference["identity"]["kind"], reference["identity"]["number"]), {}).get("updated_at"))
+            for reference in record["evidence"]]
+
+
+def list_records(limit):
+    if not 1 <= limit <= MAX_RECORDS:
+        raise ValueError(f"limit must be between 1 and {MAX_RECORDS}")
+    if not RECORDS.exists():
+        return []
+    if RECORDS.is_symlink() or not RECORDS.is_dir():
+        raise ValueError("invalid duplicate assessment directory")
+
+    paths = sorted(RECORDS.glob("*.json"))
+    if len(paths) > MAX_RECORDS:
+        raise ValueError("too many duplicate assessments")
+
+    records = [read(path.stem) for path in paths]
+    records.sort(key=lambda row: (row["assessed_at"], row["assessment_id"]), reverse=True)
+    return [dict(assessment_id=row["assessment_id"], pair=row["pair"], outcome=row["outcome"],
+                 assessed_at=row["assessed_at"]) for row in records[:limit]]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-repo", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
+    saving = commands.add_parser("record")
+    saving.add_argument("--evidence", action="append", default=[], help="KIND:NUMBER:SNAPSHOT_ID; repeat for both items")
+    saving.add_argument("--host", default="github.com")
+    saving.add_argument("--outcome", choices=OUTCOMES, required=True)
+    saving.add_argument("--confidence", choices=CONFIDENCE, required=True)
+    saving.add_argument("--shared", required=True)
+    saving.add_argument("--difference", required=True)
+    saving.add_argument("--gap", action="append", default=[])
+    saving.add_argument("--by", required=True)
+    showing = commands.add_parser("show")
+    showing.add_argument("assessment_id")
+    listing = commands.add_parser("list")
+    listing.add_argument("--limit", type=int, default=100)
+    args = parser.parse_args()
+
+    if args.expected_repo != REPO:
+        raise ValueError("selected repository changed")
+
+    if args.command == "record":
+        result = compare(args)
+    elif args.command == "show":
+        record = read(args.assessment_id)
+        result = dict(record=record, current=current(record))
+    else:
+        result = dict(repository=REPO, records=list_records(args.limit))
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        sys.exit(f"error: {error}")

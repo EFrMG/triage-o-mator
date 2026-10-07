@@ -129,7 +129,7 @@ After screening a whole batch, save its dated batch brief and use `bin/batch --m
 | Install and refresh                             | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                         |
 | Prepare and edit decisions                      | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv`         |
 | Flag items for human attention                  | `bin/review-request`                                                                   |
-| Compare and group                               | `bin/similar`, `bin/not-duplicate`, `bin/group`                                        |
+| Compare and group                               | `bin/similar`, `bin/duplicate-assessment`, `bin/not-duplicate`, `bin/group`            |
 | Read guidance and evidence                      | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`                |
 | Edit action settings                            | `bin/taxonomy-settings`, `bin/action-policy`                                           |
 | Preview, initialize and reconcile GitHub labels | `bin/label-definitions`                                                                |

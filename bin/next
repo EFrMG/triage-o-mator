@@ -20,7 +20,7 @@ from _groups import list_groups
 from _briefed import ITEM_BRIEF_RE, active_name, briefed_keys, load_records, saved_brief_exists, visible_batch_briefs
 from _similar import TitleIndex
 from _notdupes import TitleVerdicts
-from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, action_operation, current_score, has_decision, load_jsonl, load_ledger, load_taxonomy, merge_ready
+from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, action_operation, current_no_label_fit, current_score, has_decision, label_catalog_digest, load_jsonl, load_ledger, load_taxonomy, merge_ready
 
 STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
@@ -174,10 +174,11 @@ def suggestions(ledger):
         add("agent", "Prepare reusable evidence for a focused analysis", "prompts/prepare-analysis.md",
             "optional: inspect existing references offline first; choose a bounded script budget if downloading (cache coverage is not assessed here)")
 
-    unlabeled = [r for r in open_items if not r.get("labels")]
+    catalog_digest = label_catalog_digest(taxonomy)
+    unlabeled = [r for r in open_items if not r.get("labels") and not current_no_label_fit(r, catalog_digest)]
     if unlabeled:
         add("agent", f"Prepare a bounded labeling pass for {len(unlabeled)} open items with no observed labels",
-            "prompts/label-items.md (start with bin/batch 25 --unlabeled-first --include-triaged)",
+            "prompts/label-items.md (start with bin/batch 25 --unlabeled-unassessed --include-triaged)",
             "the label pass is separate from the suggested Action; GitHub writes require this repository's Item labeling setting")
 
     if untriaged:

@@ -4,6 +4,7 @@ Importing this module requires an install (see bin/_install.py): every path belo
 """
 
 import json
+import hashlib
 import os
 import re
 import subprocess
@@ -124,6 +125,23 @@ def observed_catalog(taxonomy):
         return None
 
     return catalog
+
+
+def label_catalog_digest(taxonomy):
+    """Stable content identity for the observed label choices, independent of sync time."""
+    catalog = observed_catalog(taxonomy)
+    if catalog is None:
+        return None
+
+    labels = sorted((row.get("name"), row.get("description"), row.get("color")) for row in catalog["labels"])
+    return hashlib.sha256(json.dumps(labels, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def current_no_label_fit(row, catalog_digest):
+    assessment = row.get("label_assessment")
+    return (isinstance(assessment, dict) and assessment.get("outcome") == "no-fit" and
+            assessment.get("source_updated_at") == row.get("updated_at") and
+            assessment.get("catalog_sha256") == catalog_digest)
 
 
 # On a PR, the `ready` starter label from bin/label-definitions means its code was read and nothing blocks merging. tui/ledger.go mirrors the name.

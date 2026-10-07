@@ -675,6 +675,30 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         next_steps = self.json_cli("next", "--json")["suggestions"]
         self.assertTrue(any(f"Brief screening batch {new_items.name.removesuffix('.items.jsonl')}" in row["what"] for row in next_steps), next_steps)
 
+        taxonomy_path = self.root / "config/taxonomy.json"
+        taxonomy = json.loads(taxonomy_path.read_text())
+        taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-10-06T00:00:00Z",
+                                         labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        before_labels = set((self.root / "data/owner/repo/batches").glob("*.items.jsonl"))
+        self.run_cli("batch", "2", "--include-triaged", "--unlabeled-unassessed")
+        label_batch = next(iter(set((self.root / "data/owner/repo/batches").glob("*.items.jsonl")) - before_labels))
+        self.assertEqual([json.loads(line)["number"] for line in label_batch.read_text().splitlines()], [2])
+        assessment_args = ("--expected-repo", "owner/repo", "--batch", label_batch.name.removesuffix(".items.jsonl"),
+                           "--kind", "issue", "--number", "2", "--reason", "No catalog label describes the request", "--by", "agent:triage")
+        self.json_cli("label-assessment", *assessment_args)
+        self.assertEqual(self.ledger()["issue", 2]["label_assessment"]["outcome"], "no-fit")
+        self.assertIn("Nothing to batch", self.run_cli("batch", "2", "--include-triaged", "--unlabeled-unassessed").stdout)
+        self.assertFalse(any("labeling pass" in row["what"].lower() for row in self.json_cli("next", "--json")["suggestions"]))
+        taxonomy["label_catalog"]["labels"].append(dict(id=8, name="enhancement", description="New behavior", color="00ff00"))
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        self.assertIn("1 items", self.run_cli("batch", "1", "--include-triaged", "--unlabeled-unassessed").stdout)
+        revised = self.ledger()["issue", 2]
+        revised["updated_at"] = "2026-10-07T00:00:00Z"
+        other = self.ledger()["issue", 1]
+        ledger_path.write_text(json.dumps(other) + "\n" + json.dumps(revised) + "\n")
+        self.assertIn("source revision differs", self.run_cli("label-assessment", *assessment_args, ok=False).stderr)
+
     def test_finished_batches_need_briefs_before_next_suggests_deletion_and_polish(self):
         self.sync()
         batches = self.root / "data/owner/repo/batches"

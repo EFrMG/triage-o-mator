@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Record that a selected item was examined and no observed catalog label fit."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _briefed import BATCH_ID_RE
+from _evidence import value_digest
+from _storage import locked
+from _triage import BATCHES_DIR, LEDGER_PATH, REPO, label_catalog_digest, load_ledger, load_taxonomy, now_iso, save_ledger
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-repo", required=True)
+    parser.add_argument("--batch", required=True)
+    parser.add_argument("--kind", choices=("issue", "pr"), required=True)
+    parser.add_argument("--number", type=int, required=True)
+    parser.add_argument("--reason", required=True)
+    parser.add_argument("--by", required=True)
+    args = parser.parse_args()
+
+    if args.expected_repo != REPO:
+        parser.error("selected repository changed")
+    if not BATCH_ID_RE.fullmatch(args.batch) or args.number < 1:
+        parser.error("invalid batch or item number")
+    if not args.reason.strip() or len(args.reason.encode("utf-8")) > 500 or not args.by.strip():
+        parser.error("a short reason and assessor are required")
+
+    batch_path = BATCHES_DIR / f"{args.batch}.items.jsonl"
+    try:
+        batch = [json.loads(line) for line in batch_path.read_text().splitlines() if line.strip()]
+        selected = next((row for row in batch if (row.get("kind"), row.get("number")) == (args.kind, args.number)), None)
+        if selected is None:
+            raise ValueError("item is not in the selected batch")
+
+        with locked(LEDGER_PATH):
+            ledger = load_ledger()
+            row = next((row for row in ledger if (row["kind"], row["number"]) == (args.kind, args.number)), None)
+            if row is None or row.get("updated_at") != selected.get("updated_at"):
+                raise ValueError("batch source revision differs from the ledger; select a new batch")
+            if row.get("labels") or row.get("proposed_labels"):
+                raise ValueError("item already has observed or proposed labels")
+
+            catalog_sha256 = label_catalog_digest(load_taxonomy())
+            if catalog_sha256 is None:
+                raise ValueError("an observed label catalog is required")
+
+            assessment = dict(outcome="no-fit", batch_id=args.batch, source_updated_at=row["updated_at"],
+                              source_sha256=value_digest(selected), catalog_sha256=catalog_sha256,
+                              reason=args.reason.strip(), assessed_at=now_iso(), assessed_by=args.by.strip())
+            row["label_assessment"] = assessment
+            save_ledger(ledger)
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        sys.exit(f"error: {error}")
+
+    print(json.dumps(dict(repository=REPO, kind=args.kind, number=args.number, assessment=assessment), ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

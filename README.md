@@ -133,7 +133,7 @@ After screening a whole batch, save its dated batch brief and use `bin/batch --m
 | Read guidance and evidence                      | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`        |
 | Edit action settings                            | `bin/taxonomy-settings`, `bin/action-policy`                                   |
 | Preview, initialize and reconcile GitHub labels | `bin/label-definitions`                                                        |
-| Preview and apply proposed labels               | `bin/item-labels`                                                              |
+| Record no-fit assessments and apply labels      | `bin/label-assessment`, `bin/item-labels`                                      |
 | Propose and publish actions                     | `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus`                  |
 | Score selected issues and PRs                   | `bin/item-score`                                                               |
 | See progress and handoffs                       | `bin/stats`, `bin/next`, `bin/report`, `bin/briefs`                            |

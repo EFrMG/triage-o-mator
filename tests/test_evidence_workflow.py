@@ -84,6 +84,34 @@ class EvidenceTests(Workspace):
         duplicate[duplicate.index("unresolved")] = "duplicate"
         self.assertIn("not-duplicate verdict", self.run_cli("duplicate-assessment", *duplicate, ok=False).stderr)
 
+    def test_pr_review_and_keep_open_assessments_bind_head_and_coverage(self):
+        pr = item(1, "A contribution", kind="pr")
+        pr["updated_at"] = summary()["updated_at"]
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        ledger.write_text(json.dumps(pr) + "\n")
+        selected = self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "discussion")
+        calls = len(self.calls())
+        common = ("--expected-repo", "owner/repo", "record", "--number", "1", "--snapshot", selected["snapshot_id"],
+                  "--code-read", "partial", "--base-comparison", "unavailable", "--by", "agent:tester")
+        review = self.json_cli("pr-assessment", *common, "--purpose", "review", "--outcome", "no-finding",
+                               "--reason", "No issue found in the available discussion and summary")
+        self.assertEqual(review["evidence"]["revision"]["head_sha"], "b" * 40)
+        self.assertIn("diff is not complete", review["gaps"])
+        self.assertEqual(review["code"]["read"], "partial")
+        self.assertEqual(self.json_cli("pr-assessment", *common, "--purpose", "closure", "--outcome", "keep-open",
+                                       "--reason", "Code and feedback need review")["outcome"], "keep-open")
+        self.assertIn("ready reviews require", self.run_cli("pr-assessment", *common, "--purpose", "review", "--outcome", "ready",
+                                                               "--reason", "Merge now", ok=False).stderr)
+        self.assertIn("needs a pending exact closure proposal", self.run_cli("pr-assessment", *common, "--purpose", "closure",
+                                                                            "--outcome", "close", "--reason", "Superseded", ok=False).stderr)
+        shown = self.json_cli("pr-assessment", "--expected-repo", "owner/repo", "show", review["assessment_id"])
+        self.assertTrue(shown["current"]["ledger_revision_current"])
+        self.assertEqual(len(self.calls()), calls)
+
+        pr["updated_at"] = "2026-10-07T00:00:00Z"
+        ledger.write_text(json.dumps(pr) + "\n")
+        self.assertFalse(self.json_cli("pr-assessment", "--expected-repo", "owner/repo", "show", review["assessment_id"])["current"]["ledger_revision_current"])
+
     def test_item_score_binds_numeric_assessment_to_verified_revision(self):
         issue = summary(kind="issue", number=2)
         self.responses["repos/owner/repo/issues/2"] = dict(data=issue)

@@ -401,6 +401,11 @@ class ClosureWriteTests(Workspace):
         rows[0].update(action="close", confidence="high", reason="Superseded by #2")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         self.propose_action_close(1, "--action", "close", "--evidence", f"pr:1:{snapshot}")
+        assessed = self.json_cli("pr-assessment", "--expected-repo", "owner/repo", "record", "--purpose", "closure",
+                                 "--number", "1", "--snapshot", snapshot, "--outcome", "close", "--code-read", "partial",
+                                 "--base-comparison", "unavailable", "--reason", "PR #2 supersedes this change", "--by", "agent:helper")
+        self.assertEqual(assessed["proposal"]["head_sha"], assessed["evidence"]["revision"]["head_sha"])
+        self.assertIsNotNone(assessed["proposal"]["checkpoint"])
 
         selected = ("--expected-repo", "owner/repo", "--number", "1")
         staged = self.json_cli("action-pass", "preview", *selected)

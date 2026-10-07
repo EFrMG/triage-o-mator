@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""Record a PR code review or closure assessment against verified selected evidence."""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _action_proposal_records import load as load_proposal, proposal_path
+from _assessment_evidence import selected_item
+from _evidence import canonical, digest
+from _storage import atomic_writer, locked
+from _triage import DATA_DIR, REPO, load_ledger, now_iso
+
+
+RECORDS = DATA_DIR / "pr-assessments"
+OUTCOMES = {"review": {"ready", "needs-revision", "blocked", "no-finding", "deferred"},
+            "closure": {"close", "keep-open", "deferred"}}
+MAX_RECORDS = 5000
+MAX_RECORD_BYTES = 32768
+
+
+def assess(args):
+    if args.number < 1 or not args.reason.strip() or len(args.reason) > 2000 or not args.by.strip() or len(args.by) > 200:
+        raise ValueError("select a PR and provide a bounded reason and assessor")
+    if args.outcome not in OUTCOMES[args.purpose]:
+        raise ValueError("outcome does not belong to the selected assessment purpose")
+    if len(args.gap) > 20 or any(not gap.strip() or len(gap) > 500 for gap in args.gap):
+        raise ValueError("evidence gaps must be short and bounded")
+
+    evidence = selected_item("pr", args.number, args.snapshot, host=args.host)
+    ledger = next((row for row in load_ledger() if (row["kind"], row["number"]) == ("pr", args.number)), None)
+    if ledger is None:
+        raise ValueError("PR is absent from the ledger")
+
+    gaps = list(args.gap)
+    if evidence["revision"]["updated_at"] != ledger.get("updated_at"):
+        gaps.append("selected PR revision differs from the ledger")
+    if evidence["revision"]["head_sha"] is None:
+        gaps.append("selected PR head is unknown")
+    if args.base_comparison != "verified":
+        gaps.append("base comparison is " + args.base_comparison)
+
+    required = ("summary", "comments", "files", "diff") if args.purpose == "review" else ("summary", "comments", "files", "diff", "reviews", "review_comments")
+    for component in required:
+        if evidence["coverage"].get(component) != "complete":
+            gaps.append(f"{component} is not complete")
+
+    code = dict(read=args.code_read, base_comparison=args.base_comparison, coverage={name: evidence["coverage"].get(name) for name in ("files", "diff")})
+    if args.purpose == "review" and args.outcome == "ready" and (args.code_read != "full" or gaps):
+        raise ValueError("ready reviews require a full code read with complete current evidence")
+    if args.purpose == "review" and args.outcome == "no-finding" and args.code_read == "none":
+        raise ValueError("a no-finding result requires reading available PR code")
+    if args.purpose == "closure" and args.outcome == "close" and args.code_read == "none":
+        raise ValueError("a closure recommendation requires reading relevant PR code")
+
+    proposal = None
+    path = proposal_path("pr", args.number)
+    if path.exists() or path.is_symlink():
+        saved = load_proposal(path, REPO)
+        if saved["operation"] == "close":
+            proposal = dict(checkpoint=saved["checksum"], status=saved["status"], target=saved["target"],
+                            head_sha=saved["head_sha"], activity_updated_at=saved["updated_at"])
+    if args.purpose == "closure" and args.outcome == "close" and (proposal is None or proposal["status"] != "pending"):
+        raise ValueError("a close assessment needs a pending exact closure proposal")
+    if args.purpose == "closure" and args.outcome == "close" and proposal["head_sha"] != evidence["revision"]["head_sha"]:
+        raise ValueError("closure proposal head differs from selected evidence")
+
+    content = dict(repository=REPO, purpose=args.purpose, number=args.number, outcome=args.outcome, reason=args.reason.strip(),
+                   evidence=evidence, code=code, gaps=gaps, proposal=proposal if args.purpose == "closure" else None,
+                   assessed_by=args.by.strip())
+    assessment_id = digest(canonical(content))
+    record_path = RECORDS / f"{assessment_id}.json"
+    if RECORDS.is_symlink():
+        raise ValueError("invalid PR assessment directory")
+
+    with locked(RECORDS):
+        if record_path.exists() or record_path.is_symlink():
+            prior = read(assessment_id)
+            if all(prior.get(field) == content[field] for field in content):
+                return prior
+
+            raise ValueError("PR assessment ID has conflicting contents")
+
+        record = dict(schema_version=1, artifact="pr-assessment", assessment_id=assessment_id, assessed_at=now_iso(), **content)
+        record["checksum"] = digest(canonical(record))
+        RECORDS.mkdir(parents=True, exist_ok=True)
+        with atomic_writer(record_path) as output:
+            output.write(canonical(record) + "\n")
+
+    return record
+
+
+def read(assessment_id):
+    if not re.fullmatch(r"[0-9a-f]{64}", assessment_id):
+        raise ValueError("invalid PR assessment ID")
+
+    path = RECORDS / f"{assessment_id}.json"
+    if RECORDS.is_symlink() or path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_RECORD_BYTES:
+        raise ValueError("PR assessment is missing or invalid")
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    checksum = record.pop("checksum", None)
+    content = {field: record[field] for field in ("repository", "purpose", "number", "outcome", "reason", "evidence", "code", "gaps", "proposal", "assessed_by")}
+    if (record.get("schema_version") != 1 or record.get("artifact") != "pr-assessment" or record.get("repository") != REPO or
+            record.get("assessment_id") != assessment_id or digest(canonical(content)) != assessment_id or digest(canonical(record)) != checksum):
+        raise ValueError("PR assessment identity or contents changed")
+
+    record["checksum"] = checksum
+    return record
+
+
+def current(record):
+    row = next((row for row in load_ledger() if (row["kind"], row["number"]) == ("pr", record["number"])), None)
+    proposal = record["proposal"]
+    proposal_current = None
+    if proposal is not None:
+        path = proposal_path("pr", record["number"])
+        proposal_current = path.exists() and load_proposal(path, REPO)["checksum"] == proposal["checkpoint"]
+
+    return dict(ledger_revision_current=row is not None and row.get("updated_at") == record["evidence"]["revision"]["updated_at"],
+                proposal_current=proposal_current)
+
+
+def list_records(limit):
+    if not 1 <= limit <= MAX_RECORDS:
+        raise ValueError(f"limit must be between 1 and {MAX_RECORDS}")
+    if not RECORDS.exists():
+        return []
+    if RECORDS.is_symlink() or not RECORDS.is_dir():
+        raise ValueError("invalid PR assessment directory")
+
+    paths = sorted(RECORDS.glob("*.json"))
+    if len(paths) > MAX_RECORDS:
+        raise ValueError("too many PR assessments")
+
+    records = [read(path.stem) for path in paths]
+    records.sort(key=lambda row: (row["assessed_at"], row["assessment_id"]), reverse=True)
+    return [dict(assessment_id=row["assessment_id"], number=row["number"], purpose=row["purpose"],
+                 outcome=row["outcome"], assessed_at=row["assessed_at"]) for row in records[:limit]]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-repo", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
+    saving = commands.add_parser("record")
+    saving.add_argument("--purpose", choices=OUTCOMES, required=True)
+    saving.add_argument("--number", type=int, required=True)
+    saving.add_argument("--snapshot", required=True)
+    saving.add_argument("--host", default="github.com")
+    saving.add_argument("--outcome", required=True)
+    saving.add_argument("--code-read", choices=("full", "partial", "none"), required=True)
+    saving.add_argument("--base-comparison", choices=("verified", "unverified", "unavailable"), required=True)
+    saving.add_argument("--reason", required=True)
+    saving.add_argument("--gap", action="append", default=[])
+    saving.add_argument("--by", required=True)
+    showing = commands.add_parser("show")
+    showing.add_argument("assessment_id")
+    listing = commands.add_parser("list")
+    listing.add_argument("--limit", type=int, default=100)
+    args = parser.parse_args()
+
+    if args.expected_repo != REPO:
+        raise ValueError("selected repository changed")
+
+    if args.command == "record":
+        result = assess(args)
+    elif args.command == "show":
+        record = read(args.assessment_id)
+        result = dict(record=record, current=current(record))
+    else:
+        result = dict(repository=REPO, records=list_records(args.limit))
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        sys.exit(f"error: {error}")

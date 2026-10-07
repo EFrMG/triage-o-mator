@@ -135,7 +135,7 @@ After screening a whole batch, save its dated batch brief and use `bin/batch --m
 | Preview, initialize and reconcile GitHub labels | `bin/label-definitions`                                                                |
 | Record no-fit assessments and apply labels      | `bin/label-assessment`, `bin/item-labels`                                              |
 | Assess, propose and publish actions             | `bin/action-assessment`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus` |
-| Score selected issues and PRs                   | `bin/item-score`                                                                       |
+| Score and review selected issues and PRs        | `bin/item-score`, `bin/pr-assessment`                                                  |
 | See progress and handoffs                       | `bin/stats`, `bin/next`, `bin/report`, `bin/briefs`                                    |
 
 The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md), [comment publishing guide](docs/comment-plus.md) and [item score guide](docs/item-score.md) cover the commands and their limits.

@@ -3,23 +3,21 @@
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _action_proposal_records import load as load_proposal, proposal_path
 from _assessment_evidence import selected_item
-from _evidence import canonical, digest
-from _storage import atomic_writer, locked
-from _triage import DATA_DIR, REPO, load_ledger, now_iso
+from _assessment_records import list_records as stored_records, read as read_record, save as save_record
+from _triage import DATA_DIR, REPO, load_ledger
 
 
 RECORDS = DATA_DIR / "pr-assessments"
 OUTCOMES = {"review": {"ready", "needs-revision", "blocked", "no-finding", "deferred"},
             "closure": {"close", "keep-open", "deferred"}}
-MAX_RECORDS = 5000
 MAX_RECORD_BYTES = 32768
+FIELDS = ("repository", "purpose", "number", "outcome", "reason", "evidence", "code", "gaps", "proposal", "assessed_by")
 
 
 def assess(args):
@@ -71,45 +69,11 @@ def assess(args):
     content = dict(repository=REPO, purpose=args.purpose, number=args.number, outcome=args.outcome, reason=args.reason.strip(),
                    evidence=evidence, code=code, gaps=gaps, proposal=proposal if args.purpose == "closure" else None,
                    assessed_by=args.by.strip())
-    assessment_id = digest(canonical(content))
-    record_path = RECORDS / f"{assessment_id}.json"
-    if RECORDS.is_symlink():
-        raise ValueError("invalid PR assessment directory")
-
-    with locked(RECORDS):
-        if record_path.exists() or record_path.is_symlink():
-            prior = read(assessment_id)
-            if all(prior.get(field) == content[field] for field in content):
-                return prior
-
-            raise ValueError("PR assessment ID has conflicting contents")
-
-        record = dict(schema_version=1, artifact="pr-assessment", assessment_id=assessment_id, assessed_at=now_iso(), **content)
-        record["checksum"] = digest(canonical(record))
-        RECORDS.mkdir(parents=True, exist_ok=True)
-        with atomic_writer(record_path) as output:
-            output.write(canonical(record) + "\n")
-
-    return record
+    return save_record(RECORDS, "pr-assessment", content, FIELDS, MAX_RECORD_BYTES)
 
 
 def read(assessment_id):
-    if not re.fullmatch(r"[0-9a-f]{64}", assessment_id):
-        raise ValueError("invalid PR assessment ID")
-
-    path = RECORDS / f"{assessment_id}.json"
-    if RECORDS.is_symlink() or path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_RECORD_BYTES:
-        raise ValueError("PR assessment is missing or invalid")
-
-    record = json.loads(path.read_text(encoding="utf-8"))
-    checksum = record.pop("checksum", None)
-    content = {field: record[field] for field in ("repository", "purpose", "number", "outcome", "reason", "evidence", "code", "gaps", "proposal", "assessed_by")}
-    if (record.get("schema_version") != 1 or record.get("artifact") != "pr-assessment" or record.get("repository") != REPO or
-            record.get("assessment_id") != assessment_id or digest(canonical(content)) != assessment_id or digest(canonical(record)) != checksum):
-        raise ValueError("PR assessment identity or contents changed")
-
-    record["checksum"] = checksum
-    return record
+    return read_record(RECORDS, "pr-assessment", assessment_id, FIELDS, MAX_RECORD_BYTES)
 
 
 def current(record):
@@ -125,21 +89,8 @@ def current(record):
 
 
 def list_records(limit):
-    if not 1 <= limit <= MAX_RECORDS:
-        raise ValueError(f"limit must be between 1 and {MAX_RECORDS}")
-    if not RECORDS.exists():
-        return []
-    if RECORDS.is_symlink() or not RECORDS.is_dir():
-        raise ValueError("invalid PR assessment directory")
-
-    paths = sorted(RECORDS.glob("*.json"))
-    if len(paths) > MAX_RECORDS:
-        raise ValueError("too many PR assessments")
-
-    records = [read(path.stem) for path in paths]
-    records.sort(key=lambda row: (row["assessed_at"], row["assessment_id"]), reverse=True)
     return [dict(assessment_id=row["assessment_id"], number=row["number"], purpose=row["purpose"],
-                 outcome=row["outcome"], assessed_at=row["assessed_at"]) for row in records[:limit]]
+                 outcome=row["outcome"], assessed_at=row["assessed_at"]) for row in stored_records(RECORDS, "pr-assessment", FIELDS, limit, MAX_RECORD_BYTES)]
 
 
 def main():

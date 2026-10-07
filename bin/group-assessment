@@ -9,17 +9,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _assessment_evidence import selected_item
+from _assessment_records import list_records as stored_records, read as read_record, save as save_record
 from _candidates import create_from_packet
 from _evidence import canonical, digest
 from _groups import load_group
-from _storage import atomic_writer, locked
-from _triage import DATA_DIR, REPO, load_ledger, now_iso, parse_key
+from _triage import DATA_DIR, REPO, load_ledger, parse_key
 
 
 RECORDS = DATA_DIR / "group-assessments"
-MAX_RECORDS = 5000
 MAX_RECORD_BYTES = 65536
 MAX_PACKET_BYTES = 4 * 1024 * 1024
+FIELDS = ("repository", "scope", "outcome", "reason", "gaps", "group", "assessed_by")
 
 
 def topic_scope(args):
@@ -90,45 +90,11 @@ def assess(args):
 
     content = dict(repository=REPO, scope=scope, outcome=args.outcome, reason=args.reason.strip(), gaps=[*args.gap, *automatic_gaps],
                    group=group, assessed_by=args.by.strip())
-    assessment_id = digest(canonical(content))
-    path = RECORDS / f"{assessment_id}.json"
-    if RECORDS.is_symlink():
-        raise ValueError("invalid group assessment directory")
-
-    with locked(RECORDS):
-        if path.exists() or path.is_symlink():
-            prior = read(assessment_id)
-            if all(prior.get(field) == content[field] for field in content):
-                return prior
-
-            raise ValueError("group assessment ID has conflicting contents")
-
-        record = dict(schema_version=1, artifact="group-assessment", assessment_id=assessment_id, assessed_at=now_iso(), **content)
-        record["checksum"] = digest(canonical(record))
-        RECORDS.mkdir(parents=True, exist_ok=True)
-        with atomic_writer(path) as output:
-            output.write(canonical(record) + "\n")
-
-    return record
+    return save_record(RECORDS, "group-assessment", content, FIELDS, MAX_RECORD_BYTES)
 
 
 def read(assessment_id):
-    if not re.fullmatch(r"[0-9a-f]{64}", assessment_id):
-        raise ValueError("invalid group assessment ID")
-
-    path = RECORDS / f"{assessment_id}.json"
-    if RECORDS.is_symlink() or path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_RECORD_BYTES:
-        raise ValueError("group assessment is missing or invalid")
-
-    record = json.loads(path.read_text(encoding="utf-8"))
-    checksum = record.pop("checksum", None)
-    content = {field: record[field] for field in ("repository", "scope", "outcome", "reason", "gaps", "group", "assessed_by")}
-    if (record.get("schema_version") != 1 or record.get("artifact") != "group-assessment" or record.get("repository") != REPO or
-            record.get("assessment_id") != assessment_id or digest(canonical(content)) != assessment_id or digest(canonical(record)) != checksum):
-        raise ValueError("group assessment identity or contents changed")
-
-    record["checksum"] = checksum
-    return record
+    return read_record(RECORDS, "group-assessment", assessment_id, FIELDS, MAX_RECORD_BYTES)
 
 
 def current(record):
@@ -155,21 +121,9 @@ def current(record):
 
 
 def list_records(limit):
-    if not 1 <= limit <= MAX_RECORDS:
-        raise ValueError(f"limit must be between 1 and {MAX_RECORDS}")
-    if not RECORDS.exists():
-        return []
-    if RECORDS.is_symlink() or not RECORDS.is_dir():
-        raise ValueError("invalid group assessment directory")
-
-    paths = sorted(RECORDS.glob("*.json"))
-    if len(paths) > MAX_RECORDS:
-        raise ValueError("too many group assessments")
-
-    records = [read(path.stem) for path in paths]
-    records.sort(key=lambda row: (row["assessed_at"], row["assessment_id"]), reverse=True)
     return [dict(assessment_id=row["assessment_id"], scope_type=row["scope"]["type"], topic=row["scope"]["topic"],
-                 outcome=row["outcome"], group_id=(row["group"] or {}).get("id"), assessed_at=row["assessed_at"]) for row in records[:limit]]
+                 outcome=row["outcome"], group_id=(row["group"] or {}).get("id"), assessed_at=row["assessed_at"])
+            for row in stored_records(RECORDS, "group-assessment", FIELDS, limit, MAX_RECORD_BYTES)]
 
 
 def main():

@@ -16,6 +16,8 @@ bin/cache corpus-list CORPUS_ID --limit 20
 
 Choose the corpus matching the repository and requested scope. Its handoff includes an inventory snapshot that covers every selected item, including those still pending detail acquisition. Start broad title/body exploration there. Follow each command's continuation with its returned checkpoint; if progress changes, restart from offset zero. Corpus pages contain member identities, snapshot references, component status and gaps. An inventory summary is preliminary context, not completed item detail. Do not dump `corpus-status` or the whole cache into context to find items.
 
+For acquisition counts and remaining gaps, use `bin/cache corpus-progress CORPUS_ID`; keep `corpus-list` paginated for member inspection.
+
 If no dataset covers the request and the person requested acquisition, use the TUI or the explicit CLI path in [frozen corpus acquisition](../docs/evidence-reference.md#frozen-corpus-acquisition). Choose bounded inventory and detail request budgets within the script limits, honoring any lower user allowance. Stop at a budget, cooldown or error and report remaining gaps. Do not loop retries or widen scope by default. A new selection can use `corpus-create --reuse-corpus PRIOR_CORPUS` to carry reusable member references; acquisition still checks identity, revision, counts and age.
 
 ## Ranked retrieval when the optional bridge is installed

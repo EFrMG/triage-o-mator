@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""Save a bounded action-pass assessment of selected items without publishing GitHub writes."""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _action_proposal_records import load as load_proposal, proposal_path
+from _evidence import canonical, digest
+from _storage import atomic_writer, locked
+from _triage import DATA_DIR, REPO, action_operation, load_ledger, load_taxonomy, now_iso, parse_key
+
+
+RECORDS = DATA_DIR / "action-assessments"
+MAX_ITEMS = 20
+MAX_FILE_BYTES = 65536
+MAX_RECORDS = 5000
+OUTCOMES = {"proposed", "skipped", "deferred"}
+
+
+def decision_source(row):
+    return dict(updated_at=row.get("updated_at"), state=row.get("state"), action=row.get("action"),
+                decision_sha256=digest(canonical({name: row.get(name) for name in ("action", "reason", "proposed_labels", "agent_notes", "maintainer_notes")})))
+
+
+def assessment_items(source, ledger, taxonomy):
+    if not isinstance(source, dict) or set(source) != {"items"}:
+        raise ValueError("assessment input must contain only an items array")
+
+    entries = source.get("items") if isinstance(source, dict) else None
+    if not isinstance(entries, list) or not 1 <= len(entries) <= MAX_ITEMS:
+        raise ValueError("assessment must contain one to twenty selected items")
+
+    rows = {(row["kind"], row["number"]): row for row in ledger}
+    seen = set()
+    result = []
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"key", "outcome", "reason", "evidence_gaps"}:
+            raise ValueError("each item needs key, outcome, reason and evidence_gaps")
+
+        key = parse_key(entry["key"])
+        if key is None or key in seen or key not in rows:
+            raise ValueError("item key is invalid, repeated or absent from the ledger")
+
+        seen.add(key)
+        row = rows[key]
+        outcome, reason, gaps = entry["outcome"], entry["reason"], entry["evidence_gaps"]
+        if outcome not in OUTCOMES or not isinstance(reason, str) or not reason.strip() or len(reason) > 2000:
+            raise ValueError("each item needs a bounded, explained assessment outcome")
+        if not isinstance(gaps, list) or len(gaps) > 20 or any(not isinstance(gap, str) or not gap.strip() or len(gap) > 500 for gap in gaps):
+            raise ValueError("evidence gaps must be a bounded list of short explanations")
+        if action_operation(taxonomy, row.get("action")) not in ("comment", "close", "reopen"):
+            raise ValueError(f"{entry['key']} has no saved writing action")
+
+        proposal = None
+        path = proposal_path(*key)
+        if path.exists() or path.is_symlink():
+            saved = load_proposal(path, REPO)
+            proposal = dict(checkpoint=saved["checksum"], status=saved["status"], action=saved.get("action"), operation=saved["operation"])
+        if outcome == "proposed" and (proposal is None or proposal["status"] != "pending" or proposal["action"] != row["action"]):
+            raise ValueError(f"{entry['key']} needs a current pending exact proposal")
+
+        result.append(dict(key=entry["key"], outcome=outcome, reason=reason.strip(), evidence_gaps=gaps,
+                           source=decision_source(row), proposal=proposal))
+
+    return result
+
+
+def save(source_path, by):
+    if not by.strip() or len(by) > 200:
+        raise ValueError("an attributed assessor is required")
+    if source_path.is_symlink() or not source_path.is_file() or source_path.stat().st_size > MAX_FILE_BYTES:
+        raise ValueError("assessment input is missing, a symlink or too large")
+
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    if RECORDS.is_symlink():
+        raise ValueError("invalid action assessment directory")
+
+    with locked(RECORDS):
+        items = assessment_items(source, load_ledger(), load_taxonomy())
+        identity = dict(repository=REPO, assessed_by=by.strip(), items=items)
+        assessment_id = digest(canonical(identity))
+        path = RECORDS / f"{assessment_id}.json"
+        if path.exists() or path.is_symlink():
+            saved = read(assessment_id)
+            if all(saved.get(field) == identity[field] for field in identity):
+                return saved
+
+            raise ValueError("saved action assessment has conflicting contents")
+
+        record = dict(schema_version=1, artifact="action-assessment", assessment_id=assessment_id,
+                      assessed_at=now_iso(), **identity)
+        record["checksum"] = digest(canonical(record))
+        RECORDS.mkdir(parents=True, exist_ok=True)
+        with atomic_writer(path) as output:
+            output.write(canonical(record) + "\n")
+
+    return record
+
+
+def read(assessment_id):
+    if not re.fullmatch(r"[0-9a-f]{64}", assessment_id):
+        raise ValueError("invalid action assessment ID")
+
+    path = RECORDS / f"{assessment_id}.json"
+    if RECORDS.is_symlink() or path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
+        raise ValueError("action assessment is missing")
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    checksum = record.pop("checksum", None)
+    identity = {field: record[field] for field in ("repository", "assessed_by", "items")}
+    if (record.get("schema_version") != 1 or record.get("artifact") != "action-assessment" or
+            record.get("repository") != REPO or record.get("assessment_id") != assessment_id or
+            digest(canonical(identity)) != assessment_id or digest(canonical(record)) != checksum):
+        raise ValueError("action assessment identity or contents changed")
+
+    record["checksum"] = checksum
+    return record
+
+
+def current_status(record):
+    ledger = {(row["kind"], row["number"]): row for row in load_ledger()}
+    result = []
+    for entry in record["items"]:
+        key = parse_key(entry["key"])
+        row = ledger.get(key)
+        decision_current = row is not None and decision_source(row) == entry["source"]
+        proposal = entry["proposal"]
+        if proposal is None:
+            proposal_current = None
+        else:
+            path = proposal_path(*key)
+            proposal_current = (path.exists() and load_proposal(path, REPO)["checksum"] == proposal["checkpoint"])
+
+        result.append(dict(key=entry["key"], decision_current=decision_current, proposal_current=proposal_current))
+
+    return result
+
+
+def list_records(limit):
+    if not 1 <= limit <= MAX_RECORDS:
+        raise ValueError(f"limit must be between 1 and {MAX_RECORDS}")
+    if not RECORDS.exists():
+        return []
+    if RECORDS.is_symlink() or not RECORDS.is_dir():
+        raise ValueError("invalid action assessment directory")
+
+    paths = sorted(RECORDS.glob("*.json"))
+    if len(paths) > MAX_RECORDS:
+        raise ValueError("too many action assessment records")
+
+    records = [read(path.stem) for path in paths]
+    records.sort(key=lambda row: (row["assessed_at"], row["assessment_id"]), reverse=True)
+    return [dict(assessment_id=row["assessment_id"], assessed_at=row["assessed_at"], assessed_by=row["assessed_by"],
+                 items=[dict(key=item["key"], outcome=item["outcome"]) for item in row["items"]]) for row in records[:limit]]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-repo", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
+    recording = commands.add_parser("record")
+    recording.add_argument("--file", type=Path, required=True, help="JSON with an items array of selected keys and outcomes")
+    recording.add_argument("--by", required=True)
+    showing = commands.add_parser("show")
+    showing.add_argument("assessment_id")
+    listing = commands.add_parser("list")
+    listing.add_argument("--limit", type=int, default=100)
+    args = parser.parse_args()
+
+    if args.expected_repo != REPO:
+        raise ValueError("selected repository changed")
+
+    if args.command == "record":
+        result = save(args.file, args.by)
+    elif args.command == "show":
+        record = read(args.assessment_id)
+        result = dict(record=record, current=current_status(record))
+    else:
+        result = dict(repository=REPO, records=list_records(args.limit))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        sys.exit(f"error: {error}")

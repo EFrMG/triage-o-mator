@@ -339,6 +339,42 @@ class ClosureWriteTests(Workspace):
         path = self.mock / "write-calls.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    def test_action_assessment_tracks_selected_proposed_and_deferred_items(self):
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+        for row in rows:
+            row.update(action="close", reason="Needs a closure assessment")
+
+        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        proposal = self.propose_action_close(1, "--action", "close")
+        source = self.root / "action-assessment.json"
+        source.write_text(json.dumps(dict(items=[
+            dict(key="pr:1", outcome="proposed", reason="Exact closure explanation is staged", evidence_gaps=["No selected snapshot"]),
+            dict(key="pr:2", outcome="deferred", reason="Comparison with #1 remains unresolved", evidence_gaps=["PR diff not reviewed"]),
+        ])))
+        args = ("--expected-repo", "owner/repo", "record", "--file", str(source), "--by", "agent:helper")
+        saved = self.json_cli("action-assessment", *args)
+        self.assertEqual([row["key"] for row in saved["items"]], ["pr:1", "pr:2"])
+        self.assertEqual(saved["items"][0]["proposal"]["checkpoint"], proposal["checkpoint"])
+        self.assertEqual(saved["items"][1]["outcome"], "deferred")
+        self.assertEqual(self.json_cli("action-assessment", *args), saved)
+        shown = self.json_cli("action-assessment", "--expected-repo", "owner/repo", "show", saved["assessment_id"])
+        self.assertEqual(shown["record"], saved)
+        self.assertTrue(all(row["decision_current"] for row in shown["current"]))
+        self.assertEqual([row["proposal_current"] for row in shown["current"]], [True, None])
+        self.assertEqual(self.json_cli("action-assessment", "--expected-repo", "owner/repo", "list")["records"][0]["assessment_id"], saved["assessment_id"])
+        self.assertEqual(self.write_calls(), [])
+
+        rows[1]["reason"] = "Changed assessment context"
+        ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        revised = self.json_cli("action-assessment", *args)
+        self.assertNotEqual(revised["assessment_id"], saved["assessment_id"])
+        prior = self.json_cli("action-assessment", "--expected-repo", "owner/repo", "show", saved["assessment_id"])
+        self.assertEqual(prior["record"], saved)
+        self.assertFalse(prior["current"][1]["decision_current"])
+        source.write_text(json.dumps(dict(items=[dict(key="pr:2", outcome="proposed", reason="Ready", evidence_gaps=[])])))
+        self.assertIn("needs a current pending exact proposal", self.run_cli("action-assessment", *args, ok=False).stderr)
+
     def test_unbound_pr_closure_requires_exact_human_approval(self):
         proposal = self.propose(1)
         listed = self.closure("list")["rows"][0]

@@ -9,13 +9,13 @@ This is how a less technical README I dislike reading would read, which given th
 
 ![Selecting and reading backlog items](captures/flow-1.webp)
 
-![Saving and reviewing triage decisions](captures/flow-2.webp)
+![Saving and reviewing triage decisions](captures/flow-12.webp)
 
-![Downloading a local evidence dataset](captures/flow-4.webp)
+![Downloading a local evidence dataset](captures/flow-14.webp)
 
-![Reviewing notifications and follow-up activity](captures/flow-5.webp)
+![Reviewing notifications and follow-up activity](captures/flow-9.webp)
 
-![Approving a GitHub comment or state change](captures/flow-6.webp)
+![Approving a GitHub comment or state change](captures/flow-15.webp)
 
 ![agent-writing-maintainer-brief](captures/agent-writing-maintainer-brief.png)
 

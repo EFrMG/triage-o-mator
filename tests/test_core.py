@@ -547,6 +547,18 @@ class LedgerTests(Workspace):
         self.assertIn("```go\nreturn true\n```", brief["content"])
         named = self.json_cli("briefs", "plan", "--brief", "2026-10-06-pr-42-brief.md", "--brief", "2026-10-05-group-related-brief.md", "--brief", "2026-10-06-batch-b20261006-000001-brief.md")
         self.assertEqual((named["source_count"], named["target_decisions"]), (3, 6))
+        sources = [row["id"] for row in named["briefs"]]
+        record_args = ("--expected-repo", "owner/repo", "record-master", "--master", "2026-10-06-master-brief.md",
+                       "--plan-sha256", named["plan_sha256"], "--by", "agent:tester")
+        self.assertIn("source briefs changed", self.run_cli("briefs", *record_args, *(part for source in sources for part in ("--brief", source)),
+                                                             "--plan-sha256", "0" * 64, ok=False).stderr)
+        recorded = self.json_cli("briefs", *record_args, *(part for source in sources for part in ("--brief", source)))
+        self.assertEqual(recorded["sources"], named["briefs"])
+        self.assertEqual(recorded["master_sha256"], hashlib.sha256((reports / "2026-10-06-master-brief.md").read_bytes()).hexdigest())
+        self.assertEqual(self.json_cli("briefs", *record_args, *(part for source in sources for part in ("--brief", source))), recorded)
+        (reports / sources[0]).write_text("# Edited source\n")
+        self.assertIn("source briefs changed", self.run_cli("briefs", *record_args, *(part for source in sources for part in ("--brief", source)), ok=False).stderr)
+        self.assertEqual(json.loads((self.root / "data/owner/repo/master-briefs/2026-10-06-master-brief.json").read_text()), recorded)
         self.assertEqual(self.json_cli("briefs", "plan", "--brief", "reports/owner/repo/2026-10-06-pr-42-brief.md")["source_count"], 1)
         self.run_cli("briefs", "plan", "--brief", "reports/other/repo/2026-10-06-pr-42-brief.md", ok=False)
         for index in range(2, 5):

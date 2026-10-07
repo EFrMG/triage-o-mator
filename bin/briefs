@@ -13,8 +13,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _briefed import BATCH_BRIEF_RE, BRIEF_DATE, ITEM_BRIEF_RE, READ_SUFFIX, active_name, read_name, visible_batch_briefs
 from _evidence import value_digest
-from _storage import locked
-from _triage import DATA_DIR, REPO, REPORTS_DIR, WORK_ROOT
+from _storage import atomic_writer, locked
+from _triage import DATA_DIR, REPO, REPORTS_DIR, WORK_ROOT, now_iso
 
 
 MASTER = re.compile(rf"^({BRIEF_DATE})-(?:master(?:-[A-Za-z0-9_-]+)?-brief|brief)\.md$")
@@ -22,6 +22,7 @@ GROUP = re.compile(rf"^({BRIEF_DATE})-(?:ready-groups|group-[A-Za-z0-9_-]+)-brie
 MAX_BRIEFS = 5000
 MAX_BRIEF_BYTES = 1024 * 1024
 DEFAULT_PLAN_LIMIT = 10
+MASTER_RECORDS = DATA_DIR / "master-briefs"
 
 
 def category(name):
@@ -126,6 +127,13 @@ def planned_path(value):
     return path, kind, name != base
 
 
+def content_sha256(path):
+    if path.stat().st_size > MAX_BRIEF_BYTES:
+        raise ValueError(f"brief exceeds the 1 MiB source limit: {path.name}")
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def plan_briefs(names, all_briefs, include_read, limit):
     if names and (all_briefs or include_read or limit is not None):
         raise ValueError("--brief cannot be combined with --all, --include-read, or --limit")
@@ -152,11 +160,53 @@ def plan_briefs(names, all_briefs, include_read, limit):
     if len(selected) > MAX_BRIEFS or len({active_name(path.name) for path, _, _ in selected}) != len(selected):
         raise ValueError("brief selection is too large or contains duplicates")
 
-    rows = [dict(id=path.name, path=(Path("reports") / REPO / path.name).as_posix(), type=kind[1], date=kind[2], read=is_read)
+    rows = [dict(id=path.name, path=(Path("reports") / REPO / path.name).as_posix(), type=kind[1], date=kind[2], read=is_read,
+                 content_sha256=content_sha256(path))
             for path, kind, is_read in selected]
     count = len(rows)
     target = math.ceil(2 + 2 * math.log2(count)) if count else 0
-    return dict(selection="explicit" if names else "all" if all_briefs else "recent", source_count=count, target_decisions=target, briefs=rows)
+    result = dict(selection="explicit" if names else "all" if all_briefs else "recent", source_count=count, target_decisions=target, briefs=rows)
+    result["plan_sha256"] = value_digest(dict(repository=REPO, briefs=rows))
+    return result
+
+
+def master_record_path(name):
+    if Path(name).name != name or not MASTER.fullmatch(name):
+        raise ValueError("master must use a dated master brief filename")
+
+    return MASTER_RECORDS / (name.removesuffix(".md") + ".json")
+
+
+def record_master(name, sources, plan_sha256, by):
+    if not sources or not by.strip() or not re.fullmatch(r"[0-9a-f]{64}", plan_sha256 or ""):
+        raise ValueError("source briefs, assessor and exact plan checksum are required")
+
+    path = reports_dir() / name
+    record_path = master_record_path(name)
+    if path.is_symlink() or not path.is_file() or not path.read_text(encoding="utf-8").strip():
+        raise ValueError("master brief is missing, empty or a symlink")
+
+    with locked(MASTER_RECORDS):
+        plan = plan_briefs(sources, False, False, None)
+        if plan["plan_sha256"] != plan_sha256:
+            raise ValueError("source briefs changed since planning; plan again")
+
+        record = dict(schema_version=1, repository=REPO, master=(Path("reports") / REPO / name).as_posix(),
+                      master_sha256=content_sha256(path), sources=plan["briefs"], plan_sha256=plan_sha256,
+                      recorded_at=now_iso(), recorded_by=by.strip())
+        if record_path.exists():
+            previous = json.loads(record_path.read_text(encoding="utf-8"))
+            if all(previous.get(field) == record[field] for field in ("repository", "master", "master_sha256", "sources", "plan_sha256")):
+                return previous
+
+            raise ValueError("master brief already has a different record; use a new master filename")
+
+        record_path.parent.mkdir(parents=True, exist_ok=True)
+        with atomic_writer(record_path) as out:
+            json.dump(record, out, ensure_ascii=False, indent=2)
+            out.write("\n")
+
+    return record
 
 
 def mark_read_preview(names):
@@ -220,12 +270,19 @@ def main():
     mark.add_argument("ids", nargs="+", help="supported brief filenames shown in the menu")
     mark.add_argument("--apply", action="store_true")
     mark.add_argument("--preview-sha256")
+    master = commands.add_parser("record-master", help="bind a saved master brief to exact source contents")
+    master.add_argument("--master", required=True, help="dated master brief filename")
+    master.add_argument("--brief", action="append", required=True, help="planned source brief; repeat for every input")
+    master.add_argument("--plan-sha256", required=True)
+    master.add_argument("--by", required=True)
     args = parser.parse_args()
     if args.expected_repo is not None and args.expected_repo != REPO:
         parser.error("configured repository does not match --expected-repo")
 
     if args.command == "mark-read" and args.apply and args.expected_repo is None:
         parser.error("mark-read --apply requires --expected-repo")
+    if args.command == "record-master" and args.expected_repo is None:
+        parser.error("record-master requires --expected-repo")
 
     if args.command == "list":
         result = dict(schema_version=1, repository=REPO, records=list_briefs())
@@ -233,6 +290,8 @@ def main():
         result = dict(schema_version=1, repository=REPO, **read_brief(args.id))
     elif args.command == "plan":
         result = dict(schema_version=1, repository=REPO, **plan_briefs(args.brief, args.all, args.include_read, args.limit))
+    elif args.command == "record-master":
+        result = record_master(args.master, args.brief, args.plan_sha256, args.by)
     else:
         result = dict(schema_version=1, repository=REPO, **mark_read(args.ids, args.apply, args.preview_sha256))
 

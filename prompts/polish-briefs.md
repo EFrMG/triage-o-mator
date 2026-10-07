@@ -8,6 +8,8 @@
 
 Run `bin/briefs plan` from the install to select the source briefs and calculate the size target. For exact named inputs, pass each filename or reports path with `--brief`. For a complete overview of all visible batch briefs, use `--all`; add `--include-read` if the request also covers briefs previously marked `_READ.md`. An ordinary request without named inputs uses the newest ten visible batch briefs; `--limit N` chooses a different bounded count. The command returns exact repository-scoped paths, source count and `target_decisions`. State the selected paths before reading. Do not silently omit a brief from a requested complete set or assume that a filename proves its claims are current.
 
+Keep the returned `plan_sha256` and every selected brief ID. The plan records each source's content digest, so a source edit requires a new plan and another look at that source.
+
 Read each brief in full. For a large set, work through groups of at most ten briefs, carrying forward source paths, candidate decisions, recurring themes and contradictions until every input has been considered. Treat linked issue and PR sources as evidence leads, and recommendations as proposals. Identify repeated items and themes, contradictory recommendations, completed actions, and decisions whose current state could have changed. Follow the decisive links for the cases likely to survive into the master brief; check current state through a scoped read when the next step depends on it. If working offline, use the saved evidence and say when a material claim cannot be checked. Do not turn an old brief's confidence into a Pending review flag or GitHub write approval. If any input could not be read, name the gap and do not describe the result as complete.
 
 ## 2. Write the master brief
@@ -20,4 +22,4 @@ Use the same human-facing shape as [maintainer-brief.md](maintainer-brief.md): a
 
 ## 3. Hand over
 
-Save the master brief without committing it. Reply with its path, the input briefs used, and the decisions that survived the synthesis. The contributor who asked reviews and commits the reports. Do not edit the input briefs, ledger, or GitHub from this playbook.
+After saving the master brief, record its exact inputs with `bin/briefs --expected-repo OWNER/REPO record-master --master DATE-master-brief.md --brief SOURCE.md ... --plan-sha256 HASH --by agent:NAME`. Repeat `--brief` in the plan's order. This writes a tracked record with the master and input content digests; a changed source requires replanning, and a different master or input set needs a new master filename. Reply with the master path, input briefs and decisions that survived. The contributor who asked reviews and commits the report and record. Do not edit the input briefs, ledger, or GitHub from this playbook.

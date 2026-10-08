@@ -284,7 +284,14 @@ func (m model) yankList(all bool) (string, string) {
 	b.WriteString(m.yankHeader(fmt.Sprintf("%s (%d items)", title, len(items))))
 	b.WriteString("\n")
 	for _, li := range items {
-		b.WriteString(itemLine(li.Item, li.proposal))
+		proposal := strings.Join(li.proposalLabels, ", ")
+		if li.proposalAction != "" {
+			if proposal != "" {
+				proposal += "/"
+			}
+			proposal += li.proposalAction
+		}
+		b.WriteString(itemLine(li.Item, proposal))
 		b.WriteByte('\n')
 	}
 

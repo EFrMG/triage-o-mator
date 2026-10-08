@@ -758,7 +758,8 @@ func (m model) batchItems(b batchRecord) ([]list.Item, int) {
 
 		li := listItem{Item: it}
 		if p, ok := b.Proposals[key]; ok && it.Untriaged() {
-			li.proposal = strings.Join(p.ProposedLabels, ", ") + "/" + p.Action
+			li.proposalLabels = p.ProposedLabels
+			li.proposalAction = p.Action
 		}
 
 		out = append(out, li)

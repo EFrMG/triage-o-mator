@@ -335,6 +335,64 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 	}
 }
 
+func TestItemCardMetadataLayout(t *testing.T) {
+	for _, tc := range []struct {
+		kind, typeLabel, color string
+	}{
+		{"issue", "Issue", currentTheme.Warning},
+		{"pr", "PR", currentTheme.Info},
+	} {
+		item := Item{Kind: tc.kind, Number: 7, Title: "Example", UpdatedAt: "2026-10-07", Labels: []string{"bug", "needs info"}, CommentsCount: 2}
+		li := listItem{Item: item}
+		styledType := lipgloss.NewStyle().Foreground(lipgloss.Color(tc.color)).Bold(true).Render(tc.typeLabel)
+		for _, selected := range []bool{false, true} {
+			card := markedCardWithRightAndMeta(li.Title(), li.Description(), cardMark{}, itemScoreMark(item), cardMeta{li.Tags(), li.CommentsLabel()}, selected, 52)
+			row := strings.Split(card, "\n")[2]
+			plain := ansi.Strip(row)
+			if !strings.Contains(row, styledType) || !strings.Contains(plain, "bug · needs info  2 comments") ||
+				!strings.HasPrefix(strings.TrimSpace(plain), tc.typeLabel) ||
+				!strings.HasSuffix(plain, "2 comments  ") || ansi.StringWidth(row) != 52 ||
+				strings.Contains(plain, "triaged") || strings.Contains(plain, "updated") {
+				t.Fatalf("%s selected=%v: unexpected card metadata: %q", tc.kind, selected, row)
+			}
+		}
+	}
+	decided := listItem{Item: Item{Kind: "pr", Number: 9, ProposedLabels: []string{"ready"}, Action: "none", TriagedBy: "agent"}}
+	if plain := ansi.Strip(decided.Description()); plain != "PR · agent · none" || decided.Tags() != "ready" {
+		t.Fatalf("decision marker displaced the item type: %q", plain)
+	}
+	if want := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("agent"); !strings.Contains(decided.Description(), want) {
+		t.Fatal("agent attribution lost its normal-weight color")
+	}
+	decided.Action = ""
+	if plain := ansi.Strip(decided.Description()); plain != "PR · agent" || strings.Contains(plain, "/") {
+		t.Fatalf("label-only decision rendered an empty action: %q", plain)
+	}
+
+	item := Item{Kind: "issue", Number: 8, Title: "Narrow", Labels: []string{"very long label", "another label"}, CommentsCount: 1,
+		ReviewRequest: &ReviewRequest{By: "human"}}
+	li := listItem{Item: item}
+	card := markedCardWithRightAndMeta(li.Title(), li.Description(), cardMark{}, cardMark{}, cardMeta{li.Tags(), li.CommentsLabel()}, false, 28)
+	row := strings.Split(card, "\n")[2]
+	if !strings.Contains(ansi.Strip(row), "Issue") || !strings.HasSuffix(ansi.Strip(row), "1 comment  ") || ansi.StringWidth(row) != 28 {
+		t.Fatalf("narrow card lost its type or right-aligned comment count: %q", row)
+	}
+
+	m := baselineModel(t, baselineRoot(t))
+	m.items = []Item{{Kind: "pr", Number: 9, State: "open", Title: "Ready", ProposedLabels: []string{"ready"}, Confidence: "high", TriagedBy: "agent", CommentsCount: 2,
+		ReviewRequest: &ReviewRequest{By: "maintainer"}}, {Kind: "issue", Number: 10, State: "open", Title: "Reviewed", Action: "close", TriagedBy: "maintainer", Labels: []string{"bug"}, CommentsCount: 1}}
+	for _, tab := range []int{pendingReviewTab, mergeReadyTab, allItemsTab} {
+		m.activateTab(tab)
+		view := ansi.Strip(m.list.View())
+		if !strings.Contains(view, "PR · agent") || !strings.Contains(view, "ready · pending review") || strings.Contains(view, "ready/") {
+			t.Fatalf("tab %s did not render the shared card layout: %q", tabs[tab].Name, view)
+		}
+		if tab == allItemsTab && (!strings.Contains(view, "Issue · human · close") || !strings.Contains(view, "bug  1 comment")) {
+			t.Fatalf("All Items lost human attribution or the action: %q", view)
+		}
+	}
+}
+
 func TestBaselineResizePromptCentered(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
 	check := func(width, height int) {

@@ -680,7 +680,7 @@ func (m model) groupMembersView(g Group, w, h int) string {
 	vp := m.groupContextViewport(g, w, h)
 
 	cards := make([][2]string, len(g.Members))
-	marks := make([]cardMark, len(g.Members))
+	meta := make([]cardMeta, len(g.Members))
 	for i, member := range g.Members {
 		it, ok := m.findItem(member.Key())
 		if !ok {
@@ -692,13 +692,13 @@ func (m model) groupMembersView(g Group, w, h int) string {
 		_, unsaved := m.drafts[member.Key()]
 		li := listItem{Item: it, ticked: m.groups.ticked[member.Key()], unsaved: unsaved}
 		cards[i] = [2]string{li.Title(), li.Description()}
-		marks[i] = li.Mark()
+		meta[i] = cardMeta{li.Tags(), li.CommentsLabel()}
 	}
 
 	top := inset(titleBar(g.Title, subtitle, w) + "\n\n" + vp.View())
 	list := inset(mutedText("No members yet."))
 	if len(g.Members) > 0 {
-		list = markedCardList(cards, marks, m.groups.member, m.cardWidth(), h-lipgloss.Height(top)-1)
+		list = markedCardListWithMeta(cards, nil, meta, m.groups.member, m.cardWidth(), h-lipgloss.Height(top)-1)
 	}
 
 	return top + "\n\n" + list

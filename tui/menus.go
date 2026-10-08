@@ -76,6 +76,15 @@ func markedCard(first, second string, mark cardMark, selected bool, width int) s
 
 // markedCardWithRight reserves space on the title row for a short badge while preserving the standard card layout and selected background.
 func markedCardWithRight(first, second string, mark, right cardMark, selected bool, width int) string {
+	return markedCardWithRightAndMeta(first, second, mark, right, cardMeta{}, selected, width)
+}
+
+type cardMeta struct {
+	tags, count string
+}
+
+// markedCardWithRightAndMeta places tags and a count at the right edge of the second row.
+func markedCardWithRightAndMeta(first, second string, mark, right cardMark, meta cardMeta, selected bool, width int) string {
 	width = maxInt(width, 6)
 	inner := width - 4
 	firstStyle := lipgloss.NewStyle().Width(width).Padding(0, 2).Bold(true)
@@ -94,11 +103,11 @@ func markedCardWithRight(first, second string, mark, right cardMark, selected bo
 		second = continueStyleAfterReset(second, lipgloss.Color(currentTheme.Foreground), bg)
 	}
 
-	secondLine := secondStyle.Width(width).Render(ansi.Truncate(second, inner, "…"))
+	secondLine := secondStyle.Width(width).Render(cardSecondContent(second, meta, inner))
 	if mark.text != "" && lipgloss.Width(mark.text)+1 < inner {
 		lead := markStyle.Render(mark.text)
 		rest := width - lipgloss.Width(lead)
-		secondLine = lead + secondStyle.Width(rest).PaddingLeft(1).Render(ansi.Truncate(second, rest-3, "…"))
+		secondLine = lead + secondStyle.Width(rest).PaddingLeft(1).Render(cardSecondContent(second, meta, rest-3))
 	}
 
 	firstWidth := inner
@@ -136,6 +145,26 @@ func markedCardWithRight(first, second string, mark, right cardMark, selected bo
 	return top + "\n" + firstStyle.Render(first) + "\n" + secondLine + "\n" + bottom
 }
 
+func cardSecondContent(left string, meta cardMeta, width int) string {
+	if meta.count == "" || ansi.StringWidth(meta.count)+2 >= width {
+		return ansi.Truncate(left, width, "…")
+	}
+
+	countWidth := ansi.StringWidth(meta.count)
+	left = ansi.Truncate(left, width-countWidth-2, "…")
+	space := width - ansi.StringWidth(left) - countWidth
+	if meta.tags == "" || space < 4 {
+		return left + strings.Repeat(" ", space) + meta.count
+	}
+
+	tags := ansi.Truncate(meta.tags, space-4, "…")
+	if tags == "" {
+		return left + strings.Repeat(" ", space) + meta.count
+	}
+
+	return left + strings.Repeat(" ", space-ansi.StringWidth(tags)-2) + tags + "  " + meta.count
+}
+
 // continueStyleAfterReset keeps nested styled spans, such as a progress bar, from dropping the selected card's foreground and background for the text that follows them.
 func continueStyleAfterReset(text string, foreground, background color.Color) string {
 	marker := "\x00"
@@ -160,6 +189,10 @@ func cardList(cards [][2]string, selected, width, height int) string {
 
 // markedCardList is cardList with a mark leading each card's second line (marks[i], when there is one).
 func markedCardList(cards [][2]string, marks []cardMark, selected, width, height int) string {
+	return markedCardListWithMeta(cards, marks, nil, selected, width, height)
+}
+
+func markedCardListWithMeta(cards [][2]string, marks []cardMark, meta []cardMeta, selected, width, height int) string {
 	visible := maxInt(height/cardHeight, 1)
 	start := maxInt(minInt(selected-visible+1, len(cards)-visible), 0)
 	if selected >= 0 && selected < start {
@@ -172,8 +205,12 @@ func markedCardList(cards [][2]string, marks []cardMark, selected, width, height
 		if i < len(marks) {
 			mark = marks[i]
 		}
+		secondRight := cardMeta{}
+		if i < len(meta) {
+			secondRight = meta[i]
+		}
 
-		out = append(out, markedCard(cards[i][0], cards[i][1], mark, i == selected, width))
+		out = append(out, markedCardWithRightAndMeta(cards[i][0], cards[i][1], mark, cardMark{}, secondRight, i == selected, width))
 	}
 
 	return strings.Join(out, "\n")

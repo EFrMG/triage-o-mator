@@ -3,17 +3,21 @@ package main
 import (
 	"fmt"
 	"io"
+	"slices"
+	"strings"
 
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/paginator"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // listItem adapts Item to bubbles/list's item interface.
-// proposal is set when the item is listed through a batch whose decisions file proposes labels or an action for it.
+// proposalLabels and proposalAction are set when a batch proposes a decision for the item.
 type listItem struct {
 	Item
-	proposal string
+	proposalLabels []string
+	proposalAction string
 	// ticked marks an item ticked with Space for a bulk action; unsaved, one with an unsaved draft of its decision (model.drafts).
 	ticked, unsaved bool
 }
@@ -28,28 +32,56 @@ func (li listItem) Title() string {
 }
 
 func (li listItem) Description() string {
-	comments := "comments"
-	if li.CommentsCount == 1 {
-		comments = "comment"
+	kind, color := "Issue", currentTheme.Warning
+	if li.Kind == "pr" {
+		kind, color = "PR", currentTheme.Info
+	}
+	parts := []string{lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true).Render(kind)}
+	if mark := li.Mark(); mark.text != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color(mark.color)).Render(mark.text))
+	}
+	if !li.unsaved && !li.Untriaged() && li.Action != "" {
+		parts = append(parts, singleLine(li.Action))
+	} else if !li.unsaved && (len(li.proposalLabels) > 0 || li.proposalAction != "") {
+		parts = append(parts, "proposed")
+		if li.proposalAction != "" {
+			parts = append(parts, singleLine(li.proposalAction))
+		}
 	}
 
-	// An unsaved draft says so in its mark, in place of the decision it will replace.
-	if li.unsaved {
-		return fmt.Sprintf("%s · updated %s · %d %s", li.Kind, shortDate(li.UpdatedAt), li.CommentsCount, comments)
+	return strings.Join(parts, " · ")
+}
+
+func (li listItem) Tags() string {
+	labels := append([]string{}, li.ProposedLabels...)
+	if li.Untriaged() {
+		labels = append(labels, li.proposalLabels...)
+	}
+	for _, label := range li.Labels {
+		if !slices.Contains(labels, label) {
+			labels = append(labels, label)
+		}
 	}
 
-	status := "untriaged"
-	if !li.Untriaged() {
-		status = "triaged: " + li.DecisionLabel() + "/" + li.Action
-	} else if li.proposal != "" {
-		status = "untriaged · proposed: " + li.proposal
+	var tags []string
+	for _, label := range labels {
+		if label = singleLine(label); label != "" {
+			tags = append(tags, label)
+		}
 	}
 	if li.PendingReview() {
-		status = "pending review · " + status
+		tags = append(tags, "pending review")
 	}
 
-	// The decision comes first, after the card's [agent] / [human] mark, so a narrow pane cuts the dates rather than the call.
-	return fmt.Sprintf("%s · %s · updated %s · %d %s", status, li.Kind, shortDate(li.UpdatedAt), li.CommentsCount, comments)
+	return strings.Join(tags, " · ")
+}
+
+func (li listItem) CommentsLabel() string {
+	if li.CommentsCount == 1 {
+		return "1 comment"
+	}
+
+	return fmt.Sprintf("%d comments", li.CommentsCount)
 }
 
 func itemScoreMark(item Item) cardMark {
@@ -71,7 +103,7 @@ func itemScoreColor(value int) string {
 	return currentTheme.Success
 }
 
-// Mark tags a decision with who made it. An explicit Pending review request remains visible in the card description even when the item has no decision.
+// Mark identifies who made a decision, or an unsaved draft. Pending review appears in the card's right-aligned tags.
 func (li listItem) Mark() cardMark {
 	switch {
 	case li.unsaved:
@@ -79,9 +111,9 @@ func (li listItem) Mark() cardMark {
 	case li.Untriaged():
 		return cardMark{}
 	case li.ByAgent():
-		return cardMark{"[agent]", currentTheme.Warning}
+		return cardMark{"agent", currentTheme.Warning}
 	default:
-		return cardMark{"[human]", currentTheme.Info}
+		return cardMark{"human", currentTheme.Info}
 	}
 }
 
@@ -108,14 +140,14 @@ func (cardDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 		return
 	}
 
+	if li, ok := item.(listItem); ok {
+		fmt.Fprint(w, markedCardWithRightAndMeta(entry.Title(), entry.Description(), cardMark{}, itemScoreMark(li.Item), cardMeta{li.Tags(), li.CommentsLabel()}, index == m.Index(), m.Width()))
+		return
+	}
+
 	var mark cardMark
 	if marked, ok := item.(interface{ Mark() cardMark }); ok {
 		mark = marked.Mark()
-	}
-
-	if li, ok := item.(listItem); ok {
-		fmt.Fprint(w, markedCardWithRight(entry.Title(), entry.Description(), mark, itemScoreMark(li.Item), index == m.Index(), m.Width()))
-		return
 	}
 
 	fmt.Fprint(w, markedCard(entry.Title(), entry.Description(), mark, index == m.Index(), m.Width()))

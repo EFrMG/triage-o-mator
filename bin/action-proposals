@@ -20,6 +20,19 @@ from _storage import atomic_writer, locked
 from _triage import DATA_DIR, UTC_TIMESTAMP_RE, action_operation, item_url, load_ledger, load_taxonomy, now_iso, parse_key, read_repo
 
 
+# bin/comment-plus exits with this status when it refuses before any write because the live item changed.
+TARGET_CHANGED_STATUS = 3
+
+
+class OutOfDate(ValueError):
+    pass
+
+
+def child_error(result, fallback):
+    """A child script's own message, without the "error:" prefix this script adds again on exit."""
+    return result.stderr.strip().removeprefix("error:").strip() or fallback
+
+
 def save(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     value.pop("checksum", None)
@@ -64,12 +77,19 @@ def row(value, state):
     key = f"{value['kind']}:{value['number']}"
     presentation = state["rows"].get(key, {})
     visible = presentation.get("dismissed_checkpoint") != value["checksum"]
-    active = value["status"] == "pending" and visible
+    # A refused publish leaves the proposal pending; this local note keeps it out of the approvable set until it is replaced.
+    refused = presentation.get("out_of_date")
+    out_of_date = value["status"] == "pending" and isinstance(refused, dict) and refused.get("checkpoint") == value["checksum"]
+    active = value["status"] == "pending" and visible and not out_of_date
     result = dict(kind=value["kind"], number=value["number"], title=value["title"], target=value["target"],
                   action=value.get("action"), operation=value["operation"], comment=value["comment"],
                   updated_at=value["updated_at"], head_sha=value.get("head_sha"), status=value["status"],
-                  checkpoint=value["checksum"], active=active, needs_attention=visible and value["status"] in ("pending", "uncertain") and presentation.get("viewed_checkpoint") != value["checksum"],
+                  checkpoint=value["checksum"], active=active, needs_attention=visible and not out_of_date and value["status"] in ("pending", "uncertain") and presentation.get("viewed_checkpoint") != value["checksum"],
                   dismissed=not visible, inputs=value["inputs"], outcome=value.get("outcome"), reference=value.get("reference"))
+    if "comments" in value:
+        result["comments"] = value["comments"]
+    if out_of_date:
+        result["out_of_date"] = dict(reason=refused.get("reason", ""), observed_at=refused.get("observed_at", ""))
     if "decision_question" in value:
         result["decision_question"] = value["decision_question"]
     if "decision_resolution" in value:
@@ -182,8 +202,14 @@ def inspect(repo, host, kind, number):
     if not isinstance(title, str) or not title.strip():
         raise ValueError("live item has no usable title")
 
-    return dict(repository=repo, kind=kind, number=number, target=target, title=title, state=issue["state"],
-                updated_at=issue["updated_at"], head_sha=head, requests=2 if kind == "pr" else 1)
+    result = dict(repository=repo, kind=kind, number=number, target=target, title=title, state=issue["state"],
+                  updated_at=issue["updated_at"], head_sha=head, requests=2 if kind == "pr" else 1)
+    if kind == "issue":
+        if type(issue.get("comments")) is not int or issue["comments"] < 0:
+            raise ValueError("live issue has no usable comment count")
+        result["comments"] = issue["comments"]
+
+    return result
 
 
 def valid_comment(text):
@@ -206,6 +232,8 @@ def propose(args, repo):
         raise ValueError("invalid action target or observed update time")
     if args.kind == "pr" and not re.fullmatch(r"[0-9a-f]{40}", args.head_sha or "") or args.kind == "issue" and args.head_sha:
         raise ValueError("PR actions require a head SHA; issue actions cannot have one")
+    if args.kind == "issue" and (type(args.comments) is not int or args.comments < 0) or args.kind == "pr" and args.comments is not None:
+        raise ValueError("issue actions require the observed comment count; PR actions cannot have one")
     if operation == "close" and args.observed_state != "open" or operation == "reopen" and args.observed_state != "closed":
         raise ValueError("observed state does not permit the selected action")
     if not valid_short_text(args.title, 1000) or not valid_short_text(args.by, 200):
@@ -277,6 +305,8 @@ def propose(args, repo):
                  status="pending", inputs=inputs)
     if args.kind == "pr":
         value["head_sha"] = args.head_sha
+    else:
+        value["comments"] = args.comments
     if reference is not None:
         value["reference"] = reference
     if args.decision_question is not None:
@@ -351,7 +381,7 @@ def edit(args, repo):
         raise ValueError("action comment is unchanged")
 
     replacement = argparse.Namespace(kind=args.kind, number=args.number, action=previous["action"], title=previous["title"],
-                                     host=previous["host"], updated_at=previous["updated_at"], head_sha=previous.get("head_sha"),
+                                     host=previous["host"], updated_at=previous["updated_at"], head_sha=previous.get("head_sha"), comments=previous.get("comments"),
                                      observed_state=previous["observed_state"], comment_file=args.comment_file, by=args.by,
                                      context_checkpoint=previous["inputs"]["context_checkpoint"],
                                      evidence=[f"{item['kind']}:{item['number']}:{item['snapshot_id']}" for item in previous["inputs"]["evidence"]],
@@ -440,7 +470,7 @@ def automation_policy(repo, value):
 
     result = subprocess.run([str(Path(__file__).absolute().with_name("action-policy")), "status", "--expected-repo", repo], capture_output=True, text=True)
     if result.returncode:
-        raise ValueError(result.stderr.strip() or "could not read action automation policy")
+        raise ValueError(child_error(result, "could not read action automation policy"))
     policy = json.loads(result.stdout)
     setting = next((row for row in policy["actions"] if row["name"] == value["action"]), None)
     if setting is None or setting["operation"] != value["operation"] or setting["mode"] != "execute" or not setting["configured"]:
@@ -454,16 +484,21 @@ def automation_policy(repo, value):
 def call_comment(repo, value):
     script = Path(__file__).absolute().with_name("comment-plus")
     base = [str(script), "--expected-repo", repo, "--host", value["host"], "--kind", value["kind"],
-            "--number", str(value["number"]), "--body=" + value["comment"], "--request-id", value["request_id"],
-            "--expected-updated-at", value["updated_at"]]
+            "--number", str(value["number"]), "--body=" + value["comment"], "--request-id", value["request_id"]]
     if value["kind"] == "pr":
         base += ["--expected-head", value["head_sha"]]
+    elif "comments" not in value:
+        raise OutOfDate("this issue proposal was saved without its observed comment count; prepare it again")
+    else:
+        base += ["--expected-comments", str(value["comments"])]
     if value["operation"] in ("close", "reopen"):
         base.append("--" + value["operation"])
+    else:
+        base += ["--expected-state", value["observed_state"]]
 
     preview = subprocess.run(base, capture_output=True, text=True)
     if preview.returncode:
-        raise ValueError(preview.stderr.strip() or "comment plan failed")
+        raise ValueError(child_error(preview, "comment plan failed"))
     planned = json.loads(preview.stdout)
     if planned["plan"]["target"] != value["target"] or planned["plan"]["body"] != value["comment"] or planned["plan"]["operation"] != value["operation"]:
         raise ValueError("comment plan differs from the action proposal")
@@ -475,8 +510,10 @@ def call_comment(repo, value):
         if outcome.get("approval") != planned["approval"]:
             raise ValueError("saved write outcome differs from the action proposal")
         return outcome, result.returncode == 0
+    if result.returncode == TARGET_CHANGED_STATUS:
+        raise OutOfDate(child_error(result, "the item changed since the approved proposal"))
     if result.returncode:
-        raise ValueError(result.stderr.strip() or "comment request failed before writing")
+        raise ValueError(child_error(result, "comment request failed before writing"))
 
     raise ValueError("comment reported success without a saved write outcome")
 
@@ -502,7 +539,12 @@ def execute(repo, kind, number, items, all_pending, operation, approval, automat
                 if automation:
                     definition = automation_policy(repo, value)
 
-            outcome, ok = call_comment(repo, value)
+            try:
+                outcome, ok = call_comment(repo, value)
+            except OutOfDate as error:
+                mark_out_of_date(repo, value, str(error))
+                raise
+
             value["outcome"] = dict(request_id=value["request_id"], comment=outcome["comment"], state_change=outcome["state_change"])
             if automation and new_attempt:
                 value["outcome"]["authorization"] = dict(source="repository-policy", action=value["action"], definition_sha256=definition)
@@ -517,6 +559,18 @@ def execute(repo, kind, number, items, all_pending, operation, approval, automat
             completed_batch[value["request_id"]] = value["target"]
 
     return dict(results=results)
+
+
+def mark_out_of_date(repo, value, reason):
+    """Note locally that GitHub refused this exact proposal before any write, so readers stop offering it for approval."""
+    path = DATA_DIR / "local" / "action-proposals-state.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with locked(path):
+        state = local_state(repo)
+        entry = state["rows"].setdefault(f"{value['kind']}:{value['number']}", {})
+        entry["out_of_date"] = dict(checkpoint=value["checksum"], reason=reason, observed_at=now_iso())
+        with atomic_writer(path) as out:
+            out.write(json.dumps(state, indent=2, ensure_ascii=False) + "\n")
 
 
 def reject(repo, kind, number, checkpoint, by, reason):
@@ -589,6 +643,7 @@ def main():
     add.add_argument("--observed-state", choices=("open", "closed"), required=True)
     add.add_argument("--updated-at", required=True)
     add.add_argument("--head-sha")
+    add.add_argument("--comments", type=int, help="for an issue: the comment count reported by inspect")
     add.add_argument("--comment-file", type=Path, required=True)
     add.add_argument("--by", required=True)
     add.add_argument("--context-checkpoint", required=True)

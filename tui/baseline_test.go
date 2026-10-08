@@ -2658,6 +2658,14 @@ func TestSuggestedActionsAndExplicitPendingReviewHaveSeparateTabs(t *testing.T) 
 	if !strings.Contains(cardSummary, "Suggested close · exact action needed") || cardMarkText != "" {
 		t.Fatal("saved suggestion looked like an approved exact proposal")
 	}
+	stale := m.notifications
+	stale.actions = actionProposalList{Rows: []actionProposalRow{{Kind: "issue", Number: 1, Operation: "close", Status: "pending", OutOfDate: &proposalOutOfDate{Reason: "item activity changed"}}}}
+	staleChoice := stale.choices()[0]
+	var staleSummary string
+	renderNotificationChoice(stale, staleChoice, func(_, summary string, _ cardMark) { staleSummary = summary })
+	if staleChoice.actionProposal != 0 || stale.choiceNeeds(staleChoice) || !stale.choiceSuggested(staleChoice) || !strings.Contains(staleSummary, "out of date") {
+		t.Fatalf("a proposal GitHub refused as out of date still looked approvable: %q", staleSummary)
+	}
 	if choices[0].actionProposal != 0 || suggestionIndex == 0 || m.notifications.choiceNeeds(choices[suggestionIndex]) || !m.notifications.choiceSuggested(choices[suggestionIndex]) || !m.notifications.choiceSuggested(choices[moreIndex]) {
 		t.Fatal("suggested actions were mixed with the cards that need attention")
 	}

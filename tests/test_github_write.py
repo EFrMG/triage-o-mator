@@ -71,7 +71,7 @@ class WriteTests(Workspace):
     def setUp(self):
         super().setUp()
         (self.mock / "gh").write_text(WRITE_GH)
-        (self.mock / "item.json").write_text(json.dumps(dict(number=1, html_url="https://github.com/owner/repo/issues/1", state="open")))
+        (self.mock / "item.json").write_text(json.dumps(dict(number=1, html_url="https://github.com/owner/repo/issues/1", state="open", comments=0)))
 
     def call(self, *args, body="A proposed comment", ok=True):
         return self.json_cli("comment-plus", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--body", body, *args, ok=ok)
@@ -109,13 +109,37 @@ class WriteTests(Workspace):
         value = json.loads(item_path.read_text())
         value["updated_at"] = selected
         item_path.write_text(json.dumps(value))
-        preview = self.call("--expected-updated-at", selected)
+        preview = self.call("--expected-comments", "0")
 
-        value["updated_at"] = "2026-10-04T02:00:00Z"
+        value.update(updated_at="2026-10-04T02:00:00Z", comments=1)
         item_path.write_text(json.dumps(value))
-        self.call(*self.publish(preview), "--expected-updated-at", selected, ok=False)
+        self.call(*self.publish(preview), "--expected-comments", "0", ok=False)
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET"])
         self.assertFalse((self.root / "data/owner/repo/writes" / f"{preview['plan']['request_id']}.json").exists())
+
+        # The same refusal through a staged proposal leaves it pending but marks it out of date, so readers stop offering it for approval.
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(dict(item(1, "Needs a reproduction"), action="comment", confidence="medium", reason="The report lacks steps")) + "\n")
+        args = ("--expected-repo", "owner/repo")
+        context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
+        comment = self.root / "request-info.md"
+        comment.write_text("Could you share steps to reproduce this issue?\n")
+        saved = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1", "--comments", "0", "--action", "comment", "--title", "Needs a reproduction", "--observed-state", "open",
+                              "--updated-at", selected, "--comment-file", str(comment), "--by", "agent:helper", "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
+        reviewed = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
+        refused = self.run_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1", "--publish", "--approve", reviewed["approval"], ok=False)
+        self.assertEqual(refused.stderr.strip(), "error: issue comments changed since the approved proposal; review it again")
+        self.assertNotIn("POST", [call["method"] for call in self.write_calls()])
+
+        row = self.json_cli("action-proposals", *args, "list")["rows"][0]
+        self.assertEqual((row["status"], row["active"], row["needs_attention"], row["checkpoint"]), ("pending", False, False, saved["checkpoint"]))
+        self.assertIn("issue comments changed", row["out_of_date"]["reason"])
+        self.run_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1", ok=False)
+
+        # A later update time alone, as a label or a base-branch push causes, does not stop an approved write.
+        value.update(updated_at="2026-10-04T03:00:00Z", comments=0)
+        item_path.write_text(json.dumps(value))
+        self.call(*self.publish(self.call("--expected-comments", "0")), "--expected-comments", "0")
+        self.assertIn("POST", [call["method"] for call in self.write_calls()])
 
     def test_issue_action_stages_exact_comment_and_keeps_rejection_outside_ledger(self):
         timestamp = "2026-10-04T01:00:00Z"
@@ -130,7 +154,7 @@ class WriteTests(Workspace):
         comment = self.root / "request-info.md"
         comment.write_text("Could you share steps to reproduce this issue?\n")
         args = ("--expected-repo", "owner/repo")
-        saved = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
+        saved = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1", "--comments", "0",
                               "--action", "comment", "--title", "Needs a reproduction", "--observed-state", "open",
                               "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
                               "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
@@ -158,7 +182,7 @@ class WriteTests(Workspace):
         self.assertEqual(self.write_calls(), [])
 
         refreshed = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
-        reconsidered = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
+        reconsidered = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1", "--comments", "0",
                                      "--action", "comment", "--title", "Needs a reproduction", "--observed-state", "open",
                                      "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
                                      "--context-checkpoint", refreshed["checkpoint"], "--evidence-gap", "Discussion not acquired",
@@ -185,7 +209,7 @@ class WriteTests(Workspace):
         context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
         comment = self.root / "reopen.md"
         comment.write_text("This still reproduces, so I am reopening it for investigation.\n")
-        held = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1",
+        held = self.json_cli("action-proposals", *args, "propose", "--kind", "issue", "--number", "1", "--comments", "0",
                              "--action", "reopen", "--title", "Closed too early", "--observed-state", "closed",
                              "--updated-at", timestamp, "--comment-file", str(comment), "--by", "agent:helper",
                              "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired",
@@ -214,7 +238,7 @@ class WriteTests(Workspace):
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
         context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
         comment.write_text("Closing this synthetic fixture after the reopen trial.\n")
-        next_action = ("--kind", "issue", "--number", "1", "--action", "close", "--title", "Closed too early",
+        next_action = ("--kind", "issue", "--number", "1", "--comments", "0", "--action", "close", "--title", "Closed too early",
                        "--observed-state", "open", "--updated-at", live["updated_at"], "--comment-file", str(comment),
                        "--by", "agent:helper", "--context-checkpoint", context["checkpoint"],
                        "--evidence-gap", "Discussion not acquired")
@@ -242,7 +266,7 @@ class WriteTests(Workspace):
         context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
         comment = self.root / "feedback.md"
         comment.write_text("Please clarify the behavior.\n")
-        base = ("--kind", "issue", "--number", "1", "--action", "comment", "--title", "Needs feedback",
+        base = ("--kind", "issue", "--number", "1", "--comments", "0", "--action", "comment", "--title", "Needs feedback",
                 "--observed-state", "open", "--updated-at", timestamp, "--comment-file", str(comment),
                 "--by", "agent:helper", "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
         self.json_cli("action-proposals", *args, "propose", *base)
@@ -705,7 +729,7 @@ class ClosureWriteTests(Workspace):
         first = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         write = ("--expected-repo", "owner/repo", "--host", first["host"], "--kind", "pr", "--number", "1",
                  "--body", first["comment"], "--close", "--request-id", first["request_id"],
-                 "--expected-head", first["head_sha"], "--expected-updated-at", first["updated_at"])
+                 "--expected-head", first["head_sha"])
         plan = self.json_cli("comment-plus", *write)
         self.json_cli("comment-plus", *write, "--publish", "--approve", plan["approval"])
         self.assertEqual(self.closure("list")["rows"][0]["status"], "pending")
@@ -721,7 +745,7 @@ class ClosureWriteTests(Workspace):
         saved = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         base = ("--expected-repo", "owner/repo", "--host", "github.com", "--kind", "pr", "--number", "1",
                 "--body", proposal["comment"], "--close", "--request-id", saved["request_id"],
-                "--expected-head", saved["head_sha"], "--expected-updated-at", saved["updated_at"])
+                "--expected-head", saved["head_sha"])
         plan = self.json_cli("comment-plus", *base)
         (self.mock / "fail-patch").touch()
         self.json_cli("comment-plus", *base, "--publish", "--approve", plan["approval"], ok=False)

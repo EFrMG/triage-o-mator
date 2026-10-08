@@ -128,8 +128,11 @@ func (m model) finishActionReview(msg actionReviewMsg) (tea.Model, tea.Cmd) {
 	current.busy = false
 	if msg.err != nil {
 		if msg.phase == "execute" {
-			m.recordError("Action outcome needs inspection", msg.err)
-			return m.openNotifications()
+			next, cmd := m.openNotifications()
+			updated := next.(model)
+			updated.failErr("Approved action did not complete", msg.err)
+
+			return updated, cmd
 		}
 		current.problem = msg.err.Error()
 		return m, nil
@@ -265,6 +268,10 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.warn("This action question is no longer available; refresh Notifications.")
 			return m, nil
 		}
+		if row.OutOfDate != nil {
+			m.warn("The item changed on GitHub after this proposal was prepared; press y to copy it for an agent to prepare a fresh one.")
+			return m, nil
+		}
 		if row.Status != "pending" || !row.Active || review.context == nil || !review.context.Current || review.problem != "" {
 			m.warn("Current action context is required before approval.")
 			return m, nil
@@ -311,6 +318,9 @@ func (m model) actionReviewViewport() viewport.Model {
 	width := maxInt(m.menuWidth()-4, 1)
 	var b strings.Builder
 	title := "Action proposal"
+	if row.OutOfDate != nil {
+		title = "Action proposal out of date"
+	}
 	switch row.Status {
 	case "executed":
 		title = "Completed action"

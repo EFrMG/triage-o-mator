@@ -77,6 +77,12 @@ func itemChoice(key Key) notificationChoice {
 	return notificationChoice{kind: "item", key: key, actionProposal: -1, suggestion: -1, tracked: -1, attention: -1, closure: -1}
 }
 
+// proposalOutOfDate is the local note left when GitHub refused a pending proposal before any write because the item had changed.
+type proposalOutOfDate struct {
+	Reason     string `json:"reason"`
+	ObservedAt string `json:"observed_at"`
+}
+
 type actionProposalRow struct {
 	Kind      string `json:"kind"`
 	Title     string `json:"title"`
@@ -100,6 +106,7 @@ type actionProposalRow struct {
 	Active             bool                      `json:"active"`
 	Needs              bool                      `json:"needs_attention"`
 	Dismissed          bool                      `json:"dismissed"`
+	OutOfDate          *proposalOutOfDate        `json:"out_of_date"`
 	Inputs             proposalInputs            `json:"inputs"`
 	Outcome            *struct {
 		Comment struct {
@@ -504,11 +511,11 @@ func (n notificationsUI) choiceNeeds(choice notificationChoice) bool {
 	}
 }
 
-// choiceSuggested reports a card that belongs under Suggested actions: a saved decision's action with no exact proposal and nothing else needing attention, which Notifications can hand to an agent but not approve.
+// choiceSuggested reports a card that belongs under Suggested actions: a saved decision's action with no exact proposal, or a proposal GitHub refused as out of date, and nothing else needing attention. Notifications can hand these to an agent but not approve them.
 func (n notificationsUI) choiceSuggested(choice notificationChoice) bool {
 	switch choice.kind {
 	case "item":
-		return choice.suggestion >= 0 && choice.actionProposal < 0 && !n.choiceNeeds(choice)
+		return (choice.suggestion >= 0 && choice.actionProposal < 0 || choice.actionProposal >= 0 && n.actions.Rows[choice.actionProposal].OutOfDate != nil) && !n.choiceNeeds(choice)
 	case "suggestion-prev", "suggestion-more":
 		return true
 	default:
@@ -982,7 +989,11 @@ func (m model) notificationsView() string {
 		fmt.Fprintf(&b, "%s\n", inset(mutedText("No past actions yet.")))
 	}
 	fmt.Fprintf(&b, "\n%s\n", inset(heading.Render("Suggested actions")))
-	if len(n.suggestions) == 0 {
+	hasSuggested := false
+	for _, choice := range choices {
+		hasSuggested = hasSuggested || n.choiceSuggested(choice)
+	}
+	if !hasSuggested {
 		fmt.Fprintf(&b, "%s\n", inset(mutedText("No saved decision suggests a comment, closure or reopening.")))
 	} else {
 		fmt.Fprintf(&b, "%s\n", inset(mutedText("From saved decisions. Prepare an exact proposal for them with Agents.")))
@@ -1077,7 +1088,11 @@ func renderNotificationChoice(n notificationsUI, choice notificationChoice, card
 			if title == "" {
 				title = row.Title
 			}
-			parts = append(parts, proposalStatusSummary(row.Operation, row.Status))
+			if row.OutOfDate != nil {
+				parts = append(parts, proposalStatusSummary(row.Operation, "")+" out of date · fresh proposal needed")
+			} else {
+				parts = append(parts, proposalStatusSummary(row.Operation, row.Status))
+			}
 			if row.Action != "" && row.Action != row.Operation {
 				parts = append(parts, "Action: "+row.Action)
 			}

@@ -14,7 +14,15 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 
 from _storage import atomic_writer, locked
-from _triage import DATA_DIR, UTC_TIMESTAMP_RE, item_url, now_iso, read_repo
+from _triage import DATA_DIR, item_url, now_iso, read_repo
+
+
+# Exit status for a refusal made before any write because the live item no longer matches what was approved.
+TARGET_CHANGED_STATUS = 3
+
+
+class TargetChanged(ValueError):
+    pass
 
 
 def api(host, method, endpoint, payload=None):
@@ -53,7 +61,8 @@ def main():
     mode.add_argument("--publish", action="store_true")
     parser.add_argument("--approve", help="SHA-256 from the reviewed dry-run plan")
     parser.add_argument("--expected-head", help="PR head SHA observed when the proposal was prepared")
-    parser.add_argument("--expected-updated-at", help="item update time observed when the proposal was prepared")
+    parser.add_argument("--expected-state", choices=("open", "closed"), help="item state observed when a comment-only proposal was prepared")
+    parser.add_argument("--expected-comments", type=int, help="issue comment count observed when the proposal was prepared")
     args = parser.parse_args()
 
     # Older argparse versions strip a literal '--' even from '--body=--', returning an empty list for this single-value option.
@@ -71,8 +80,8 @@ def main():
         raise ValueError("head revision checks require a pull request")
     if args.expected_head and not re.fullmatch(r"[0-9a-f]{40}", args.expected_head):
         raise ValueError("expected head must be a 40-character lowercase SHA")
-    if args.expected_updated_at and not UTC_TIMESTAMP_RE.fullmatch(args.expected_updated_at):
-        raise ValueError("expected update time must be a UTC GitHub timestamp")
+    if args.expected_comments is not None and (args.kind != "issue" or args.expected_comments < 0):
+        raise ValueError("comment count checks apply to issues and need a count of zero or more")
 
     text = args.body if args.body is not None else args.body_file.read_text(encoding="utf-8")
     if not text.strip() or len(text) > 65536 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in text):
@@ -88,8 +97,10 @@ def main():
     plan = dict(version=1, request_id=request_id, operation=operation, host=args.host, repo=repo, kind=args.kind, number=args.number, target=target, body=text, state_change=target_state)
     if args.expected_head:
         plan["expected_head"] = args.expected_head
-    if args.expected_updated_at:
-        plan["expected_updated_at"] = args.expected_updated_at
+    if args.expected_comments is not None:
+        plan["expected_comments"] = args.expected_comments
+    if args.expected_state:
+        plan["expected_state"] = args.expected_state
     digest = hashlib.sha256(json.dumps(plan, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     if not args.publish:
         print(json.dumps(dict(plan=plan, approval=digest), ensure_ascii=False, indent=2))
@@ -116,21 +127,24 @@ def main():
         # Verify the live target before any write; a moved repository or a kind mismatch requires a new preview.
         item = api(args.host, "GET", f"repos/{repo}/issues/{args.number}")
         if not isinstance(item, dict) or item.get("html_url") != target or item.get("number") != args.number or ("pull_request" in item) != (args.kind == "pr"):
-            raise ValueError("live target differs from the approved target")
+            raise TargetChanged("live target differs from the approved target")
         if target_state != "none":
             required_state = "open" if args.close else "closed"
             if item.get("state") != required_state:
-                raise ValueError(f"item is no longer {required_state}; preview again after inspecting GitHub")
-        if args.expected_updated_at and item.get("updated_at") != args.expected_updated_at:
-            raise ValueError("item activity changed since the approved proposal; review it again")
+                raise TargetChanged(f"item is no longer {required_state}; preview again after inspecting GitHub")
+        if args.expected_state and item.get("state") != args.expected_state:
+            raise TargetChanged(f"item is no longer {args.expected_state}; review it again")
+        # An issue's conversation is what a proposal answers, so a changed comment count stops it. GitHub's updated_at is not compared: labels, cross-references and base-branch pushes move it without touching what was reviewed.
+        if args.expected_comments is not None and item.get("comments") != args.expected_comments:
+            raise TargetChanged("issue comments changed since the approved proposal; review it again")
         if args.expected_head:
             pull = api(args.host, "GET", f"repos/{repo}/pulls/{args.number}")
             if not isinstance(pull, dict) or pull.get("html_url") != target or pull.get("number") != args.number or (pull.get("head") or {}).get("sha") != args.expected_head:
-                raise ValueError("pull request head changed since the approved proposal; review it again")
+                raise TargetChanged("pull request head changed since the approved proposal; review it again")
         if args.reopen and args.kind == "pr":
             pull = api(args.host, "GET", f"repos/{repo}/pulls/{args.number}")
             if not isinstance(pull, dict) or pull.get("html_url") != target or pull.get("number") != args.number or pull.get("state") != "closed" or pull.get("merged_at") is not None or pull.get("merged") is True:
-                raise ValueError("pull request is merged or differs from the approved closed target")
+                raise TargetChanged("pull request is merged or differs from the approved closed target")
 
         record = dict(plan=plan, approval=digest, started_at=now_iso(), comment=dict(status="unknown"), state_change=dict(status="not_requested"))
         # Durable before POST: process death and transport errors must never invite an automatic duplicate comment.
@@ -174,5 +188,8 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except TargetChanged as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(TARGET_CHANGED_STATUS)
     except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
         sys.exit(f"error: {exc}")

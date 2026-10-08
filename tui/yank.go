@@ -178,6 +178,9 @@ func (m model) yankActionProposal(row actionProposalRow) (string, string) {
 	var b strings.Builder
 	b.WriteString(m.yankHeader(what))
 	fmt.Fprintf(&b, "\n%s #%d · %s\nTarget: %s\n", strings.ToUpper(row.Kind), row.Number, row.Status, sanitize(row.Target))
+	if row.OutOfDate != nil {
+		fmt.Fprintf(&b, "Out of date: GitHub refused it before any write (%s). Inspect the item again and prepare a replacement with --replace-checkpoint %s.\n", sanitize(row.OutOfDate.Reason), row.Checkpoint)
+	}
 	fmt.Fprintf(&b, "Saved proposal: bin/action-proposals --expected-repo %s view --kind %s --number %d --checkpoint %s\n", m.repo, row.Kind, row.Number, row.Checkpoint)
 	fmt.Fprintf(&b, "Current guidance and feedback: bin/action-proposals --expected-repo %s context --kind %s --number %d --checkpoint %s\n", m.repo, row.Kind, row.Number, row.Checkpoint)
 	if len(row.Inputs.Evidence) > 0 {

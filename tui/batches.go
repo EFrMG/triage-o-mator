@@ -583,6 +583,8 @@ func (m model) handleBatchFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.batches.editing = false
 	case key.Matches(msg, keys.FormSubmit):
 		return m.createBatch()
+	case key.Matches(msg, keys.Confirm) && m.batches.field == batchFormFields-1:
+		return m.createBatch()
 	case onChoice && key.Matches(msg, keys.OpenList):
 		m.batches.pick.Open(m.batchFieldOptions(m.batches.field))
 	case onChoice && key.Matches(msg, keys.ChoiceNext):

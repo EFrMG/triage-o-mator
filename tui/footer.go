@@ -323,6 +323,9 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.batches.field > 0 {
 			edit.hints = append(edit.hints, bind("change", keys.ValueNext, keys.ValuePrev), bind("choices", keys.OpenList))
 		}
+		if m.batches.field == batchFormFields-1 {
+			edit.hints = append(edit.hints, bind("create", keys.Confirm))
+		}
 
 		return []footerGroup{edit}
 	case m.editingRepo && m.installing.path != "":

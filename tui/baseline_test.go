@@ -1455,7 +1455,14 @@ func TestBaselineBatchCreationUsesFloatingEditor(t *testing.T) {
 	if !m.batches.editing || m.batches.pick.open || m.batches.kindIdx != 1 {
 		t.Fatal("picking a kind created the batch or lost the selected value")
 	}
-	next, cmd := m.Update(mouseKey("ctrl+s"))
+	m = baselineSend(m, mouseKey("tab"))
+	m = baselineSend(m, mouseKey("tab"))
+	next, cmd := m.Update(mouseKey("enter"))
+	if cmd == nil || next.(model).batches.editing || !next.(model).batches.busy {
+		t.Fatal("Enter on the final Group field did not create the batch")
+	}
+
+	next, cmd = m.Update(mouseKey("ctrl+s"))
 	m = next.(model)
 	if cmd == nil || m.batches.editing || !m.batches.busy || m.batches.kindIdx != 1 {
 		t.Fatal("Ctrl-S did not submit the floating batch editor")

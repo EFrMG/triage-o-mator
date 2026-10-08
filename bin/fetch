@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import REPO, RAW_DIR, here, now_iso, run_gh
+from _triage import REPO, RAW_DIR, here, load_ledger, now_iso, run_gh
 from _storage import atomic_writer, locked
 from _acquire import GitHubReader, ReadFailure
 
@@ -190,6 +190,7 @@ def fetch(args, host, cache=None):
 
         lines = [json.dumps(row, ensure_ascii=False) for row in by_key.values()]
 
+    pr_heads = scored_pr_heads(lines, host)
     out_path = RAW_DIR / "issues_and_prs.jsonl"
     payload = "\n".join(lines) + ("\n" if lines else "")
 
@@ -202,6 +203,7 @@ def fetch(args, host, cache=None):
     # fetch_id tells fetches apart even within the same second; bin/sync copies it to synced_fetch_id once it has merged this fetch.
     meta.update({"repo": REPO, "host": host, "fetch_id": uuid.uuid4().hex, "fetched_at": started, "mode": mode, "since": since, "issues": issues, "prs": prs, "raw_sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest()})
     meta.pop("inventory", None)
+    meta["pr_heads"] = pr_heads
     if observation:
         from _inventory import prepare
 
@@ -226,6 +228,33 @@ def fetch(args, host, cache=None):
     what = "open" if mode == "full" else "changed"
     print(f"Fetched {issues} {what} issues + {prs} {what} PRs ({mode}) -> {out_path}", file=sys.stderr)
     print(here("Next: bin/sync"), file=sys.stderr)
+
+
+def scored_pr_heads(lines, host):
+    """Read the head commit of each fetched open PR whose saved score binds one and whose update time moved, one GET each.
+
+    The issue list has no head commit, and labels or a push to the base branch move a PR's update time without touching its code. bin/sync stores the result so a PR score goes stale only when the code changed. A failed read leaves that PR's head unknown.
+    """
+    scored = {row["number"]: row for row in load_ledger()
+              if row.get("kind") == "pr" and ((row.get("item_score") or {}).get("revision") or {}).get("head_sha")}
+    moved = [row["number"] for row in map(json.loads, lines)
+             if row["kind"] == "pr" and row.get("state") == "open" and row["number"] in scored and row.get("updated_at") != scored[row["number"]].get("updated_at")]
+    if not moved:
+        return {}
+
+    heads = {}
+    reader = GitHubReader(host, budget=len(moved))
+    for number in moved:
+        try:
+            pull, _ = reader.get(f"repos/{REPO}/pulls/{number}")
+        except (ReadFailure, ValueError, OSError):
+            continue
+
+        head = (pull.get("head") or {}).get("sha") if isinstance(pull, dict) and pull.get("number") == number else None
+        if isinstance(head, str) and len(head) == 40:
+            heads[str(number)] = head
+
+    return heads
 
 
 if __name__ == "__main__":

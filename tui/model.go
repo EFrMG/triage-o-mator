@@ -47,6 +47,8 @@ type model struct {
 
 	// pendingApply counts concurrent decision writes and undo commands; batch applies use batches.busy.
 	pendingApply int
+	// ledgerSeen is the ledgerStamp of the ledger last loaded, so a write from outside the TUI, such as an agent saving decisions or scores, is noticed and read.
+	ledgerSeen string
 
 	items            []Item
 	groups           groupUI

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -147,6 +148,16 @@ type ledgerReloadedMsg struct {
 	repo  string // which repo's ledger this is, so a reload that finishes after Switch Repo is dropped
 	items []Item
 	err   error
+}
+
+// ledgerStamp identifies the ledger file's current contents cheaply, by modification time and size; "" when it cannot be read.
+func ledgerStamp(installRoot, repo string) string {
+	info, err := os.Stat(filepath.Join(DataDir(installRoot, repo), "ledger.jsonl"))
+	if err != nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
 }
 
 func reloadLedgerCmd(installRoot, repo string) tea.Cmd {

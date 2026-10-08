@@ -150,6 +150,9 @@ class EvidenceTests(Workspace):
         changed = self.ledger()["issue", 2]
         changed["updated_at"] = "2026-09-23T01:00:00Z"
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(changed) + "\n")
+        self.assertTrue(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")["current"])
+        changed["comments_count"] += 1
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(changed) + "\n")
         self.assertFalse(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")["current"])
 
         rejected = self.run_cli("item-score", *args, "--snapshot", selected["snapshot_id"], "--clarity", "2", "--support", "2",
@@ -166,7 +169,7 @@ class EvidenceTests(Workspace):
         self.assertEqual(len(self.calls()), calls)
 
         changed = self.ledger()["issue", 2]
-        changed["updated_at"] = "2026-09-24T01:00:00Z"
+        changed.update(updated_at="2026-09-24T01:00:00Z", comments_count=changed["comments_count"] + 1)
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(changed) + "\n")
         self.assertFalse(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "issue", "--number", "2")["assessment_current"])
         self.assertTrue(any("Score a bounded selection of 1" in row["what"] for row in self.json_cli("next", "--json")["suggestions"]))
@@ -188,6 +191,20 @@ class EvidenceTests(Workspace):
         self.assertEqual(partial_score["score"]["snapshot_id"], partial["snapshot_id"])
         self.assertEqual(partial_score["score"]["revision"]["head_sha"], "b" * 40)
         self.assertNotEqual(partial_score["score"]["coverage"].get("diff"), "complete")
+
+        # A refresh that sees the scored PR moved reads its head once: an unchanged head keeps the result current, a new one makes it stale.
+        listed = dict(self.ledger()["pr", 1], updated_at="2026-09-25T00:00:00Z")
+        self.responses["repos/owner/repo/issues?state=open&per_page=100"] = dict(data=[{key: listed[key] for key in ("number", "kind", "title", "url", "author", "created_at", "updated_at", "state", "state_reason", "labels", "comments_count")}])
+        self.run_cli("fetch", "--full")
+        self.run_cli("sync")
+        self.assertEqual((self.ledger()["pr", 1]["updated_at"], self.ledger()["pr", 1]["head_sha"]), ("2026-09-25T00:00:00Z", "b" * 40))
+        self.assertTrue(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "pr", "--number", "1")["assessment_current"])
+        self.responses["repos/owner/repo/pulls/1"]["data"]["head"]["sha"] = "c" * 40
+        self.responses["repos/owner/repo/issues?state=open&per_page=100"]["data"][0]["updated_at"] = "2026-09-26T00:00:00Z"
+        self.run_cli("fetch", "--full")
+        self.run_cli("sync")
+        self.assertFalse(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "pr", "--number", "1")["assessment_current"])
+
         wrong_repo = self.run_cli("item-score", "--expected-repo", "other/repo", "show", "--kind", "pr", "--number", "1", ok=False)
         self.assertIn("selected repository changed", wrong_repo.stderr)
 

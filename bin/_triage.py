@@ -257,7 +257,7 @@ def current_score(rec):
 
 
 def score_assessment_current(rec):
-    """A numeric or unassessed result covers the ledger revision it examined; legacy unbound results are due for another pass."""
+    """A numeric or unassessed result covers what it examined until that changes: a PR's head commit, an issue's comment count. Legacy unbound results are due for another pass. Item.ScoreValue in tui/ledger.go mirrors this."""
     score = rec.get("item_score")
     if not isinstance(score, dict) or score.get("rubric") != SCORE_RUBRIC:
         return False
@@ -267,7 +267,17 @@ def score_assessment_current(rec):
         return False
 
     revision = score.get("revision")
-    return isinstance(revision, dict) and bool(revision.get("updated_at")) and revision["updated_at"] == rec.get("updated_at")
+    if not isinstance(revision, dict):
+        return False
+
+    if rec.get("kind") == "pr":
+        if revision.get("head_sha") and rec.get("head_sha"):
+            return revision["head_sha"] == rec["head_sha"]
+    elif type(revision.get("comments")) is int:
+        return revision["comments"] == rec.get("comments_count")
+
+    # Without the narrower observation on both sides, the recorded update time decides: labels and base-branch pushes move it too, so bin/fetch reads a moved scored PR's head.
+    return bool(revision.get("updated_at")) and revision["updated_at"] == rec.get("updated_at")
 
 
 def merge_ready(rec):

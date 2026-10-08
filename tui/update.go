@@ -181,6 +181,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.items = msg.items
+		m.ledgerSeen = ledgerStamp(m.installRoot, m.repo)
 		if m.notifications.open {
 			m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, m.notifications.actions)
 			if m.notifications.suggestionOffset >= len(m.notifications.suggestions) {

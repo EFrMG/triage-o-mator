@@ -58,6 +58,7 @@ def sync():
         ts = now_iso()
 
         added, updated, closed = 0, 0, 0
+        pr_heads = meta.get("pr_heads") or {}
         for item in raw_items:
             # Inventory bodies stay in disposable raw evidence, not the compact decision ledger. Preserve existing user-owned extra fields.
             item = {k: v for k, v in item.items() if k not in TRIAGE_DEFAULTS and k not in ("body", "inventory_ids")}
@@ -78,7 +79,15 @@ def sync():
                 if existing.get("state") == "open" and item.get("state") == "closed":
                     closed += 1
 
+                moved = existing.get("updated_at") != item.get("updated_at")
                 existing.update(item)
+                # A head read by this fetch is current; one from before the PR moved no longer is.
+                head = pr_heads.get(str(item["number"])) if item["kind"] == "pr" else None
+                if head:
+                    existing["head_sha"] = head
+                elif moved:
+                    existing.pop("head_sha", None)
+
                 existing["last_synced_at"] = ts
                 updated += 1
 

@@ -408,14 +408,7 @@ func (m model) contextFooterGroups() []footerGroup {
 }
 
 func (m model) itemFooter() []footerGroup {
-	score := "Score —"
-	if it, ok := m.findItem(m.detail.key); ok {
-		score = it.ScoreLabel()
-		if value, assessed := it.ScoreValue(); assessed {
-			score = lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true).Render(score)
-		}
-	}
-	item := group("Item", hint{"", score}, bind("", keys.Save), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Close, keys.CloseEditor), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Yank))
+	item := group("Item", bind("", keys.Save), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Close, keys.CloseEditor), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Yank))
 	if it, ok := m.findItem(m.detail.key); ok && it.PendingReview() {
 		item.hints = append(item.hints, bind("", keys.ReviewClear))
 	}

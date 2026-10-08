@@ -296,6 +296,23 @@ func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
 
 func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 	m := baselineModel(t, baselineRoot(t))
+	m.ledgerSeen = ledgerStamp(m.installRoot, m.repo)
+	if _, cmd := m.onStatusTick(); m.ledgerSeen == "" || cmd == nil {
+		t.Fatal("the fixture ledger could not be stamped")
+	}
+	ledgerPath := filepath.Join(DataDir(m.installRoot, m.repo), "ledger.jsonl")
+	saved, err := os.ReadFile(ledgerPath)
+	if err != nil || os.WriteFile(ledgerPath, append(saved, '\n'), 0o644) != nil {
+		t.Fatal("could not rewrite the fixture ledger")
+	}
+	ticked, _ := m.onStatusTick()
+	if ticked.(model).ledgerSeen == m.ledgerSeen {
+		t.Fatal("a ledger written outside the TUI, as an agent's scoring pass does, was not noticed")
+	}
+	reloaded := reloadLedgerCmd(m.installRoot, m.repo)().(ledgerReloadedMsg)
+	if reloaded.err != nil || len(reloaded.items) != len(m.items) {
+		t.Fatalf("the rewritten ledger did not reload: %+v", reloaded.err)
+	}
 	it := m.items[0]
 	it.UpdatedAt = "2026-10-06T00:00:00Z"
 	for _, marks := range []struct{ clarity, support, actionability int }{{0, 0, 0}, {1, 1, 0}, {1, 1, 1}, {2, 1, 1}, {2, 2, 1}} {
@@ -324,8 +341,33 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 		}
 		viewLines := strings.Split(m.itemView(), "\n")
 		if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(viewLines[0])), it.ScoreLabel()) || ansi.StringWidth(viewLines[0]) != m.detailInnerWidth() ||
-			strings.Contains(viewLines[1], it.ScoreLabel()) || !strings.Contains(m.itemFooter()[0].hints[0].desc, it.ScoreLabel()) {
-			t.Fatalf("score %d was not right-aligned on the item title", value)
+			strings.Contains(viewLines[1], it.ScoreLabel()) || strings.Contains(m.itemFooter()[0].hints[0].desc, "Score") {
+			t.Fatalf("score %d was not right-aligned on the item title, or was repeated in the footer", value)
+		}
+
+		comments := it.CommentsCount
+		bound := it
+		boundScore := *score
+		boundScore.Revision.Comments = &comments
+		bound.ItemScore = &boundScore
+		bound.UpdatedAt = "2099-01-01T00:00:00Z"
+		if _, current := bound.ScoreValue(); !current && bound.Kind == "issue" {
+			t.Fatal("a later update time alone made an issue score stale")
+		}
+		bound.CommentsCount++
+		if _, current := bound.ScoreValue(); bound.Kind == "issue" && (current || bound.ScoreLabel() != fmt.Sprintf("Score %d/5 (stale?)", value)) {
+			t.Fatalf("a new comment did not mark the issue score stale: %q", bound.ScoreLabel())
+		}
+		pull := Item{Kind: "pr", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2099-01-01T00:00:00Z", ItemScore: &boundScore}
+		pullScore := boundScore
+		pullScore.Revision.HeadSHA = pull.HeadSHA
+		pull.ItemScore = &pullScore
+		if _, current := pull.ScoreValue(); !current {
+			t.Fatal("an unchanged head commit made a PR score stale")
+		}
+		pull.HeadSHA = strings.Repeat("c", 40)
+		if pull.ScoreLabel() != fmt.Sprintf("Score %d/5 (stale?)", value) {
+			t.Fatalf("a new head commit did not mark the PR score stale: %q", pull.ScoreLabel())
 		}
 		form := m.formPanel(60)
 		plain := ansi.Strip(form)
@@ -378,7 +420,7 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 	}
 
 	it.UpdatedAt = "2026-10-07T00:00:00Z"
-	if _, current := it.ScoreValue(); current || itemScoreMark(it).text != "Score — (stale)" {
+	if _, current := it.ScoreValue(); current || !strings.HasSuffix(itemScoreMark(it).text, "/5 (stale?)") {
 		t.Fatal("a later item revision kept displaying the old score as current")
 	}
 }

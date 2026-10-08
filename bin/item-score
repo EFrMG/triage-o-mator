@@ -163,6 +163,10 @@ def main():
             if score["revision"] is not None and score["revision"]["updated_at"] != row.get("updated_at"):
                 raise ValueError("selected evidence revision differs from the ledger; sync or choose current evidence")
 
+            if args.kind == "issue" and score["revision"] is not None:
+                # New comments are what returns an issue to the scoring queue, so the result binds the count it was given at.
+                score["revision"] = dict(score["revision"], comments=row.get("comments_count"))
+
             row["item_score"] = score
             save_ledger(ledger)
     except (ValueError, OSError, KeyError, TypeError) as error:

@@ -136,7 +136,11 @@ func (s proposalReviewStyles) writeProposal(b *strings.Builder, row actionPropos
 	if !s.writeSavedState(b, row.Status, row.Operation, kind) {
 		if context != nil && !context.Current || state.problem != "" {
 			fmt.Fprintf(b, "%s\n", inset(s.danger.Render("Changed context: prepare a fresh proposal and review.")))
-		} else if row.Status != "pending" || !row.Active || context == nil || state.busy {
+		} else if state.busy && state.approved {
+			fmt.Fprintf(b, "%s\n", inset(s.action.Render("Publishing the approved action…")))
+		} else if state.busy {
+			fmt.Fprintf(b, "%s\n", inset(s.action.Render("Checking the saved local context…")))
+		} else if row.Status != "pending" || !row.Active || context == nil {
 			fmt.Fprintf(b, "%s\n", inset(s.action.Render("Approval unavailable until the saved local context is current.")))
 		} else {
 			operation := "Publish the comment below."

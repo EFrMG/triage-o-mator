@@ -26,6 +26,7 @@ type Item struct {
 	Labels          []string       `json:"labels"`
 	ProposedLabels  []string       `json:"proposed_labels"`
 	CommentsCount   int            `json:"comments_count"`
+	HeadSHA         string         `json:"head_sha"` // PRs only, when a refresh read it for a scored PR
 	ItemScore       *ItemScore     `json:"item_score"`
 	Action          string         `json:"action"`
 	Confidence      string         `json:"confidence"`
@@ -50,6 +51,7 @@ type ItemScore struct {
 	Revision   struct {
 		UpdatedAt string `json:"updated_at"`
 		HeadSHA   string `json:"head_sha"`
+		Comments  *int   `json:"comments"`
 	} `json:"revision"`
 	AssessedAt string `json:"assessed_at"`
 	AssessedBy string `json:"assessed_by"`
@@ -69,25 +71,47 @@ type Key struct {
 
 func (i Item) Key() Key { return Key{Kind: i.Kind, Number: i.Number} }
 
-// scoreRubric and ScoreValue mirror SCORE_RUBRIC and current_score in bin/_triage.py.
+// scoreRubric, savedScore, scoreCurrent and ScoreValue mirror SCORE_RUBRIC, score_assessment_current and current_score in bin/_triage.py.
 const scoreRubric = "item-quality-v1"
 
-func (i Item) ScoreValue() (int, bool) {
-	if i.ItemScore == nil || i.ItemScore.Rubric != scoreRubric || i.ItemScore.Value == nil ||
-		*i.ItemScore.Value < 0 || *i.ItemScore.Value > 5 || i.ItemScore.Revision.UpdatedAt == "" ||
-		i.ItemScore.Revision.UpdatedAt != i.UpdatedAt {
+// savedScore is the recorded 0–5 number, whether or not the item has changed since.
+func (i Item) savedScore() (int, bool) {
+	if i.ItemScore == nil || i.ItemScore.Rubric != scoreRubric || i.ItemScore.Value == nil || *i.ItemScore.Value < 0 || *i.ItemScore.Value > 5 {
 		return 0, false
 	}
 
 	return *i.ItemScore.Value, true
 }
 
+// scoreCurrent reports whether what the score examined is unchanged: a PR's head commit, an issue's comment count, else the recorded update time.
+func (i Item) scoreCurrent() bool {
+	revision := i.ItemScore.Revision
+	if i.Kind == "pr" {
+		if revision.HeadSHA != "" && i.HeadSHA != "" {
+			return revision.HeadSHA == i.HeadSHA
+		}
+	} else if revision.Comments != nil {
+		return *revision.Comments == i.CommentsCount
+	}
+
+	return revision.UpdatedAt != "" && revision.UpdatedAt == i.UpdatedAt
+}
+
+func (i Item) ScoreValue() (int, bool) {
+	value, ok := i.savedScore()
+	if !ok || !i.scoreCurrent() {
+		return 0, false
+	}
+
+	return value, true
+}
+
 func (i Item) ScoreLabel() string {
 	if value, ok := i.ScoreValue(); ok {
 		return fmt.Sprintf("Score %d/5", value)
 	}
-	if i.ItemScore != nil && i.ItemScore.Value != nil {
-		return "Score — (stale)"
+	if value, ok := i.savedScore(); ok {
+		return fmt.Sprintf("Score %d/5 (stale?)", value)
 	}
 
 	return "Score —"

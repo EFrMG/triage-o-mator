@@ -94,5 +94,12 @@ func (m model) onStatusTick() (tea.Model, tea.Cmd) {
 		m.corpusObserverLifecycle.current = &readProcess{}
 		return m, tea.Batch(statusTick(), corpusCommand(m.installRoot, m.repo, m.corpusEpoch, m.corpus, "observe", m.corpusObserverLifecycle.current))
 	}
+	// A script run outside the TUI may have rewritten the ledger; the TUI's own writes and refreshes reload it themselves.
+	if stamp := ledgerStamp(m.installRoot, m.repo); stamp != "" && stamp != m.ledgerSeen && !m.refreshing && m.pendingApply == 0 {
+		m.ledgerSeen = stamp
+
+		return m, tea.Batch(statusTick(), reloadLedgerCmd(m.installRoot, m.repo))
+	}
+
 	return m, statusTick()
 }

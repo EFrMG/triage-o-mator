@@ -41,11 +41,11 @@ func (li listItem) Description() string {
 		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color(mark.color)).Render(mark.text))
 	}
 	if !li.unsaved && !li.Untriaged() && li.Action != "" {
-		parts = append(parts, singleLine(li.Action))
+		parts = append(parts, lipgloss.NewStyle().Bold(true).Render(singleLine(li.Action)))
 	} else if !li.unsaved && (len(li.proposalLabels) > 0 || li.proposalAction != "") {
 		parts = append(parts, "proposed")
 		if li.proposalAction != "" {
-			parts = append(parts, singleLine(li.proposalAction))
+			parts = append(parts, lipgloss.NewStyle().Bold(true).Render(singleLine(li.proposalAction)))
 		}
 	}
 

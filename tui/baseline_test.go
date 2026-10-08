@@ -364,6 +364,13 @@ func TestItemCardMetadataLayout(t *testing.T) {
 	if want := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("agent"); !strings.Contains(decided.Description(), want) {
 		t.Fatal("agent attribution lost its normal-weight color")
 	}
+	if want := lipgloss.NewStyle().Bold(true).Render("none"); !strings.Contains(decided.Description(), want) {
+		t.Fatal("saved action lost its bold style")
+	}
+	proposed := listItem{Item: Item{Kind: "issue"}, proposalAction: "close"}
+	if want := lipgloss.NewStyle().Bold(true).Render("close"); !strings.Contains(proposed.Description(), want) {
+		t.Fatal("proposed action lost its bold style")
+	}
 	decided.Action = ""
 	if plain := ansi.Strip(decided.Description()); plain != "PR · agent" || strings.Contains(plain, "/") {
 		t.Fatalf("label-only decision rendered an empty action: %q", plain)

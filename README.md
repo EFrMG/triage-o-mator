@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/favicon-no-bg.png" alt="triage-o-mator favicon" width="120">
+
 # triage-o-mator
 
 Isn't it fun to contribute on GitHub?!
@@ -7,7 +9,7 @@ Isn't it fun to contribute on GitHub?!
 [![Version](https://img.shields.io/github/v/tag/EFrMG/triage-o-mator?sort=semver)](https://github.com/EFrMG/triage-o-mator/tags)
 [![License](https://img.shields.io/github/license/EFrMG/triage-o-mator)](LICENSE)
 
-![triage-o-mator social card](assets/social-media-card.png)
+<img src="assets/social-media-card-no-bg.png" alt="triage-o-mator social card" width="980">
 
 </div>
 

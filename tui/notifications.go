@@ -493,11 +493,23 @@ func (n notificationsUI) actionNeeds(row actionHistoryRow) bool {
 func (n notificationsUI) choiceNeeds(choice notificationChoice) bool {
 	switch choice.kind {
 	case "item":
-		return choice.suggestion >= 0 || choice.actionProposal >= 0 && n.actions.Rows[choice.actionProposal].Needs && n.actions.Rows[choice.actionProposal].Status != "executed" ||
+		return choice.actionProposal >= 0 && n.actions.Rows[choice.actionProposal].Needs && n.actions.Rows[choice.actionProposal].Status != "executed" ||
 			choice.tracked >= 0 && n.tracked.Rows[choice.tracked].NewCount > 0 ||
 			choice.attention >= 0 && n.watchNeeds(n.attention.Rows[choice.attention]) ||
 			choice.closure >= 0 && n.actionNeeds(n.closures.Rows[choice.closure])
-	case "attention-prev", "attention-more", "closure-prev", "closure-more", "suggestion-prev", "suggestion-more":
+	case "attention-prev", "attention-more", "closure-prev", "closure-more":
+		return true
+	default:
+		return false
+	}
+}
+
+// choiceSuggested reports a card that belongs under Suggested actions: a saved decision's action with no exact proposal and nothing else needing attention, which Notifications can hand to an agent but not approve.
+func (n notificationsUI) choiceSuggested(choice notificationChoice) bool {
+	switch choice.kind {
+	case "item":
+		return choice.suggestion >= 0 && choice.actionProposal < 0 && !n.choiceNeeds(choice)
+	case "suggestion-prev", "suggestion-more":
 		return true
 	default:
 		return false
@@ -581,12 +593,6 @@ func (n notificationsUI) choices() []notificationChoice {
 			choices = append(choices, item)
 		}
 	}
-	if n.suggestionOffset > 0 {
-		choices = append(choices, notificationChoice{kind: "suggestion-prev"})
-	}
-	if end < len(n.suggestions) {
-		choices = append(choices, notificationChoice{kind: "suggestion-more"})
-	}
 	if n.attention != nil {
 		if n.attention.Pagination.Offset > 0 {
 			choices = append(choices, notificationChoice{kind: "attention-prev"})
@@ -604,7 +610,7 @@ func (n notificationsUI) choices() []notificationChoice {
 		}
 	}
 	for _, item := range items {
-		if !n.choiceNeeds(item) {
+		if !n.choiceNeeds(item) && !n.choiceSuggested(item) {
 			choices = append(choices, item)
 		}
 	}
@@ -615,6 +621,17 @@ func (n notificationsUI) choices() []notificationChoice {
 		if n.tracked.Next != nil {
 			choices = append(choices, notificationChoice{kind: "tracked-more"})
 		}
+	}
+	for _, item := range items {
+		if n.choiceSuggested(item) {
+			choices = append(choices, item)
+		}
+	}
+	if n.suggestionOffset > 0 {
+		choices = append(choices, notificationChoice{kind: "suggestion-prev"})
+	}
+	if end < len(n.suggestions) {
+		choices = append(choices, notificationChoice{kind: "suggestion-more"})
 	}
 	return choices
 }
@@ -956,13 +973,24 @@ func (m model) notificationsView() string {
 	}
 	hasPast := false
 	for _, choice := range choices {
-		if !n.choiceNeeds(choice) {
+		if !n.choiceNeeds(choice) && !n.choiceSuggested(choice) {
 			hasPast = true
 			renderNotificationChoice(n, choice, card)
 		}
 	}
 	if !hasPast {
 		fmt.Fprintf(&b, "%s\n", inset(mutedText("No past actions yet.")))
+	}
+	fmt.Fprintf(&b, "\n%s\n", inset(heading.Render("Suggested actions")))
+	if len(n.suggestions) == 0 {
+		fmt.Fprintf(&b, "%s\n", inset(mutedText("No saved decision suggests a comment, closure or reopening.")))
+	} else {
+		fmt.Fprintf(&b, "%s\n", inset(mutedText("From saved decisions. Prepare an exact proposal for them with Agents.")))
+	}
+	for _, choice := range choices {
+		if n.choiceSuggested(choice) {
+			renderNotificationChoice(n, choice, card)
+		}
 	}
 	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(m.mainHeight()))
 	vp.SetContent(b.String())
@@ -1107,10 +1135,10 @@ func renderNotificationChoice(n notificationsUI, choice notificationChoice, card
 			label = "✓ " + label
 		}
 		mark := cardMark{}
-		if choice.suggestion >= 0 && choice.actionProposal < 0 && (choice.tracked < 0 || n.tracked.Rows[choice.tracked].NewCount == 0) {
-			mark = cardMark{text: "SUGGESTED", color: currentTheme.Warning}
+		if n.choiceSuggested(choice) {
+			// The section heading and the summary already say it is a suggestion.
 		} else if n.choiceNeeds(choice) {
-			mark = cardMark{text: "NEW", color: currentTheme.Info}
+			mark = cardMark{text: "New", color: currentTheme.Info}
 		} else if choice.actionProposal >= 0 {
 			mark = actionOperationMark(n.actions.Rows[choice.actionProposal].Operation)
 		}

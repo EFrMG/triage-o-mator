@@ -712,7 +712,7 @@ func (m model) clickNotifications(event tea.Mouse, _ bool) (tea.Model, tea.Cmd) 
 	}
 	hasPast := false
 	for i, choice := range choices {
-		if !n.choiceNeeds(choice) {
+		if !n.choiceNeeds(choice) && !n.choiceSuggested(choice) {
 			hasPast = true
 			starts[i] = line
 			line += cardHeight
@@ -720,6 +720,13 @@ func (m model) clickNotifications(event tea.Mouse, _ bool) (tea.Model, tea.Cmd) 
 	}
 	if !hasPast {
 		line++
+	}
+	line += 3 // blank, Suggested actions heading and its one-line note
+	for i, choice := range choices {
+		if n.choiceSuggested(choice) {
+			starts[i] = line
+			line += cardHeight
+		}
 	}
 	offset := minInt(maxInt(0, starts[selected]-m.mainHeight()/2), maxInt(line+1-m.mainHeight(), 0))
 	clicked := event.Y - 1 + offset

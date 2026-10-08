@@ -2634,10 +2634,13 @@ func TestSuggestedActionsAndExplicitPendingReviewHaveSeparateTabs(t *testing.T) 
 		t.Fatal("Notifications did not page suggested actions")
 	}
 	m.notifications.selected = suggestionIndex
-	var cardSummary string
-	renderNotificationChoice(m.notifications, choices[suggestionIndex], func(_, summary string, _ cardMark) { cardSummary = summary })
-	if !strings.Contains(cardSummary, "Suggested close · exact action needed") {
+	var cardSummary, cardMarkText string
+	renderNotificationChoice(m.notifications, choices[suggestionIndex], func(_, summary string, mark cardMark) { cardSummary, cardMarkText = summary, mark.text })
+	if !strings.Contains(cardSummary, "Suggested close · exact action needed") || cardMarkText != "" {
 		t.Fatal("saved suggestion looked like an approved exact proposal")
+	}
+	if choices[0].actionProposal != 0 || suggestionIndex == 0 || m.notifications.choiceNeeds(choices[suggestionIndex]) || !m.notifications.choiceSuggested(choices[suggestionIndex]) || !m.notifications.choiceSuggested(choices[moreIndex]) {
+		t.Fatal("suggested actions were mixed with the cards that need attention")
 	}
 	next, cmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "y"})
 	if cmd == nil || !strings.Contains(next.(model).status, "action suggestion") {

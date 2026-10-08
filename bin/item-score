@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
-from _assessment_evidence import selected_item
+from _assessment_evidence import selected_item, unassessed_with_new_evidence
 from _cache import EvidenceCache
 from _evidence import repository, validate_payload
 from _storage import locked
@@ -122,6 +122,7 @@ def main():
         score = row.get("item_score")
         print(json.dumps(dict(repository=REPO, kind=args.kind, number=args.number, score=score, current=current_score(row) is not None,
                               assessment_current=score_assessment_current(row),
+                              new_evidence=(args.kind, args.number) in unassessed_with_new_evidence([row]),
                               ledger_updated_at=row.get("updated_at")), ensure_ascii=False, indent=2))
         return
 

@@ -191,6 +191,17 @@ class EvidenceTests(Workspace):
         self.assertEqual(partial_score["score"]["snapshot_id"], partial["snapshot_id"])
         self.assertEqual(partial_score["score"]["revision"]["head_sha"], "b" * 40)
         self.assertNotEqual(partial_score["score"]["coverage"].get("diff"), "complete")
+        self.assertFalse(partial_score["new_evidence"])
+
+        # Once complete code evidence is saved, the unassessed PR is offered for scoring again.
+        patch = "@@ -1,1 +1,1 @@\n-old\n+new"
+        self.responses["repos/owner/repo/pulls/1"]["data"].update(changed_files=1, additions=1, deletions=1)
+        self.responses["repos/owner/repo/pulls/1#diff"] = dict(text="diff --git a/app.py b/app.py\nindex 1111111..2222222 100644\n--- a/app.py\n+++ b/app.py\n" + patch)
+        self.responses["repos/owner/repo/pulls/1/files?per_page=100&page=1"] = dict(data=[dict(filename="app.py", status="modified", additions=1, deletions=1, changes=2, patch=patch)])
+        complete = self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "pr-code", "--mode", "refresh")
+        self.assertEqual(complete["components"]["diff"]["status"], "complete")
+        self.assertTrue(self.json_cli("item-score", "--expected-repo", "owner/repo", "show", "--kind", "pr", "--number", "1")["new_evidence"])
+        self.assertTrue(any("Score a bounded selection of 2" in row["what"] for row in self.json_cli("next", "--json")["suggestions"]))
 
         # A refresh that sees the scored PR moved reads its head once: an unchanged head keeps the result current, a new one makes it stale.
         listed = dict(self.ledger()["pr", 1], updated_at="2026-09-25T00:00:00Z")

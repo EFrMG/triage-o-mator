@@ -137,7 +137,11 @@ def suggestions(ledger):
             "each action follows its repository policy; incomplete or disputed cases stay staged")
 
     # Both numeric and unassessed results cover one recorded source revision; a changed item returns to the queue.
-    unscored = [r for r in open_items if not score_assessment_current(r)]
+    # An unassessed result also returns once complete evidence for its item is saved.
+    from _assessment_evidence import unassessed_with_new_evidence
+
+    evidence_arrived = unassessed_with_new_evidence(open_items)
+    unscored = [r for r in open_items if not score_assessment_current(r) or (r["kind"], r["number"]) in evidence_arrived]
     if unscored:
         add("agent", f"Score a bounded selection of {len(unscored)} new or stale items",
             "prompts/score-items.md (select up to 20 exact item keys and saved snapshots)",

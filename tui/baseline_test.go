@@ -1429,10 +1429,13 @@ func TestBaselineBatchCreationUsesFloatingEditor(t *testing.T) {
 	m.batches.open = true
 	m.sidebar.selected = batchesIndex
 	m = baselineSend(m, mouseKey("n"))
-	if !m.batches.editing {
+	if !m.batches.editing || m.batches.size.Prompt != "" {
 		t.Fatal("n did not open the batch editor")
 	}
 	view := ansi.Strip(m.bodyView())
+	if strings.Contains(view, "> 25") {
+		t.Fatal("batch size field kept the default input prompt")
+	}
 	for _, field := range []string{"New batch", "Size", "Kind", "Order", "Group"} {
 		if !strings.Contains(view, field) {
 			t.Fatalf("floating batch editor omitted %s", field)
@@ -1456,6 +1459,34 @@ func TestBaselineBatchCreationUsesFloatingEditor(t *testing.T) {
 	m = next.(model)
 	if cmd == nil || m.batches.editing || !m.batches.busy || m.batches.kindIdx != 1 {
 		t.Fatal("Ctrl-S did not submit the floating batch editor")
+	}
+}
+
+func TestBaselineBatchItemsReturnToBatches(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	id := "b20261008-000001"
+	m.batches.records = []batchRecord{{ID: id, Keys: []Key{{Kind: "issue", Number: 1}}}}
+	m.batches.selected = 0
+	m.openBatch(id)
+	if m.activeBatch != id || !m.listReady || m.focus != FocusList {
+		t.Fatal("batch did not open its item list")
+	}
+
+	m = baselineSend(m, mouseKey("enter"))
+	if m.focus != FocusDetail {
+		t.Fatal("batch item did not open")
+	}
+	m = baselineSend(m, mouseKey("esc"))
+	if m.focus != FocusList || m.activeBatch != id {
+		t.Fatal("Esc from a batch item did not return to its list")
+	}
+	m = baselineSend(m, mouseKey("esc"))
+	if !m.batches.open || m.activeBatch != "" || m.batches.selected != 0 || m.listReady || m.focus != FocusSidebar || m.sidebar.selected != batchesIndex {
+		t.Fatal("Esc from a batch item list did not return to the selected batch")
+	}
+	m = baselineSend(m, mouseKey("esc"))
+	if m.batches.open || !m.overview {
+		t.Fatal("Esc from Batches did not return to the overview")
 	}
 }
 

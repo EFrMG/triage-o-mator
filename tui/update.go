@@ -1306,6 +1306,24 @@ func (m *model) goBack() {
 		// A draft kept just now shows as unsaved in the list.
 		m.showList()
 	case FocusList:
+		if m.activeBatch != "" {
+			id := m.activeBatch
+			m.activeBatch = ""
+			m.listReady = false
+			m.overview = true
+			m.focus = FocusSidebar
+			m.sidebar.selected = batchesIndex
+			for i, batch := range m.batches.records {
+				if batch.ID == id {
+					m.batches.selected = i
+					m.batches.open = true
+					break
+				}
+			}
+
+			return
+		}
+
 		m.focus = FocusSidebar
 	case FocusSidebar:
 		m.listReady = false

@@ -370,6 +370,7 @@ func (m model) activeProposal(key Key) (proposal, bool) {
 
 func (m *model) startBatchForm() {
 	size := textinput.New()
+	size.Prompt = ""
 	size.CharLimit = 3
 	size.SetValue("25")
 	size.CursorEnd()

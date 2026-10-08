@@ -166,6 +166,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(reloadLedgerCmd(m.installRoot, m.repo), detailCmd, autoCmd)
 	case trackDoneMsg:
 		return m.finishTracking(msg)
+	case trackManyDoneMsg:
+		return m.finishTrackingMany(msg)
 
 	case ledgerReloadedMsg:
 		if msg.root != m.installRoot || msg.repo != m.repo {
@@ -996,9 +998,7 @@ func (m model) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.openDuplicatesFor(li.Key(), true)
 		}
 	case key.Matches(msg, keys.Track):
-		if li, ok := m.list.SelectedItem().(listItem); ok {
-			return m.startTracking(li.Key())
-		}
+		return m.requestTracking(m.listTargets())
 	case key.Matches(msg, keys.Delete):
 		if m.activeBatch != "" {
 			return m.requestBatchRemove()

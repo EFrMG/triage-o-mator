@@ -1906,6 +1906,25 @@ func TestProposalReaderTracksComments(t *testing.T) {
 	if reload == nil || updated.(model).notifications.actionReview == nil {
 		t.Fatal("tracking did not refresh Notifications while keeping the proposal reader")
 	}
+
+	ticked := []Item{{Kind: "issue", Number: 1}, {Kind: "pr", Number: 3}}
+	list := baselineModel(t, root)
+	next, cmd = list.requestTracking(ticked)
+	if cmd != nil || next.(model).listConfirm != "w" {
+		t.Fatal("tracking several ticked items did not ask for w again")
+	}
+	next, cmd = next.(model).requestTracking(ticked)
+	if cmd == nil {
+		t.Fatal("the second w did not track the ticked items")
+	}
+	many := cmd().(trackManyDoneMsg)
+	if many.err != nil || many.added != 2 {
+		t.Fatalf("w tracked only part of the ticked selection: %+v", many)
+	}
+	updated, _ = next.(model).finishTrackingMany(many)
+	if updated.(model).trackingBusy || !strings.Contains(updated.(model).status, "Tracking 2 new item(s)") {
+		t.Fatalf("bulk tracking did not report its result: %q", updated.(model).status)
+	}
 }
 
 func TestNotificationsShowOneCardPerItemAndViewEachSource(t *testing.T) {

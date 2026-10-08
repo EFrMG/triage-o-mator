@@ -67,6 +67,88 @@ func (m model) startTracking(key Key) (tea.Model, tea.Cmd) {
 	return m, trackCmd(m.installRoot, m.repo, "add", key)
 }
 
+// trackManyDoneMsg reports a bulk w: how many targets are now tracked, how many of those already were, and the first failure, which stops the rest.
+type trackManyDoneMsg struct {
+	root, repo            string
+	total, added, already int
+	err                   error
+}
+
+// requestTracking tracks the comments of every list target: one hovered item at once, several ticked ones after a second w, since each saves its own comment baseline from GitHub.
+func (m model) requestTracking(targets []Item) (tea.Model, tea.Cmd) {
+	if len(targets) == 0 || m.trackingBusy {
+		return m, nil
+	}
+	if len(targets) == 1 {
+		m.listConfirm = ""
+
+		return m.startTracking(targets[0].Key())
+	}
+	if len(targets) > 20 {
+		m.status = "Track at most 20 items at once."
+
+		return m, nil
+	}
+	if m.listConfirm != "w" {
+		m.listConfirm = "w"
+		m.status = fmt.Sprintf("Track comments on %s? Each one reads its current comments from GitHub. Press w again.", describeTargets(targets))
+
+		return m, nil
+	}
+
+	m.listConfirm = ""
+	m.trackingBusy = true
+	m.status = fmt.Sprintf("Tracking %s and saving their comment baselines…", describeTargets(targets))
+	keys := make([]Key, len(targets))
+	for i, item := range targets {
+		keys[i] = item.Key()
+	}
+
+	return m, trackManyCmd(m.installRoot, m.repo, keys)
+}
+
+func trackManyCmd(root, repo string, targets []Key) tea.Cmd {
+	return func() tea.Msg {
+		msg := trackManyDoneMsg{root: root, repo: repo, total: len(targets)}
+		for _, target := range targets {
+			done := trackCmd(root, repo, "add", target)().(trackDoneMsg)
+			if done.err != nil {
+				msg.err = done.err
+				break
+			}
+
+			if done.alreadyTracking {
+				msg.already++
+			} else {
+				msg.added++
+			}
+		}
+
+		return msg
+	}
+}
+
+func (m model) finishTrackingMany(msg trackManyDoneMsg) (tea.Model, tea.Cmd) {
+	if msg.root != m.installRoot || msg.repo != m.repo {
+		return m, nil
+	}
+	m.trackingBusy = false
+	m.clearTicks()
+	summary := fmt.Sprintf("Tracking %d new item(s)", msg.added)
+	if msg.already > 0 {
+		summary += fmt.Sprintf("; %d already tracked", msg.already)
+	}
+	if msg.err != nil {
+		m.recordError("Couldn't track every selected item", msg.err)
+		m.status = fmt.Sprintf("%s, then stopped with %d left. ! shows details.", summary, msg.total-msg.added-msg.already)
+
+		return m, nil
+	}
+	m.status = summary + ". Their comments will be checked on the next ledger refresh."
+
+	return m, nil
+}
+
 func (m model) finishTracking(msg trackDoneMsg) (tea.Model, tea.Cmd) {
 	if msg.root != m.installRoot || msg.repo != m.repo {
 		return m, nil

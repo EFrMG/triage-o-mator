@@ -258,12 +258,15 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.status = "This action already ran."
 			return m, nil
 		}
-		if row.Status != "pending" || !row.Active || review.context == nil || !review.context.Current || review.problem != "" {
-			m.warn("Current action context is required before approval.")
+		if row.Status == "pending" && row.DecisionQuestion != "" && row.DecisionResolution == nil {
+			if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok {
+				return m.openAnswerComposer(choice)
+			}
+			m.warn("This action question is no longer available; refresh Notifications.")
 			return m, nil
 		}
-		if row.DecisionQuestion != "" && row.DecisionResolution == nil {
-			m.warn("Answer the action question before exact approval.")
+		if row.Status != "pending" || !row.Active || review.context == nil || !review.context.Current || review.problem != "" {
+			m.warn("Current action context is required before approval.")
 			return m, nil
 		}
 		review.busy = true
@@ -274,12 +277,6 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "e":
 		if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok {
 			return m.openProposalEdit(choice)
-		}
-	case "r":
-		if row.DecisionQuestion != "" {
-			if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok {
-				return m.openAnswerComposer(choice)
-			}
 		}
 	case "d", "D":
 		if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok {

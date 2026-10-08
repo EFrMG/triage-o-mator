@@ -227,8 +227,8 @@ func (m model) contextFooterGroups() []footerGroup {
 			}
 			if row.Status == "pending" {
 				action.hints = append(action.hints, hint{"e", "edit"}, hint{"d", "reject"})
-				if row.DecisionQuestion != "" {
-					action.hints = append(action.hints, hint{"r", "answer question"})
+				if row.DecisionQuestion != "" && row.DecisionResolution == nil {
+					action.hints = append(action.hints, hint{"a", "answer question"})
 				}
 			} else {
 				action.hints = append(action.hints, hint{"d", "dismiss"})

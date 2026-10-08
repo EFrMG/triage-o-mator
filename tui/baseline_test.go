@@ -2917,10 +2917,13 @@ else:
 	if m.notifications.actionReview == nil || m.notifications.actionReview.context == nil || m.notifications.actionReview.context.Current {
 		t.Fatal("stale action context was accepted")
 	}
-	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	if cmd != nil {
-		t.Fatal("stale action context offered approval")
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	m = next.(model)
+	if cmd == nil || !m.comment.open || m.notifications.actionReview.approval != "" {
+		t.Fatal("questioned action entered approval before an answer")
 	}
+	next, _ = m.handleCommentKey(tea.KeyPressMsg{Text: "esc"})
+	m = next.(model)
 	if err := os.Remove(filepath.Join(root, "stale-action")); err != nil {
 		t.Fatal(err)
 	}
@@ -2933,14 +2936,26 @@ else:
 	if !strings.Contains(styledReview, newProposalReviewStyles().section.Render("Proposed action")) || !strings.Contains(styledReview, newProposalReviewStyles().section.Render("Comment to publish")) {
 		t.Fatal("issue action did not use the shared proposal review styling")
 	}
-	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	if cmd != nil {
-		t.Fatal("unanswered action question offered approval")
-	}
 	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "r"})
 	m = next.(model)
+	if cmd != nil || m.comment.open {
+		t.Fatal("r still opened the action answer composer")
+	}
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
+	m = next.(model)
 	if cmd == nil || !m.comment.open || m.comment.answerCheckpoint != "action-1" {
-		t.Fatal("r did not open the attributed answer composer")
+		t.Fatal("a did not open the attributed answer composer")
+	}
+	m.height = 30
+	m.layoutComment()
+	panel := ansi.Strip(m.commentView())
+	if lipgloss.Height(panel) > m.commentHeight() || !strings.Contains(strings.Split(panel, "\n")[lipgloss.Height(panel)-1], "╯") {
+		t.Fatal("action answer editor overflowed or lost its bottom border")
+	}
+	m.comment.answerQuestion = strings.Repeat("Long question text ", 100)
+	m.layoutComment()
+	if lipgloss.Height(m.commentView()) > m.commentHeight() {
+		t.Fatal("long action question overflowed the answer editor")
 	}
 	m.comment.text.SetValue("Send a focused request")
 	next, cmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
@@ -3023,14 +3038,10 @@ else:
 	if m.notifications.actionReview == nil || m.notifications.actionReview.context == nil {
 		t.Fatal("PR closure did not open the shared action reader")
 	}
-	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	if cmd != nil {
-		t.Fatal("unanswered PR closure question offered approval")
-	}
-	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "r"})
+	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
 	m = next.(model)
 	if cmd == nil || !m.comment.open || m.comment.answerCheckpoint != "closure-1" {
-		t.Fatal("r did not open the PR closure answer composer")
+		t.Fatal("a did not open the PR closure answer composer")
 	}
 	m.comment.text.SetValue("Yes, #4 retains the behavior")
 	next, cmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})

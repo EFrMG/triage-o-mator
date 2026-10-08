@@ -665,10 +665,20 @@ func (m model) commentView() string {
 		}
 	}
 	if m.comment.answerCheckpoint != "" {
-		content = wrapText("Question: "+sanitize(m.comment.answerQuestion), maxInt(m.commentWidth()-4, 1)) + "\n\n" + content
+		content = m.answerQuestionView() + "\n\n" + content
 	}
 
 	return m.composerPanel(m.commentHeader(m.commentWidth()-4), content)
+}
+
+func (m model) answerQuestionView() string {
+	lines := strings.Split(wrapText("Question: "+m.comment.answerQuestion, maxInt(m.commentWidth()-4, 1)), "\n")
+	limit := maxInt(m.commentHeight()-9, 1)
+	if len(lines) > limit {
+		lines = lines[:limit]
+		lines[limit-1] = "…"
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m model) commentWidth() int {
@@ -725,6 +735,9 @@ func (m *model) layoutComment() {
 	c := &m.comment
 	width := maxInt(m.commentWidth()-4, 1)
 	height := maxInt(m.commentHeight()-4, 3)
+	if c.answerCheckpoint != "" {
+		height -= lipgloss.Height(m.answerQuestionView()) + 2
+	}
 	if c.referenceActive && !c.previewing {
 		height = maxInt(height-6, 3)
 	}

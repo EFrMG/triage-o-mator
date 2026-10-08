@@ -366,7 +366,7 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 			t.Fatal("an unchanged head commit made a PR score stale")
 		}
 		pull.HeadSHA = strings.Repeat("c", 40)
-		if pull.ScoreLabel() != fmt.Sprintf("Score %d/5 (stale?)", value) {
+		if pull.ScoreLabel() != fmt.Sprintf("Score %d/5 (stale?)", value) || itemScoreMark(pull).color != itemScoreColor(value) {
 			t.Fatalf("a new head commit did not mark the PR score stale: %q", pull.ScoreLabel())
 		}
 		form := m.formPanel(60)

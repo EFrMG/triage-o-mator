@@ -85,7 +85,8 @@ func (li listItem) CommentsLabel() string {
 }
 
 func itemScoreMark(item Item) cardMark {
-	if value, ok := item.ScoreValue(); ok {
+	// A stale score keeps its number's color; only its "(stale?)" suffix says it may be out of date.
+	if value, ok := item.savedScore(); ok {
 		return cardMark{text: item.ScoreLabel(), color: itemScoreColor(value)}
 	}
 

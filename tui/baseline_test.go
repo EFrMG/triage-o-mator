@@ -2920,7 +2920,7 @@ elif "review" in args:
     print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="exact-approval")))
 elif "execute" in args:
     pathlib.Path("published-action").write_text("yes")
-    print(json.dumps(dict(kind="issue", number=1, status="executed")))
+    print(json.dumps(dict(results=[dict(kind="issue", number=1, status="executed")])))
 else:
     sys.exit("unexpected action command")
 `
@@ -3048,7 +3048,7 @@ elif "review" in args:
     print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="exact-closure-approval")))
 elif "execute" in args:
     pathlib.Path("published-closure").write_text("yes")
-    print(json.dumps(dict(kind="pr", number=3, status="executed")))
+    print(json.dumps(dict(results=[dict(kind="pr", number=3, status="executed")])))
 else:
     sys.exit("unexpected action proposal operation")
 `

@@ -72,12 +72,15 @@ func actionReviewCmd(root, repo string, generation uint64, row actionProposalRow
 				}
 			}
 		} else {
-			var result struct {
-				Kind, Status string
-				Number       int
+			// bin/action-proposals execute reports one result per selected proposal; this reader approved exactly one.
+			var executed struct {
+				Results []struct {
+					Kind, Status string
+					Number       int
+				} `json:"results"`
 			}
-			msg.err = json.Unmarshal([]byte(out), &result)
-			if msg.err == nil && (result.Kind != row.Kind || result.Number != row.Number || result.Status != "executed") {
+			msg.err = json.Unmarshal([]byte(out), &executed)
+			if msg.err == nil && (len(executed.Results) != 1 || executed.Results[0].Kind != row.Kind || executed.Results[0].Number != row.Number || executed.Results[0].Status != "executed") {
 				msg.err = fmt.Errorf("action execution outcome differs from the approved item")
 			}
 		}

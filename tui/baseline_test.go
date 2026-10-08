@@ -89,6 +89,58 @@ func baselineModel(t *testing.T, root string) model {
 	return baselineSend(m, fetchSyncDoneMsg{})
 }
 
+func TestBackClearsTicksBeforeLeavingSelections(t *testing.T) {
+	for _, back := range []string{"esc", "h"} {
+		for _, screen := range []string{"items", "group members", "batches", "briefs", "notifications"} {
+			t.Run(screen+"/"+back, func(t *testing.T) {
+				m := baselineModel(t, baselineRoot(t))
+				itemKey := Key{Kind: "issue", Number: 1}
+				switch screen {
+				case "items":
+					m.activateTab(0)
+					m.ticked[itemKey] = true
+					m.showList()
+				case "group members":
+					m.groups.open = true
+					m.groups.detail = true
+					m.groups.records = []Group{{Members: []GroupMember{{Kind: "issue", Number: 1}}}}
+					m.groups.ticked = map[Key]bool{itemKey: true}
+				case "batches":
+					m.batches.open = true
+					m.batches.ticked = map[string]bool{"batch": true}
+				case "briefs":
+					m.briefs.open = true
+					m.briefs.ticked = map[string]bool{"brief": true}
+				case "notifications":
+					m.notifications.open = true
+					m.notifications.ticked = map[int]bool{1: true}
+				}
+
+				m = baselineSend(m, mouseKey(back))
+				if screen == "items" && m.focus != FocusList {
+					t.Fatal("clearing item ticks left the list")
+				}
+				if screen == "group members" && (!m.groups.open || !m.groups.detail || len(m.groups.ticked) != 0) ||
+					screen == "batches" && (!m.batches.open || len(m.batches.ticked) != 0) ||
+					screen == "briefs" && (!m.briefs.open || len(m.briefs.ticked) != 0) ||
+					screen == "notifications" && (!m.notifications.open || len(m.notifications.ticked) != 0) ||
+					screen == "items" && (len(m.ticked) != 0 || strings.Contains(m.list.Title, "ticked")) {
+					t.Fatal("first back did not clear ticks in place")
+				}
+
+				m = baselineSend(m, mouseKey(back))
+				if screen == "items" && m.focus != FocusSidebar ||
+					screen == "group members" && m.groups.detail ||
+					screen == "batches" && m.batches.open ||
+					screen == "briefs" && m.briefs.open ||
+					screen == "notifications" && m.notifications.open {
+					t.Fatal("second back did not leave the selection screen")
+				}
+			})
+		}
+	}
+}
+
 func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
 	root := baselineRoot(t)
 	reports := filepath.Join(root, "reports", "owner", "repo")

@@ -525,6 +525,13 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleDetailKey(msg)
 	}
 
+	// Esc and h clear visible item ticks before navigating away from the list.
+	if m.focus == FocusList && m.itemListActive() && (msg.String() == "esc" || msg.String() == "h") && len(m.ticked) > 0 {
+		m.clearTicks()
+
+		return m, nil
+	}
+
 	// In a searched list, going back clears the search first.
 	if key.Matches(msg, keys.Back) && m.focus == FocusList && m.searchQuery() != "" {
 		m.clearSearch()

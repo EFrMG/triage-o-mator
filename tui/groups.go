@@ -341,6 +341,12 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	g := m.selectedGroup()
 	switch {
 	case key.Matches(msg, keys.Back):
+		if m.groups.detail && (msg.String() == "esc" || msg.String() == "h") && len(m.groups.ticked) > 0 {
+			m.groups.ticked = map[Key]bool{}
+
+			return m, nil
+		}
+
 		if m.groups.detail {
 			m.groups.detail = false
 
@@ -387,6 +393,9 @@ func (m model) handleGroupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.groups.detail && g != nil && m.groups.member < len(g.Members) {
 			k := g.Members[m.groups.member].Key()
 			m.groups.ticked[k] = !m.groups.ticked[k]
+			if !m.groups.ticked[k] {
+				delete(m.groups.ticked, k)
+			}
 			member := minInt(m.groups.member+1, len(g.Members)-1)
 			if member != m.groups.member {
 				m.groups.previewOffset = 0

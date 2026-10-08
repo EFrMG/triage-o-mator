@@ -487,6 +487,10 @@ func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.briefsGeneration++
 			return m, nil
 		}
+		if msg.String() != "left" && len(m.briefs.ticked) > 0 {
+			m.briefs.ticked = map[string]bool{}
+			return m, nil
+		}
 		m.briefsLifecycle.stop()
 		m.briefsGeneration++
 		focus := m.briefs.originFocus

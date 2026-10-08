@@ -714,6 +714,10 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.notificationsGeneration++
 		return m.requestQuit()
 	case "esc", "x", "h":
+		if msg.String() != "x" && len(m.notifications.ticked) > 0 {
+			m.notifications.ticked = map[int]bool{}
+			return m, nil
+		}
 		m.notificationsLifecycle.stop()
 		m.notificationsGeneration++
 		m.notifications = notificationsUI{}
@@ -768,6 +772,9 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			row := m.notifications.actions.Rows[choices[m.notifications.selected].actionProposal]
 			if row.Kind == "pr" && row.Operation == "close" && row.Active {
 				m.notifications.ticked[row.Number] = !m.notifications.ticked[row.Number]
+				if !m.notifications.ticked[row.Number] {
+					delete(m.notifications.ticked, row.Number)
+				}
 			}
 		}
 	case "a", "A":

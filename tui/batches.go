@@ -434,6 +434,12 @@ func (m model) handleBatchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case key.Matches(msg, keys.Back):
+		if (msg.String() == "esc" || msg.String() == "h") && len(m.batches.ticked) > 0 {
+			m.batches.ticked = map[string]bool{}
+
+			return m, nil
+		}
+
 		m.batches.open = false
 
 		return m, nil
@@ -471,6 +477,9 @@ func (m model) handleBatchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Tick):
 		if b != nil {
 			m.batches.ticked[b.ID] = !m.batches.ticked[b.ID]
+			if !m.batches.ticked[b.ID] {
+				delete(m.batches.ticked, b.ID)
+			}
 			m.batches.selected = minInt(m.batches.selected+1, last)
 		}
 	case key.Matches(msg, keys.ApplyAll):

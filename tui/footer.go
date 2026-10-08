@@ -341,16 +341,10 @@ func (m model) contextFooterGroups() []footerGroup {
 	case m.groups.open:
 		return m.groupFooter()
 	case m.briefs.open:
-		if m.briefs.markPreview != nil {
-			if m.briefs.busy {
-				return []footerGroup{group("Briefs", hint{"", "marking read…"})}
-			}
-			return []footerGroup{group("Briefs", hint{"d", "confirm renames"}, hint{"j/k", "scroll"}), group("Navigation", hint{"Esc", "cancel"})}
-		}
 		if m.briefs.busy {
 			status := "reading…"
 			if len(m.briefs.markIDs) > 0 {
-				status = "checking renames…"
+				status = "marking read…"
 			}
 			return []footerGroup{group("Briefs", hint{"", status}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}

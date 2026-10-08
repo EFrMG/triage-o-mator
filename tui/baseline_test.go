@@ -242,22 +242,12 @@ func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
 	next, cmd = m.Update(mouseKey("d"))
 	m = next.(model)
 	if cmd == nil || !m.briefs.busy {
-		t.Fatal("Mark read did not request an exact preview")
+		t.Fatal("Mark read did not start")
 	}
-	m = baselineSend(m, cmd())
-	if m.briefs.markPreview == nil || len(m.briefs.markPreview.Renames) != 2 || !strings.Contains(ansi.Strip(m.briefsView()), "_READ") {
-		t.Fatal("Brief rename preview omitted exact targets")
-	}
-	m = baselineSend(m, mouseKey("esc"))
-	if m.briefs.markPreview != nil || len(m.briefs.ticked) != 2 {
-		t.Fatal("Cancelling a brief rename discarded the selection")
-	}
-	next, cmd = m.Update(mouseKey("d"))
-	m = baselineSend(next.(model), cmd())
-	next, cmd = m.Update(mouseKey("d"))
+	next, cmd = m.Update(cmd())
 	m = next.(model)
 	if cmd == nil || !m.briefs.busy {
-		t.Fatal("Confirmed brief rename did not call the owning script")
+		t.Fatal("One keypress did not apply the checked brief renames")
 	}
 	next, reload := m.Update(cmd())
 	m = next.(model)
@@ -275,11 +265,17 @@ func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
 	}
 	m = baselineSend(m, mouseKey("3"))
 	next, cmd = m.Update(mouseKey("d"))
-	m = baselineSend(next.(model), cmd())
-	if m.briefs.markPreview == nil || len(m.briefs.markPreview.Renames) != 1 || m.briefs.markPreview.Renames[0].Source != "2026-10-05-group-related-brief.md" {
-		t.Fatal("d without ticks did not select the hovered brief")
+	m = next.(model)
+	next, cmd = m.Update(cmd())
+	m = next.(model)
+	if cmd == nil || len(m.briefs.markIDs) != 1 || m.briefs.markIDs[0] != "2026-10-05-group-related-brief.md" {
+		t.Fatal("d without ticks did not apply to the hovered brief")
 	}
-	m = baselineSend(m, mouseKey("esc"))
+	next, reload = m.Update(cmd())
+	m = baselineSend(next.(model), reload())
+	if len(m.briefs.records) != 1 {
+		t.Fatal("Hovered brief remained after marking it read")
+	}
 
 	stale := briefsMsg{root: root, repo: "owner/repo", generation: m.briefsGeneration, read: m.briefs.document}
 	staleMark := briefMarkMsg{root: root, repo: "owner/repo", generation: m.briefsGeneration, reply: &briefMarkReply{}}

@@ -83,8 +83,6 @@ type briefsUI struct {
 	document             *briefReadReply
 	items                []Key
 	markIDs              []string
-	markPreview          *briefMarkReply
-	markViewport         viewport.Model
 	requestedID          string
 	viewport             viewport.Model
 	renderedID           string
@@ -205,7 +203,6 @@ func (m model) startBriefsRead(id string) (tea.Model, tea.Cmd) {
 		m.briefs.renderedID = ""
 	} else {
 		m.briefs.markIDs = nil
-		m.briefs.markPreview = nil
 	}
 	if m.briefsLifecycle == nil {
 		m.briefsLifecycle = &readLifecycle{}
@@ -215,7 +212,7 @@ func (m model) startBriefsRead(id string) (tea.Model, tea.Cmd) {
 }
 
 func (m model) openBriefs() (tea.Model, tea.Cmd) {
-	m.briefs = briefsUI{open: true, originFocus: m.focus, viewport: viewport.New(), markViewport: viewport.New(), ticked: map[string]bool{}}
+	m.briefs = briefsUI{open: true, originFocus: m.focus, viewport: viewport.New(), ticked: map[string]bool{}}
 	m.sidebar.selected = briefsIndex
 	return m.startBriefsRead("")
 }
@@ -288,7 +285,6 @@ func (m model) finishBriefMark(msg briefMarkMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		m.recordError("Brief rename unavailable", msg.err)
 		m.status = "Couldn't mark briefs read. Press ! for details; reload the list before retrying."
-		m.briefs.markPreview = nil
 		m.briefs.markIDs = nil
 		if msg.apply {
 			m.briefs.ticked = map[string]bool{}
@@ -297,13 +293,10 @@ func (m model) finishBriefMark(msg briefMarkMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if !msg.apply {
-		m.briefs.markPreview = msg.reply
-		m.layoutBriefs()
-		return m, nil
+		return m.startBriefMark(m.briefs.markIDs, true, msg.reply.PreviewSHA256)
 	}
 
 	m.status = fmt.Sprintf("Marked %s read.", pluralize(len(msg.reply.Renames), "brief", "briefs"))
-	m.briefs.markPreview = nil
 	m.briefs.markIDs = nil
 	m.briefs.ticked = map[string]bool{}
 	return m.startBriefsRead("")
@@ -323,17 +316,6 @@ func (m model) briefsRows(section int) []briefRecord {
 }
 
 func (m *model) layoutBriefs() {
-	if m.briefs.open && m.briefs.markPreview != nil {
-		width := m.cardWidth()
-		m.briefs.markViewport.SetWidth(width)
-		m.briefs.markViewport.SetHeight(maxInt(m.mainHeight()-3, 1))
-		lines := make([]string, len(m.briefs.markPreview.Renames))
-		for i, row := range m.briefs.markPreview.Renames {
-			lines[i] = fmt.Sprintf("%s → %s", row.Source, row.Target)
-		}
-		m.briefs.markViewport.SetContent(wrapText(strings.Join(lines, "\n"), width))
-		return
-	}
 	if !m.briefs.open || m.briefs.document == nil {
 		return
 	}
@@ -355,11 +337,6 @@ func (m *model) layoutBriefs() {
 
 func (m model) briefsView() string {
 	width, height := m.menuWidth(), m.mainHeight()
-	if m.briefs.markPreview != nil {
-		body := inset(titleBar("Mark briefs read", fmt.Sprintf("%d exact renames", len(m.briefs.markPreview.Renames)), width)) + "\n\n"
-		body += inset(m.briefs.markViewport.View())
-		return m.withSidebar(body, true)
-	}
 	if m.briefs.reading {
 		title := "Reading brief…"
 		if m.briefs.document != nil {
@@ -421,7 +398,7 @@ func (m model) briefsView() string {
 	if m.briefs.busy {
 		message := "Reading saved briefs…"
 		if len(m.briefs.markIDs) > 0 {
-			message = "Checking exact rename targets…"
+			message = "Marking briefs read…"
 		}
 		body += inset(message)
 		return m.withSidebar(body, true)
@@ -446,27 +423,6 @@ func (m model) briefsView() string {
 }
 
 func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.briefs.markPreview != nil {
-		if m.briefs.busy {
-			return m, nil
-		}
-		switch msg.String() {
-		case "esc", "h", "left":
-			m.briefs.markPreview = nil
-			m.briefs.markIDs = nil
-		case "j", "down":
-			m.briefs.markViewport.ScrollDown(1)
-		case "k", "up":
-			m.briefs.markViewport.ScrollUp(1)
-		case "ctrl+d":
-			m.briefs.markViewport.ScrollDown(maxInt(m.briefs.markViewport.Height()/2, 1))
-		case "ctrl+u":
-			m.briefs.markViewport.ScrollUp(maxInt(m.briefs.markViewport.Height()/2, 1))
-		case "d":
-			return m.startBriefMark(m.briefs.markIDs, true, m.briefs.markPreview.PreviewSHA256)
-		}
-		return m, nil
-	}
 	switch msg.String() {
 	case "q":
 		return m.requestQuit()
@@ -605,9 +561,6 @@ func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) clickBriefs(event tea.Mouse) (tea.Model, tea.Cmd) {
-	if m.briefs.markPreview != nil {
-		return m, nil
-	}
 	if m.briefs.reading {
 		if !m.briefs.cards {
 			return m, nil

@@ -319,12 +319,12 @@ func (m model) contextFooterGroups() []footerGroup {
 		edit := group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("next/save", keys.Confirm), bind("save", keys.FormSubmit))
 		return []footerGroup{edit, group("Navigation", bind("", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.batches.open && m.batches.editing:
-		edit := group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("next", keys.Confirm), bind("create", keys.FormSubmit))
+		edit := group("New batch", hint{"Tab/Shift-Tab", "field"}, bind("create", keys.FormSubmit), bind("discard", keys.Cancel))
 		if m.batches.field > 0 {
-			edit = group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev, keys.ChoiceNext, keys.ChoicePrev), bind("change", keys.ValueNext, keys.ValuePrev), bind("", keys.OpenList), bind("next/create", keys.Confirm), bind("create", keys.FormSubmit))
+			edit.hints = append(edit.hints, bind("change", keys.ValueNext, keys.ValuePrev), bind("choices", keys.OpenList))
 		}
 
-		return []footerGroup{edit, group("Navigation", bind("", keys.Cancel), bind("exit", keys.ForceQuit))}
+		return []footerGroup{edit}
 	case m.editingRepo && m.installing.path != "":
 		return []footerGroup{group("Install", bind("install", keys.Enter), hint{"s", "solo / tracked"}), group("Navigation", bind("cancel", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.editingRepo && m.noInstall():

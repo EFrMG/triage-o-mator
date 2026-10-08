@@ -543,7 +543,7 @@ func (m model) batchFieldOptions(field int) ([]string, int) {
 	return nil, 0
 }
 
-// handleBatchFormKey edits the new-batch form: Tab / Enter move down the fields, and Enter on the last one creates the batch, like Ctrl-S. On a choice field j/k (or the arrows) change the value and l / → open its list; picking moves on, and on the last field creates the batch.
+// handleBatchFormKey edits the floating new-batch form. Ctrl-S creates the batch after the fields have been chosen.
 func (m model) handleBatchFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	onChoice := m.batches.field > 0
 	// A choice isn't typing, so q quits there as everywhere else, list open or not.
@@ -565,12 +565,6 @@ func (m model) handleBatchFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.batches.groupChoice = m.batches.pick.cursor
 		}
 
-		if m.batches.field == batchFormFields-1 {
-			return m.createBatch()
-		}
-
-		m.batches.field++
-
 		return m, nil
 	}
 
@@ -586,7 +580,7 @@ func (m model) handleBatchFormKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Cancel):
 		m.batches.editing = false
-	case key.Matches(msg, keys.FormSubmit), key.Matches(msg, keys.Confirm) && m.batches.field == batchFormFields-1:
+	case key.Matches(msg, keys.FormSubmit):
 		return m.createBatch()
 	case onChoice && key.Matches(msg, keys.OpenList):
 		m.batches.pick.Open(m.batchFieldOptions(m.batches.field))
@@ -768,12 +762,9 @@ func (m model) batchItems(b batchRecord) ([]list.Item, int) {
 	return out, triaged
 }
 
-// batchesView is the Batches screen, beside the sidebar: the new-batch form, or the batches as cards with their progress.
+// batchesView shows batch cards beside the sidebar and overlays the new-batch editor when it is open.
 func (m model) batchesView() string {
 	w, h := m.menuWidth(), m.mainHeight()
-	if m.batches.editing {
-		return m.withSidebar(inset(m.batchFormView(w)), true)
-	}
 
 	subtitle := "No batches yet"
 	if n := len(m.batches.records); n > 0 {
@@ -813,39 +804,48 @@ func (m model) batchesView() string {
 
 	body := inset(titleBar("Batches", subtitle, w)) + "\n\n" + cardList(cards, m.batches.selected, m.cardWidth(), h-2)
 
-	return m.withSidebar(body, true)
+	background := m.withSidebar(body, true)
+	if m.batches.editing {
+		return m.batchFormOverlay(background)
+	}
+
+	return background
 }
 
-// batchFormView is the new-batch form, styled like the decision form: muted labels, the focused one marked, a choice field's list under it.
-func (m model) batchFormView(w int) string {
-	accent := lipgloss.NewStyle().Foreground(focusedBorderColor).Bold(true)
+// batchFormOverlay keeps the batch cards visible behind a four-field floating editor.
+func (m model) batchFormOverlay(background string) string {
+	w := maxInt(m.commentWidth()-4, 1)
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Bold(true)
 	label := func(i int, name string) string {
 		if i == m.batches.field {
-			return accent.Render(fmt.Sprintf("› %-8s", name))
+			return accent.Render("  " + name)
 		}
 
-		return mutedText(fmt.Sprintf("  %-8s", name))
+		return mutedText("  " + name)
 	}
 
-	rows := []string{titleBar("New batch", "untriaged open items, with bodies and comments fetched from GitHub (read-only)", w), ""}
-	values := []string{m.batches.size.View(), batchKinds[m.batches.kindIdx], batchOrders[m.batches.orderIdx] + " first", m.batchGroupLabel()}
-	for i, name := range []string{"Size", "Kind", "Order", "Group"} {
-		value := values[i]
-		if i == m.batches.field && i > 0 {
-			value = accent.Render(value)
-		}
-
-		rows = append(rows, label(i, name)+" "+value)
-		if i == m.batches.field && m.batches.pick.open {
-			for _, line := range strings.Split(m.batches.pick.View(minInt(w-11, 48)), "\n") {
-				rows = append(rows, strings.Repeat(" ", 11)+line)
+	size := m.batches.size
+	size.SetWidth(w)
+	values := []string{size.View(), batchKinds[m.batches.kindIdx], batchOrders[m.batches.orderIdx] + " first", m.batchGroupLabel()}
+	names := []string{"Size", "Kind", "Order", "Group"}
+	var rows []string
+	if m.batches.pick.open {
+		i := m.batches.field
+		rows = append(rows, label(i, names[i]), accent.Render(values[i]), m.batches.pick.View(minInt(w, 48)))
+	} else {
+		for i, name := range names {
+			value := values[i]
+			if i == m.batches.field && i > 0 {
+				value = accent.Render(value)
 			}
+
+			rows = append(rows, label(i, name), value)
 		}
+		rows = append(rows, "", mutedText("25–40 is a size you can read carefully; larger batches take longer to fetch."))
 	}
 
-	rows = append(rows, "", mutedText("25–40 is a size you can read carefully; larger batches take longer to fetch."))
-
-	return strings.Join(rows, "\n")
+	header := composerHeader("New batch", "", "untriaged open items", false, w)
+	return m.composerOverlay(background, m.composerPanel(header, strings.Join(rows, "\n")))
 }
 
 // pluralize is "1 batch" / "3 batches".

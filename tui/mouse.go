@@ -558,8 +558,12 @@ func (m model) clickBatches(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
 }
 
 func (m model) clickBatchForm(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
+	x, y := m.commentPosition()
+	if event.X <= x || event.X >= x+m.commentWidth()-1 {
+		return m, nil
+	}
 	if m.batches.pick.open {
-		first := 5 + m.batches.field
+		first := y + 6
 		start := maxInt(minInt(m.batches.pick.cursor-dropdownRows/2, len(m.batches.pick.options)-dropdownRows), 0)
 		index := start + event.Y - first
 		if event.Y >= first && event.Y < first+minInt(dropdownRows, len(m.batches.pick.options)) && index < len(m.batches.pick.options) {
@@ -568,15 +572,16 @@ func (m model) clickBatchForm(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd)
 		}
 		return m, nil
 	}
-	row := event.Y - 3
-	if row < 0 || row >= batchFormFields {
+	row := event.Y - y - 3
+	if row < 0 || row >= batchFormFields*2 {
 		return m, nil
 	}
-	if m.batches.field == row && repeat && row > 0 {
+	field := row / 2
+	if m.batches.field == field && repeat && field > 0 {
 		return m.mousePress("l")
 	}
-	m.batches.field = row
-	if row == 0 {
+	m.batches.field = field
+	if field == 0 {
 		m.batches.size.Focus()
 	} else {
 		m.batches.size.Blur()

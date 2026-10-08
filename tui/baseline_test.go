@@ -1424,6 +1424,41 @@ func TestBaselineFixedBatchDoesNotMixLiveEvidence(t *testing.T) {
 	}
 }
 
+func TestBaselineBatchCreationUsesFloatingEditor(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	m.batches.open = true
+	m.sidebar.selected = batchesIndex
+	m = baselineSend(m, mouseKey("n"))
+	if !m.batches.editing {
+		t.Fatal("n did not open the batch editor")
+	}
+	view := ansi.Strip(m.bodyView())
+	for _, field := range []string{"New batch", "Size", "Kind", "Order", "Group"} {
+		if !strings.Contains(view, field) {
+			t.Fatalf("floating batch editor omitted %s", field)
+		}
+	}
+	if lipgloss.Width(m.bodyView()) != m.width {
+		t.Fatal("floating batch editor overflowed the terminal")
+	}
+
+	m = baselineSend(m, mouseKey("tab"))
+	m = baselineSend(m, mouseKey("l"))
+	if !m.batches.pick.open || m.batches.field != 1 || !strings.Contains(ansi.Strip(m.bodyView()), "issue") {
+		t.Fatal("kind choices did not open in the floating editor")
+	}
+	m = baselineSend(m, mouseKey("down"))
+	m = baselineSend(m, mouseKey("enter"))
+	if !m.batches.editing || m.batches.pick.open || m.batches.kindIdx != 1 {
+		t.Fatal("picking a kind created the batch or lost the selected value")
+	}
+	next, cmd := m.Update(mouseKey("ctrl+s"))
+	m = next.(model)
+	if cmd == nil || m.batches.editing || !m.batches.busy || m.batches.kindIdx != 1 {
+		t.Fatal("Ctrl-S did not submit the floating batch editor")
+	}
+}
+
 func TestBaselineCommentPlanMustMatchDraft(t *testing.T) {
 	items := baselineItems()
 	items[0].URL = "https://github.com/owner/repo/issues/1"

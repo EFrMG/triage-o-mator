@@ -12,6 +12,7 @@ Isn't it fun to contribute on GitHub?!
 <img src="assets/social-media-card-no-bg.png" alt="triage-o-mator social card" width="980">
 
 </div>
+<br>
 
 Well, it is not as productive when the Issues and Pull Requests pile up. Maintainers and reviewers need time to handle those, and so here we intend to provide a working solution to ameliorate the effort through correct organization.
 

@@ -1,9 +1,15 @@
+<div align="center">
+
 # triage-o-mator
 
 Isn't it fun to contribute on GitHub?!
 
 [![Version](https://img.shields.io/github/v/tag/EFrMG/triage-o-mator?sort=semver)](https://github.com/EFrMG/triage-o-mator/tags)
 [![License](https://img.shields.io/github/license/EFrMG/triage-o-mator)](LICENSE)
+
+![triage-o-mator social card](assets/social-media-card.png)
+
+</div>
 
 Well, it is not as productive when the Issues and Pull Requests pile up. Maintainers and reviewers need time to handle those, and so here we intend to provide a working solution to ameliorate the effort through correct organization.
 

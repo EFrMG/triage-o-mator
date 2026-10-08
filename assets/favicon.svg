@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">triage-o-mator selected card queue</title>
+  <rect width="64" height="64" rx="2" fill="#1e1e2e"/>
+  <rect x="16" y="12" width="29" height="37" rx="2" fill="#585b70"/>
+  <rect x="20" y="16" width="29" height="37" rx="2" fill="#313244" stroke="#a6adc8" stroke-width=".667"/>
+  <rect x="22" y="18" width="29" height="37" rx="2" fill="#536b8a"/>
+  <circle cx="36.5" cy="36.5" r="10.5" fill="#1e1e2e"/>
+  <path d="M32 31.5 Q36.5 35 41 31.5 M32 41.5 Q36.5 38 41 41.5" fill="none" stroke="#a6adc8" stroke-width="1.25" stroke-linecap="round"/>
+  <path d="M30.5 36.5h12" fill="none" stroke="#90bd92" stroke-width="1.25" stroke-linecap="round"/>
+</svg>

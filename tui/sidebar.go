@@ -61,7 +61,7 @@ func (s sidebarModel) View(focused bool) string {
 	renderRow(pairsIndex, withCount("≈ Possible Duplicates", s.pairCount))
 	renderRow(notificationsIndex, withCount("! Notifications", s.notificationCount))
 	b.WriteString("\n")
-	renderRow(settingsIndex, "⚙ Settings")
+	renderRow(settingsIndex, "󰯠 Settings")
 	renderRow(switchRepoIndex, "⇄ Switch Repo")
 
 	return strings.TrimSuffix(b.String(), "\n")

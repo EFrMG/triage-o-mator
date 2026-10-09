@@ -170,16 +170,18 @@ index=json.loads(index_path.read_text()) if index_path.exists() else {}
 result={'captured':[],'missing':[]}
 for agent, record in sorted(index.items()):
     root=Path(record['root'])
-    parts=[root/'agent-handoff.md', root/'private'/'triage-o-mator', root/'public'/'triage-o-mator']
+    lane=record.get('lane')
+    lanes=[lane] if lane in ('private','public') else ['private','public']
+    parts=[root/name/'triage-o-mator' for name in lanes]
     if not all(part.exists() for part in parts):
         result['missing'].append(agent)
         print(f'warning: agent {agent} install is missing at {root}; recorded as missing', file=sys.stderr)
         continue
     target=stage/'agent-installs'/agent
-    (target/'private').mkdir(parents=True); (target/'public').mkdir()
-    shutil.copy2(parts[0], target/'agent-handoff.md')
-    shutil.copytree(parts[1], target/'private'/'triage-o-mator', symlinks=True)
-    shutil.copytree(parts[2], target/'public'/'triage-o-mator', symlinks=True)
+    target.mkdir(parents=True)
+    for name in lanes:
+        (target/name).mkdir()
+        shutil.copytree(root/name/'triage-o-mator', target/name/'triage-o-mator', symlinks=True)
     result['captured'].append(agent)
 (stage/'agent-installs.json').write_text(json.dumps(result, indent=2)+'\n')
 PY
@@ -188,7 +190,7 @@ cat > "$stage/README-restore.txt" <<'EOF'
 This archive preserves a bare Git mirror, a bundle of the triage-o-mator
 program Git history, live playbook text, any tracked worktree diff, the dated
 current-run evaluation files and shared evaluation source, and GitHub REST observations. Each
-agent's own private and public install is under agent-installs/ when it still existed. When a
+agent's own lane-specific install is under agent-installs/ when it still existed. When a
 local triage-o-mator install was available, it also includes that install,
 its immutable evidence cache and analysis records. Install symlinks point to
 the original program checkout; relink from the matching program commit after

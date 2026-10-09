@@ -25,7 +25,7 @@ CODE_ROOT = HERE.parents[1]
 BASE_RUN_ID = "0"
 RECORDS = Path(os.environ.get("TRIAGE_EVAL_RECORDS") or CODE_ROOT / "DOCS" / "triage-playbook-evals").resolve() / "seed"
 SOURCE_CLONE = Path(os.environ.get("TRIAGE_EVAL_SOURCE_CLONE", "/workspace/lazygit")).resolve()
-TEST_CLONE = Path(os.environ.get("TRIAGE_EVAL_CLONE_PATH", "/workspace/lazygit-test")).resolve()
+TEST_CLONE = Path(os.environ.get("TRIAGE_EVAL_CLONE_PATH", "/workspace/lazygit-clone")).resolve()
 
 
 ISSUE_CASES = (
@@ -465,7 +465,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expected-repo", required=True)
     parser.add_argument("--run-id", required=True, help="new short lowercase run identifier; use a different ID for each fresh test run")
-    parser.add_argument("--previous-archive", help="verified archive of the old lazygit-test install to replace")
+    parser.add_argument("--previous-archive", help="verified archive of the old private fixture install to replace")
     parser.add_argument("--preview-after-reset", action="store_true", help="preview a fresh run while the archived previous remote still exists; never applies writes")
     parser.add_argument("--apply", action="store_true", help="create missing fixtures after exact plan review")
     parser.add_argument("--plan-sha256", help="SHA-256 printed by the matching preview; required with --apply")
@@ -510,7 +510,7 @@ def main():
 
     spec["run_id"] = args.run_id
     spec["marker"] = f"{spec['marker']}-{args.run_id}"
-    spec["description"] = f"triage-o-mator private evaluation fixture {spec['marker']}"
+    spec["description"] = f"Private lazygit review workspace {spec['marker']}"
 
     if args.expected_repo != spec["repository"]:
         parser.error("--expected-repo does not match the fixture repository")

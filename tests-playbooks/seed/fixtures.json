@@ -1,10 +1,10 @@
 {
   "version": 2,
   "owner": "someonesalter",
-  "repository": "someonesalter/lazygit-test",
+  "repository": "someonesalter/lazygit-clone",
   "base_branch": "master",
   "base_sha": "c5f7158154602d23b0750d4304c73e2aead8df5b",
-  "marker": "triage-eval-2026-10-08",
+  "marker": "lazygit",
   "topics": [
     {"id": "config", "feature": "configuration loading", "trigger": "starting with a flag that points to a moved config file", "observed": "the error names the old default path", "expected": "the error names the path supplied by the flag", "preference": "a startup view listing the config files that were loaded", "policy_request": "require a sample config when a change alters file-loading behavior", "source": "docs-master/Config.md"},
     {"id": "commands", "feature": "custom commands", "trigger": "running a custom command after selecting a different file", "observed": "the command uses the earlier file", "expected": "the command uses the current selection", "preference": "a confirmation before a custom command runs", "policy_request": "review shell escaping before accepting custom-command changes", "source": "docs-master/Custom_Command_Keybindings.md"},

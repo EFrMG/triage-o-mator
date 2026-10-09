@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import seed
 import agent_install
-import test_handoff
+import freeze_run
 
 
 class SeedTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class SeedTests(unittest.TestCase):
         self.spec = json.loads((Path(__file__).parent / "fixtures.json").read_text())
         self.spec["run_id"] = "0"
         self.spec["marker"] += "-0"
-        self.spec["description"] = f"triage-o-mator private evaluation fixture {self.spec['marker']}"
+        self.spec["description"] = f"Private lazygit review workspace {self.spec['marker']}"
 
     def expanded_spec(self, root):
         """An expanded-case fixture over every base topic, editing one stand-in source file per topic."""
@@ -321,7 +321,7 @@ class SeedTests(unittest.TestCase):
 
     def test_clone_replacement_requires_verified_previous_archive(self):
         with TemporaryDirectory() as directory:
-            clone = Path(directory) / "lazygit-test"
+            clone = Path(directory) / "lazygit-clone"
             clone.mkdir()
             (clone / "old-marker").write_text("old")
 
@@ -347,7 +347,7 @@ class SeedTests(unittest.TestCase):
     def test_same_run_preview_accepts_existing_clone_with_saved_state(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            clone = root / "lazygit-test"
+            clone = root / "lazygit-clone"
             clone.mkdir()
             state = root / "runs" / "0" / "seed-state.json"
             state.parent.mkdir(parents=True)
@@ -394,7 +394,7 @@ class SeedTests(unittest.TestCase):
             return {"number": next(next_number)}
 
         with TemporaryDirectory() as directory:
-            local_clone = Path(directory) / "lazygit-test"
+            local_clone = Path(directory) / "lazygit-clone"
             digest = hashlib.sha256(json.dumps({"spec": spec, "operations": intent, "followup_comments": followups, "create_private_repo": spec["repository"], "disable_dependabot_config": ".github/dependabot.yml", "replace_clone": str(local_clone), "previous_archive": None, "previous_archive_sha256": None, "install_path": str(local_clone / "triage-o-mator")}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
             with patch.multiple(seed, HERE=Path(directory), RECORDS=Path(directory)), patch.object(seed, "clone_path", return_value=local_clone), patch.object(seed, "verify_source"), patch.object(seed, "verify_repo", return_value=None), patch.object(seed, "ensure_repo_base", return_value=spec["base_sha"]), patch.object(seed, "ensure_clone"), patch.object(seed, "ensure_install") as install, patch.object(seed, "ledger_difference", return_value=(set(), set())), patch.object(seed, "ensure_branch"), patch.object(seed, "existing_branch_content"), patch.object(seed, "pages", return_value=[{"state": "open", "number": n} for n in range(290, 310)]), patch.object(seed, "api", side_effect=fake_api) as api, patch.object(seed.subprocess, "run") as local_commands, patch.object(sys, "argv", ["seed.py", "--expected-repo", spec["repository"], "--run-id", "0", "--apply", "--plan-sha256", digest]), redirect_stdout(io.StringIO()):
@@ -412,7 +412,23 @@ class SeedTests(unittest.TestCase):
 
                 self.assertEqual(130, api.call_count)
 
-    def test_agent_handoff_freezes_a_verified_exact_scope(self):
+    def test_program_freeze_allows_local_records_but_refuses_tracked_edits(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "program.py").write_text("original\n")
+            subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "add", "program.py"], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "--quiet", "-m", "base"], check=True)
+            (root / "local-record.json").write_text("{}\n")
+
+            self.assertEqual(agent_install.git(root, "rev-parse", "HEAD"), freeze_run.clean_program_commit(root))
+
+            (root / "program.py").write_text("changed\n")
+
+            with self.assertRaisesRegex(RuntimeError, "tracked changes"):
+                freeze_run.clean_program_commit(root)
+
+    def test_evaluator_freeze_records_a_verified_exact_scope(self):
         with TemporaryDirectory() as directory:
             run_dir = Path(directory) / "runs" / "0"
             run_dir.mkdir(parents=True)
@@ -427,21 +443,16 @@ class SeedTests(unittest.TestCase):
 
             (run_dir / "gold.json").write_text("{}\n")
 
-            with patch.multiple(seed, HERE=Path(directory), RECORDS=Path(directory)), patch.object(sys, "argv", ["test_handoff.py", "--run-id", "0"]), redirect_stdout(io.StringIO()):
-                test_handoff.main()
+            with patch.multiple(seed, HERE=Path(directory), RECORDS=Path(directory)), patch.object(freeze_run, "clean_program_commit", return_value="program-commit"), patch.object(sys, "argv", ["freeze_run.py", "--run-id", "0"]), redirect_stdout(io.StringIO()):
+                freeze_run.main()
 
-            handoff = json.loads((run_dir / "test-handoff.json").read_text())
-            self.assertEqual(110, len(handoff["seeded_keys"]))
-            self.assertEqual(hashlib.sha256(b"{}\n").hexdigest(), handoff["gold_sha256"])
-            self.assertIn("auto-triage.md", handoff["playbook_sha256"])
-            agent_text = (run_dir / "agent-handoff.md").read_text()
-            self.assertIn("does not assert that any playbook pass has run", agent_text)
-            self.assertIn("It is not a task", agent_text)
+            freeze = json.loads((run_dir / "freeze.json").read_text())
+            self.assertEqual(110, len(freeze["seeded_keys"]))
+            self.assertEqual(hashlib.sha256(b"{}\n").hexdigest(), freeze["gold_sha256"])
+            self.assertIn("auto-triage.md", freeze["playbook_sha256"])
+            self.assertFalse(list(run_dir.glob("*agent-handoff.md")))
 
-            for withheld in ("](", "gold", "plan.md", "seed/", "batch", handoff["gold_sha256"], "test-plan"):
-                self.assertNotIn(withheld, agent_text)
-
-    def test_new_run_handoff_needs_scope_and_run_specific_gold(self):
+    def test_new_run_freeze_needs_scope_and_run_specific_gold(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             run_dir = root / "runs" / "r05"
@@ -457,27 +468,26 @@ class SeedTests(unittest.TestCase):
 
             (run_dir / "gold.json").write_text("{\"run\": \"r05\"}\n")
 
-            with patch.multiple(seed, HERE=root, RECORDS=root), patch.object(sys, "argv", ["test_handoff.py", "--run-id", "r05"]), redirect_stdout(io.StringIO()):
-                test_handoff.main()
+            with patch.multiple(seed, HERE=root, RECORDS=root), patch.object(freeze_run, "clean_program_commit", return_value="program-commit"), patch.object(sys, "argv", ["freeze_run.py", "--run-id", "r05"]), redirect_stdout(io.StringIO()):
+                freeze_run.main()
 
-            handoff = json.loads((run_dir / "test-handoff.json").read_text())
-            self.assertEqual({"issue": [40, 40, 40], "pr": [30]}, handoff["briefing_batches"])
-            self.assertEqual({"issue": 120, "pr": 30}, handoff["counts"])
-            self.assertEqual(hashlib.sha256((run_dir / "gold.json").read_bytes()).hexdigest(), handoff["gold_sha256"])
-            self.assertIn("120 open issues and 30 open PRs", (run_dir / "agent-handoff.md").read_text())
-            self.assertFalse((run_dir / "test-handoff.md").exists())
+            freeze = json.loads((run_dir / "freeze.json").read_text())
+            self.assertEqual({"issue": [40, 40, 40], "pr": [30]}, freeze["briefing_batches"])
+            self.assertEqual({"issue": 120, "pr": 30}, freeze["counts"])
+            self.assertEqual(hashlib.sha256((run_dir / "gold.json").read_bytes()).hexdigest(), freeze["gold_sha256"])
+            self.assertFalse(list(run_dir.glob("*agent-handoff.md")))
 
             (run_dir / "gold.json").unlink()
 
-            with patch.multiple(seed, HERE=root, RECORDS=root), patch.object(sys, "argv", ["test_handoff.py", "--run-id", "r05"]), self.assertRaisesRegex(RuntimeError, "answer guide is missing"):
-                test_handoff.main()
+            with patch.multiple(seed, HERE=root, RECORDS=root), patch.object(freeze_run, "clean_program_commit", return_value="program-commit"), patch.object(sys, "argv", ["freeze_run.py", "--run-id", "r05"]), self.assertRaisesRegex(RuntimeError, "answer guide is missing"):
+                freeze_run.main()
 
             (run_dir / "gold.json").write_text("{}\n")
             preview.pop("public_read_scope")
             (run_dir / "preview.json").write_text(json.dumps(preview))
 
-            with patch.multiple(seed, HERE=root, RECORDS=root), patch.object(sys, "argv", ["test_handoff.py", "--run-id", "r05"]), self.assertRaisesRegex(RuntimeError, "explicit public scope"):
-                test_handoff.main()
+            with patch.multiple(seed, HERE=root, RECORDS=root), patch.object(freeze_run, "clean_program_commit", return_value="program-commit"), patch.object(sys, "argv", ["freeze_run.py", "--run-id", "r05"]), self.assertRaisesRegex(RuntimeError, "explicit public scope"):
+                freeze_run.main()
 
     def test_agent_install_is_isolated_and_drops_earlier_public_decisions(self):
         with TemporaryDirectory() as directory:
@@ -514,23 +524,28 @@ class SeedTests(unittest.TestCase):
             (public_data / "ledger.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
             (root / "private" / "triage-o-mator" / "data" / self.spec["repository"] / "ledger.jsonl").write_text("")
 
-            playbooks = {path.name: test_handoff.sha256(path) for path in sorted((seed.CODE_ROOT / "prompts").glob("*.md"))}
-            handoff = {"repository": self.spec["repository"], "source_commit": heads["public"], "playbook_sha256": playbooks, "public_read_scope": scope, "install_sha256": test_handoff.install_signature(root / "private" / "triage-o-mator")}
-            (run_dir / "test-handoff.json").write_text(json.dumps(handoff))
+            playbooks = {path.name: freeze_run.sha256(path) for path in sorted((seed.CODE_ROOT / "prompts").glob("*.md"))}
+            freeze = {"repository": self.spec["repository"], "source_commit": heads["public"], "program_commit": "program-commit", "playbook_sha256": playbooks, "public_read_scope": scope, "install_sha256": freeze_run.install_signature(root / "private" / "triage-o-mator")}
+            (run_dir / "freeze.json").write_text(json.dumps(freeze))
             (run_dir / "audit.json").write_text(json.dumps({"local_checkout": heads["private"]}))
             (run_dir / "preview.json").write_text(json.dumps({"clone_path": str(root / "private"), "install_path": str(root / "private" / "triage-o-mator")}))
-            (run_dir / "agent-handoff.md").write_text("starting state\n")
-            patches = (patch.multiple(seed, HERE=kit, RECORDS=kit), patch.object(seed, "SOURCE_CLONE", root / "public"), patch.object(agent_install, "AGENT_ROOT", root / "agents"), patch.object(sys, "argv", ["agent_install.py", "--run-id", "r05", "--agent", "a"]))
+            patches = (patch.multiple(seed, HERE=kit, RECORDS=kit), patch.object(seed, "SOURCE_CLONE", root / "public"), patch.object(agent_install, "AGENT_ROOT", root / "agents"), patch.object(freeze_run, "clean_program_commit", return_value="program-commit"), patch.object(sys, "argv", ["agent_install.py", "--run-id", "r05", "--agent", "a", "--lane", "public"]))
 
-            with patches[0], patches[1], patches[2], patches[3], redirect_stdout(io.StringIO()):
+            with patches[0], patches[1], patches[2], patches[3], patches[4], redirect_stdout(io.StringIO()):
                 agent_install.main()
 
                 with self.assertRaisesRegex(RuntimeError, "already exists"):
                     agent_install.main()
 
+                with patch.object(sys, "argv", ["agent_install.py", "--run-id", "r05", "--agent", "p", "--lane", "private"]), redirect_stdout(io.StringIO()):
+                    agent_install.main()
+
+                with patch.object(freeze_run, "clean_program_commit", return_value="different-commit"), patch.object(sys, "argv", ["agent_install.py", "--run-id", "r05", "--agent", "b", "--lane", "private"]), self.assertRaisesRegex(RuntimeError, "Program commit changed"):
+                    agent_install.main()
+
                 (root / "private" / "triage-o-mator" / "config" / "repo").write_text("someone/else\n")
 
-                with patch.object(sys, "argv", ["agent_install.py", "--run-id", "r05", "--agent", "b"]), self.assertRaisesRegex(RuntimeError, "changed since test-start"):
+                with patch.object(sys, "argv", ["agent_install.py", "--run-id", "r05", "--agent", "b", "--lane", "private"]), self.assertRaisesRegex(RuntimeError, "changed since test-start"):
                     agent_install.main()
 
             agent = root / "agents" / "triage-eval-r05" / "a"
@@ -540,12 +555,17 @@ class SeedTests(unittest.TestCase):
             self.assertFalse((agent / "public" / "triage-o-mator" / "data" / scope["repository"] / "pr-assessments").exists())
             self.assertFalse((agent / "public" / "triage-o-mator" / "reports").exists())
             self.assertTrue((agent / "public" / "triage-o-mator" / "data" / scope["repository"] / "cache" / "corpora" / "corpus.plan.json").is_file())
-            self.assertEqual("pinned\n", (agent / "private" / "base.txt").read_text())
-            self.assertEqual("", agent_install.git(agent / "private", "status", "--porcelain"))
+            self.assertFalse((agent / "private").exists())
             self.assertEqual("no-push://public-read-only", agent_install.git(agent / "public", "remote", "get-url", "--push", "origin"))
-            self.assertEqual(["agent-handoff.md", "private", "public"], sorted(path.name for path in agent.iterdir()))
+            self.assertEqual(["public"], sorted(path.name for path in agent.iterdir()))
+            private_agent = root / "agents" / "triage-eval-r05" / "p"
+            self.assertEqual("pinned\n", (private_agent / "private" / "base.txt").read_text())
+            self.assertFalse((private_agent / "public").exists())
+            self.assertEqual("", agent_install.git(private_agent / "private", "status", "--porcelain"))
             record = json.loads((run_dir / "agent-installs.json").read_text())
-            self.assertEqual(["a"], list(record))
+            self.assertEqual(["a", "p"], list(record))
+            self.assertEqual("public", record["a"]["lane"])
+            self.assertEqual("private", record["p"]["lane"])
             self.assertEqual((2, 1), (record["a"]["public"]["ledger_rows"], record["a"]["public"]["ledger_rows_cleared"]))
 
 

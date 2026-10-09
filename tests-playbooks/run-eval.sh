@@ -9,7 +9,7 @@ records=$(realpath -m "${TRIAGE_EVAL_RECORDS:-$here/../DOCS/triage-playbook-eval
 export TRIAGE_EVAL_RECORDS=$records
 runs="$records/seed/runs"
 repo=${TRIAGE_EVAL_REPOSITORY:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["repository"])' "$seed_dir/fixtures.json")}
-clone=${TRIAGE_EVAL_CLONE_PATH:-/workspace/lazygit-test}
+clone=${TRIAGE_EVAL_CLONE_PATH:-/workspace/lazygit-clone}
 
 usage() {
   cat >&2 <<EOF
@@ -18,16 +18,15 @@ Usage:
   $0 plan-after-reset RUN_ID PREVIOUS_ARCHIVE
   $0 seed RUN_ID PLAN_SHA256 [PREVIOUS_ARCHIVE]
   $0 test-start RUN_ID
-  $0 agent-install RUN_ID AGENT
+  $0 agent-install RUN_ID AGENT private|public
   $0 archive RUN_ID ARCHIVE_NAME
   $0 verify /absolute/path/to/ARCHIVE.tar.gz
   $0 delete /absolute/path/to/ARCHIVE.tar.gz --confirm-repo $repo
 
-The test-start command verifies the seed and writes test-handoff.json for the
-evaluator and agent-handoff.md for agents. The agent-install command builds one
-agent's own private and public clones and installs under
-\${TRIAGE_EVAL_AGENT_ROOT:-/tmp}/triage-eval-RUN_ID/AGENT/ with a copy of that
-handoff. Agents start there with their task text and no path into this kit.
+The test-start command verifies the seed and writes freeze.json for the evaluator.
+The agent-install command builds one private or public clone and install under
+\${TRIAGE_EVAL_AGENT_ROOT:-/tmp}/triage-eval-RUN_ID/AGENT/.
+Agents start in their own install with task text and no path into this kit.
 EOF
   exit 2
 }
@@ -109,22 +108,24 @@ PY
     run_id=$1
     [[ $run_id =~ ^[a-z0-9]{1,12}$ ]] || usage
     python3 "$seed_dir/audit.py" --run-id "$run_id"
-    python3 "$seed_dir/test_handoff.py" --run-id "$run_id"
+    python3 "$seed_dir/freeze_run.py" --run-id "$run_id"
     ;;
   agent-install)
-    [[ $# == 2 ]] || usage
+    [[ $# == 3 ]] || usage
     run_id=$1
     agent=$2
+    lane=$3
     [[ $run_id =~ ^[a-z0-9]{1,12}$ && $agent =~ ^[a-z0-9]{1,12}$ ]] || usage
-    [[ -s "$runs/$run_id/test-handoff.json" ]] || { printf 'Run test-start first\n' >&2; exit 1; }
-    python3 "$seed_dir/agent_install.py" --run-id "$run_id" --agent "$agent"
+    [[ $lane == private || $lane == public ]] || usage
+    [[ -s "$runs/$run_id/freeze.json" ]] || { printf 'Run test-start first\n' >&2; exit 1; }
+    python3 "$seed_dir/agent_install.py" --run-id "$run_id" --agent "$agent" --lane "$lane"
     ;;
   archive)
     [[ $# == 2 ]] || usage
     run_id=$1
     name=$2
     [[ $run_id =~ ^[a-z0-9]{1,12}$ ]] || usage
-    [[ -s "$runs/$run_id/test-handoff.json" && -s "$runs/$run_id/report.md" ]] || { printf 'Test handoff and one report.md are required in the local records at seed/runs/%s/ for a completed-run archive. Use archive-run.sh directly for a partial capture.\n' "$run_id" >&2; exit 1; }
+    [[ -s "$runs/$run_id/freeze.json" && -s "$runs/$run_id/report.md" ]] || { printf 'Run freeze and one report.md are required in the local records at seed/runs/%s/ for a completed-run archive. Use archive-run.sh directly for a partial capture.\n' "$run_id" >&2; exit 1; }
     "$here/archive-run.sh" "$repo" "$clone" "$records/archives" "$name" "$run_id"
     ;;
   verify)

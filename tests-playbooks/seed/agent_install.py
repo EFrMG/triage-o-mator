@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Build one agent's isolated private and public installs outside the kit, from a frozen handoff."""
+"""Build one agent's isolated private or public install outside the kit, from a verified run freeze."""
 
 import argparse
 import datetime
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,7 +11,7 @@ import shutil
 import subprocess
 
 import seed
-import test_handoff
+import freeze_run
 
 
 AGENT_ROOT = Path(os.environ.get("TRIAGE_EVAL_AGENT_ROOT", "/tmp")).resolve()
@@ -76,7 +75,7 @@ def public_install(source_install, target_install, scope):
     source_data = source_install / "data" / repository
 
     if not (source_data / "cache" / "corpora" / f"{scope['corpus_id']}.plan.json").is_file():
-        raise RuntimeError("Public source install lacks the handoff's frozen corpus")
+        raise RuntimeError("Public source install lacks the selected frozen corpus")
 
     target_install.mkdir()
 
@@ -103,20 +102,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--agent", required=True, help="short lowercase name for this agent, such as a or b")
+    parser.add_argument("--lane", required=True, choices=("private", "public"))
     args = parser.parse_args()
 
     if not re.fullmatch(r"[a-z0-9]{1,12}", args.run_id) or not re.fullmatch(r"[a-z0-9]{1,12}", args.agent):
         parser.error("--run-id and --agent must be 1–12 lowercase letters or digits")
 
     run_dir = seed.RECORDS / "runs" / args.run_id
-    handoff = json.loads((run_dir / "test-handoff.json").read_text())
+    freeze = json.loads((run_dir / "freeze.json").read_text())
     audit = json.loads((run_dir / "audit.json").read_text())
     preview = json.loads((run_dir / "preview.json").read_text())
-    agent_text = (run_dir / "agent-handoff.md").read_bytes()
-    scope = handoff["public_read_scope"]
+    scope = freeze["public_read_scope"]
 
     if not scope:
-        raise RuntimeError("This run's handoff has no public read scope, so no public install can be built")
+        raise RuntimeError("This run's freeze has no public read scope, so no public install can be built")
 
     root = AGENT_ROOT / f"triage-eval-{args.run_id}" / args.agent
 
@@ -129,25 +128,33 @@ def main():
     seed_clone = Path(preview["clone_path"])
     seed_install = Path(preview["install_path"])
 
-    if not handoff.get("install_sha256") or test_handoff.install_signature(seed_install) != handoff["install_sha256"]:
+    if not freeze.get("install_sha256") or freeze_run.install_signature(seed_install) != freeze["install_sha256"]:
         raise RuntimeError("Seeded install changed since test-start; agents would not start from the audited state")
 
-    if git(seed_clone, "rev-parse", "HEAD") != audit["local_checkout"] or git(seed.SOURCE_CLONE, "rev-parse", "HEAD") != handoff["source_commit"]:
+    if git(seed_clone, "rev-parse", "HEAD") != audit["local_checkout"] or git(seed.SOURCE_CLONE, "rev-parse", "HEAD") != freeze["source_commit"]:
         raise RuntimeError("Private or public source checkout moved since the audit")
 
-    recorded = {path.name: test_handoff.sha256(path) for path in sorted((seed.CODE_ROOT / "prompts").glob("*.md"))}
+    if freeze_run.clean_program_commit(seed.CODE_ROOT) != freeze["program_commit"]:
+        raise RuntimeError("Program commit changed since test-start; record a new freeze before adding an agent")
 
-    if recorded != handoff["playbook_sha256"]:
-        raise RuntimeError("Playbooks changed since test-start; record a new handoff before adding an agent")
+    recorded = {path.name: freeze_run.sha256(path) for path in sorted((seed.CODE_ROOT / "prompts").glob("*.md"))}
+
+    if recorded != freeze["playbook_sha256"]:
+        raise RuntimeError("Playbooks changed since test-start; record a new freeze before adding an agent")
 
     root.mkdir(parents=True)
-    private_head = clone(seed_clone, root / "private", f"https://github.com/{handoff['repository']}.git")
-    shutil.copytree(seed_install, root / "private" / "triage-o-mator", symlinks=True)
-    public_head = clone(seed.SOURCE_CLONE, root / "public", f"https://github.com/{scope['repository']}.git", "no-push://public-read-only")
-    rows, cleared = public_install(seed.SOURCE_CLONE / "triage-o-mator", root / "public" / "triage-o-mator", scope)
-    (root / "agent-handoff.md").write_bytes(agent_text)
 
-    record = {"root": str(root), "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "handoff_sha256": hashlib.sha256(agent_text).hexdigest(), "program_commit": git(seed.CODE_ROOT, "rev-parse", "HEAD"), "private": {"path": str(root / "private"), "repository": handoff["repository"], "head": private_head, "install_sha256": test_handoff.install_signature(root / "private" / "triage-o-mator")}, "public": {"path": str(root / "public"), "repository": scope["repository"], "head": public_head, "corpus_id": scope["corpus_id"], "ledger_rows": rows, "ledger_rows_cleared": cleared}}
+    if args.lane == "private":
+        private_head = clone(seed_clone, root / "private", f"https://github.com/{freeze['repository']}.git")
+        shutil.copytree(seed_install, root / "private" / "triage-o-mator", symlinks=True)
+        lane_record = {"path": str(root / "private"), "repository": freeze["repository"], "head": private_head, "install_sha256": freeze_run.install_signature(root / "private" / "triage-o-mator")}
+
+    else:
+        public_head = clone(seed.SOURCE_CLONE, root / "public", f"https://github.com/{scope['repository']}.git", "no-push://public-read-only")
+        rows, cleared = public_install(seed.SOURCE_CLONE / "triage-o-mator", root / "public" / "triage-o-mator", scope)
+        lane_record = {"path": str(root / "public"), "repository": scope["repository"], "head": public_head, "corpus_id": scope["corpus_id"], "ledger_rows": rows, "ledger_rows_cleared": cleared}
+
+    record = {"root": str(root), "lane": args.lane, "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "program_commit": git(seed.CODE_ROOT, "rev-parse", "HEAD"), args.lane: lane_record}
     index_path = run_dir / "agent-installs.json"
     index = json.loads(index_path.read_text()) if index_path.exists() else {}
     index[args.agent] = record
@@ -156,10 +163,13 @@ def main():
     os.replace(temporary, index_path)
 
     print(f"Agent {args.agent}: {root}")
-    print(f"  private install: {root / 'private' / 'triage-o-mator'}")
-    print(f"  public install:  {root / 'public' / 'triage-o-mator'} ({cleared} of {rows} ledger rows cleared of earlier decisions)")
-    print(f"  handoff:         {root / 'agent-handoff.md'}")
-    print("Start the agent in that directory with its task text. Do not give it any path into the kit.")
+    print(f"  {args.lane} install: {root / args.lane / 'triage-o-mator'}")
+
+    if args.lane == "public":
+        print(f"  inventory:       {cleared} of {rows} ledger rows cleared of earlier decisions")
+
+    print(f"  start in:        {root / args.lane / 'triage-o-mator'}")
+    print("Give the agent its frozen task text. Do not give it any path into the kit.")
 
 
 if __name__ == "__main__":

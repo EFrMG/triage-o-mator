@@ -11,6 +11,7 @@ This file is for agents **changing triage-o-mator itself**. If the task is to tr
 | `prompts/`, `config/`            | Agent playbooks and copied taxonomy defaults     |
 | `docs/`, `themes/`               | Installed documentation links and color palettes |
 | `tests/`, `tui/baseline_test.go` | Workflow tests over disposable installs          |
+| `tests-playbooks/`               | Playbook evaluation kit; run records stay local  |
 
 The checkout is the program. `bin/install-to` creates a `triage-o-mator/` **install** inside the repository being triaged. Its `config/`, `data/` and `reports/` belong to that repository; its program files link back to this checkout. There is no ledger or `config/repo` in this checkout by default. See [installation](docs/install.md).
 

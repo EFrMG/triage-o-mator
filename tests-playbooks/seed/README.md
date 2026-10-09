@@ -19,10 +19,26 @@ A run fixture has one entry per topic `id` in `fixtures.json` under both `issues
     }
   },
   "prs": {
-    "TOPIC_ID": { "title": "…", "body": "…", "path": "file in the pinned checkout", "append": "text added at the end" }
+    "TOPIC_ID": {
+      "title": "…",
+      "body": "…",
+      "path": "file in the pinned checkout",
+      "append": "text added at the end"
+    }
   },
-  "comments": [{ "item_id": "TOPIC_ID-alt_duplicate", "body": "one follow-up comment on that issue" }],
-  "public_read_scope": { "repository": "…", "corpus_id": "…", "inventory_snapshot": "…", "source_commit": "…", "mode": "fixed-snapshot offline" },
+  "comments": [
+    {
+      "item_id": "TOPIC_ID-alt_duplicate",
+      "body": "one follow-up comment on that issue"
+    }
+  ],
+  "public_read_scope": {
+    "repository": "…",
+    "corpus_id": "…",
+    "inventory_snapshot": "…",
+    "source_commit": "…",
+    "mode": "fixed-snapshot offline"
+  },
   "briefing_batches": { "issue": [40, 40, 40], "pr": [30] }
 }
 ```

@@ -12,6 +12,25 @@ from urllib.parse import quote
 import seed
 
 
+def audit_pr_files(repo, operation, actual_files, key):
+    expected = seed.pr_files(operation)
+    wanted = {file["path"]: "modified" if "base_content_sha256" in file else "added" for file in expected}
+
+    if len(actual_files) != len(expected) or {file["filename"]: file["status"] for file in actual_files} != wanted:
+        raise RuntimeError(f"PR {key} does not have its exact expected file set")
+
+    for file in expected:
+        if "base_content_sha256" in file and hashlib.sha256((seed.SOURCE_CLONE / file["path"]).read_bytes()).hexdigest() != file["base_content_sha256"]:
+            raise RuntimeError(f"PR {key} does not bind the pinned base file")
+
+        path = quote(file["path"], safe="/")
+        head = quote(operation["head_sha"], safe="") if "head_sha" in operation else quote(operation["branch"], safe="")
+        content = seed.api("GET", f"repos/{repo}/contents/{path}?ref={head}")
+
+        if content.get("encoding") != "base64" or base64.b64decode(content["content"]).decode("utf-8") != file["content"]:
+            raise RuntimeError(f"PR {key} file content differs from its preview")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", required=True)
@@ -72,7 +91,7 @@ def main():
     verified_prs = 0
     expected_issue_count = sum(operation["kind"] == "issue" for operation in preview["operations"])
     expected_pr_count = sum(operation["kind"] == "pr" for operation in preview["operations"])
-    seeded_followups = {state["items"][f"issue:{followup['item_id']}"]: followup for followup in preview.get("followup_comments", [])}
+    seeded_followups = {state["items"][seed.followup_key(followup)]: followup for followup in preview.get("followup_comments", [])}
 
     for operation in preview["operations"]:
         key = f"{operation['kind']}:{operation['id']}"
@@ -95,8 +114,8 @@ def main():
             followup = seeded_followups[number]
             comments = seed.api("GET", f"repos/{repo}/issues/{number}/comments?per_page=100")
 
-            if len(comments) != 1 or comments[0]["body"] != followup["body"] or comments[0]["id"] != state["comments"][f"issue:{followup['item_id']}"]:
-                raise RuntimeError(f"Seeded issue #{number} lacks its exact follow-up")
+            if len(comments) != 1 or comments[0]["body"] != followup["body"] or comments[0]["id"] != state["comments"][seed.followup_key(followup)]:
+                raise RuntimeError(f"Seeded item #{number} lacks its exact follow-up")
 
         if operation["kind"] != "pr":
             continue
@@ -108,21 +127,7 @@ def main():
 
         files = seed.api("GET", f"repos/{repo}/pulls/{number}/files?per_page=100")
 
-        expected_status = "modified" if "base_content_sha256" in operation else "added"
-
-        if len(files) != 1 or files[0]["filename"] != operation["path"] or files[0]["status"] != expected_status:
-            raise RuntimeError(f"PR {key} does not have its one expected {expected_status} file")
-
-        if "base_content_sha256" in operation and hashlib.sha256((seed.SOURCE_CLONE / operation["path"]).read_bytes()).hexdigest() != operation["base_content_sha256"]:
-            raise RuntimeError(f"PR {key} does not bind the pinned base file")
-
-        path = quote(operation["path"], safe="/")
-        branch = quote(operation["branch"], safe="")
-        content = seed.api("GET", f"repos/{repo}/contents/{path}?ref={branch}")
-        actual = base64.b64decode(content["content"]).decode("utf-8")
-
-        if actual != operation["content"]:
-            raise RuntimeError(f"PR {key} file content differs from its preview")
+        audit_pr_files(repo, {**operation, "head_sha": pull["head"]["sha"]}, files, key)
 
         verified_prs += 1
 
@@ -157,7 +162,7 @@ def main():
         raise RuntimeError("Fresh install has a non-staged action policy")
 
     seeded_preference_requests = sum(operation["kind"] == "issue" and operation["id"].endswith("-distinct") for operation in preview["operations"])
-    report = {"repository": repo, "plan_sha256": preview["plan_sha256"], "local_checkout": head, "pinned_source": preview["push_base_sha"], "remote_base": remote_base, "private": True, "actions_disabled": True, "remote_issues": expected_issue_count, "remote_prs": verified_prs, "closed_bot_prs_excluded": len(extra_items), "exact_titles_and_bodies": len(expected_numbers), "seeded_followups": len(seeded_followups), "seeded_preference_requests": seeded_preference_requests, "legacy_conversation_corrections": len(corrected), "legacy_preference_corrections": len(preferences), "single_file_pr_diffs": verified_prs, "ledger_rows": len(rows), "local_clone_clean": True, "action_policy": "stage"}
+    report = {"repository": repo, "plan_sha256": preview["plan_sha256"], "local_checkout": head, "pinned_source": preview["push_base_sha"], "remote_base": remote_base, "private": True, "actions_disabled": True, "remote_issues": expected_issue_count, "remote_prs": verified_prs, "closed_bot_prs_excluded": len(extra_items), "exact_titles_and_bodies": len(expected_numbers), "seeded_followups": len(seeded_followups), "seeded_preference_requests": seeded_preference_requests, "legacy_conversation_corrections": len(corrected), "legacy_preference_corrections": len(preferences), "single_file_pr_diffs": sum(operation["kind"] == "pr" and len(seed.pr_files(operation)) == 1 for operation in preview["operations"]), "multi_file_pr_diffs": sum(operation["kind"] == "pr" and len(seed.pr_files(operation)) > 1 for operation in preview["operations"]), "ledger_rows": len(rows), "local_clone_clean": True, "action_policy": "stage"}
     (run_dir / "audit.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 

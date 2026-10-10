@@ -88,6 +88,55 @@ def title(marker, item):
     return f"[{marker}/{item['public_id']}] {item['title']}"
 
 
+def pr_files(item):
+    return item["files"] if "files" in item else [{key: item[key] for key in ("path", "content", "base_content_sha256") if key in item}]
+
+
+def expanded_pr_files(pr):
+    edits = pr.get("files", [pr])
+
+    if not isinstance(edits, list) or not 1 <= len(edits) <= 20 or ("files" in pr and any(key in pr for key in ("path", "append", "replace"))):
+        raise RuntimeError("PR needs one to twenty file edits, without mixed legacy fields")
+
+    files = []
+    seen = set()
+
+    for edit in edits:
+        name = edit.get("path")
+
+        if not isinstance(name, str) or not name or "\\" in name or name.startswith("/") or any(part in ("", ".", "..", ".git") for part in name.split("/")) or name in seen:
+            raise RuntimeError("PR file paths must be unique repository-relative paths")
+
+        path = SOURCE_CLONE / name
+
+        if not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(SOURCE_CLONE.resolve()):
+            raise RuntimeError(f"PR edit is not a regular pinned source file: {name}")
+
+        seen.add(name)
+        base_content = path.read_bytes().decode("utf-8")
+
+        if ("append" in edit) == ("replace" in edit):
+            raise RuntimeError(f"PR edit needs exactly one append or replace: {name}")
+
+        if "append" in edit:
+            new_content = base_content + edit["append"]
+
+        else:
+            old = edit["replace"]["old"]
+
+            if not old or base_content.count(old) != 1:
+                raise RuntimeError(f"PR replacement is not unique in {path}")
+
+            new_content = base_content.replace(old, edit["replace"]["new"], 1)
+
+        if new_content == base_content:
+            raise RuntimeError(f"PR has no operative diff: {name}")
+
+        files.append({"path": name, "content": new_content, "base_content_sha256": hashlib.sha256(base_content.encode()).hexdigest()})
+
+    return files
+
+
 def expanded(spec):
     issues = []
     pulls = []
@@ -100,24 +149,9 @@ def expanded(spec):
             cases = extra["issues"][topic["id"]]
             issue_cases.extend((case_id, cases[f"{prefix}_title"], cases[f"{prefix}_body"]) for case_id, prefix in (("alt_duplicate", "other_words"), ("same_title_distinct", "different_cause"), ("unresolved_pair", "unresolved")))
             pr = extra["prs"][topic["id"]]
-            path = SOURCE_CLONE / pr["path"]
-            base_content = path.read_text()
-
-            if "append" in pr:
-                new_content = base_content + pr["append"]
-
-            else:
-                old = pr["replace"]["old"]
-
-                if base_content.count(old) != 1:
-                    raise RuntimeError(f"PR replacement is not unique in {path}")
-
-                new_content = base_content.replace(old, pr["replace"]["new"], 1)
-
-            if new_content == base_content:
-                raise RuntimeError(f"PR has no operative diff: {topic['id']}")
-
-            pr_cases.append(("extra_pr", pr["title"], pr["body"], new_content, pr["path"], hashlib.sha256(base_content.encode()).hexdigest()))
+            files = expanded_pr_files(pr)
+            first = files[0]
+            pr_cases.append(("extra_pr", pr["title"], pr["body"], first["content"], first["path"], first["base_content_sha256"]))
 
         issue_cases.sort(key=lambda case: hashlib.sha256(f"{spec['marker']}:{topic['id']}:issue:{case[0]}".encode()).digest())
         pr_cases.sort(key=lambda case: hashlib.sha256(f"{spec['marker']}:{topic['id']}:pr:{case[0]}".encode()).digest())
@@ -133,9 +167,45 @@ def expanded(spec):
             if base_content_sha256:
                 item["base_content_sha256"] = base_content_sha256
 
+            if case_id == "extra_pr" and "files" in pr:
+                item = {key: value for key, value in item.items() if key not in ("path", "content", "base_content_sha256")}
+                item["files"] = files
+
             pulls.append(item)
 
+    extra = spec.get("expanded_cases", {})
+
+    for kind, items, field in (("issue", issues, "extra_issues"), ("pr", pulls, "extra_prs")):
+        additions = extra.get(field, [])
+
+        if not isinstance(additions, list) or len(additions) > 99:
+            raise RuntimeError(f"{field} must be a list of at most 99 items")
+
+        seen = {item["id"] for item in items}
+
+        additions = sorted(additions, key=lambda item: hashlib.sha256(f"{spec['marker']}:{kind}:{item.get('id', '')}".encode()).digest())
+
+        for index, addition in enumerate(additions, 1):
+            item_id = addition.get("id", "")
+
+            if not re.fullmatch(r"[a-z][a-z0-9-]{0,79}", item_id) or item_id in seen or not all(isinstance(addition.get(key), str) and addition[key].strip() for key in ("title", "body")):
+                raise RuntimeError(f"Invalid or duplicate supplemental {kind} item")
+
+            seen.add(item_id)
+            public_id = f"{kind[0]}{len(spec['topics']) + 1:02d}{index:02d}"
+            item = {key: addition[key] for key in ("id", "title", "body")}
+            item["public_id"] = public_id
+
+            if kind == "pr":
+                item.update(files=expanded_pr_files(addition), branch=f"{spec['marker']}-{public_id}")
+
+            items.append(item)
+
     return issues, pulls
+
+
+def followup_key(followup):
+    return f"{followup.get('kind', 'issue')}:{followup['item_id']}"
 
 
 def followup_comments(spec):
@@ -143,6 +213,18 @@ def followup_comments(spec):
 
     if extra := spec.get("expanded_cases"):
         comments.extend(extra.get("comments", []))
+
+    issues, pulls = expanded(spec)
+    allowed = {f"{kind}:{item['id']}" for kind, items in (("issue", issues), ("pr", pulls)) for item in items}
+    seen = set()
+
+    for comment in comments:
+        key = followup_key(comment)
+
+        if key not in allowed or key in seen or not isinstance(comment.get("body"), str) or not comment["body"].strip():
+            raise RuntimeError("Follow-up must name one unique seeded issue or PR and have text")
+
+        seen.add(key)
 
     return comments
 
@@ -294,7 +376,8 @@ def planned(spec, issues, pulls):
     for item in pr_cases:
         wanted_title = title(marker, item)
         existing = exact_match(pulls, wanted_title, item["body"], item["branch"], spec["base_branch"])
-        entry = {"kind": "pr", "id": item["id"], "public_id": item["public_id"], "target": f"{repo}/pulls", "existing_number": existing["number"] if existing else None, "title": wanted_title, "body": item["body"], "branch": item["branch"], "base": spec["base_branch"], "path": item["path"], "content": item["content"]}
+        entry = {"kind": "pr", "id": item["id"], "public_id": item["public_id"], "target": f"{repo}/pulls", "existing_number": existing["number"] if existing else None, "title": wanted_title, "body": item["body"], "branch": item["branch"], "base": spec["base_branch"]}
+        entry.update({"files": item["files"]} if "files" in item else {"path": item["path"], "content": item["content"]})
 
         if "base_content_sha256" in item:
             entry["base_content_sha256"] = item["base_content_sha256"]
@@ -423,38 +506,48 @@ def ensure_clone(spec, previous_archive):
 
 
 def existing_branch_content(repo, item):
-    path = quote(item["path"], safe="/")
     branch = quote(item["branch"], safe="")
-    content = api("GET", f"repos/{repo}/contents/{path}?ref={branch}", missing_ok=True)
 
-    if content is None or content.get("encoding") != "base64":
-        raise RuntimeError(f"Existing branch {item['branch']} lacks its expected fixture file")
+    for file in pr_files(item):
+        path = quote(file["path"], safe="/")
+        content = api("GET", f"repos/{repo}/contents/{path}?ref={branch}", missing_ok=True)
 
-    actual = base64.b64decode(content["content"]).decode("utf-8")
+        if content is None or content.get("encoding") != "base64":
+            raise RuntimeError(f"Existing branch {item['branch']} lacks its expected fixture file")
 
-    if actual != item["content"]:
-        raise RuntimeError(f"Existing branch {item['branch']} has changed fixture content")
+        actual = base64.b64decode(content["content"]).decode("utf-8")
+
+        if actual != file["content"]:
+            raise RuntimeError(f"Existing branch {item['branch']} has changed fixture content")
 
 
 def ensure_branch(spec, item):
     repo = spec["repository"]
     branch = item["branch"]
+    files = pr_files(item)
+
+    for file in files:
+        if "base_content_sha256" in file:
+            actual = hashlib.sha256((SOURCE_CLONE / file["path"]).read_bytes()).hexdigest()
+
+            if actual != file["base_content_sha256"]:
+                raise RuntimeError(f"Pinned base content changed for {file['path']}")
+
     ref = api("GET", f"repos/{repo}/git/ref/heads/{quote(branch, safe='')}", missing_ok=True)
 
     if ref is not None:
         existing_branch_content(repo, item)
         return ref["object"]["sha"]
 
-    if "base_content_sha256" in item:
-        actual = hashlib.sha256((SOURCE_CLONE / item["path"]).read_bytes()).hexdigest()
-
-        if actual != item["base_content_sha256"]:
-            raise RuntimeError(f"Pinned base content changed for {item['path']}")
-
     base = spec["base_sha"]
     base_commit = api("GET", f"repos/{repo}/git/commits/{base}")
-    blob = api("POST", f"repos/{repo}/git/blobs", {"content": item["content"], "encoding": "utf-8"})
-    tree = api("POST", f"repos/{repo}/git/trees", {"base_tree": base_commit["tree"]["sha"], "tree": [{"path": item["path"], "mode": "100644", "type": "blob", "sha": blob["sha"]}]})
+    entries = []
+
+    for file in files:
+        blob = api("POST", f"repos/{repo}/git/blobs", {"content": file["content"], "encoding": "utf-8"})
+        entries.append({"path": file["path"], "mode": "100644", "type": "blob", "sha": blob["sha"]})
+
+    tree = api("POST", f"repos/{repo}/git/trees", {"base_tree": base_commit["tree"]["sha"], "tree": entries})
     commit = api("POST", f"repos/{repo}/git/commits", {"message": f"Seed {spec['marker']} {item['public_id']} fixture change", "tree": tree["sha"], "parents": [base]})
     api("POST", f"repos/{repo}/git/refs", {"ref": f"refs/heads/{branch}", "sha": commit["sha"]})
 
@@ -605,7 +698,7 @@ def main():
         print(f"{key} -> {repo}#{number}")
 
     for followup in followups:
-        key = f"issue:{followup['item_id']}"
+        key = followup_key(followup)
         number = state["items"][key]
         comments = api("GET", f"repos/{repo}/issues/{number}/comments?per_page=100")
 
@@ -617,12 +710,12 @@ def main():
             comment_id = comments[0]["id"]
 
         else:
-            raise RuntimeError(f"Issue #{number} has an unexpected discussion; inspect before resuming")
+            raise RuntimeError(f"Item #{number} has an unexpected discussion; inspect before resuming")
 
         saved_comment = state["comments"].get(key)
 
         if saved_comment is not None and saved_comment != comment_id:
-            raise RuntimeError(f"Saved comment for issue #{number} differs from the remote discussion")
+            raise RuntimeError(f"Saved comment for item #{number} differs from the remote discussion")
 
         state["comments"][key] = comment_id
         save_state(state_path, state)

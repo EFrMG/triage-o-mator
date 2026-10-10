@@ -41,6 +41,21 @@ class EvidenceTests(Workspace):
         self.assertEqual(len(self.calls()), count)
         self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
 
+        ledger = self.root / "data/owner/repo/ledger.jsonl"
+        row = item(1, "A contribution", kind="pr")
+        row["updated_at"] = summary()["updated_at"]
+        ledger.write_text(json.dumps(row) + "\n")
+        self.run_cli("batch", "1", "--cache-mode", "offline", "--snapshot", first["snapshot_id"], "--request-budget", "0")
+        batch = next((self.root / "data/owner/repo/batches").glob("*.items.jsonl"))
+        self.assertEqual(json.loads(batch.read_text())["number"], 1)
+        self.assertEqual(len(self.calls()), count)
+
+        for mode, budget in (("refresh", "0"), ("cache-preferred", "0"), ("offline", "-1")):
+            rejected = self.run_cli("batch", "1", "--cache-mode", mode, "--request-budget", budget, ok=False)
+            self.assertIn("--request-budget must be positive", rejected.stderr)
+
+        self.assertEqual(len(self.calls()), count)
+
     def test_duplicate_comparison_keeps_unresolved_pair_and_both_selected_revisions(self):
         rows = []
         snapshots = {}

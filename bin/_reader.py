@@ -19,7 +19,7 @@ def problems(record, requested, max_age):
 def read_evidence(kind, number, profile="discussion", mode="offline", host="github.com", max_age=DEFAULT_MAX_AGE, budget=100, snapshot_id=None):
     validate_item(dict(kind=kind, number=number, database_id=None, node_id=None))
     natural(max_age, "maximum age")
-    natural(budget, "request budget", 1)
+    natural(budget, "request budget", 0 if mode == "offline" else 1)
     if profile not in PROFILES or mode not in MODES:
         raise ValueError("unsupported evidence profile or read mode")
 

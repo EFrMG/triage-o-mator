@@ -134,7 +134,7 @@ def main():
     ap.add_argument("--snapshot", help="use one fixed snapshot; requires --cache-mode offline and every selected item in that snapshot")
     ap.add_argument("--host", default="github.com")
     ap.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE)
-    ap.add_argument("--request-budget", type=int, default=100, help="maximum requests per selected item in cache mode")
+    ap.add_argument("--request-budget", type=int, default=100, help="maximum requests per selected item in cache mode; zero allowed offline")
     args = ap.parse_args()
     if sum(value is not None for value in (args.remove, args.delete, args.mark_briefed)) > 1:
         ap.error("choose only one batch operation")
@@ -150,8 +150,11 @@ def main():
     if args.host != "github.com" and not args.cache_mode:
         ap.error("--host requires --cache-mode")
 
-    if args.max_age < 0 or args.request_budget < 1:
-        ap.error("--max-age must be nonnegative and --request-budget positive")
+    if args.max_age < 0:
+        ap.error("--max-age must be nonnegative")
+
+    if args.request_budget < 0 or (args.request_budget == 0 and args.cache_mode != "offline"):
+        ap.error("--request-budget must be positive, or zero with --cache-mode offline")
 
     if args.remove is not None:
         if not args.key:

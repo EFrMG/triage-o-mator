@@ -65,12 +65,13 @@ Only ever GET requests, as the rest of this tooling does.
 
 1. **Claim vs change:** does the diff do what the description says, and nothing else? Flag unrelated changes and scope creep.
 2. **Correctness:** real bugs with file and line: wrong conditions, unquoted variables in shell, broken error paths, edge cases (empty input, missing file, first run vs upgrade).
-3. **Safety:** anything that touches install/upgrade paths, system files, `sudo`, `curl | sh`, network downloads, credentials or user data, or deletes things. These always need a human even when they look right.
-4. **Conventions:** compare with the neighbouring files you read in the tree (naming, structure, how similar features are wired up). A PR that fits the project's patterns is far cheaper to accept.
-5. **Tests and verification:** tests added or updated? Did testers in the comments confirm it works, on which versions?
-6. **Feedback addressed:** were earlier review comments dealt with? Unanswered maintainer requests mean it needs revision or has gone stale.
-7. **Overlap:** `bin/similar --kind pr --number N`, plus what the tree's history showed. Competing PRs for the same change are `duplicate` candidates (see `prompts/find-duplicates.md`) or belong in a group together.
-8. **State:** a draft, `mergeable: CONFLICTING`, or an author silent since feedback points to a needed revision or a stale PR.
+3. **Compatibility:** compare previously valid inputs and configuration against the pinned base and proposed change, tracing relevant callers. For changed conditions, types or ranges, inspect values at and around the boundaries. When a claim depends on earlier changes, releases or an already-landed fix, inspect the relevant Git history. Distinguish source-based conclusions from runtime verification.
+4. **Safety:** anything that touches install/upgrade paths, system files, `sudo`, `curl | sh`, network downloads, credentials or user data, or deletes things. These always need a human even when they look right.
+5. **Conventions:** compare with the neighbouring files you read in the tree (naming, structure, how similar features are wired up). A PR that fits the project's patterns is far cheaper to accept.
+6. **Tests and verification:** tests added or updated? Did testers in the comments confirm it works, on which versions?
+7. **Feedback addressed:** were earlier review comments dealt with? Unanswered maintainer requests mean it needs revision or has gone stale.
+8. **Overlap:** `bin/similar --kind pr --number N`, plus what the tree's history showed. Competing PRs for the same change are `duplicate` candidates (see `prompts/find-duplicates.md`) or belong in a group together.
+9. **State:** a draft, `mergeable: CONFLICTING`, or an author silent since feedback points to a needed revision or a stale PR.
 
 ## 5. Decide
 

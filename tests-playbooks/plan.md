@@ -6,6 +6,8 @@
 
 Assess whether triage-o-mator's **playbooks help an agent make and communicate sound decisions** while its scripts preserve evidence and enforce write boundaries. A synthetic PR about some example, tests whether a reviewer spots a contradiction between a PR claim and its diff. It is not a test of lazygit features. Product behavior requires its own build or runtime test and must be reported separately.
 
+Use evaluation findings to prioritize triage-o-mator's development. Keep test infrastructure proportionate: prefer realistic user workflows and small method corrections, and do not let pursuit of a perfect test suite displace crucial features or fixes in the main tool. Record remaining limitations honestly so they can inform those priorities.
+
 Keep four kinds of work distinct:
 
 1. **Judgment cases:** small, pinned issue/PR selections with positive, negative and unresolved examples. Two independent agents see the same immutable evidence and receive an explicit task for each playbook being assessed.

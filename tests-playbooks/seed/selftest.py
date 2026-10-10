@@ -506,6 +506,7 @@ class SeedTests(unittest.TestCase):
                 (install / "config").mkdir()
                 (install / "config" / "repo").write_text(repository + "\n")
                 (install / "bin").symlink_to(seed.CODE_ROOT / "bin")
+                (install / "AGENTS.md").symlink_to(seed.CODE_ROOT / "prompts" / "PLAYBOOK.md")
                 (data / "raw" / "fetch_meta.json").write_text("{}\n")
                 (checkout / "base.txt").write_text("pinned\n")
                 subprocess.run(["git", "init", "--quiet", str(checkout)], check=True)
@@ -543,6 +544,21 @@ class SeedTests(unittest.TestCase):
                 with patch.object(freeze_run, "clean_program_commit", return_value="different-commit"), patch.object(sys, "argv", ["agent_install.py", "--run-id", "r05", "--agent", "b", "--lane", "private"]), self.assertRaisesRegex(RuntimeError, "Program commit changed"):
                     agent_install.main()
 
+                instructions = root / "public" / "triage-o-mator" / "AGENTS.md"
+                instructions.unlink()
+
+                with patch.object(sys, "argv", ["agent_install.py", "--run-id", "r05", "--agent", "b", "--lane", "public"]), self.assertRaisesRegex(RuntimeError, "AGENTS.md must link"):
+                    agent_install.main()
+
+                self.assertFalse((root / "agents" / "triage-eval-r05" / "b").exists())
+                instructions.symlink_to(seed.CODE_ROOT / "AGENTS.md")
+
+                with self.assertRaisesRegex(RuntimeError, "AGENTS.md must link"):
+                    agent_install.launch_context(instructions.parent, scope["repository"])
+
+                with self.assertRaisesRegex(RuntimeError, "selects another repository"):
+                    agent_install.launch_context(instructions.parent, self.spec["repository"])
+
                 (root / "private" / "triage-o-mator" / "config" / "repo").write_text("someone/else\n")
 
                 with patch.object(sys, "argv", ["agent_install.py", "--run-id", "r05", "--agent", "b", "--lane", "private"]), self.assertRaisesRegex(RuntimeError, "changed since test-start"):
@@ -567,6 +583,20 @@ class SeedTests(unittest.TestCase):
             self.assertEqual("public", record["a"]["lane"])
             self.assertEqual("private", record["p"]["lane"])
             self.assertEqual((2, 1), (record["a"]["public"]["ledger_rows"], record["a"]["public"]["ledger_rows_cleared"]))
+
+            for name, lane in (("a", "public"), ("p", "private")):
+                install = root / "agents" / "triage-eval-r05" / name / lane / "triage-o-mator"
+                launch = record[name]["launch"]
+                self.assertEqual(str(install), launch["working_directory"])
+                self.assertEqual(str(install / "AGENTS.md"), launch["instructions_file"])
+                self.assertEqual((seed.CODE_ROOT / "prompts" / "PLAYBOOK.md").resolve(), (install / "AGENTS.md").resolve())
+                self.assertIn(str(install), launch["message"])
+                self.assertIn(str(install / "AGENTS.md"), launch["message"])
+                self.assertNotIn("AGENT_ID", launch["message"])
+                self.assertNotIn(str(run_dir), launch["message"])
+
+                startup = subprocess.run([sys.executable, "-c", "from pathlib import Path; print(Path.cwd()); print(Path('AGENTS.md').read_text().splitlines()[0])"], cwd=launch["working_directory"], text=True, capture_output=True, check=True)
+                self.assertEqual([str(install), "# Triage playbook"], startup.stdout.splitlines())
 
 
 if __name__ == "__main__":

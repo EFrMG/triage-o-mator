@@ -98,6 +98,20 @@ def public_install(source_install, target_install, scope):
     return scrubbed_ledger(source_data / "ledger.jsonl", target_data / "ledger.jsonl")
 
 
+def launch_context(install, repository):
+    """Give the launcher concrete routing information, without task content or evaluator records."""
+    install = Path(install).absolute()
+    instructions = install / "AGENTS.md"
+
+    if (install / "config" / "repo").read_text().strip() != repository:
+        raise RuntimeError("Agent launch install selects another repository")
+
+    if not instructions.is_file() or instructions.resolve() != (seed.CODE_ROOT / "prompts" / "PLAYBOOK.md").resolve():
+        raise RuntimeError("Agent launch AGENTS.md must link to the installed triage playbook")
+
+    return {"working_directory": str(install), "instructions_file": str(instructions), "message": f"Use {install} as the working directory for every shell command. First read {instructions} and confirm config/repo selects {repository}. Work only in this install and its parent Git checkout, following the install's linked program, documentation and playbooks as needed."}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", required=True)
@@ -142,6 +156,10 @@ def main():
     if recorded != freeze["playbook_sha256"]:
         raise RuntimeError("Playbooks changed since test-start; record a new freeze before adding an agent")
 
+    source_install = seed_install if args.lane == "private" else seed.SOURCE_CLONE / "triage-o-mator"
+    repository = freeze["repository"] if args.lane == "private" else scope["repository"]
+    launch_context(source_install, repository)
+
     root.mkdir(parents=True)
 
     if args.lane == "private":
@@ -154,7 +172,8 @@ def main():
         rows, cleared = public_install(seed.SOURCE_CLONE / "triage-o-mator", root / "public" / "triage-o-mator", scope)
         lane_record = {"path": str(root / "public"), "repository": scope["repository"], "head": public_head, "corpus_id": scope["corpus_id"], "ledger_rows": rows, "ledger_rows_cleared": cleared}
 
-    record = {"root": str(root), "lane": args.lane, "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "program_commit": git(seed.CODE_ROOT, "rev-parse", "HEAD"), args.lane: lane_record}
+    launch = launch_context(root / args.lane / "triage-o-mator", repository)
+    record = {"root": str(root), "lane": args.lane, "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "program_commit": git(seed.CODE_ROOT, "rev-parse", "HEAD"), "launch": launch, args.lane: lane_record}
     index_path = run_dir / "agent-installs.json"
     index = json.loads(index_path.read_text()) if index_path.exists() else {}
     index[args.agent] = record
@@ -168,8 +187,10 @@ def main():
     if args.lane == "public":
         print(f"  inventory:       {cleared} of {rows} ledger rows cleared of earlier decisions")
 
-    print(f"  start in:        {root / args.lane / 'triage-o-mator'}")
-    print("Give the agent its frozen task text. Do not give it any path into the kit.")
+    print("Launch context (supply separately from the frozen task text):")
+    print(json.dumps(launch, indent=2))
+    print("Set the launcher's working directory when supported; otherwise supply the concrete launch message before the task. Never ask the agent to substitute a path placeholder or infer a path from its name.")
+    print("Capture command/tool-call logs in the evaluator; do not ask the agent to build a logging wrapper. Do not give it any path into the kit.")
 
 
 if __name__ == "__main__":

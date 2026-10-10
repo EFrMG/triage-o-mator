@@ -25,6 +25,6 @@ export TRIAGE_EVAL_CLONE_PATH=/path/to/lazygit-clone # where the private clone w
 python3 seed/selftest.py # offline checks, no GitHub
 ```
 
-Then follow [the plan](plan.md) from read-only preview through exact seed approval, lane-specific agent installs, frozen tasks, one `report.md`, verified archive and separately approved repository deletion. Each fresh agent starts in its own install under `/tmp` and receives only its task text, never a path into this kit or the records.
+Then follow [the plan](plan.md) from read-only preview through exact seed approval, lane-specific agent installs, frozen tasks, one `report.md`, verified archive and separately approved repository deletion. Each fresh agent receives its concrete install launch context under `/tmp` and the frozen task text, never a path into this kit or the records. Set its working directory explicitly when the runtime supports it; otherwise use the concrete routing message emitted by `agent-install`. The evaluator captures tool-call logs; agents do not build logging wrappers.
 
 **A rerun is not a replay.** The fixture, tasks and evidence can be held fixed; agent answers cannot. Expect the same cases and a comparable picture, not identical judgments. The public half reads a frozen lazygit corpus that the seed does not create: acquire your own with the install's normal scripts and name it in the fixture's `public_read_scope`.

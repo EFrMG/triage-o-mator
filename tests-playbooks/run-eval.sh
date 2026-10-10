@@ -26,7 +26,9 @@ Usage:
 The test-start command verifies the seed and writes freeze.json for the evaluator.
 The agent-install command builds one private or public clone and install under
 \${TRIAGE_EVAL_AGENT_ROOT:-/tmp}/triage-eval-RUN_ID/AGENT/.
-Agents start in their own install with task text and no path into this kit.
+The command prints and records concrete launch context for the assigned install.
+Supply it separately from the identical task text; never use path placeholders.
+Capture tool-call logs in the evaluator, without agent-written wrappers.
 EOF
   exit 2
 }

@@ -16,6 +16,8 @@ Read both sides' descriptions, relevant comments, and for PRs the operative diff
 
 For issues, establish the same defect or request, trigger and symptom. Hardware or version differences can matter. A fix already on the target branch calls for a `resolved` assessment, supported by read-only code history, rather than a duplicate label. For PRs, ask whether merging one makes the other redundant; substantially different implementations for the same goal are competitors that need review. A related issue and PR are not duplicates of each other.
 
+A report phrased as a question may still describe a defect. Another reporter's confirmation that documentation answered their question does not resolve this report. Before recommending duplicate closure, establish that the surviving item covers the reported behavior and preserves any unresolved details; otherwise keep the relationship unresolved or request a specific missing discriminator.
+
 If several PRs overlap, inspect each proposed survivor's base, feedback, checks and unique work before suggesting which stays open. Age is only a tiebreaker. If no survivor is clear, report a competing group. The [group comparison guide](../docs/groups.md) covers pinned evidence, findings, preservation reports, reconciliation and distinct-pair verdicts. Its `ready` state does not establish semantic redundancy, human approval or permission to close.
 
 ## Record or report the result

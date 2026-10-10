@@ -19,6 +19,7 @@ Usage:
   $0 seed RUN_ID PLAN_SHA256 [PREVIOUS_ARCHIVE]
   $0 test-start RUN_ID
   $0 agent-install RUN_ID AGENT private|public
+  $0 agent-retire RUN_ID AGENT
   $0 archive RUN_ID ARCHIVE_NAME
   $0 verify /absolute/path/to/ARCHIVE.tar.gz
   $0 delete /absolute/path/to/ARCHIVE.tar.gz --confirm-repo $repo
@@ -29,6 +30,8 @@ The agent-install command builds one private or public clone and install under
 The command prints and records concrete launch context for the assigned install.
 Supply it separately from the identical task text; never use path placeholders.
 Capture tool-call logs in the evaluator, without agent-written wrappers.
+After the agent stops and its output is sealed, agent-retire verifies the seal
+and removes only the disposable parent checkout. Keep its install until archive verification.
 EOF
   exit 2
 }
@@ -121,6 +124,11 @@ PY
     [[ $lane == private || $lane == public ]] || usage
     [[ -s "$runs/$run_id/freeze.json" ]] || { printf 'Run test-start first\n' >&2; exit 1; }
     python3 "$seed_dir/agent_install.py" --run-id "$run_id" --agent "$agent" --lane "$lane"
+    ;;
+  agent-retire)
+    [[ $# == 2 ]] || usage
+    [[ $1 =~ ^[a-z0-9]{1,12}$ && $2 =~ ^[a-z0-9]{1,12}$ ]] || usage
+    python3 "$seed_dir/agent_retire.py" --run-id "$1" --agent "$2"
     ;;
   archive)
     [[ $# == 2 ]] || usage

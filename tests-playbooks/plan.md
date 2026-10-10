@@ -45,6 +45,8 @@ Separate **launch context** from **task text**. `agent-install` validates the se
 
 Capture chronological command/tool-call logs from the evaluator's runtime transcript. Verify that transcript capture is available before launching a blind task. Agents should do ordinary triage work and report their evidence and outcomes; do not require custom logging scripts, shell wrappers or command re-escaping. Seal the raw transcript, output and artifact digests when each attempt finishes. Extract command logs from that retained transcript without rewriting it, and report any missing trace or commands outside the assigned scope.
 
+After an agent has stopped and its output is sealed, run `run-eval.sh agent-retire RUN_ID AGENT` before creating more installs. Never retire a checkout while an agent is running or may resume work in it. The command verifies the completed seal, retained artifact hashes, registered paths, pinned HEAD and absence of checkout changes, then removes only the disposable parent source files and Git directory. It retains the complete `triage-o-mator/` install at its registered path for same-attempt artifact transfers and final archiving. Cleanup is recorded in `seed/runs/RUN_ID/agents/AGENT/retirement.json`; an interrupted cleanup can resume using the same command after its retained install is revalidated. A retired checkout cannot supply source context for later work: create a fresh agent install for each new task. Keep the seed and public source checkouts, and every retained agent install, until the archive is verified. This keeps redundant parent checkouts from filling `/tmp`.
+
 Two independent attempts reveal disagreements; they do not estimate a reliable accuracy rate. If a future report needs a rate or before/after comparison, repeat the same frozen tasks across additional trials with the model, budget and environment held fixed, and keep the per-trial traces. Do not turn two matching answers into a confidence score.
 
 Every agent works in its own install and receives a separately written task, saved under the run directory before it is sent, plus the concrete launch context described above. A public task names the frozen corpus and snapshot scope it needs; a private diagnostic task names its exact keys and snapshots. Ordinary repository context comes from that install's `AGENTS.md`, `config/repo` and scripts. The `briefing_batches` sizes recorded in evaluator-only `freeze.json` are the planned denominator for Maintainer brief coverage; give a fresh agent pair one bounded batch at a time and retain the selected, screened and remaining keys across batch records.
@@ -108,7 +110,10 @@ $KIT/run-eval.sh agent-install "$RUN_ID" p01a private # repeat with fresh IDs fo
 $KIT/run-eval.sh agent-install "$RUN_ID" p01b private
 $KIT/run-eval.sh agent-install "$RUN_ID" u01a public # separate agents for real public evidence
 $KIT/run-eval.sh agent-install "$RUN_ID" u01b public
-# Freeze case manifest and exact agent tasks; run bounded passes; write report.md.
+# Freeze case manifest and exact agent tasks; run bounded passes.
+# After each agent stops and its output is sealed:
+$KIT/run-eval.sh agent-retire "$RUN_ID" p01a # repeat for each finished agent
+# Keep retained installs; write report.md, then archive and verify.
 $KIT/run-eval.sh archive "$RUN_ID" ARCHIVE_NAME
 $KIT/run-eval.sh verify "$RECORDS/archives/ARCHIVE_NAME.tar.gz"
 # After separate approval of the exact repository deletion:

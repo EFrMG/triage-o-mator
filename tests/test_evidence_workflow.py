@@ -1,10 +1,13 @@
 """Evidence is acquired explicitly, then read from pinned local snapshots."""
 
+import importlib.util
 import json
+import os
 import subprocess
 import sys
+from unittest.mock import patch
 
-from support import Workspace, item, repository, summary
+from support import ROOT, Workspace, item, repository, summary
 
 
 class EvidenceTests(Workspace):
@@ -379,6 +382,31 @@ except ReadFailure as error:
         row = self.ledger()[("pr", 1)]
         self.assertNotIn("body", row)
         self.assertIsNone(row["review_request"])
+
+        spec = importlib.util.spec_from_file_location("evaluation_seed", ROOT / "tests-playbooks/seed/seed.py")
+        seed = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(seed)
+        self.responses["repos/owner/repo/issues?state=open&per_page=100"] = dict(data=[row])
+        self.save_responses()
+        before = len(self.calls())
+
+        with patch.dict(os.environ, self.env):
+            seed.refresh_inventory(self.root, "owner/repo")
+
+        self.assertEqual(len(self.calls()), before + 2)
+        before = len(self.calls())
+        snapshot = self.cache("import-inventory")["snapshot_id"]
+        corpus = self.cache("corpus-create", "--snapshot", snapshot, "--scope", "open-items", "--profile", "backlog")["corpus_id"]
+        status = self.cache("corpus-status", corpus)
+        self.assertEqual(status["plan"]["repository"]["database_id"], 42)
+        self.assertEqual([(member["kind"], member["number"]) for member in status["plan"]["members"]], [("pr", 1)])
+        self.assertEqual(status["counts"]["pending"], 1)
+        record = self.cache("read", "--kind", "pr", "--number", "1", "--snapshot", snapshot)
+        self.assertEqual(record["problems"]["summary"], ["partial"])
+        self.assertEqual(record["problems"]["comments"], ["missing"])
+        self.assertIsNone(record["identity"]["database_id"])
+        self.assertFalse(self.ledger()[("pr", 1)]["action"])
+        self.assertEqual(len(self.calls()), before)
 
     def test_frozen_search_stays_offline(self):
         snapshot = self.import_inventory()

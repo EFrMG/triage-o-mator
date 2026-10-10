@@ -437,6 +437,11 @@ def ledger_difference(spec, state):
     return expected - observed, observed - expected
 
 
+def refresh_inventory(install, repo):
+    subprocess.run([str(install / "bin" / "fetch"), "--full", "--cache-inventory", "--expected-repo", repo, "--request-budget", "10"], cwd=install, check=True)
+    subprocess.run([str(install / "bin" / "sync")], cwd=install, check=True)
+
+
 def ensure_repo_base(spec, existing):
     repo = spec["repository"]
 
@@ -730,8 +735,7 @@ def main():
             if attempt:
                 time.sleep(2)
 
-            subprocess.run([str(install / "bin" / "fetch"), "--full"], cwd=install, check=True)
-            subprocess.run([str(install / "bin" / "sync")], cwd=install, check=True)
+            refresh_inventory(install, repo)
             missing, unexpected = ledger_difference(spec, state)
 
             if not missing and not unexpected:

@@ -1,4 +1,4 @@
-"""Evaluation fixture creation and checkout retirement preserve reviewed boundaries.""""
+"""Evaluation fixture creation and checkout retirement preserve reviewed boundaries."""
 
 import importlib.util
 import json

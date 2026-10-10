@@ -36,7 +36,7 @@ When someone asks for one of these in plain words, open the matching playbook in
 
 For a backlog-wide request, work in bounded selections and finish one selection before taking another. Keep the selected keys, source batch or snapshot, completed outcomes and remaining keys in the handoff; a request budget or per-command limit is a limit on one pass, not a reason to silently drop the rest. Use the batch briefing checkpoint only for batches actually screened under the maintainer-brief playbook. Other passes must report their own coverage and must not claim to have screened the whole backlog from a sample or a `bin/next` count.
 
-An automated action assessment uses `bin/action-assessment` to record each selected key as proposed, skipped or deferred against the saved ledger decision and any exact proposal checkpoint. Those tracked assessments are separate from proposal history, GitHub write outcomes and Pending review.
+An automated action assessment uses `bin/action-assessment` to record each selected key as proposed, skipped or deferred against the saved ledger decision and any exact proposal checkpoint. An item without a saved writing action can be recorded as skipped without creating a decision or proposal. Those tracked assessments are separate from proposal history, GitHub write outcomes and Pending review.
 
 Duplicate sweeps use `bin/duplicate-assessment` to checkpoint each examined pair against both selected evidence snapshots. An unresolved comparison remains a recorded gap, while the separate human `not-duplicate` verdict controls candidate filtering.
 

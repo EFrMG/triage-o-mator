@@ -51,8 +51,8 @@ def assessment_items(source, ledger, taxonomy):
             raise ValueError("each item needs a bounded, explained assessment outcome")
         if not isinstance(gaps, list) or len(gaps) > 20 or any(not isinstance(gap, str) or not gap.strip() or len(gap) > 500 for gap in gaps):
             raise ValueError("evidence gaps must be a bounded list of short explanations")
-        if action_operation(taxonomy, row.get("action")) not in ("comment", "close", "reopen"):
-            raise ValueError(f"{entry['key']} has no saved writing action")
+        if action_operation(taxonomy, row.get("action")) not in ("comment", "close", "reopen") and outcome != "skipped":
+            raise ValueError(f"{entry['key']} has no saved writing action; record it as skipped")
 
         proposal = None
         path = proposal_path(*key)

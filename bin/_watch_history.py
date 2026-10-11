@@ -3,6 +3,7 @@
 from _chunks import page, read, window
 from _evidence import canonical, digest, natural
 from _watch import load, observation
+from _read_commands import command
 
 POLICY = "watch-source-revisions-v1"
 
@@ -63,7 +64,7 @@ def bound(cache, number, token=None, entry=None):
     watch = load(cache, number)
     expected = checkpoint(watch, entry)
     if token is not None and token != expected:
-        raise ValueError("watch history checkpoint or entry changed; restart at offset zero")
+        raise ValueError("watch history checkpoint or entry changed/mismatched; expected the checkpoint from watch-history for this repository, PR and selected --entry, not a snapshot ID, polling or local-context checkpoint; restart watch-history with the same --number and --entry at offset zero")
 
     entries, coverage = collect(cache, watch)
 
@@ -79,7 +80,7 @@ def history(cache, number, offset=0, limit=20, token=None, entry=None):
     if entry is not None:
         selected = next((row for row in entries if row["id"] == entry), None)
         if selected is None:
-            raise ValueError("source revision is not in this watch")
+            raise ValueError("source revision is not in this watch; --entry expects a source-revision id from watch-history for this PR, not source_id, snapshot_id or checkpoint; rerun watch-history without --entry at offset zero")
 
         rows = selected["references"]
     else:
@@ -89,7 +90,16 @@ def history(cache, number, offset=0, limit=20, token=None, entry=None):
 
     selected = rows[offset:offset + limit]
     pagination = page(len(rows), offset, len(selected))
+    selected = [dict(row, reference_type="watch-raw-reference" if entry is not None else "watch-source-revision",
+                     read_command=command("cache", watch["repository"], "watch-source", number=number, entry=entry,
+                                          reference=offset + index, checkpoint=token) if entry is not None else
+                     command("cache", watch["repository"], "watch-history", number=number, entry=row["id"]))
+                for index, row in enumerate(selected)]
+    next_command = command("cache", watch["repository"], "watch-history", number=number, entry=entry,
+                           offset=pagination["next_offset"], limit=limit, checkpoint=token) if pagination["next_offset"] is not None else None
+
     return dict(schema_version=1, policy=POLICY, repository=watch["repository"], item=watch["item"],
+                checkpoint_type="watch-entry-references" if entry is not None else "watch-history", next_command=next_command,
                 checkpoint=token, polling_checkpoint=watch["checksum"], entry=entry,
                 results=selected, pagination=pagination, coverage=coverage, requests=0,
                 continuation=dict(offset=pagination["next_offset"], limit=limit, checkpoint=token, entry=entry) if pagination["next_offset"] is not None else None,
@@ -101,18 +111,21 @@ def source(cache, number, entry, reference=0, token=None, byte_offset=0, max_byt
     natural(reference, "reference index")
     window(byte_offset, max_bytes, 65536)
     if token is None:
-        raise ValueError("source reads require the entry reference page's --checkpoint")
+        raise ValueError("source reads require the entry reference page's --checkpoint; run watch-history with the same --number and --entry at offset zero, then use its read_command")
 
     watch, token, entries, coverage = bound(cache, number, token, entry)
     selected = next((row for row in entries if row["id"] == entry), None)
     if selected is None or reference >= len(selected["references"]):
-        raise ValueError("source reference is not in this watch revision")
+        raise ValueError("source reference is not in this watch revision; --entry expects the source-revision id and --reference its raw-reference index from watch-history for this PR")
 
     ref = selected["references"][reference]
     chunk = read(cache, ref["snapshot_id"], "pr", number, ref["component"], ref["offset"], 1, byte_offset, max_bytes)
     # A source continuation is confined to this one saved row, even if the component has more rows.
     continuation = dict(entry=entry, reference=reference, checkpoint=token, byte_offset=byte_offset + chunk["bytes"]["returned"], max_bytes=max_bytes) if chunk["bytes"]["omitted_after"] else None
     chunk["continuation"] = None
+    chunk["next_command"] = None
+    next_command = command("cache", watch["repository"], "watch-source", number=number, **continuation) if continuation else None
 
     return dict(schema_version=1, policy=POLICY, entry=entry, reference=ref, checkpoint=token,
+                checkpoint_type="watch-entry-references", next_command=next_command,
                 source=chunk, continuation=continuation, coverage=coverage, requests=0)

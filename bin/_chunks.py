@@ -5,6 +5,7 @@ import json
 from _evidence import DEFAULT_MAX_AGE
 from _evidence import COMPONENTS, canonical, digest, natural, validate_payload
 from _reader import problems
+from _read_commands import command
 
 
 def window(offset, limit, maximum):
@@ -29,12 +30,18 @@ def listing(cache, snapshot_id, offset=0, limit=20, max_age=DEFAULT_MAX_AGE):
     manifest = cache.load_manifest(snapshot_id)
     records = manifest["items"]
     selected = records[offset:offset + limit]
-    return dict(snapshot_id=snapshot_id, repository=manifest["repository"],
-                pagination=page(len(records), offset, len(selected)),
+    pagination = page(len(records), offset, len(selected))
+    return dict(snapshot_id=snapshot_id, reference_type="immutable-snapshot", repository=manifest["repository"],
+                next_command=command("cache", manifest["repository"], "list", snapshot=snapshot_id,
+                                     offset=pagination["next_offset"], limit=limit, max_age=max_age) if pagination["next_offset"] is not None else None,
+                pagination=pagination,
                 verification="manifest and descriptors only; payloads are verified on component read",
                 freshness_basis="recorded revision and local age, not current GitHub state",
                 items=[dict(identity=row["identity"], revision=row["revision"],
-                            components={name: dict(status=value["status"], object=value["object"])
+                            components={name: dict(status=value["status"], object=value["object"],
+                                                   read_command=command("cache", manifest["repository"], "chunk", snapshot=snapshot_id,
+                                                                        kind=row["identity"]["kind"], number=row["identity"]["number"],
+                                                                        component=name, max_age=max_age) if value["object"] else None)
                                         for name, value in row["components"].items()},
                             problems=problems(row, sorted(COMPONENTS), max_age)) for row in selected],
                 requests=0)
@@ -106,7 +113,7 @@ def read(cache, snapshot_id, kind, number, component, offset=0, limit=20,
         raise ValueError("item is not in selected snapshot")
 
     descriptor = record["components"].get(component)
-    result = dict(snapshot_id=snapshot_id, repository=manifest["repository"], identity=record["identity"],
+    result = dict(snapshot_id=snapshot_id, reference_type="immutable-snapshot-component", repository=manifest["repository"], identity=record["identity"],
                   revision=record["revision"], component=component, descriptor=descriptor,
                   problems=problems(record, [component], max_age), requests=0,
                   freshness_basis="recorded revision and local age, not current GitHub state",
@@ -115,7 +122,7 @@ def read(cache, snapshot_id, kind, number, component, offset=0, limit=20,
         if offset or byte_offset:
             raise ValueError("missing component has no content offset")
 
-        return dict(result, available=False, text=None, pagination=page(0, 0, 0), continuation=None)
+        return dict(result, available=False, text=None, pagination=page(0, 0, 0), continuation=None, next_command=None)
 
     payload = cache.read_object(descriptor["object"])
     validate_payload(component, descriptor, kind, payload)
@@ -151,7 +158,10 @@ def read(cache, snapshot_id, kind, number, component, offset=0, limit=20,
     elif pagination["next_offset"] is not None:
         continuation = dict(offset=pagination["next_offset"], limit=limit, byte_offset=0)
 
-    return dict(result, available=True, encoding=encoding, text=fragment, pagination=pagination,
+    next_command = command("cache", manifest["repository"], "chunk", snapshot=snapshot_id, kind=kind, number=number,
+                           component=component, max_age=max_age, max_bytes=max_bytes, **continuation) if continuation else None
+
+    return dict(result, available=True, encoding=encoding, text=fragment, pagination=pagination, next_command=next_command,
                 bytes=page(len(raw), byte_offset, end - byte_offset), continuation=continuation,
                 page_complete=byte_offset == 0 and end == len(raw),
                 note="Concatenate byte fragments before parsing JSON. Offsets are zero-based; diff lines retain original endings. Reuse the exact snapshot, item, component and limit.")

@@ -44,6 +44,25 @@ class EvidenceTests(Workspace):
         self.assertEqual(len(self.calls()), count)
         self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
 
+        listing = self.cache("list", "--snapshot", first["snapshot_id"])
+        command = listing["items"][0]["components"]["summary"]["read_command"]
+        chunk = self.json_cli(command[0].removeprefix("bin/"), *command[1:], "--max-bytes", "7")
+        text = chunk["text"]
+        while chunk["next_command"]:
+            command = chunk["next_command"]
+            chunk = self.json_cli(command[0].removeprefix("bin/"), *command[1:])
+            self.assertEqual(chunk["snapshot_id"], first["snapshot_id"])
+            text += chunk["text"]
+
+        self.assertEqual(json.loads(text)["body"], "Useful source text")
+        self.assertEqual(len(self.calls()), count)
+        wrong_type = self.run_cli("cache", "list", "--snapshot", "v1:" + "a" * 64, ok=False)
+        self.assertIn("expected an immutable snapshot ID", wrong_type.stderr)
+        unknown = self.run_cli("cache", "list", "--snapshot", "0" * 64, ok=False)
+        self.assertIn("selected immutable snapshot is not retained", unknown.stderr)
+        self.run_cli("cache", "--expected-repo", "other/repo", "list", "--snapshot", first["snapshot_id"], ok=False)
+        self.assertEqual(len(self.calls()), count)
+
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         row = item(1, "A contribution", kind="pr")
         row["updated_at"] = summary()["updated_at"]

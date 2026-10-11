@@ -179,6 +179,10 @@ class ItemContextTests(Workspace):
         self.assertEqual(first["rows"][0]["fields"]["maintainer_notes"]["preview"], "Wait for the dependency")
         self.assertEqual(first["rows"][1]["revision"], 2)
         self.assertEqual(first["pagination"]["omitted_after"], 1)
+        self.assertEqual(first["checkpoint_type"], "local-context")
+        command = first["next_command"]
+        copied = self.json_cli(command[0].removeprefix("bin/"), *command[1:])
+        self.assertEqual(copied["rows"][0]["fields"]["notes"]["preview"], "é" * 256)
         self.context("read", "--kind", "pr", "--number", "1", "--offset", "2", ok=False)
 
         second = self.context("read", "--kind", "pr", "--number", "1", "--offset", "2", "--limit", "2", "--checkpoint", first["checkpoint"])
@@ -194,6 +198,14 @@ class ItemContextTests(Workspace):
                                  "--checkpoint", first["checkpoint"], "--max-bytes", "65536")
         self.assertEqual(full_note["text"], notes)
         self.assertIsNone(full_note["continuation"])
+        command = member["fields"]["notes"]["read_command"]
+        self.assertEqual(self.json_cli(command[0].removeprefix("bin/"), *command[1:])["text"], notes)
+        command = source["next_command"]
+        self.assertEqual(self.json_cli(command[0].removeprefix("bin/"), *command[1:])["text"], "éé")
+        wrong_type = self.run_cli("item-context", "--expected-repo", "owner/repo", "source", "--kind", "pr", "--number", "1",
+                                  "--row", member["id"], "--field", "notes", "--checkpoint", "a" * 64, ok=False)
+        self.assertIn("local-context checkpoint from item-context read", wrong_type.stderr)
+        self.run_cli("item-context", "--expected-repo", "other/repo", "read", "--kind", "pr", "--number", "1", ok=False)
 
         row["last_synced_at"] = "2026-09-29T03:00:00Z"
         ledger.write_text(json.dumps(row) + "\n")
@@ -502,6 +514,7 @@ class WatchTests(Workspace):
     def test_watch_poll_records_activity_without_approval(self):
         snapshot = self.acquire()
         self.json_cli("cache", "watch-enroll", "--number", "1", "--snapshot", snapshot, "--by", "operator", "--closure-event", "99")
+        original = self.json_cli("cache", "watch-history", "--number", "1")
         self.responses["repos/owner/repo/pulls/1"]["data"].update(updated_at="2026-09-23T00:00:00Z", comments=1)
         self.responses["repos/owner/repo/issues/1/comments?per_page=100&page=1"] = dict(data=[dict(id=1, node_id="C_1", html_url="https://github.com/owner/repo/issues/1#issuecomment-1", body="Please reconsider", user=dict(login="author"), created_at="2026-09-23T00:00:00Z", updated_at="2026-09-23T00:00:00Z")])
         self.responses["repos/owner/repo/issues/1/timeline?per_page=100&page=1"]["data"].append(dict(id=1, event="commented", created_at="2026-09-23T00:00:00Z"))
@@ -509,3 +522,26 @@ class WatchTests(Workspace):
         self.assertEqual(result["observation_count"], 2)
         self.assertEqual(result["poll"]["status"], "complete")
         self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
+        before = len(self.calls())
+        history = self.json_cli("cache", "watch-history", "--number", "1", "--limit", "1")
+        command = history["results"][0]["read_command"]
+        references = self.json_cli(command[0].removeprefix("bin/"), *command[1:])
+        self.assertEqual(references["checkpoint_type"], "watch-entry-references")
+        command = references["results"][0]["read_command"]
+        raw = self.json_cli(command[0].removeprefix("bin/"), *command[1:], "--max-bytes", "10")
+        text = raw["source"]["text"]
+        while raw["next_command"]:
+            self.assertIsNone(raw["source"]["next_command"])
+            command = raw["next_command"]
+            raw = self.json_cli(command[0].removeprefix("bin/"), *command[1:])
+            text += raw["source"]["text"]
+
+        self.assertEqual(json.loads(text)[0]["event"], "closed")
+        wrong = self.run_cli("cache", "watch-history", "--number", "1", "--entry", snapshot, ok=False)
+        self.assertIn("source-revision id from watch-history", wrong.stderr)
+        wrong = self.run_cli("cache", "watch-source", "--number", "1", "--entry", history["results"][0]["id"],
+                             "--checkpoint", snapshot, ok=False)
+        self.assertIn("not a snapshot ID", wrong.stderr)
+        self.run_cli("cache", "--expected-repo", "other/repo", "watch-history", "--number", "1", ok=False)
+        self.run_cli("cache", "watch-history", "--number", "1", "--checkpoint", original["checkpoint"], ok=False)
+        self.assertEqual(len(self.calls()), before)

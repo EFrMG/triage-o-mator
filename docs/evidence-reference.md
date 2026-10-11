@@ -73,6 +73,16 @@ Pages contain at most 100 members (default 20), with frozen identity, observed i
 
 `corpus-list` verifies plan/state checksums, versions, structure, repository identity and membership against the inventory manifest. It verifies only the selected members' result manifests, including identity and descriptor consistency for declared complete outcomes. It **does not** read payloads, re-audit full-inventory provenance stored in bodies, or verify unselected result references. `corpus-status` and `corpus-run` retain those full checks. This narrower metadata view is for discovery, not acquisition validation or execution authority; a missing/corrupt unselected payload can remain undiscovered until selected or audited. Reads stay offline, do not initialize storage or rebuild indexes, and refuse invalid selected metadata without fallback.
 
+## Copying reader references
+
+`cache list` labels immutable snapshot references and supplies a `read_command` argument list for each retained component. `cache chunk` supplies `next_command` for another bounded fragment or page, carrying the exact snapshot, item, component, age policy and limits forward. A null command means there is no next read in that selection.
+
+`cache watch-history` distinguishes source-revision IDs from raw references. Each history row's `read_command` opens its reference page; each reference row's command reads that selected raw source with the entry-specific checkpoint. `watch-source` continuation stays inside that one raw reference. A snapshot ID, polling checkpoint and history checkpoint are different references even when all contain 64 hexadecimal characters.
+
+`item-context read` labels its checkpoint as `local-context` and provides a `read_command` for each text field. Its `next_command` carries the item and checkpoint for the next page; `item-context source` carries the row, field and byte bounds for the next fragment. These checkpoints describe local guidance and do not identify repository source evidence.
+
+The commands are JSON arrays of arguments, relative to the current install. Pass them as arguments, for example to `subprocess.run(argv, check=True)`, without a shell or interpolating source text. They preserve canonical references, cache host and repository guards; they do not grant approval or authenticate source claims. Wrong, unknown, foreign or stale references still refuse offline. Other readers retain their existing continuation interfaces.
+
 ## Basic cache commands
 
 The cache provides versioned evidence storage, **read-only acquisition for explicitly selected items and frozen inventory corpora**, and shared readers. `enrich-one`, `batch`, `similar --enrich`, and `group export --enrich` can opt in. Default TUI enrichment still uses its existing path; the TUI can read fixed cached batches without fetching missing evidence. No cache command changes the ledger or authorizes actions. The [tutorial](tutorial.md#10-build-deeper-offline-context-when-needed) covers the TUI controls.

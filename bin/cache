@@ -115,7 +115,7 @@ def main():
 
     for name in ("list", "chunk"):
         command = commands.add_parser(name, help="bounded offline snapshot metadata" if name == "list" else "bounded offline component text from a fixed snapshot")
-        command.add_argument("--snapshot", required=True)
+        command.add_argument("--snapshot", required=True, help="immutable snapshot ID (64 lowercase hex characters); not a source revision or context checkpoint")
         command.add_argument("--offset", type=int, default=0)
         command.add_argument("--limit", type=int, default=20)
         command.add_argument("--max-age", type=int, default=DEFAULT_MAX_AGE)
@@ -218,8 +218,8 @@ def main():
             continuation.add_argument("--checkpoint", help="current watch token for continuing an unfinished poll")
             continuation.add_argument("--restart", action="store_true", help="explicitly restart with fresh acquisition; retained observations remain")
         if name in ("watch-history", "watch-source"):
-            command.add_argument("--checkpoint")
-            command.add_argument("--entry", required=name == "watch-source", help="source revision ID; history then pages its raw references")
+            command.add_argument("--checkpoint", help="checkpoint from watch-history with the same PR and --entry selection; not a snapshot, polling or local-context token")
+            command.add_argument("--entry", required=name == "watch-source", help="source-revision id from watch-history; history pages its raw references and provides read_command arguments")
         if name == "watch-history":
             command.add_argument("--offset", type=int, default=0)
             command.add_argument("--limit", type=int, default=20)

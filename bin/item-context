@@ -24,11 +24,11 @@ def main():
         if name == "read":
             command.add_argument("--offset", type=int, default=0)
             command.add_argument("--limit", type=int, default=10)
-            command.add_argument("--checkpoint")
+            command.add_argument("--checkpoint", help="local-context checkpoint from read for this repository/item; not a snapshot ID or watch checkpoint")
         else:
             command.add_argument("--row", required=True, help="row ID from read")
             command.add_argument("--field", required=True, help="text field from that row")
-            command.add_argument("--checkpoint", required=True)
+            command.add_argument("--checkpoint", required=True, help="local-context checkpoint from read for this repository/item; use the field's read_command")
             command.add_argument("--byte-offset", type=int, default=0)
             command.add_argument("--max-bytes", type=int, default=4096)
 

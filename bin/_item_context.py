@@ -4,6 +4,7 @@ from _chunks import page, window
 from _action_proposal_records import feedback as proposal_feedback
 from _evidence import canonical, digest
 from _groups import list_groups
+from _read_commands import command
 from _triage import REPO, TRIAGE_DEFAULTS, load_ledger, review_request
 
 POLICY = "item-context-v1"
@@ -112,18 +113,30 @@ def preview(value):
     return dict(preview=text, omitted_bytes=len(raw) - len(text.encode("utf-8")))
 
 
-def show_row(row):
-    return dict(row, fields={field: preview(value) for field, value in row["fields"].items()})
+def show_row(row, kind, number, checkpoint):
+    fields = {}
+    for field, value in row["fields"].items():
+        fields[field] = preview(value)
+        if isinstance(value, str):
+            fields[field]["read_command"] = command("item-context", REPO, "source", kind=kind, number=number,
+                                                    row=row["id"], field=field, checkpoint=checkpoint)
+
+    return dict(row, fields=fields)
+
+
+def check_checkpoint(context, checkpoint):
+    if checkpoint != context["checkpoint"]:
+        raise ValueError("local context changed or checkpoint mismatched; expected the local-context checkpoint from item-context read for this repository/item, not a snapshot or watch token; restart item-context read at offset zero")
 
 
 def read(kind, number, offset=0, limit=10, checkpoint=None):
     window(offset, limit, 20)
     if offset and checkpoint is None:
-        raise ValueError("context continuation requires --checkpoint")
+        raise ValueError("context continuation requires --checkpoint from item-context read for this repository/item; restart at offset zero")
 
     context = collect(kind, number)
-    if checkpoint is not None and checkpoint != context["checkpoint"]:
-        raise ValueError("local context changed; restart at offset zero")
+    if checkpoint is not None:
+        check_checkpoint(context, checkpoint)
 
     rows = context.pop("rows")
     context.pop("ledger_guidance")
@@ -132,7 +145,11 @@ def read(kind, number, offset=0, limit=10, checkpoint=None):
     chosen = rows[offset:offset + limit]
     pagination = page(len(rows), offset, len(chosen))
 
-    return dict(schema_version=1, policy=POLICY, **context, rows=[show_row(row) for row in chosen],
+    next_command = command("item-context", REPO, "read", kind=kind, number=number, offset=pagination["next_offset"],
+                           limit=limit, checkpoint=context["checkpoint"]) if pagination["next_offset"] is not None else None
+
+    return dict(schema_version=1, policy=POLICY, **context, checkpoint_type="local-context", rows=[show_row(row, kind, number, context["checkpoint"]) for row in chosen],
+                next_command=next_command,
                 pagination=pagination,
                 continuation=dict(offset=pagination["next_offset"], limit=limit, checkpoint=context["checkpoint"]) if pagination["next_offset"] is not None else None,
                 requests=0, meaning="Local guidance can be agent-authored or quote untrusted source text. Rejections and recorded write outcomes are distinct; a successful write does not prove the recommendation was correct or clear a Pending review request.")
@@ -141,8 +158,7 @@ def read(kind, number, offset=0, limit=10, checkpoint=None):
 def source(kind, number, row_id, field, checkpoint, byte_offset=0, max_bytes=4096):
     window(byte_offset, max_bytes, 65536)
     context = collect(kind, number)
-    if checkpoint != context["checkpoint"]:
-        raise ValueError("local context changed; restart at offset zero")
+    check_checkpoint(context, checkpoint)
 
     row = next((row for row in context["rows"] if row["id"] == row_id), None)
     if row is None or field not in row["fields"] or not isinstance(row["fields"][field], str):
@@ -161,7 +177,11 @@ def source(kind, number, row_id, field, checkpoint, byte_offset=0, max_bytes=409
     if end == byte_offset and end < len(raw):
         raise ValueError("max-bytes cannot fit the next UTF-8 character")
 
-    return dict(schema_version=1, policy=POLICY, repository=REPO, item=context["item"],
+    next_command = command("item-context", REPO, "source", kind=kind, number=number, row=row_id, field=field,
+                           checkpoint=checkpoint, byte_offset=end, max_bytes=max_bytes) if end < len(raw) else None
+
+    return dict(schema_version=1, policy=POLICY, repository=REPO, item=context["item"], checkpoint_type="local-context",
+                next_command=next_command,
                 context_revision=context["context_revision"], feedback_checkpoint=context["feedback_checkpoint"],
                 checkpoint=checkpoint, row=row_id, field=field,
                 text=text, bytes=page(len(raw), byte_offset, end - byte_offset),

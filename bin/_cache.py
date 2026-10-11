@@ -294,10 +294,15 @@ class EvidenceCache:
     def load_manifest(self, snapshot_id):
         """Verify manifest identity and descriptors only; callers must verify any selected objects separately."""
         if not isinstance(snapshot_id, str) or not DIGEST.fullmatch(snapshot_id):
-            raise ValueError("snapshot ID must be a SHA-256 digest")
+            raise ValueError("snapshot ID must be a SHA-256 digest (64 lowercase hex characters); expected an immutable snapshot ID, not a source revision or checkpoint; see bin/cache list --help")
 
         metadata = self.require_ready(bound=True)
-        manifest = json.loads(self.path("snapshots", snapshot_id + ".json").read_text(encoding="utf-8"))
+        try:
+            text = self.path("snapshots", snapshot_id + ".json").read_text(encoding="utf-8")
+        except FileNotFoundError as exc:
+            raise ValueError("selected immutable snapshot is not retained; verify the exact snapshot ID in the selected source packet; no latest or live fallback") from exc
+
+        manifest = json.loads(text)
         validate_snapshot(manifest)
         if manifest["snapshot_id"] != snapshot_id:
             raise ValueError("snapshot filename/identity mismatch")

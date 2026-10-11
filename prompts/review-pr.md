@@ -62,6 +62,8 @@ Only ever GET requests, as the rest of this tooling does.
 
 ## 4. Review checklist
 
+Before adopting a review comment or automated finding as a blocker, state its concrete failure claim and trace the relevant input through callers, options or formats, transformations and the consuming code at the selected revisions. Record the decisive source and the strongest source fact against the claim in your review notes, including concerns you reject. Classify each concern as supported, contradicted or unresolved according to that trace. If a necessary link is unavailable, name it and limit the conclusion; do not repeat the concern as an established defect. Judge other findings separately: rejecting one concern does not establish that the whole PR is correct.
+
 1. **Claim vs change:** does the diff do what the description says, and nothing else? Flag unrelated changes and scope creep.
 2. **Correctness:** real bugs with file and line: wrong conditions, unquoted variables in shell, broken error paths, edge cases (empty input, missing file, first run vs upgrade).
 3. **Compatibility:** compare previously valid inputs and configuration against the pinned base and proposed change, tracing relevant callers. For changed conditions, types or ranges, inspect values at and around the boundaries. When a claim depends on earlier changes, releases or an already-landed fix, inspect the relevant Git history. Distinguish source-based conclusions from runtime verification.

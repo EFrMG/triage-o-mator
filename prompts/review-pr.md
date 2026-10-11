@@ -62,13 +62,7 @@ Only ever GET requests, as the rest of this tooling does.
 
 ## 4. Review checklist
 
-Before adopting a review comment or automated finding as a blocker, work through these checks in your existing review notes, including concerns you reject:
-
-- **Required condition:** state what must reach the consumer for the claimed failure to occur. Use a concrete input when the source supports one.
-- **Value at the consumer:** follow that input through the relevant callers, options or formats and transformations at the selected revisions. State the resulting value or relevant property at the consuming operation, with decisive source references. Establish which path reaches it; finding a helper elsewhere or naming both ends does not establish the connection.
-- **Contrary fact:** identify the strongest source fact against the claim and explain whether it defeats the required condition on that path. Resolve the contradiction rather than merely mentioning it.
-
-Classify the concern as supported, contradicted or unresolved from those checks. If a necessary connection is unavailable, name it and limit the conclusion instead of asserting the failure. Judge other findings separately: rejecting one concern does not establish that the whole PR is correct.
+Before adopting a review comment or automated finding as a blocker, state its concrete failure claim and trace the relevant input through callers, options or formats, transformations and the consuming code at the selected revisions. Record the decisive source and the strongest source fact against the claim in your review notes, including concerns you reject. Classify each concern as supported, contradicted or unresolved according to that trace. If a necessary link is unavailable, name it and limit the conclusion; do not repeat the concern as an established defect. Judge other findings separately: rejecting one concern does not establish that the whole PR is correct.
 
 1. **Claim vs change:** does the diff do what the description says, and nothing else? Flag unrelated changes and scope creep.
 2. **Correctness:** real bugs with file and line: wrong conditions, unquoted variables in shell, broken error paths, edge cases (empty input, missing file, first run vs upgrade).

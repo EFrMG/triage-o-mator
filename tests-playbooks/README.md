@@ -29,4 +29,18 @@ Then follow [the plan](plan.md) from read-only preview through recorded authoriz
 
 **A rerun is not a replay.** The fixture, tasks and evidence can be held fixed; agent answers cannot. Expect the same cases and a comparable picture, not identical judgments. The public half reads a frozen lazygit corpus that the seed does not create: acquire your own with the install's normal scripts and name it in the fixture's `public_read_scope`.
 
+## Deliver the complete playbook to subagents
+
+Before task work, have each subagent read the installed main playbook with a standalone command from its assigned install:
+
+```sh
+cat AGENTS.md
+```
+
+Then `cat` the selected task playbook separately. Give the tool enough output room for the whole document. The evaluator checks that the complete text reached the agent, as described in [the plan](plan.md#assign-agents-and-bounded-playbook-tasks).
+
+## Keep focused runs proportionate
+
+Declare only the cases and contrasts needed for the question, reuse verified frozen evidence and skip remote seeding and live writes when the task is entirely offline. Keep exact inputs in one preparation manifest, one seal per attempt, one adjudicated report and one verified archive. Keep required source/artifact hashes in those records and the archive manifest, plus an external archive checksum; ordinary working notes and editable publication drafts do not each need a checksum sibling. See [the plan](plan.md#retention-for-focused-runs) for the retained boundaries and existing retirement contract.
+
 After each agent stops and its output is sealed, run `run-eval.sh agent-retire RUN_ID AGENT`. It verifies the seal, saved install files, registered paths and clean pinned checkout before removing the parent checkout. The complete install stays at its registered path for continuation transfers and archiving. Retirement receipts live beside the sealed output; interrupted cleanup can resume with the same command. Never retire a running agent’s checkout or remove retained installs before archive verification. See [the plan](plan.md) for the full procedure.

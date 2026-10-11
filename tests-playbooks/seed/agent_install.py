@@ -109,7 +109,7 @@ def launch_context(install, repository):
     if not instructions.is_file() or instructions.resolve() != (seed.CODE_ROOT / "prompts" / "PLAYBOOK.md").resolve():
         raise RuntimeError("Agent launch AGENTS.md must link to the installed triage playbook")
 
-    return {"working_directory": str(install), "instructions_file": str(instructions), "message": f"Use {install} as the working directory for every shell command. First read {instructions} and confirm config/repo selects {repository}. Work only in this install and its parent Git checkout, following the install's linked program, documentation and playbooks as needed."}
+    return {"working_directory": str(install), "instructions_file": str(instructions), "message": f"Use {install} as the working directory for every shell command. First run cat AGENTS.md as a standalone read of {instructions}, with enough tool output capacity for the complete document. Read each selected task playbook in full separately before task work. Then confirm config/repo selects {repository}. Work only in this install and its parent Git checkout, following the install's linked program, documentation and playbooks as needed."}
 
 
 def main():

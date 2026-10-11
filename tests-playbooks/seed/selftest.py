@@ -595,8 +595,8 @@ class SeedTests(unittest.TestCase):
                 self.assertNotIn("AGENT_ID", launch["message"])
                 self.assertNotIn(str(run_dir), launch["message"])
 
-                startup = subprocess.run([sys.executable, "-c", "from pathlib import Path; print(Path.cwd()); print(Path('AGENTS.md').read_text().splitlines()[0])"], cwd=launch["working_directory"], text=True, capture_output=True, check=True)
-                self.assertEqual([str(install), "# Triage playbook"], startup.stdout.splitlines())
+                startup = subprocess.run(["cat", "AGENTS.md"], cwd=launch["working_directory"], text=True, capture_output=True, check=True)
+                self.assertEqual((seed.CODE_ROOT / "prompts" / "PLAYBOOK.md").read_text(), startup.stdout)
 
 
 if __name__ == "__main__":

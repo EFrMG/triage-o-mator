@@ -1,5 +1,6 @@
 """The install, ledger, and duplicate workflows that a maintainer uses first."""
 
+import ast
 import csv
 import fcntl
 import hashlib
@@ -14,6 +15,48 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from support import FAKE_GH, ROOT, Workspace, item, repository, summary
+
+
+class CLIHelpTests(Workspace):
+    def test_help_before_and_after_installation(self):
+        commands = sorted(path for path in (self.root / "bin").iterdir() if path.suffix == "" and not path.name.startswith(".") and path.is_file())
+        env = dict(self.env, PYTHONDONTWRITEBYTECODE="1", XDG_CONFIG_HOME=str(self.root / "user-config"))
+        marker = self.root / ".triage-install.json"
+        repo = self.root / "config/repo"
+
+        for state in ("installed", "unconfigured", "invalid-repository", "uninstalled"):
+            if state == "unconfigured":
+                repo.unlink()
+            elif state == "invalid-repository":
+                repo.write_text("invalid repository\n")
+            elif state == "uninstalled":
+                marker.unlink()
+
+            before = {path.relative_to(self.root): path.read_bytes() if path.is_file() else None for path in self.root.rglob("*")}
+            for command in commands:
+                tree = ast.parse(command.read_text())
+                subcommands = sorted({node.args[0].value for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "add_parser" and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)})
+                if command.name == "cache":
+                    subcommands.extend(("search-index", "query", "retrieve", "search-info"))
+
+                for args in ([], *([name] for name in subcommands)):
+                    for flag in ("--help", "-h"):
+                        with self.subTest(state=state, command=command.name, args=args, flag=flag):
+                            result = subprocess.run([str(command), *args, flag], cwd=self.root, env=env, capture_output=True, text=True, timeout=30)
+                            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                            self.assertIn("usage:", result.stdout)
+                            self.assertIn("--help", result.stdout)
+
+            after = {path.relative_to(self.root): path.read_bytes() if path.is_file() else None for path in self.root.rglob("*")}
+            self.assertEqual(before, after)
+            self.assertEqual(self.calls(), [])
+
+        repo.write_text("owner/repo\n")
+        before = {path.relative_to(self.root): path.read_bytes() if path.is_file() else None for path in self.root.rglob("*")}
+        result = subprocess.run([str(self.root / "bin/sync"), "--", "--help"], cwd=self.root, env=env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not a triage-o-mator install", result.stderr)
+        self.assertEqual(before, {path.relative_to(self.root): path.read_bytes() if path.is_file() else None for path in self.root.rglob("*")})
 
 
 class InstallTests(unittest.TestCase):

@@ -12,6 +12,7 @@ On success it records the fetch it consumed in data/<owner>/<repo>/raw/fetch_met
 Usage: bin/sync
 """
 
+import argparse
 import hashlib
 import json
 import sys
@@ -33,6 +34,12 @@ from _storage import atomic_writer, locked
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Merge the last local fetch into the ledger, preserving triage decisions.",
+        epilog="Example: bin/fetch --full && bin/sync. Sync itself makes no GitHub requests.",
+    )
+    parser.parse_args()
+
     # The inventory metadata lock precedes the ledger lock, and no acquisition occurs under the ledger lock.
     with locked(RAW_DIR / "fetch_meta.json"):
         sync()

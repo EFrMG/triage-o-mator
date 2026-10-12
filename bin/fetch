@@ -77,7 +77,7 @@ def full_fetch_reason(meta, forced, host):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--full", action="store_true", help="re-fetch every open item instead of only recent changes")
     ap.add_argument("--expected-repo", help="refuse if the configured repository changed")
     ap.add_argument("--json", action="store_true", help="emit the inventory import result on stdout")

@@ -47,7 +47,7 @@ def parse_keys(values):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--key", action="append", default=[], help="an item as kind:number; give two")
     ap.add_argument("--by", help="who ruled it out (git config user.name)")
     ap.add_argument("--note", default="", help="why, in a few words")

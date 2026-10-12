@@ -22,7 +22,7 @@ from _row_revision import row_revision
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--open-only", action="store_true")
     ap.add_argument(
         "--pending-review",

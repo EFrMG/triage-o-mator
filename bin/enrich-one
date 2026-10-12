@@ -19,7 +19,7 @@ from _triage import REPO, enrich_item
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--kind", choices=["issue", "pr"], required=True)
     ap.add_argument("--number", type=int, required=True)
     ap.add_argument("--diff", action="store_true", help="also fetch PR diff text")

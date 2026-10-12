@@ -31,6 +31,11 @@ class RepositionTests(Workspace):
         self.assertIn("search-info", self.offline("--help", no_site=True).stdout)
         result = json.loads(self.offline("search", "--snapshot", self.snapshot, "--query", "Renderer", "--component", "summary", no_site=True).stdout)
         self.assertEqual(result["matched_items"], 1)
+        for command in ("search-index", "query", "retrieve", "search-info"):
+            self.assertIn("docs/reposition.md", self.offline(command, "--help", no_site=True).stdout)
+
+        positional_help = self.offline("query", "--", "--help", no_site=True, expected=2)
+        self.assertIn("audited Reposition is unavailable", positional_help.stderr)
         missing = self.offline("query", "--snapshot", self.snapshot, "--query", "Renderer", no_site=True, expected=2)
         self.assertIn("audited Reposition is unavailable", missing.stderr)
         abbreviated_cache = self.offline("query", "--snapshot", self.snapshot, "--cach", str(self.root / "other-cache"), "--query", "Renderer", no_site=True, expected=2)
@@ -174,7 +179,7 @@ else:
         python = self.root / ".reposition-venv/bin/python"
         site_packages = subprocess.check_output([str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"], text=True).strip()
         package = Path(site_packages) / "reposition"
-        self.assertEqual(self.offline("query", "--help").returncode, 0)
+        self.assertIn("--max-bytes", self.offline("query", "--help").stdout)
         shadow = self.root / "shadow/reposition"
         shadow.mkdir(parents=True)
         (shadow / "__init__.py").write_text('raise AssertionError("shadow package ran")\n')
@@ -182,6 +187,7 @@ else:
         self.assertIn("usage:", self.offline("query", "--help", environment=environment).stdout)
         (package / "__init__.py").write_text('__version__ = "0.2.0.dev1"\n')
 
-        result = self.offline("query", "--help", expected=2)
+        self.assertIn("docs/reposition.md", self.offline("query", "--help").stdout)
+        result = self.offline("search-info", "--corpus", "unused", expected=2)
         self.assertIn("audited Reposition is unavailable", result.stderr)
         self.assertTrue(self.json_cli("reposition-env", "enable")["enabled"])

@@ -257,9 +257,17 @@ def ensure_sidecar_ignore(cache):
 
 
 def register_commands(commands):
-    for name in COMMANDS:
+    descriptions = {
+        "search-index": ("Build a bounded offline search index from a selected corpus.", "bin/cache search-index --corpus CORPUS_ID"),
+        "query": ("Search a selected corpus offline for ranked, verified source excerpts.", "bin/cache query --corpus CORPUS_ID --query 'terminal fails after suspend'"),
+        "retrieve": ("Read a larger verified source window from a selected search result.", "bin/cache retrieve --corpus CORPUS_ID --unit UNIT_ID --checkpoint INDEX_CHECKPOINT"),
+        "search-info": ("Inspect the offline search index for a selected corpus.", "bin/cache search-info --corpus CORPUS_ID"),
+    }
+    for name, (description, example) in descriptions.items():
         commands.add_parser(
-            name, help="optional offline Reposition retrieval; command --help lists bounded options"
+            name, help=description, description=description,
+            epilog=f"Example: {example}\nSee docs/reposition.md for options and setup. Running this command requires the audited Reposition environment; help does not.",
+            formatter_class=argparse.RawDescriptionHelpFormatter,
         )
 
 
@@ -276,7 +284,14 @@ def maybe_run(argv):
     if position >= len(argv) or argv[position] not in COMMANDS:
         return None
 
+    arguments = argv[position + 1 :]
+    help_arguments = arguments[:arguments.index("--")] if "--" in arguments else arguments
+    help_requested = any(argument in ("-h", "--help") for argument in help_arguments)
+
     if DISABLED.exists():
+        if help_requested:
+            return None
+
         sys.stderr.write("error: Reposition is OFF for this checkout; turn automatic download OFF and ON to retry setup, or run bin/reposition-env enable. Native cache search remains available.\n")
         return 2
 
@@ -284,12 +299,14 @@ def maybe_run(argv):
     parser.add_argument("--host", default="github.com")
     parser.add_argument("--expected-repo")
     common = parser.parse_args(argv[:position])
-    arguments = argv[position + 1 :]
     options = (value.partition("=")[0] for value in arguments)
     if any(option.startswith("--") and len(option) > 2 and "--cache".startswith(option) for option in options):
         parser.error("the cache namespace is owned by this install; --cache cannot override it")
 
     if not environment_status()["enabled"]:
+        if help_requested:
+            return None
+
         sys.stderr.write(f"error: audited Reposition is unavailable for this checkout; run bin/reposition-env enable to install Reposition {SUPPORTED_REPOSITION} from the approved wheel. Native cache search remains available.\n")
         return 2
 
@@ -321,7 +338,7 @@ def maybe_run(argv):
         )
         return 2
 
-    if "--help" in arguments or "-h" in arguments:
+    if help_requested:
         return main([COMMANDS[argv[position]], "--cache", "unused", *arguments])
 
     from _cache import EvidenceCache

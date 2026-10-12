@@ -108,7 +108,7 @@ def write_lines(path, lines):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument(
         "n", nargs="?", type=int, default=25, help="batch size (default 25)"
     )

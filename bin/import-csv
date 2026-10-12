@@ -41,7 +41,7 @@ def parse_proposed_labels(value, line):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("csv_path", type=Path)
     ap.add_argument("--by", default=getpass.getuser())
     args = ap.parse_args()

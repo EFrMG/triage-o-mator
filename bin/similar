@@ -33,7 +33,7 @@ from _enrichment import add_cache_arguments, validate_cache_arguments, enrich_se
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--kind", choices=["issue", "pr"])
     ap.add_argument("--number", type=int)
     ap.add_argument("--pairs", action="store_true", help="list likely duplicate pairs across all open items instead")

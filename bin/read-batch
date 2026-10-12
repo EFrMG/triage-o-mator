@@ -65,7 +65,7 @@ def render(item):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("batch")
     ap.add_argument("--number", type=int, help="only this item")
     ap.add_argument("--list", action="store_true", help="one line per item")

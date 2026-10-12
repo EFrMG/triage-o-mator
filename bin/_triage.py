@@ -1,6 +1,6 @@
 """Shared helpers for the triage scripts. Not a CLI entry point.
 
-Importing this module requires an install (see bin/_install.py): every path below is inside the triage-o-mator/ directory of the repository being triaged, never inside the checkout the scripts are symlinked from.
+Except for CLI help, importing this module requires an install (see bin/_install.py): every operational path below is inside the triage-o-mator/ directory of the repository being triaged, never inside the checkout the scripts are symlinked from.
 """
 
 import json
@@ -18,7 +18,10 @@ from _install import CODE_ROOT, REPO_RE, WORK_ROOT, now_iso, require_install  # 
 from _storage import atomic_writer
 
 # Every script works on one repository's triage data, which only an install has.
-require_install(WORK_ROOT)
+# Help is parsed by each CLI before any work; it must remain available before installation or repository configuration.
+_HELP_REQUESTED = any(arg in ("-h", "--help") for arg in sys.argv[1:sys.argv.index("--") if "--" in sys.argv else len(sys.argv)])
+if not _HELP_REQUESTED:
+    require_install(WORK_ROOT)
 
 # Most people run the tool from the root of the repository being triaged, not from inside the install, so a command this prints has to be pastable from wherever they are standing: nothing inside the install, "triage-o-mator/" from the repository root, "../../triage-o-mator/" from a directory below it.
 def _command_prefix():
@@ -97,7 +100,7 @@ def read_repo():
     return repo
 
 
-REPO = read_repo() if (CONFIG_DIR / "repo").exists() else None
+REPO = read_repo() if not _HELP_REQUESTED and (CONFIG_DIR / "repo").exists() else None
 
 # Everything a repo's triage produces lives in its own folder, so switching config/repo switches data too and two repos' issue numbers can never collide in one ledger.
 DATA_DIR = DATA_ROOT.joinpath(*REPO.split("/")) if REPO else DATA_ROOT

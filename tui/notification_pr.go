@@ -9,9 +9,10 @@ import (
 
 // A notification opens its subject with a fresh, read-only GitHub read. Keep the reader state and the former item tabs so Back returns to the selected card.
 type notificationPRUI struct {
-	open   bool
-	key    Key
-	former detailModel
+	open         bool
+	key          Key
+	former       detailModel
+	formerChecks checksUI
 }
 
 func (m model) openNotificationItem(key Key) (tea.Model, tea.Cmd) {
@@ -23,7 +24,9 @@ func (m model) openNotificationItemAt(key Key, section int) (tea.Model, tea.Cmd)
 		return m, nil
 	}
 
-	m.notificationPR = notificationPRUI{open: true, key: key, former: m.detail}
+	m.stopChecks()
+	m.notificationPR = notificationPRUI{open: true, key: key, former: m.detail, formerChecks: m.checks}
+	m.checks = checksUI{}
 	m.detail = newDetailModel()
 	m.detail.SetItem(Item{Kind: key.Kind, Number: key.Number})
 	m.detail.full = true
@@ -54,10 +57,13 @@ func (m model) finishNotificationPREvidence(msg evidenceReadMsg) (tea.Model, tea
 		return m, nil
 	}
 
+	m.stopChecks()
+	m.checks = checksUI{}
 	m.detail.item.Title, m.detail.item.State, m.detail.item.URL = msg.data.Title, msg.data.State, msg.data.URL
 	m.detail.populate(msg.data)
 	m.status = ""
-	return m, nil
+	cmd := m.checksIfNeeded()
+	return m, cmd
 }
 
 // notificationActionItem uses only the selected fresh read for a comment target; the notification card and ledger may describe older or missing items.
@@ -112,17 +118,25 @@ func (m model) openNotificationCommentAction(action string) (tea.Model, tea.Cmd)
 }
 
 func (m model) handleNotificationPRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if next, cmd, handled := m.handleChecksKey(msg); handled {
+		return next, cmd
+	}
+
 	if key.Matches(msg, keys.TabPrev) {
 		m.detail.CycleSection(-1)
-		return m, nil
+		cmd := m.checksIfNeeded()
+		return m, cmd
 	}
 	if key.Matches(msg, keys.TabNext) {
 		m.detail.CycleSection(1)
-		return m, nil
+		cmd := m.checksIfNeeded()
+		return m, cmd
 	}
 
 	switch msg.String() {
 	case "esc", "h", "left":
+		m.stopChecks()
+		m.checks = m.notificationPR.formerChecks
 		m.evidenceLifecycle.stop()
 		m.evidenceRequest++
 		m.detail = m.notificationPR.former
@@ -141,7 +155,7 @@ func (m model) handleNotificationPRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		m.detail.CycleSection(1)
 	case "shift+tab":
 		m.detail.CycleSection(-1)
-	case "1", "2", "3", "4":
+	case "1", "2", "3", "4", "5":
 		m.detail.JumpSection(int(msg.String()[0] - '1'))
 	case "j", "down":
 		m.detail.LineDown(1)
@@ -157,5 +171,6 @@ func (m model) handleNotificationPRKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		m.detail.HalfPageUp()
 	}
 
-	return m, nil
+	cmd := m.checksIfNeeded()
+	return m, cmd
 }

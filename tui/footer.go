@@ -43,7 +43,11 @@ func (m model) navigationGroup() footerGroup {
 }
 
 func (m model) menusGroup() footerGroup {
-	return group("Menus", bind("", keys.Yank), bind("", keys.Group), bind("", keys.Corpus), bind("", keys.Theme), bind("", keys.Refresh), bind("", keys.RefreshFull))
+	menus := group("Menus", bind("", keys.Yank), bind("", keys.Group), bind("", keys.Corpus), bind("", keys.Theme), bind("", keys.RefreshFull))
+	if !m.checksKeyScope() {
+		menus.hints = append(menus.hints, bind("", keys.Refresh))
+	}
+	return menus
 }
 
 // footerGroups lists the keys that work on the current screen, most specific first and Navigation last.
@@ -189,7 +193,7 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.notifications.actionReview != nil {
 			back = "back to proposal"
 		}
-		read := group("Item", bind("previous tab", keys.TabPrev), bind("next tab", keys.TabNext), hint{"Tab/Shift-Tab", "tabs"}, hint{"1/2/3/4", "jump to tab"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, bind("", keys.Track))
+		read := group("Item", bind("previous tab", keys.TabPrev), bind("next tab", keys.TabNext), hint{"Tab/Shift-Tab", "tabs"}, hint{"1/2/3/4/5", "jump to tab"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, bind("", keys.Track))
 		if it, ok := m.notificationActionItem(); ok {
 			read.hints = append(read.hints, bind("", keys.Comment, keys.CommentEditor))
 			if it.State == "open" {
@@ -197,6 +201,9 @@ func (m model) contextFooterGroups() []footerGroup {
 			} else {
 				read.hints = append(read.hints, bind("", keys.Reopen, keys.ReopenEditor))
 			}
+		}
+		if m.checksKeyScope() {
+			read.hints = append(read.hints, bind("", keys.ChecksRefresh), bind("pages", keys.ChecksPrev, keys.ChecksNext))
 		}
 		return []footerGroup{read, group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
 	case m.attention.open:
@@ -417,6 +424,9 @@ func (m model) itemFooter() []footerGroup {
 		tabAction = "tabs / form"
 	}
 	read := group("Read", bind(tabAction, keys.TabPrev, keys.TabNext), bind("", keys.TabJump), bind("expand", keys.Enter), bind("scroll", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("page", keys.HalfDown, keys.HalfUp))
+	if m.checksKeyScope() {
+		read.hints = append(read.hints, bind("", keys.ChecksRefresh), bind("pages", keys.ChecksPrev, keys.ChecksNext))
+	}
 	if m.detail.AnySectionFull() {
 		return []footerGroup{item, read, m.menusGroup(), m.navigationGroup()}
 	}

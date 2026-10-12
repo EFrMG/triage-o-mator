@@ -85,6 +85,7 @@ func run(m model) {
 	m.attentionLifecycle = &readLifecycle{}
 	m.notificationsLifecycle = &readLifecycle{}
 	m.evidenceLifecycle = &readLifecycle{}
+	m.checksLifecycle = &readLifecycle{}
 	m.corpusLifecycle, m.corpusObserverLifecycle = &readLifecycle{}, &readLifecycle{}
 	p := tea.NewProgram(m)
 	_, err := p.Run()
@@ -92,6 +93,7 @@ func run(m model) {
 	m.attentionLifecycle.stop()
 	m.notificationsLifecycle.stop()
 	m.evidenceLifecycle.stop()
+	m.checksLifecycle.stop()
 	m.corpusLifecycle.stop()
 	m.corpusObserverLifecycle.stop()
 	if err != nil {

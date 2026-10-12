@@ -32,7 +32,7 @@ Terminals smaller than 60×24 show a resize prompt.
 
 ## 2. Refresh the backlog
 
-- `r` fetches changed issues and PRs from GitHub and syncs them into the ledger. The app also checks tracked comments during this normal refresh.
+- `r` fetches changed issues and PRs from GitHub and syncs them into the ledger. The app also checks tracked comments during this normal refresh. While reading a PR's Checks tab, `r` instead requests focused CI metadata.
 - `R` performs a full fetch. An incremental fetch cannot detect an issue or PR that was deleted or transferred; the next full fetch, run automatically at least daily or manually with `R`, marks items missing from the open list closed.
 - Refreshes are read-only against GitHub and preserve local decisions and Pending review requests.
 
@@ -47,12 +47,16 @@ Terminals smaller than 60×24 show a resize prompt.
 ## 4. Read an item
 
 - Open any item with `Enter`.
-- Its tabs, Body, Agent notes when present, Comments, and Diff for PRs, run across the top. `H`/`L` switch between them, `1`–`4` jump to one, and `Enter` shows one full screen.
+- Its tabs, Body, Agent notes when present, Comments, and Diff and Checks for PRs, run across the top. `H`/`L` switch between them, `1`–`5` jump to one, and `Enter` shows one full screen.
 - `o` opens the item on GitHub.
 
 The author below the title is blue; open and closed states are green and red. Each comment shows its creation date at the bottom right in UTC when that date is available. Older saved comments without dates remain undated.
 
 Read comments as well as the body: workarounds, links to the real duplicate, and evidence that a problem remains current often live there.
+
+The **Checks** tab opens saved CI metadata offline. It shows the recorded commit and observation time, evidence coverage and freshness, and observed results separately. `[` and `]` page through check runs, commit statuses and unresolved suites. Earlier attempts remain in the source evidence; the view reports observations omitted from its summary and page. Ambiguous histories, skipped or neutral outcomes, incomplete acquisition and stale evidence remain explicit. An empty observation does not mean checks passed, and passing observations do not establish required-check policy or merge readiness.
+
+While reading Checks for a current item, `r` explicitly acquires focused CI metadata within a request budget. A fixed item packet keeps its selected snapshot and refuses that refresh; use a separately selected current item to acquire newer checks. Opening or paging a fixed packet never fetches missing CI evidence. This view does not collect CI logs or execute checks.
 
 ## 5. Record a decision
 
@@ -70,7 +74,7 @@ Read comments as well as the body: workarounds, links to the real duplicate, and
 - On any screen, `y` copies what is in front of you as Markdown: the item you have open, the ones you ticked, or the one under the cursor. `Y` copies the whole screen's worth, such as a list, batch, or group. If no clipboard tool is available, the status line shows the export file it wrote instead.
 - Paste that context into your agent's chat and ask it to investigate, or ask it to "triage 10 items but don't apply them, I'll check them in the TUI." The copied block names the repository, install, and commands needed to read more.
 - Open the result under **Batches**. Each item is prefilled with the agent's proposal and notes.
-- `s` saves a proposal, including any changes you make. An unchanged proposal retains its original author; a changed proposal becomes your revised decision. Agent notes are preserved either way.
+- `s` saves a proposal, including any changes you make. An unchanged proposal retains its original author; a changed proposal becomes your revised decision. Omitted fields preserve saved values; an explicit empty field clears its value. Notes-only edits preserve decision attribution.
 - `A` twice applies every remaining proposal as an attributed local agent decision. Already-triaged items are kept, and the applied calls remain available in **All Items**.
 - `n` in **Batches** makes a new batch; `Enter` on its last field creates it.
 - In the new-batch form, choose a group to restrict the batch to that group's untriaged open members.

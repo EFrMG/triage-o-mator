@@ -47,7 +47,7 @@ func (s detailSection) empty() bool {
 	return s.loaded && strings.TrimSpace(s.source) == ""
 }
 
-// detailModel owns the item view's tabs (Body, Agent notes, Comments, Diff) for the selected item: one is active, shown beside the decision form, or full screen.
+// detailModel owns the item view's tabs (Body, Agent notes, Comments, Diff, Checks) for the selected item: one is active, shown beside the decision form, or full screen.
 type detailModel struct {
 	key              Key
 	item             Item
@@ -84,7 +84,7 @@ func (d *detailModel) SetItem(it Item) (needsFetch bool) {
 
 	d.sections = append(d.sections, detailSection{name: "Comments", kind: commentsSection})
 	if it.Kind == "pr" {
-		d.sections = append(d.sections, detailSection{name: "Diff", kind: diffSection})
+		d.sections = append(d.sections, detailSection{name: "Diff", kind: diffSection}, detailSection{name: "Checks", kind: markdownSection, loaded: true, source: "Open this tab to read retained checks offline. No automatic acquisition."})
 	}
 
 	for i := range d.sections {
@@ -226,7 +226,7 @@ func (d *detailModel) CycleSection(delta int) {
 	d.renderActive()
 }
 
-// JumpSection makes tab i active (1-4 in the item view).
+// JumpSection makes tab i active (up to five tabs in the item view).
 func (d *detailModel) JumpSection(i int) {
 	if i >= 0 && i < len(d.sections) {
 		d.CycleSection(i - d.active)

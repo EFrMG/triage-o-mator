@@ -437,7 +437,8 @@ func (m model) clickDetail(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
 				}
 				m.detail.JumpSection(i)
 				m.form.FocusField(fieldContent)
-				return m, m.diffIfNeeded()
+				cmd := m.diffIfNeeded()
+				return m, cmd
 			}
 			x -= width
 		}

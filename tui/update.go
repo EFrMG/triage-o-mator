@@ -12,6 +12,9 @@ import (
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	result := next.(model)
+	if m.detail.checksActive() && (!result.detail.checksActive() || m.detail.key != result.detail.key || m.detail.generation != result.detail.generation || m.focus == FocusDetail && result.focus != FocusDetail && !result.notificationPR.open) {
+		result.stopChecks()
+	}
 	result.trackStatus(m)
 	result.layout()
 
@@ -20,6 +23,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case checksMsg:
+		return m.finishChecks(msg)
 	case commentEditorMsg:
 		return m.finishCommentEditor(msg)
 	case groupNoteEditorMsg:
@@ -263,7 +268,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Landed on the Diff tab while the item was still loading: fetch the diff now.
-		return m, m.diffIfNeeded()
+		cmd := m.diffIfNeeded()
+		return m, cmd
 	case evidenceReadMsg:
 		return m.finishEvidenceRead(msg)
 
@@ -429,6 +435,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.notificationsLifecycle.stop()
 		m.actionHistoryLifecycle.stop()
 		m.attentionLifecycle.stop()
+		m.stopChecks()
 		return m, tea.Quit
 	}
 
@@ -554,6 +561,12 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.focus == FocusDetail {
+		if next, cmd, handled := m.handleChecksKey(msg); handled {
+			return next, cmd
+		}
+	}
+
 	// In an item, l / → go from the content to the form and h / ← come back (the reason field is typing, so it's reached with Tab). h / ← on the content, and Esc anywhere, still go back.
 	if m.focus == FocusDetail && !m.detail.AnySectionFull() {
 		switch {
@@ -645,6 +658,7 @@ func (m model) startRefreshItemsAtHost(full bool, host string, items ...Key) (te
 
 // requestQuit quits immediately if nothing would be lost, otherwise asks for a second explicit quit before discarding in-memory drafts.
 func (m model) requestQuit() (tea.Model, tea.Cmd) {
+	m.stopChecks()
 	m.commitDraftIfDirty()
 	if len(m.drafts) == 0 {
 		return m, tea.Quit
@@ -1113,7 +1127,8 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.detail.CycleSection(1)
 
-		return m, m.diffIfNeeded()
+		cmd := m.diffIfNeeded()
+		return m, cmd
 	case key.Matches(msg, keys.TabPrev):
 		if m.form.focused != fieldContent && !m.detail.AnySectionFull() {
 			m.form.FocusField(fieldContent)
@@ -1121,7 +1136,8 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.detail.CycleSection(-1)
 
-		return m, m.diffIfNeeded()
+		cmd := m.diffIfNeeded()
+		return m, cmd
 	case key.Matches(msg, keys.TabJump):
 		tab := int(msg.String()[0] - '1')
 		if tab >= len(m.detail.sections) {
@@ -1137,7 +1153,8 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.detail.JumpSection(tab)
 
-		return m, m.diffIfNeeded()
+		cmd := m.diffIfNeeded()
+		return m, cmd
 	case key.Matches(msg, keys.Enter):
 		if m.detail.ToggleActiveSection() {
 			return m, m.enrichDetailCmd(true)
@@ -1198,7 +1215,10 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 // diffIfNeeded fetches the PR diff the first time its tab is shown.
-func (m model) diffIfNeeded() tea.Cmd {
+func (m *model) diffIfNeeded() tea.Cmd {
+	if m.detail.checksActive() {
+		return m.checksIfNeeded()
+	}
 	if m.detail.NeedsActiveDiff() {
 		return m.enrichDetailCmd(true)
 	}
@@ -1302,6 +1322,7 @@ func (m *model) leaveSavedItem() {
 func (m *model) goBack() {
 	switch m.focus {
 	case FocusDetail:
+		m.stopChecks()
 		m.commitDraftIfDirty()
 		if m.briefs.returnToBrief {
 			m.briefs.open = true

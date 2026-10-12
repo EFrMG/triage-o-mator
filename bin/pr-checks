@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""Show bounded CI metadata from selected PR evidence; acquire only when explicitly requested."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _acquire import ReadFailure
+from _checks import read
+from _triage import REPO
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, epilog="Examples: bin/pr-checks --expected-repo OWNER/REPO --number 123; add --mode refresh --request-budget 20 for explicit acquisition; continue offline with --snapshot HASH --offset 20.")
+    parser.add_argument("--expected-repo", required=True)
+    parser.add_argument("--number", type=int, required=True)
+    parser.add_argument("--snapshot", help="read this immutable snapshot offline, with no latest or live fallback")
+    parser.add_argument("--mode", choices=("offline", "cache-preferred", "refresh"), default="offline")
+    parser.add_argument("--host", default="github.com")
+    parser.add_argument("--max-age", type=int, default=86400)
+    parser.add_argument("--request-budget", type=int, default=100)
+    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--limit", type=int, default=20)
+    args = parser.parse_args()
+    if args.expected_repo != REPO:
+        parser.error("selected repository changed")
+
+    result = read(args.number, mode=args.mode, host=args.host, snapshot_id=args.snapshot, max_age=args.max_age,
+                  budget=args.request_budget, offset=args.offset, limit=args.limit)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError, ReadFailure) as error:
+        sys.exit(f"error: {error}")

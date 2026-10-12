@@ -1,5 +1,7 @@
 """Evidence is acquired explicitly, then read from pinned local snapshots."""
 
+import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -34,6 +36,165 @@ class EvidenceTests(Workspace):
         self.assertEqual(result["problems"]["summary"], ["missing"])
         self.assertEqual(self.calls(), [])
         self.assertFalse((self.root / "data/owner/repo/cache").exists())
+
+    def test_pr_checks_keep_coverage_results_history_and_source_scope_separate(self):
+        args = ("--expected-repo", "owner/repo", "--number", "1")
+        missing = self.json_cli("pr-checks", *args)
+        self.assertEqual((missing["coverage"], missing["observed_result"], missing["rows"]), ("missing", "unknown", []))
+        self.assertEqual(self.calls(), [])
+        self.assertFalse((self.root / "data/owner/repo/cache").exists())
+        sha = "b" * 40
+        prefix = f"repos/owner/repo/commits/{sha}"
+        app = dict(id=11, name="CI")
+
+        def suite(identifier=10, **changes):
+            return dict(dict(id=identifier, head_sha=sha, app=app, status="completed", conclusion="success", created_at="2026-09-22T02:00:00Z"), **changes)
+
+        def run(identifier=20, **changes):
+            return dict(dict(id=identifier, head_sha=sha, app=app, check_suite=dict(id=10), name="build", status="completed", conclusion="success",
+                             started_at="2026-09-22T02:00:00Z", completed_at="2026-09-22T02:01:00Z", details_url="https://github.com/owner/repo/actions/runs/20"), **changes)
+
+        def status(identifier=30, **changes):
+            return dict(dict(id=identifier, context="external", state="success", created_at="2026-09-22T02:00:00Z", target_url="https://ci.example/build"), **changes)
+
+        def sources(suites, runs, statuses):
+            self.responses[prefix + "/check-suites?per_page=100&page=1"] = dict(data=dict(total_count=len(suites), check_suites=suites))
+            for selected in suites:
+                values = [value for value in runs if value["check_suite"]["id"] == selected["id"]]
+                self.responses[f"repos/owner/repo/check-suites/{selected['id']}/check-runs?filter=all&per_page=100&page=1"] = dict(data=dict(total_count=len(values), check_runs=values))
+
+            self.responses[prefix + "/statuses?per_page=100&page=1"] = dict(data=statuses)
+
+        sources([suite()], [run(19, conclusion="failure", started_at="2026-09-22T01:00:00Z"), run()],
+                [status(31, context="EXTERNAL", created_at="2026-09-22T03:00:00Z"), status(state="failure")])
+        selected = self.json_cli("pr-checks", *args, "--mode", "refresh", "--limit", "1")
+        self.assertEqual((selected["coverage"], selected["freshness"], selected["observed_result"]), ("complete", "within-window", "passed"))
+        self.assertEqual(selected["raw_count"], 5)
+        self.assertEqual(selected["result_counts"], dict(passed=2, failed=0, pending=0, unknown=0))
+        self.assertEqual(selected["pagination"]["total"], 2)
+        self.assertEqual(selected["historical_or_suite_omissions"], 3)
+        self.assertFalse(any("/files" in call or "/reviews" in call or "/comments" in call for call in self.calls()))
+        count = len(self.calls())
+        fixed = self.json_cli("pr-checks", *args, "--snapshot", selected["snapshot_id"], "--offset", "1", "--limit", "1")
+        self.assertEqual((fixed["rows"][0]["name"], fixed["rows"][0]["result"]), ("EXTERNAL", "passed"))
+        self.assertEqual(fixed["rows"][0]["source_reference"]["snapshot_id"], selected["snapshot_id"])
+        self.assertEqual(len(self.calls()), count)
+        self.run_cli("pr-checks", *args, "--offset", "1", ok=False)
+        self.run_cli("pr-checks", *args, "--snapshot", selected["snapshot_id"], "--mode", "refresh", ok=False)
+        self.run_cli("pr-checks", "--expected-repo", "other/repo", "--number", "1", ok=False)
+        self.assertEqual(len(self.calls()), count)
+        raw = self.json_cli("cache", *selected["raw_command"][1:], "--limit", "20")
+        self.assertIn('"failure"', raw["text"])
+
+        sources([suite(status="queued", conclusion=None)], [run(status="queued", conclusion=None, started_at=None, completed_at=None)], [])
+        sole_queued = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertEqual(sole_queued["observed_result"], "pending")
+        self.assertEqual(next(value for value in sole_queued["rows"] if value["source"] == "check-run")["result"], "pending")
+
+        sources([suite()], [run(), run(21, status="queued", conclusion=None, started_at=None, completed_at=None)],
+                [status(31, state="pending", created_at="2026-09-22T03:00:00Z"), status()])
+        active = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertNotEqual(active["observed_result"], "passed")
+        self.assertTrue(any(value["status"] == "queued" for value in active["rows"]))
+        self.assertEqual(next(value for value in active["rows"] if value["source"] == "status")["result"], "pending")
+
+        sources([suite(), suite(12)], [run(), run(22, check_suite=dict(id=12), started_at="2026-09-22T04:00:00Z")], [])
+        ambiguous = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertEqual(ambiguous["observed_result"], "unknown")
+        self.assertEqual(len(ambiguous["rows"]), 2)
+        self.assertTrue(all(any("spans suites" in problem for problem in value["problems"]) for value in ambiguous["rows"]))
+        sources([suite(), suite(12, status="in_progress", conclusion=None)], [run()], [])
+        suite_only = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertEqual(suite_only["observed_result"], "pending")
+        self.assertTrue(any(value["source"] == "check-suite" for value in suite_only["rows"]))
+
+        other_app = dict(id=12, name="Another CI")
+        sources([suite(), suite(12, app=other_app)], [run(), run(22, app=other_app, check_suite=dict(id=12))], [])
+        separate_apps = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertEqual(separate_apps["observed_result"], "passed")
+        self.assertEqual({value["app"] for value in separate_apps["rows"]}, {"CI", "Another CI"})
+        sources([suite(conclusion="failure")], [run()], [])
+        contradictory = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertEqual(contradictory["observed_result"], "unknown")
+
+        fork = dict(full_name="fork/repo", id=43, node_id="R_fork")
+        self.responses["repos/owner/repo/pulls/1"]["data"]["head"]["repo"] = fork
+        self.responses["repos/fork/repo"] = dict(data=fork)
+        fork_prefix = f"repos/fork/repo/commits/{sha}"
+        self.responses[fork_prefix + "/check-suites?per_page=100&page=1"] = dict(data=dict(total_count=1, check_suites=[suite()]))
+        self.responses["repos/fork/repo/check-suites/10/check-runs?filter=all&per_page=100&page=1"] = dict(data=dict(total_count=1, check_runs=[run(conclusion="failure")]))
+        self.responses[fork_prefix + "/statuses?per_page=100&page=1"] = dict(data=[])
+        sources([suite()], [run()], [])
+        fork_checks = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertEqual(fork_checks["observed_result"], "failed")
+        self.assertEqual(fork_checks["result_counts"], dict(passed=1, failed=1, pending=0, unknown=0))
+        self.assertEqual({value["repository"] for value in fork_checks["rows"]}, {"owner/repo", "fork/repo"})
+        self.assertEqual(len(fork_checks["allowed_repositories"]), 2)
+        self.responses["repos/owner/repo/pulls/1"]["data"]["head"]["repo"] = repository()
+
+        sources([], [], [])
+        budgeted = self.json_cli("pr-checks", *args, "--mode", "refresh", "--request-budget", "3")
+        self.assertLessEqual(budgeted["requests"], 3)
+        self.assertNotEqual(budgeted["observed_result"], "passed")
+        empty = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertEqual((empty["coverage"], empty["observed_result"]), ("complete", "empty"))
+        self.responses[prefix + "/statuses?per_page=100&page=1"] = dict(status=404, data=dict(message="not found"))
+        partial = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertEqual((partial["coverage"], partial["freshness"], partial["observed_result"]), ("partial", "within-window", "unknown"))
+        self.assertTrue(partial["problems"])
+
+        sources([suite()], [run(name="x" * 10000, details_url="https://ci.example/" + "x" * 3000)], [])
+        bounded = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertEqual(len(bounded["rows"][0]["name"]), 256)
+        self.assertIsNone(bounded["rows"][0]["url"])
+        self.assertTrue(bounded["rows"][0]["problems"])
+        sources([suite()], [run()], [])
+        sound = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        manifest = self.cache("show", sound["snapshot_id"])
+        self.responses["repos/owner/repo/pulls/1"]["data"]["head"]["sha"] = "c" * 40
+        self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "discussion", "--mode", "refresh")
+        moved = self.json_cli("pr-checks", *args)
+        self.assertEqual((moved["observed_head_sha"], moved["checks_head_sha"], moved["freshness"], moved["observed_result"]), ("c" * 40, sha, "stale", "unknown"))
+        self.assertEqual(self.json_cli("pr-checks", *args, "--snapshot", sound["snapshot_id"])["observed_result"], "passed")
+        cache_root = self.root / "data/owner/repo/cache"
+        descriptor = manifest["items"][0]["components"]["checks"]
+        payload = json.loads((cache_root / "objects" / (descriptor["object"]["sha256"] + ".json")).read_text())
+
+        def forged(change, observed_at=None):
+            altered = copy.deepcopy(manifest)
+            rows = copy.deepcopy(payload)
+            change(rows)
+            text = json.dumps(rows, sort_keys=True, separators=(",", ":")) + "\n"
+            reference = dict(sha256=hashlib.sha256(text.encode()).hexdigest(), bytes=len(text.encode()), format="json")
+            altered["items"][0]["components"]["checks"]["object"] = reference
+            if observed_at is not None:
+                altered["items"][0]["components"]["checks"]["fetched_at"] = observed_at
+            (cache_root / "objects" / (reference["sha256"] + ".json")).write_text(text)
+            altered.pop("snapshot_id")
+            identity = hashlib.sha256(json.dumps(altered, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            altered["snapshot_id"] = identity
+            (cache_root / "snapshots" / (identity + ".json")).write_text(json.dumps(altered))
+            return identity
+
+        old_observation = "2026-09-23T00:00:00Z"
+        historical = forged(lambda values: [value.update(fetched_at=old_observation) for value in values], observed_at=old_observation)
+        stale = self.json_cli("pr-checks", *args, "--snapshot", historical)
+        self.assertEqual((stale["freshness"], stale["observed_result"]), ("stale", "unknown"))
+        count = len(self.calls())
+        for change in (lambda values: values[1].update(repository=dict(host="github.com", full_name="foreign/repo", database_id=99, node_id="R_foreign")),
+                       lambda values: values[1].update(head_sha="c" * 40),
+                       lambda values: values[1]["data"].update(check_suite=dict(id=99)),
+                       lambda values: values[1]["data"].update(id=True),
+                       lambda values: values[1]["data"].update(app=[]),
+                       lambda values: values[1]["data"].update(check_suite=[]),
+                       lambda values: values[1].update(fetched_at="2099-01-01T00:00:00Z")):
+            self.run_cli("pr-checks", *args, "--snapshot", forged(change), ok=False)
+
+        self.assertEqual(len(self.calls()), count)
+        object_path = cache_root / "objects" / (descriptor["object"]["sha256"] + ".json")
+        object_path.write_text("corrupt")
+        self.run_cli("pr-checks", *args, "--snapshot", sound["snapshot_id"], ok=False)
+        self.assertEqual(len(self.calls()), count)
 
     def test_selected_acquisition_and_offline_reuse(self):
         first = self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "discussion")

@@ -87,6 +87,9 @@ type model struct {
 	pairsLoaded                              bool
 	detail                                   detailModel
 	evidenceLifecycle                        *readLifecycle
+	checksLifecycle                          *readLifecycle
+	checksRequest                            uint64
+	checks                                   checksUI
 	corpus                                   corpusUI
 	corpusEpoch                              uint64
 	corpusLifecycle, corpusObserverLifecycle *readLifecycle
@@ -403,6 +406,8 @@ func toListItems(items []Item) []list.Item {
 
 // openItem loads it into the detail panel and decision form: the ledger's decision first, then a batch proposal for an untriaged item, then any unsaved draft on top. The returned command fetches whatever the item still needs: its body/comments and its duplicate candidates.
 func (m *model) openItem(it Item) tea.Cmd {
+	m.stopChecks()
+	m.checks = checksUI{}
 	m.confirmSave = false
 	if p, ok := m.activeProposal(it.Key()); ok && it.Untriaged() && p.has("agent_notes") {
 		it.AgentNotes = p.AgentNotes
@@ -977,6 +982,8 @@ func (m *model) switchRepo(repo string) tea.Cmd {
 	m.attentionGeneration++
 	m.attention = attentionUI{}
 	m.evidenceLifecycle.stop()
+	m.stopChecks()
+	m.checks = checksUI{}
 	m.corpusLifecycle.stop()
 	m.corpusObserverLifecycle.stop()
 	m.corpusEpoch++

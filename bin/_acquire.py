@@ -19,6 +19,7 @@ PROFILES = {
     "discussion": ["summary", "comments"],
     "pr-context": ["summary", "comments", "files", "reviews", "review_comments"],
     "pr-code": ["summary", "comments", "files", "diff"],
+    "pr-checks": ["summary", "checks"],
     "pr-comparison": ["summary", "comments", "files", "diff", "reviews", "review_comments", "checks", "closing_issues"],
 }
 MODES = ("offline", "cache-preferred", "refresh")

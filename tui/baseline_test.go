@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -973,7 +973,7 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 	m.notifications.open = true
 	next, _ := m.openNotificationItemAt(Key{Kind: "pr", Number: 3}, 1)
 	m = next.(model)
-	if !m.notificationPR.open || m.detail.active != 1 || len(m.detail.sections) != 3 {
+	if !m.notificationPR.open || m.detail.active != 1 || len(m.detail.sections) != 4 {
 		t.Fatal("notification PR did not open on its comments tab")
 	}
 	m.detail.Resize(80, 20)
@@ -1025,6 +1025,126 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 	if m.notificationPR.open {
 		t.Fatal("h did not return from the notification item")
 	}
+
+	// Opening Checks acquires no evidence, and replies remain bound to both the item and selected packet.
+	m.openItem(Item{Kind: "pr", Number: 3})
+	m.notifications.open = false
+	m.focus = FocusDetail
+	m.detail.Resize(80, 20)
+	m.form.reason.SetValue("preserve this draft")
+	next, cmd := m.Update(tea.KeyPressMsg{Text: "4"})
+	m = next.(model)
+	if cmd == nil || !m.checks.busy || m.checksRequest == 0 || m.checksLifecycle == nil {
+		t.Fatal("opening Checks did not request an offline read")
+	}
+	missing := cmd().(checksMsg)
+	if missing.err != nil || missing.data.Mode != "offline" || missing.data.Requests != 0 {
+		t.Fatalf("offline Checks read: %v", missing.err)
+	}
+	m = baselineSend(m, missing)
+	if !strings.Contains(ansi.Strip(m.detail.View()), "missing") || m.form.Reason() != "preserve this draft" {
+		t.Fatal("missing checks became coverage or discarded form draft")
+	}
+	if cmd := m.checksIfNeeded(); cmd != nil {
+		t.Fatal("Checks automatically repeated an observation")
+	}
+
+	page := checksPage{Kind: "pr", Number: 3, Mode: "offline", Snapshot: "checks-pin", Head: "new-head", ChecksHead: "old-head", Coverage: "partial", Freshness: "stale", Result: "unknown", RawCount: 24, HistoryOmissions: 3}
+	page.Repository = checksRepository{Host: evidenceHost, FullName: m.repo}
+	page.AllowedRepositories = []checksRepository{page.Repository, {Host: evidenceHost, FullName: "fork/repo"}}
+	for range 20 {
+		page.Rows = append(page.Rows, checkRow{Repository: "fork/repo", Source: "check-run", Name: "build", Result: "passed", Status: "completed", Conclusion: "success", HeadSHA: "old-head", URL: "https://github.com/fork/repo/actions/runs/42"})
+	}
+	page.Pagination.Total, page.Pagination.Returned, page.Pagination.After = 21, 20, 1
+	nextOffset := 20
+	page.Pagination.Next = &nextOffset
+	page.ResultCounts.Passed, page.ResultCounts.Unknown = 20, 1
+	if err := validateChecksPage(page, m.repo, 3, "offline", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	forged := page
+	forged.Repository.FullName = "foreign/repo"
+	if err := validateChecksPage(forged, m.repo, 3, "offline", "", 0); err == nil {
+		t.Fatal("foreign checks reply accepted")
+	}
+	missing.data = page
+	m = baselineSend(m, missing)
+	text := ansi.Strip(m.detail.View())
+	if !strings.Contains(text, "old-head") || !strings.Contains(text, "new-head") || !strings.Contains(renderChecks(page), "3 historical or suite") || !strings.Contains(renderChecks(page), "fork/repo") {
+		t.Fatal("checks view hid revision/source/omission distinctions")
+	}
+	if !strings.Contains(fmt.Sprint(m.footerGroups()), "refresh checks") {
+		t.Fatal("Checks refresh key was missing from help")
+	}
+	next, pageCmd, handled := m.handleChecksKey(tea.KeyPressMsg{Text: "]"})
+	m = next.(model)
+	if !handled || pageCmd == nil || m.checks.pendingSnapshot != "checks-pin" {
+		t.Fatal("checks continuation did not retain selected snapshot")
+	}
+	process, request := m.checksLifecycle.current, m.checksRequest
+	m = baselineSend(m, tea.KeyPressMsg{Text: "1"})
+	if !process.cancelled || m.checksRequest == request || m.checks.busy {
+		t.Fatal("leaving Checks did not cancel its reader")
+	}
+	stale := missing
+	stale.request = request
+	m = baselineSend(m, stale)
+	if m.checks.busy {
+		t.Fatal("late checks page restarted the reader")
+	}
+
+	m.detail.JumpSection(len(m.detail.sections) - 1)
+	next, refreshCmd := m.Update(tea.KeyPressMsg{Text: "r"})
+	m = next.(model)
+	if refreshCmd == nil || !m.checks.busy || m.refreshing || m.checks.pendingSnapshot != "" || m.checks.snapshot != "checks-pin" {
+		t.Fatal("contextual refresh lost request state or triggered backlog fetch")
+	}
+	m.form.FocusField(fieldReason)
+	if strings.Contains(fmt.Sprint(m.itemFooter()), "refresh checks") {
+		t.Fatal("reason editor advertised Checks refresh instead of text input")
+	}
+	m.focus = FocusList
+	if !strings.Contains(fmt.Sprint(m.menusGroup()), "fetch") {
+		t.Fatal("an old Checks tab hid list refresh")
+	}
+	m.focus = FocusDetail
+	request = m.checksRequest
+	m = baselineSend(m, tea.KeyPressMsg{Text: "r"})
+	if m.checksRequest != request || !strings.HasSuffix(m.form.Reason(), "r") {
+		t.Fatal("Checks shortcut intercepted reason typing")
+	}
+	m.form.FocusField(fieldContent)
+	m.stopChecks()
+	m.detail.enriched.Evidence = &batchEvidence{SnapshotID: "fixed-packet"}
+	m.detail.JumpSection(len(m.detail.sections) - 1)
+	m.checks = checksUI{}
+	cmd = m.checksIfNeeded()
+	if cmd == nil || m.checks.pendingSnapshot != "fixed-packet" {
+		t.Fatal("fixed packet Checks used latest evidence")
+	}
+	before := m.detail.sections[m.detail.active].source
+	next, refresh, handled := m.handleChecksKey(tea.KeyPressMsg{Text: "r"})
+	m = next.(model)
+	if !handled || refresh != nil || m.detail.sections[m.detail.active].source != before {
+		t.Fatal("fixed checks refresh changed source or started acquisition")
+	}
+	m.checks.snapshot = "fixed-packet"
+	pinned := m.checks.snapshot
+	next, _ = m.openNotificationItem(Key{Kind: "pr", Number: 8})
+	m = next.(model)
+	m.detail.JumpSection(len(m.detail.sections) - 1)
+	readReply := evidenceReadMsg{root: m.installRoot, repo: m.repo, key: m.detail.key, request: m.evidenceRequest, generation: m.detail.generation, data: EnrichedItem{Kind: "pr", Number: 8, Evidence: &batchEvidence{SnapshotID: "notification-pin", Mode: "refresh"}}}
+	next, notificationCmd := m.finishEvidenceRead(readReply)
+	m = next.(model)
+	if notificationCmd == nil || !m.checks.busy || m.checks.pendingSnapshot != "notification-pin" {
+		t.Fatal("notification Checks read lost returned reader state")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Text: "h"})
+	if m.checks.snapshot != pinned {
+		t.Fatal("notification item replaced the former selected CI snapshot")
+	}
+
+	m.stopChecks()
 }
 
 func TestBaselineItemTabsLeadIntoForm(t *testing.T) {

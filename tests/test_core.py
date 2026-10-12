@@ -787,6 +787,49 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.run_cli("batch", "2", "--include-triaged", "--unlabeled-first")
         newest = next(iter(set((self.root / "data/owner/repo/batches").glob("*.items.jsonl")) - before_batches))
         self.assertEqual({json.loads(line)["number"] for line in newest.read_text().splitlines()}, {1, 2})
+        decisions = newest.with_name(newest.name.replace(".items.jsonl", ".decisions.jsonl"))
+        self.assertEqual([set(json.loads(line)) for line in decisions.read_text().splitlines()], [{"number", "kind"}, {"number", "kind"}])
+        before_template = ledger_path.read_bytes()
+        self.run_cli("apply", str(decisions))
+        self.assertEqual(ledger_path.read_bytes(), before_template)
+        template_rows = [json.loads(line) for line in decisions.read_text().splitlines()]
+        next_steps = self.json_cli("next", "--json")["suggestions"]
+        self.assertTrue(any(f"Fill in batch {newest.name.removesuffix('.items.jsonl')}" in row["what"] for row in next_steps))
+        template_rows[0]["reason"] = ""
+        decisions.write_text("".join(json.dumps(row) + "\n" for row in template_rows))
+        next_steps = self.json_cli("next", "--json")["suggestions"]
+        self.assertTrue(any(f"agent proposals in batch {newest.name.removesuffix('.items.jsonl')}" in row["what"] for row in next_steps))
+        self.run_cli("apply", str(decisions), "--only-untriaged")
+        next_steps = self.json_cli("next", "--json")["suggestions"]
+        self.assertFalse(any(f"agent proposals in batch {newest.name.removesuffix('.items.jsonl')}" in row["what"] for row in next_steps))
+        self.assertEqual(self.ledger()[("issue", 2)]["action"], "")
+        self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], [])
+        completed = self.ledger()[("issue", 2)]
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--action", "")
+        template_rows[1]["agent_notes"] = "New notes beside a completed clear"
+        decisions.write_text("".join(json.dumps(row) + "\n" for row in template_rows))
+        result = self.run_cli("apply", str(decisions), "--only-untriaged", "--by", "agent:second-pass")
+        self.assertIn("Applied 1 decisions", result.stdout)
+        self.assertIn("Skipped 1 edits already recorded", result.stdout)
+        self.assertNotIn("Kept", result.stdout)
+        self.assertEqual(self.ledger()[("issue", 2)], completed)
+        self.assertEqual(self.ledger()[("issue", 1)]["agent_notes"], "New notes beside a completed clear")
+        before_replay = ledger_path.read_bytes()
+        replay = self.run_cli("apply", str(decisions), "--only-untriaged")
+        self.assertIn("Applied 0 decisions", replay.stdout)
+        self.assertIn("Skipped 2 edits already recorded", replay.stdout)
+        self.assertNotIn("Kept", replay.stdout)
+        self.assertEqual(ledger_path.read_bytes(), before_replay)
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--action", "none")
+        template_rows[1].pop("agent_notes")
+        template_rows[0].pop("reason")
+        template_rows[0]["agent_notes"] = "Notes without a triage decision"
+        decisions.write_text("".join(json.dumps(row) + "\n" for row in template_rows))
+        next_steps = self.json_cli("next", "--json")["suggestions"]
+        self.assertTrue(any(f"agent proposals in batch {newest.name.removesuffix('.items.jsonl')}" in row["what"] for row in next_steps))
+        self.run_cli("apply", str(decisions), "--only-untriaged")
+        next_steps = self.json_cli("next", "--json")["suggestions"]
+        self.assertFalse(any(f"agent proposals in batch {newest.name.removesuffix('.items.jsonl')}" in row["what"] for row in next_steps))
         rows = [json.loads(line) for line in ledger_path.read_text().splitlines()]
         for current in rows:
             current["updated_at"] = "2026-10-06T00:00:00Z" if current["number"] == 1 else "2026-09-22T00:00:00Z"
@@ -912,9 +955,41 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.assertEqual(noted, {**before, "agent_notes": "Retain this evidence"})
 
         decisions = self.root / "placeholder.decisions.jsonl"
-        decisions.write_text(json.dumps(dict(number=2, kind="issue", proposed_labels=[], action="", confidence="", reason="", agent_notes="", proposed_by="")) + "\n")
-        self.assertIn("Skipped 1 rows still blank", self.run_cli("apply", str(decisions)).stdout)
-        self.assertEqual(self.ledger()[("issue", 2)], noted)
+        ledger_path = self.root / "data/owner/repo/ledger.jsonl"
+        before_bytes = ledger_path.read_bytes()
+        decisions.write_text("".join(json.dumps(row) + "\n" for row in [dict(number=1, kind="issue"), dict(number=2, kind="issue", proposed_by="agent:metadata")]))
+        self.assertIn("Skipped 2 rows without edits", self.run_cli("apply", str(decisions)).stdout)
+        self.assertEqual(ledger_path.read_bytes(), before_bytes)
+
+        decisions.write_text(json.dumps(dict(number=2, kind="issue", agent_notes="Batch evidence", proposed_by="agent:notes")) + "\n")
+        self.run_cli("apply", str(decisions), "--only-untriaged")
+        self.assertEqual(ledger_path.read_bytes(), before_bytes)
+        self.run_cli("apply", str(decisions))
+        self.assertEqual(self.ledger()[("issue", 2)], {**noted, "agent_notes": "Batch evidence"})
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--agent-notes", "Retain this evidence")
+
+        for field in ("proposed_labels", "action", "confidence", "reason", "agent_notes", "proposed_by"):
+            for invalid in (None, False, 0):
+                with self.subTest(field=field, invalid=invalid):
+                    decisions.write_text(json.dumps(dict(number=1, kind="issue", reason="Must not be partially saved")) + "\n" + json.dumps({"number": 2, "kind": "issue", field: invalid}) + "\n")
+                    self.run_cli("apply", str(decisions), ok=False)
+                    self.assertEqual(ledger_path.read_bytes(), before_bytes)
+
+        for invalid in ("certain", [], {}):
+            decisions.write_text(json.dumps(dict(number=2, kind="issue", confidence=invalid)) + "\n")
+            self.run_cli("apply", str(decisions), ok=False)
+            self.assertEqual(ledger_path.read_bytes(), before_bytes)
+
+        decisions.write_text(json.dumps(dict(number=2, kind="issue", proposed_labels=[])) + "\n")
+        self.run_cli("apply", str(decisions), "--only-untriaged")
+        self.assertEqual(ledger_path.read_bytes(), before_bytes)
+        self.run_cli("apply", str(decisions), "--dry-run")
+        self.assertEqual(ledger_path.read_bytes(), before_bytes)
+        self.run_cli("apply", str(decisions))
+        cleared_batch = self.ledger()[("issue", 2)]
+        self.assertEqual(cleared_batch, {**noted, "proposed_labels": [], "triaged_at": cleared_batch["triaged_at"], "triaged_by": "agent", "batch_id": "placeholder"})
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--proposed-label", "bug", "--by", "agent:triage")
+        noted = self.ledger()[("issue", 2)]
 
         args = ("--number", "2", "--kind", "issue", "--replace-proposed-labels", "--action", "", "--by", "human")
         self.run_cli("apply", *args, "--dry-run")
@@ -953,6 +1028,19 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.assertEqual(self.ledger()[("issue", 1)]["action"], "none")
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--replace-proposed-labels", "--action", "")
         self.assertEqual(self.ledger()[("issue", 1)]["action"], "")
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--confidence", "", "--reason", "")
+        self.assertEqual(self.ledger()[("issue", 1)]["confidence"], "")
+        self.assertEqual(self.ledger()[("issue", 1)]["reason"], "")
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--agent-notes", "Notes to clear")
+        before_notes_clear = self.ledger()[("issue", 1)]
+        decisions.write_text(json.dumps(dict(number=1, kind="issue", agent_notes="")) + "\n")
+        self.run_cli("apply", str(decisions))
+        self.assertEqual(self.ledger()[("issue", 1)], {**before_notes_clear, "agent_notes": ""})
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--reason", "Reason without action")
+        self.assertEqual(self.ledger()[("issue", 1)]["reason"], "Reason without action")
+        decisions.write_text(json.dumps(dict(number=1, kind="issue", action="", confidence="", reason="")) + "\n")
+        self.run_cli("apply", str(decisions))
+        self.assertEqual(self.ledger()[("issue", 1)]["reason"], "")
 
         request = self.ledger()[("issue", 2)]["review_request"]
         self.run_cli("review-request", "clear", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "2", "--by", "agent:other", ok=False)

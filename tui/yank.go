@@ -287,13 +287,8 @@ func (m model) yankList(all bool) (string, string) {
 	b.WriteString(m.yankHeader(fmt.Sprintf("%s (%d items)", title, len(items))))
 	b.WriteString("\n")
 	for _, li := range items {
-		proposal := strings.Join(li.proposalLabels, ", ")
-		if li.proposalAction != "" {
-			if proposal != "" {
-				proposal += "/"
-			}
-			proposal += li.proposalAction
-		}
+		proposal := li.proposalSummary
+
 		b.WriteString(itemLine(li.Item, proposal))
 		b.WriteByte('\n')
 	}
@@ -356,13 +351,8 @@ func (m model) yankBatch(all bool) (string, string) {
 		}
 
 		proposed := ""
-		if p, ok := record.Proposals[key]; ok && (p.Action != "" || len(p.ProposedLabels) > 0) {
-			labels := strings.Join(p.ProposedLabels, ", ")
-			action := p.Action
-			if action == "" {
-				action = "action not assessed"
-			}
-			proposed = fmt.Sprintf("%s / %s (%s) — %s", labels, action, p.Confidence, p.Reason)
+		if p, ok := record.Proposals[key]; ok && p.hasEdits() {
+			proposed = p.summary()
 		}
 
 		b.WriteString(itemLine(item, proposed))

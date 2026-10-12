@@ -14,7 +14,7 @@ Writes:
     data/<owner>/<repo>/batches/<batch_id>.items.jsonl       full context, one item per line, including `duplicate_candidates` (the top title matches from bin/similar, minus pairs already ruled out; leads to check, not proof)
     data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl   template to fill in and pass to bin/apply
 
-The template has proposed_labels/action/confidence/reason blanked out; choose only labels in the repository's observed catalog and fill the action per config/taxonomy.json and docs/taxonomy.md when assessed (optionally also agent_notes, the longer evidence, and proposed_by, e.g. "agent:<contributor>"), then run:
+The template contains only number and kind. Add only the fields you want to edit: proposed_labels, action, confidence, reason and agent_notes, plus proposed_by for attribution (e.g. "agent:<contributor>"). Omitted fields preserve saved values; [] clears proposed labels and "" clears a text field. An untouched identity row is a no-op. Choose labels from the observed catalog and assess actions per config/taxonomy.json and docs/taxonomy.md, then run:
 
     bin/apply data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl
 
@@ -252,10 +252,7 @@ def main():
             enriched["group_member_notes"] = members[(rec["kind"], rec["number"])]["notes"]
 
         items.append(enriched)
-        decisions.append({
-            "number": rec["number"], "kind": rec["kind"], "proposed_labels": [], "action": "", "confidence": "", "reason": "",
-            "agent_notes": "", "proposed_by": "",
-        })
+        decisions.append({"number": rec["number"], "kind": rec["kind"]})
         print(f"  [{i}/{len(selected)}] #{rec['number']} {rec['kind']}", file=sys.stderr)
 
     write_lines(items_path, [json.dumps(row, ensure_ascii=False) for row in items])

@@ -404,7 +404,7 @@ func toListItems(items []Item) []list.Item {
 // openItem loads it into the detail panel and decision form: the ledger's decision first, then a batch proposal for an untriaged item, then any unsaved draft on top. The returned command fetches whatever the item still needs: its body/comments and its duplicate candidates.
 func (m *model) openItem(it Item) tea.Cmd {
 	m.confirmSave = false
-	if p, ok := m.activeProposal(it.Key()); ok && it.Untriaged() && it.AgentNotes == "" {
+	if p, ok := m.activeProposal(it.Key()); ok && it.Untriaged() && p.has("agent_notes") {
 		it.AgentNotes = p.AgentNotes
 	}
 

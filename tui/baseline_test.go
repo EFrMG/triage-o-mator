@@ -457,8 +457,8 @@ func TestItemCardMetadataLayout(t *testing.T) {
 	if want := lipgloss.NewStyle().Bold(true).Render("none"); !strings.Contains(decided.Description(), want) {
 		t.Fatal("saved action lost its bold style")
 	}
-	proposed := listItem{Item: Item{Kind: "issue"}, proposalAction: "close"}
-	if want := lipgloss.NewStyle().Bold(true).Render("close"); !strings.Contains(proposed.Description(), want) {
+	proposed := listItem{Item: Item{Kind: "issue"}, proposalSummary: "action: close"}
+	if want := lipgloss.NewStyle().Bold(true).Render("action: close"); !strings.Contains(proposed.Description(), want) {
 		t.Fatal("proposed action lost its bold style")
 	}
 	decided.Action = ""
@@ -1185,7 +1185,7 @@ func TestBaselineSaveAndExplicitPendingReviewAreSeparate(t *testing.T) {
 	m := baselineModel(t, root)
 	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
-	m.form.ApplyProposal(proposal{Action: "none", Confidence: "medium", Reason: "Checked source", ProposedBy: "agent:triage"})
+	m.form.ApplyProposal(proposal{Action: "none", Confidence: "medium", Reason: "Checked source", ProposedBy: "agent:triage", fields: map[string]bool{"action": true, "confidence": true, "reason": true}})
 	next, cmd := m.Update(tea.KeyPressMsg{Text: "s"})
 	if cmd == nil {
 		t.Fatal("save produced no script command")
@@ -1347,7 +1347,7 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 	if m.form.Reason() != reason {
 		t.Fatal("draft reason was truncated")
 	}
-	m.form.ApplyProposal(proposal{Action: "none", Confidence: "", Reason: reason})
+	m.form.ApplyProposal(proposal{Action: "none", Confidence: "", Reason: reason, fields: map[string]bool{"action": true, "confidence": true, "reason": true}})
 	if m.form.Reason() != reason || m.form.Confidence() != "" {
 		t.Fatal("proposal reason or confidence changed")
 	}
@@ -1387,7 +1387,7 @@ func TestBaselinePendingSavePinsRepositoryAndReleasesSwitch(t *testing.T) {
 	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
 	m.detail.loading = false
-	m.form.ApplyProposal(proposal{Action: "none", Reason: "old repository decision"})
+	m.form.ApplyProposal(proposal{Action: "none", Reason: "old repository decision", fields: map[string]bool{"action": true, "reason": true}})
 	next, cmd := m.Update(tea.KeyPressMsg{Text: "s"})
 	m = next.(model)
 	if cmd == nil || m.switchBusy() == "" {
@@ -1435,6 +1435,52 @@ func TestBaselineApplyRepliesRequireOrigin(t *testing.T) {
 	m = baselineSend(m, applyDoneMsg{root: root, repo: m.repo, key: key})
 	if m.pendingApply != 0 || len(m.drafts) != 0 {
 		t.Fatal("successful apply did not release switching or clear the draft")
+	}
+
+	m.openItem(m.items[0])
+	m.form.ApplyProposal(proposal{AgentNotes: "new notes", fields: map[string]bool{"agent_notes": true}})
+	snapshot := m.form.Snapshot()
+	m.drafts[key] = snapshot
+	m.pendingApply = 1
+	protected := baselineLedgerRow(t, root)
+	protected["action"], protected["triaged_by"] = "none", "human"
+	bytes, _ := json.Marshal(protected)
+	if err := os.WriteFile(filepath.Join(root, "data/owner/repo/ledger.jsonl"), append(bytes, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msg := m.saveDecisionCmd()().(applyDoneMsg)
+	if msg.err != nil || !msg.protected {
+		t.Fatalf("concurrent decision was not reported as protected: %v", msg.err)
+	}
+	next, reload := m.Update(msg)
+	m = next.(model)
+	if m.pendingApply != 0 || len(m.drafts) != 1 || m.form.saved || !strings.Contains(m.status, "Kept existing decision") || reload == nil {
+		t.Fatal("protected save discarded its draft or claimed success")
+	}
+	m = baselineSend(m, reload())
+	if len(m.drafts) != 1 || m.form.proposalNotes != "new notes" || m.items[0].Action != "none" {
+		t.Fatal("protected save reload discarded draft or failed to show current ledger")
+	}
+
+	m.openItem(Item{Kind: "issue", Number: 2})
+	m.openItem(m.items[0])
+	if !m.form.proposed || m.form.proposalNotes != "new notes" || !m.form.proposalEdit.has("agent_notes") || m.form.proposalEdit.has("action") {
+		t.Fatal("reopening a protected draft lost its exact proposal context")
+	}
+	retry := m.saveDecisionCmd()().(applyDoneMsg)
+	if retry.err != nil || !retry.protected || baselineLedgerRow(t, root)["agent_notes"] == "new notes" {
+		t.Fatal("reopened proposal draft bypassed concurrent-triage protection")
+	}
+	oldSnapshot := m.form.Snapshot()
+	m.form.ApplyProposal(proposal{AgentNotes: "newer notes", ProposedBy: "agent:newer", fields: map[string]bool{"agent_notes": true, "reason": true}})
+	newerSnapshot := m.form.Snapshot()
+	m.drafts[key] = newerSnapshot
+	if oldSnapshot.Equal(newerSnapshot) || !oldSnapshot.FieldsEqual(newerSnapshot) {
+		t.Fatal("draft equality ignored proposal-only edits or changed visible-field equality")
+	}
+	m = baselineSend(m, applyDoneMsg{root: root, repo: m.repo, key: key, snapshot: &oldSnapshot})
+	if len(m.drafts) != 1 || m.form.saved || m.form.proposalNotes != "newer notes" || !m.form.proposalEdit.has("reason") || m.form.proposalBy != "agent:newer" {
+		t.Fatal("older save reply cleared a newer proposal-only draft")
 	}
 }
 
@@ -1512,6 +1558,90 @@ func TestBaselineFixedBatchDoesNotMixLiveEvidence(t *testing.T) {
 	if m.detail.SetItem(Item{Kind: "issue", Number: 1}) || m.detail.enriched.Body != "frozen body" {
 		t.Fatal("fixed batch requested or displayed live evidence")
 	}
+
+	decisions := filepath.Join(batchDir, records[0].ID+".decisions.jsonl")
+	for _, invalid := range []string{
+		`{"kind":"issue","number":1,"agent_notes":null}`,
+		`{"kind":"issue","number":1,"reason":false}`,
+		`{"kind":"issue","number":1,"proposed_labels":["bug","bug"]}`,
+		`{"kind":"issue","number":1,"confidence":"unknown"}`,
+	} {
+		if err := os.WriteFile(decisions, []byte(invalid+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadBatches(root, "owner/repo"); err == nil {
+			t.Fatalf("accepted malformed proposal: %s", invalid)
+		}
+	}
+	patch := `{"kind":"issue","number":1,"agent_notes":"","proposed_by":"agent:new"}`
+	if err := os.WriteFile(decisions, []byte(patch+"\n"+`{"kind":"issue","number":2,"proposed_by":"agent:metadata"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	records, err = loadBatches(root, "owner/repo")
+	if err != nil || len(records[0].Proposals) != 1 {
+		t.Fatalf("identity/metadata became an edit: %v", err)
+	}
+	row := baselineLedgerRow(t, root)
+	row["agent_notes"], row["reason"], row["confidence"], row["triaged_by"] = "old notes", "existing reason", "medium", "agent:original"
+	saved, _ := json.Marshal(row)
+	if err := os.WriteFile(filepath.Join(root, "data/owner/repo/ledger.jsonl"), append(saved, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = baselineModel(t, root)
+	m.batches.records = records
+	m.openBatch(records[0].ID)
+	m.openItem(m.items[0])
+	if m.detail.item.AgentNotes != "" || m.form.Reason() != "existing reason" || m.form.Confidence() != "medium" {
+		t.Fatal("partial notes proposal overwrote omitted decision fields or failed to clear notes")
+	}
+	if m.pendingProposals(records[0]) != 1 {
+		t.Fatal("explicit empty notes were not pending")
+	}
+	listItems, _ := m.batchItems(records[0])
+	if !strings.Contains(listItems[0].(listItem).Description(), "Clear notes") {
+		t.Fatal("explicit notes clear was invisible")
+	}
+	if text, _ := m.yankBatch(true); !strings.Contains(text, "Clear notes") {
+		t.Fatal("batch export lost explicit clear intent")
+	}
+	_, cmd := m.requestSave()
+	if cmd == nil {
+		t.Fatal("notes-only patch could not be accepted")
+	}
+	if msg := cmd().(applyDoneMsg); msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	row = baselineLedgerRow(t, root)
+	if row["agent_notes"] != "" || row["reason"] != "existing reason" || row["confidence"] != "medium" || row["triaged_by"] != "agent:original" {
+		t.Fatalf("accepting notes patch changed omitted values or attribution: %v", row)
+	}
+	m.items, err = LoadLedger(root, "owner/repo")
+	if err != nil || m.pendingProposals(records[0]) != 0 {
+		t.Fatal("applied notes patch remained pending")
+	}
+
+	var clear proposal
+	if err := json.Unmarshal([]byte(`{"kind":"issue","number":1,"proposed_labels":[],"action":"","confidence":"","reason":""}`), &clear); err != nil {
+		t.Fatal(err)
+	}
+	records[0].Proposals[Key{Kind: "issue", Number: 1}] = clear
+	m.batches.records = records
+	m.openItem(m.items[0])
+	if m.form.Reason() != "" || m.form.Confidence() != "" || m.form.Action() != "" || m.pendingProposals(records[0]) != 1 {
+		t.Fatal("explicit empty decision was not recognized")
+	}
+	if msg := m.saveDecisionCmd()().(applyDoneMsg); msg.err != nil {
+		t.Fatal(msg.err)
+	}
+	m.items, err = LoadLedger(root, "owner/repo")
+	if err != nil || !m.items[0].Untriaged() || m.pendingProposals(records[0]) != 0 {
+		t.Fatal("applied clear remained pending or became triage coverage")
+	}
+	m.items[0].Action = "none"
+	if m.pendingProposals(records[0]) != 0 {
+		t.Fatal("batch proposed overwriting a triaged item")
+	}
+
 }
 
 func TestBaselineBatchCreationUsesFloatingEditor(t *testing.T) {

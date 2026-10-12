@@ -13,11 +13,12 @@ import (
 )
 
 // listItem adapts Item to bubbles/list's item interface.
-// proposalLabels and proposalAction are set when a batch proposes a decision for the item.
+// Proposal values and their summary are set when a batch proposes edits for the item.
 type listItem struct {
 	Item
-	proposalLabels []string
-	proposalAction string
+	proposalLabels    []string
+	proposalSummary   string
+	proposalLabelsSet bool
 	// ticked marks an item ticked with Space for a bulk action; unsaved, one with an unsaved draft of its decision (model.drafts).
 	ticked, unsaved bool
 }
@@ -42,11 +43,9 @@ func (li listItem) Description() string {
 	}
 	if !li.unsaved && !li.Untriaged() && li.Action != "" {
 		parts = append(parts, lipgloss.NewStyle().Bold(true).Render(singleLine(li.Action)))
-	} else if !li.unsaved && (len(li.proposalLabels) > 0 || li.proposalAction != "") {
+	} else if !li.unsaved && li.proposalSummary != "" {
 		parts = append(parts, "proposed")
-		if li.proposalAction != "" {
-			parts = append(parts, lipgloss.NewStyle().Bold(true).Render(singleLine(li.proposalAction)))
-		}
+		parts = append(parts, lipgloss.NewStyle().Bold(true).Render(li.proposalSummary))
 	}
 
 	return strings.Join(parts, " · ")
@@ -55,7 +54,11 @@ func (li listItem) Description() string {
 func (li listItem) Tags() string {
 	labels := append([]string{}, li.ProposedLabels...)
 	if li.Untriaged() {
-		labels = append(labels, li.proposalLabels...)
+		if li.proposalLabelsSet {
+			labels = slices.Clone(li.proposalLabels)
+		} else {
+			labels = append(labels, li.proposalLabels...)
+		}
 	}
 	for _, label := range li.Labels {
 		if !slices.Contains(labels, label) {

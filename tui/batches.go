@@ -19,10 +19,10 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Batches are bin/batch's working files in the current repo's data/<owner>/<repo>/batches/: <id>.items.jsonl (enriched context) and <id>.decisions.jsonl (blank template, or proposals an agent filled in).
+// Batches are bin/batch's working files in the current repo's data/<owner>/<repo>/batches/: <id>.items.jsonl (enriched context) and <id>.decisions.jsonl (identity template, or explicit edits an agent filled in).
 // The TUI only reads those files directly; creating a batch shells out to bin/batch and applying its proposals shells out to bin/apply, same as every other mutation.
 
-// proposal is one filled-in row of a batch's decisions file.
+// proposal retains both the values and field presence of an explicit edit in a batch decisions file.
 type proposal struct {
 	Number         int      `json:"number"`
 	Kind           string   `json:"kind"`
@@ -32,6 +32,125 @@ type proposal struct {
 	Reason         string   `json:"reason"`
 	AgentNotes     string   `json:"agent_notes"`
 	ProposedBy     string   `json:"proposed_by"`
+	fields         map[string]bool
+}
+
+var proposalFields = []string{"proposed_labels", "action", "confidence", "reason", "agent_notes"}
+
+func (p *proposal) UnmarshalJSON(data []byte) error {
+	type values proposal
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	var decoded values
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+
+	decoded.fields = map[string]bool{}
+	for _, name := range append(slices.Clone(proposalFields), "proposed_by") {
+		value, present := raw[name]
+		if !present {
+			continue
+		}
+
+		if string(value) == "null" {
+			return fmt.Errorf("%s must not be null", name)
+		}
+
+		decoded.fields[name] = true
+	}
+
+	if decoded.Kind != "issue" && decoded.Kind != "pr" || decoded.Number < 1 {
+		return fmt.Errorf("proposal requires an issue or PR identity")
+	}
+
+	if decoded.fields["confidence"] && !slices.Contains([]string{"", "low", "medium", "high"}, decoded.Confidence) {
+		return fmt.Errorf("invalid confidence %q", decoded.Confidence)
+	}
+
+	seen := map[string]bool{}
+	for _, label := range decoded.ProposedLabels {
+		if label == "" || seen[label] {
+			return fmt.Errorf("proposed labels must be distinct nonempty strings")
+		}
+
+		seen[label] = true
+	}
+
+	*p = proposal(decoded)
+	return nil
+}
+
+func (p proposal) has(field string) bool { return p.fields[field] }
+
+func (p proposal) hasEdits() bool {
+	for _, name := range proposalFields {
+		if p.has(name) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (p proposal) fulfilled(it Item, batchID string) bool {
+	if !p.hasEdits() {
+		return false
+	}
+	if p.has("proposed_labels") {
+		labels, saved := slices.Clone(p.ProposedLabels), slices.Clone(it.ProposedLabels)
+		slices.Sort(labels)
+		slices.Sort(saved)
+		if !slices.Equal(labels, saved) {
+			return false
+		}
+	}
+
+	for _, field := range []struct{ name, proposed, saved string }{
+		{"action", p.Action, it.Action}, {"confidence", p.Confidence, it.Confidence}, {"reason", p.Reason, it.Reason}, {"agent_notes", p.AgentNotes, it.AgentNotes},
+	} {
+		if p.has(field.name) && field.proposed != field.saved {
+			return false
+		}
+	}
+
+	for _, name := range proposalFields[:4] {
+		if p.has(name) {
+			return it.BatchID == batchID
+		}
+	}
+
+	return true
+}
+
+func (p proposal) summary() string {
+	var parts []string
+	if p.has("proposed_labels") {
+		if len(p.ProposedLabels) == 0 {
+			parts = append(parts, "Clear proposed labels")
+		} else {
+			parts = append(parts, "Labels: "+strings.Join(p.ProposedLabels, ", "))
+		}
+	}
+
+	for _, field := range []struct{ name, title, value string }{
+		{"action", "action", p.Action}, {"confidence", "confidence", p.Confidence}, {"reason", "reason", p.Reason}, {"agent_notes", "notes", p.AgentNotes},
+	} {
+		if !p.has(field.name) {
+			continue
+		}
+		if field.value == "" {
+			parts = append(parts, "Clear "+field.title)
+		} else if field.name == "agent_notes" {
+			parts = append(parts, "Update notes")
+		} else {
+			parts = append(parts, field.title+": "+singleLine(field.value))
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 type batchRecord struct {
@@ -141,7 +260,7 @@ func loadBatches(root, repo string) ([]batchRecord, error) {
 					return err
 				}
 
-				if p.Action != "" || len(p.ProposedLabels) > 0 {
+				if p.hasEdits() {
 					rec.Proposals[Key{Kind: p.Kind, Number: p.Number}] = p
 				}
 
@@ -361,6 +480,10 @@ func (m model) batchByID(id string) *batchRecord {
 func (m model) activeProposal(key Key) (proposal, bool) {
 	if b := m.batchByID(m.activeBatch); b != nil {
 		p, ok := b.Proposals[key]
+
+		if it, found := m.findItem(key); found && p.fulfilled(it, b.ID) {
+			return proposal{}, false
+		}
 
 		return p, ok
 	}
@@ -704,7 +827,7 @@ func (m model) pendingProposals(b batchRecord) int {
 // countProposals counts the proposals A would apply, and how many of those use an action config/taxonomy.json doesn't have (bin/apply records them as-is, with a warning).
 func (m model) countProposals(b batchRecord) (pending, invalid int) {
 	for key, p := range b.Proposals {
-		if it, ok := m.findItem(key); ok && it.Untriaged() {
+		if it, ok := m.findItem(key); ok && it.Untriaged() && !p.fulfilled(it, b.ID) {
 			pending++
 			if unlisted(m.taxonomy.SelectableActions(), p.Action) != "" {
 				invalid++
@@ -763,9 +886,10 @@ func (m model) batchItems(b batchRecord) ([]list.Item, int) {
 		}
 
 		li := listItem{Item: it}
-		if p, ok := b.Proposals[key]; ok && it.Untriaged() {
+		if p, ok := b.Proposals[key]; ok && it.Untriaged() && !p.fulfilled(it, b.ID) {
 			li.proposalLabels = p.ProposedLabels
-			li.proposalAction = p.Action
+			li.proposalSummary = p.summary()
+			li.proposalLabelsSet = p.has("proposed_labels")
 		}
 
 		out = append(out, li)

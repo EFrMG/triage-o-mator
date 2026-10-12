@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -33,9 +34,10 @@ type decisionForm struct {
 	focused  formField
 
 	// A negative index preserves a blank field in an existing decision or proposal.
-	actionIdx      int
-	confidenceIdx  int
-	proposedLabels []string
+	actionIdx        int
+	confidenceIdx    int
+	ledgerConfidence string
+	proposedLabels   []string
 	// The reason editor grows up to reasonMaxLines visible rows; Enter saves rather than inserting a newline.
 	reason textarea.Model
 
@@ -48,6 +50,7 @@ type decisionForm struct {
 	// proposalNotes is that proposal's agent_notes, saved along with the decision so accepting a proposal in the TUI keeps the agent's evidence.
 	proposalNotes    string
 	proposalBy       string
+	proposalEdit     proposal
 	proposalSnapshot decisionSnapshot
 	// Unlisted values from the ledger or a proposal stay visible and block saving until the contributor picks supported values.
 	badAction, badConfidence string
@@ -110,30 +113,57 @@ func (f *decisionForm) SetWidth(width int) {
 
 // decisionSnapshot is an in-memory, unsaved draft of a decision for one item: lets a reviewer jump between items without losing edits made before pressing ctrl+s. See model.drafts.
 type decisionSnapshot struct {
-	actionIdx      int
-	confidenceIdx  int
-	proposedLabels []string
-	reason         string
-	badLabels      []string
-	badAction      string
-	badConfidence  string
+	actionIdx       int
+	confidenceIdx   int
+	proposedLabels  []string
+	reason          string
+	badLabels       []string
+	badAction       string
+	badConfidence   string
+	proposalContext *proposalDraft
 }
 
-func (s decisionSnapshot) Equal(other decisionSnapshot) bool {
+// proposalDraft keeps the source edit alongside a draft so reopening an item preserves omissions, explicit clears and attribution.
+type proposalDraft struct {
+	proposed  bool
+	notes, by string
+	edit      proposal
+	original  decisionSnapshot
+}
+
+func (s decisionSnapshot) FieldsEqual(other decisionSnapshot) bool {
 	return s.actionIdx == other.actionIdx && s.confidenceIdx == other.confidenceIdx &&
 		s.reason == other.reason && s.badAction == other.badAction && s.badConfidence == other.badConfidence &&
 		slices.Equal(s.proposedLabels, other.proposedLabels) && slices.Equal(s.badLabels, other.badLabels)
 }
 
+func (s decisionSnapshot) Equal(other decisionSnapshot) bool {
+	if !s.FieldsEqual(other) {
+		return false
+	}
+
+	a, b := s.proposalContext, other.proposalContext
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	return a.proposed == b.proposed && a.notes == b.notes && a.by == b.by &&
+		a.original.Equal(b.original) && a.edit.Number == b.edit.Number && a.edit.Kind == b.edit.Kind &&
+		a.edit.Action == b.edit.Action && a.edit.Confidence == b.edit.Confidence && a.edit.Reason == b.edit.Reason &&
+		a.edit.AgentNotes == b.edit.AgentNotes && a.edit.ProposedBy == b.edit.ProposedBy &&
+		slices.Equal(a.edit.ProposedLabels, b.edit.ProposedLabels) && maps.Equal(a.edit.fields, b.edit.fields)
+}
+
 func (f decisionForm) Snapshot() decisionSnapshot {
 	return decisionSnapshot{
-		actionIdx:      f.actionIdx,
-		confidenceIdx:  f.confidenceIdx,
-		proposedLabels: slices.Clone(f.proposedLabels),
-		reason:         f.reason.Value(),
-		badLabels:      slices.Clone(f.badLabels),
-		badAction:      f.badAction,
-		badConfidence:  f.badConfidence,
+		actionIdx:       f.actionIdx,
+		confidenceIdx:   f.confidenceIdx,
+		proposedLabels:  slices.Clone(f.proposedLabels),
+		reason:          f.reason.Value(),
+		badLabels:       slices.Clone(f.badLabels),
+		badAction:       f.badAction,
+		badConfidence:   f.badConfidence,
+		proposalContext: &proposalDraft{proposed: f.proposed, notes: f.proposalNotes, by: f.proposalBy, edit: f.proposalEdit, original: f.proposalSnapshot},
 	}
 }
 
@@ -144,6 +174,12 @@ func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 	f.proposedLabels = slices.Clone(s.proposedLabels)
 	f.reason.SetValue(s.reason)
 	f.badLabels, f.badAction, f.badConfidence = slices.Clone(s.badLabels), s.badAction, s.badConfidence
+	if context := s.proposalContext; context != nil {
+		f.proposed = context.proposed
+		f.proposalNotes, f.proposalBy = context.notes, context.by
+		f.proposalEdit, f.proposalSnapshot = context.edit, context.original
+	}
+
 	f.dirty = true
 	f.saved = false
 	f.touched = true
@@ -151,26 +187,37 @@ func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 
 // ApplyProposal seeds the form from a batch decisions file's proposal for an untriaged item. It counts as touched (someone chose these values) but not dirty: the proposal stays in the file, so leaving without saving loses nothing.
 func (f *decisionForm) ApplyProposal(p proposal) {
-	f.proposedLabels = slices.Clone(p.ProposedLabels)
-	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), p.Action)
-	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, p.Confidence)
-
-	if p.Action == "" {
-		f.actionIdx = -1
+	if p.has("proposed_labels") {
+		f.proposedLabels = slices.Clone(p.ProposedLabels)
+		f.badLabels = f.unlistedLabels()
 	}
-
-	if p.Confidence == "" {
+	if p.has("action") {
+		f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), p.Action)
+		if p.Action == "" {
+			f.actionIdx = -1
+		}
+		f.badAction = unlisted(f.taxonomy.SelectableActions(), p.Action)
+	}
+	if p.has("confidence") {
+		f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, p.Confidence)
+		if p.Confidence == "" {
+			f.confidenceIdx = -1
+		}
+		f.badConfidence = unlisted(f.taxonomy.Confidence, p.Confidence)
+	}
+	if !p.has("confidence") && f.ledgerConfidence == "" {
 		f.confidenceIdx = -1
 	}
-
-	f.reason.SetValue(p.Reason)
+	if p.has("reason") {
+		f.reason.SetValue(p.Reason)
+	}
 	f.proposalNotes = p.AgentNotes
-	f.badLabels, f.badAction = f.unlistedLabels(), unlisted(f.taxonomy.SelectableActions(), p.Action)
-	f.badConfidence = unlisted(f.taxonomy.Confidence, p.Confidence)
+	f.proposalEdit = p
 	f.touched = true
 	f.proposed = true
 	f.proposalBy = p.ProposedBy
 	f.proposalSnapshot = f.Snapshot()
+	f.proposalSnapshot.proposalContext = nil
 }
 
 // MarkDuplicate prefills a matching GitHub label and a close operation, leaving confidence for the contributor to set.
@@ -212,6 +259,7 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 
 // LoadItem seeds the form from an existing ledger row (empty strings if untriaged).
 func (f *decisionForm) LoadItem(it Item) {
+	f.ledgerConfidence = it.Confidence
 	f.kind = it.Kind
 	f.proposedLabels = slices.Clone(it.ProposedLabels)
 	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), it.Action)
@@ -235,6 +283,7 @@ func (f *decisionForm) LoadItem(it Item) {
 	f.proposed = false
 	f.proposalNotes = ""
 	f.proposalBy = ""
+	f.proposalEdit = proposal{}
 	f.proposalSnapshot = decisionSnapshot{}
 	f.pick.open = false
 	f.reason.Blur()

@@ -241,42 +241,50 @@ func enrichItemCmd(installRoot, repo string, key Key, generation uint64, withDif
 type applyDoneMsg struct {
 	root, repo string
 	snapshot   *decisionSnapshot
+	protected  bool
 	key        Key
 	err        error
 }
 
-// applyDecisionCmd saves one decision; batchID, when set, stamps it with the batch it was made in (bin/apply defaults to "tui").
-// agentNotes, when non-empty, carries a batch proposal's notes into the ledger along with the decision saved from it; empty leaves the item's existing notes alone.
-func applyDecisionCmd(installRoot, repo string, key Key, proposedLabels []string, replaceLabels bool, action, confidence, reason, agentNotes, by, batchID string) tea.Cmd {
+// applyDecisionCmd passes only the selected local edits to the owning script; batch proposals retain the untriaged guard.
+func applyDecisionCmd(installRoot, repo string, key Key, p proposal, by, batchID string, onlyUntriaged bool) tea.Cmd {
 	return func() tea.Msg {
-		args := []string{
-			"--expected-repo", repo,
-			"--number", strconv.Itoa(key.Number), "--kind", key.Kind,
-			"--action", action,
-			"--reason", reason, "--by", by,
-		}
-		if replaceLabels {
+		args := []string{"--expected-repo", repo, "--number", strconv.Itoa(key.Number), "--kind", key.Kind, "--by", by}
+
+		if p.has("proposed_labels") {
 			args = append(args, "--replace-proposed-labels")
-			for _, label := range proposedLabels {
+			for _, label := range p.ProposedLabels {
 				args = append(args, "--proposed-label", label)
 			}
 		}
-		// bin/apply restricts --confidence to low/medium/high via argparse choices; omit the flag entirely rather than passing "" when unset.
-		if confidence != "" {
-			args = append(args, "--confidence", confidence)
+
+		for _, field := range []struct{ name, value string }{
+			{"action", p.Action}, {"confidence", p.Confidence}, {"reason", p.Reason}, {"agent_notes", p.AgentNotes},
+		} {
+			if p.has(field.name) {
+				args = append(args, "--"+strings.ReplaceAll(field.name, "_", "-"), field.value)
+			}
 		}
 
 		if batchID != "" {
 			args = append(args, "--batch-id", batchID)
 		}
 
-		if agentNotes != "" {
-			args = append(args, "--agent-notes", agentNotes)
+		if onlyUntriaged {
+			args = append(args, "--only-untriaged")
 		}
 
-		_, err := runScript(installRoot, "apply", args...)
+		out, err := runScript(installRoot, "apply", args...)
+		protected := false
+		if onlyUntriaged {
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasPrefix(line, "Kept 1 existing decisions") {
+					protected = true
+				}
+			}
+		}
 
-		return applyDoneMsg{root: installRoot, repo: repo, key: key, err: err}
+		return applyDoneMsg{root: installRoot, repo: repo, key: key, protected: protected, err: err}
 	}
 }
 

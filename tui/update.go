@@ -282,6 +282,18 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if msg.protected {
+			if msg.snapshot != nil {
+				if _, exists := m.drafts[msg.key]; !exists {
+					m.drafts[msg.key] = *msg.snapshot
+				}
+			}
+
+			m.status = "Kept existing decision; proposal remains unsaved."
+
+			return m, reloadLedgerCmd(m.installRoot, m.repo)
+		}
+
 		if draft, ok := m.drafts[msg.key]; ok && (msg.snapshot == nil || draft.Equal(*msg.snapshot)) {
 			delete(m.drafts, msg.key)
 		}
@@ -1209,7 +1221,7 @@ func (m model) requestDecisionSave() (tea.Model, tea.Cmd) {
 
 		return m, nil
 	}
-	if len(m.form.ProposedLabels()) == 0 && m.form.Action() == "" {
+	if len(m.form.ProposedLabels()) == 0 && m.form.Action() == "" && !(m.form.proposed && m.form.proposalEdit.hasEdits() && m.form.Snapshot().FieldsEqual(m.form.proposalSnapshot)) {
 		m.fail("Choose at least one proposed label or an action before saving.")
 
 		return m, nil
@@ -1246,14 +1258,21 @@ func (m model) requestDecisionSave() (tea.Model, tea.Cmd) {
 func (m model) saveDecisionCmd() tea.Cmd {
 	snapshot := m.form.Snapshot()
 	by := m.contributor
-	if m.form.proposed && snapshot.Equal(m.form.proposalSnapshot) {
+	if m.form.proposed && snapshot.FieldsEqual(m.form.proposalSnapshot) {
 		by = m.form.proposalBy
 		if by == "" {
 			by = "agent"
 		}
 	}
 
-	cmd := applyDecisionCmd(m.installRoot, m.repo, m.detail.key, m.form.ProposedLabels(), m.form.ReplaceProposedLabels(), m.form.Action(), m.form.Confidence(), m.form.Reason(), m.form.proposalNotes, by, m.activeBatch)
+	p := proposal{ProposedLabels: m.form.ProposedLabels(), Action: m.form.Action(), Confidence: m.form.Confidence(), Reason: m.form.Reason(), AgentNotes: m.form.proposalNotes,
+		fields: map[string]bool{"action": true, "confidence": true, "reason": true, "proposed_labels": m.form.ReplaceProposedLabels(), "agent_notes": m.form.proposalEdit.has("agent_notes")},
+	}
+	unchangedProposal := m.form.proposed && snapshot.FieldsEqual(m.form.proposalSnapshot)
+	if unchangedProposal {
+		p = m.form.proposalEdit
+	}
+	cmd := applyDecisionCmd(m.installRoot, m.repo, m.detail.key, p, by, m.activeBatch, m.form.proposed)
 
 	return func() tea.Msg { msg := cmd().(applyDoneMsg); msg.snapshot = &snapshot; return msg }
 }

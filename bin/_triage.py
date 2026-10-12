@@ -74,6 +74,8 @@ FIELDS = [
     "last_synced_at",
 ]
 
+DECISION_FIELDS = ("proposed_labels", "action", "confidence", "reason")
+
 TRIAGE_DEFAULTS = {
     "proposed_labels": [],
     "action": "",
@@ -245,6 +247,25 @@ def parse_key(text):
 def has_decision(rec):
     """Proposed labels or an action identify a saved local decision."""
     return bool(rec.get("proposed_labels") or rec.get("action"))
+
+
+def proposal_fulfilled(row, record, batch_id):
+    """Requested edits already match local state; this does not establish triage coverage or write approval."""
+    edits = set(row).intersection(DECISION_FIELDS + ("agent_notes",))
+    if not edits:
+        return False
+
+    for field in edits:
+        if field == "proposed_labels":
+            if not isinstance(row[field], list) or any(not isinstance(name, str) for name in row[field]):
+                return False
+
+            if sorted(row[field]) != sorted(record.get(field, [])):
+                return False
+        elif row[field] != record.get(field, ""):
+            return False
+
+    return not edits.intersection(DECISION_FIELDS) or record.get("batch_id") == batch_id
 
 
 def current_score(rec):

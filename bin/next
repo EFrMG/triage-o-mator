@@ -20,7 +20,7 @@ from _groups import list_groups
 from _briefed import ITEM_BRIEF_RE, active_name, briefed_keys, load_records, saved_brief_exists, visible_batch_briefs
 from _similar import TitleIndex
 from _notdupes import TitleVerdicts
-from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, action_operation, current_no_label_fit, has_decision, label_catalog_digest, load_jsonl, load_ledger, load_taxonomy, merge_ready, score_assessment_current
+from _triage import here, BATCHES_DIR, DATA_DIR, RAW_DIR, REPO, REPORTS_DIR, action_operation, current_no_label_fit, has_decision, DECISION_FIELDS, proposal_fulfilled, label_catalog_digest, load_jsonl, load_ledger, load_taxonomy, merge_ready, score_assessment_current
 
 STALE_FETCH_HOURS = 6
 STRONG_PAIR = 0.8
@@ -45,8 +45,8 @@ def batch_states(by_key):
         items = load_jsonl(items_path)
         keys = [(r["kind"], r["number"]) for r in items]
         rows = load_jsonl(BATCHES_DIR / f"{batch_id}.decisions.jsonl")
-        filled = [r for r in rows if has_decision(r)]
-        waiting = [r for r in filled if not has_decision(by_key.get((r["kind"], r["number"])) or {})]
+        filled = [r for r in rows if any(field in r for field in DECISION_FIELDS + ("agent_notes",))]
+        waiting = [r for r in filled if not has_decision(by_key.get((r["kind"], r["number"])) or {}) and not proposal_fulfilled(r, by_key.get((r["kind"], r["number"])) or {}, batch_id)]
         done = sum(1 for k in keys if has_decision(by_key.get(k) or {}))
         states.append(dict(id=batch_id, items=len(keys), filled=len(filled), waiting=len(waiting), done=done,
                            briefing=bool(items) and all(r.get("briefing_batch") is True for r in items)))

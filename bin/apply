@@ -10,7 +10,9 @@ Usage:
     bin/apply (--number N --kind issue|pr | --key issue:N ...) --clear
     any of the above with --dry-run to validate and report without writing the ledger
 
-Each line in the decisions file needs number, kind and an action field, which may be blank when labels are proposed before an action is assessed. It may carry `proposed_labels` (a list of names from this repository's observed GitHub label catalog), confidence, reason, agent_notes and proposed_by. Observed GitHub `labels` are separate from these local proposals. A row without `proposed_labels` leaves the item's proposal unchanged; an empty list clears it when the row has a nonblank action. Rows with both a blank action and no proposed labels remain untouched batch placeholders. In single-item mode, `--replace-proposed-labels` explicitly replaces the set, including with an empty set when no `--proposed-label` is given and the action is omitted or blank. An omitted action keeps the saved action; an explicit blank action clears it. Unknown proposed labels are refused until the catalog is refreshed. A row without `agent_notes` leaves the item's existing notes alone.
+Each decisions row needs number and kind. Add only fields to edit: proposed_labels, action, confidence, reason and agent_notes. Omitted fields preserve saved values; proposed_labels: [] clears proposals and an empty string clears a text field. An identity-only row, including one with only proposed_by metadata, changes nothing. proposed_labels must contain distinct names from this repository's observed GitHub label catalog; observed GitHub labels are separate. Text fields must be strings, and confidence must be empty, low, medium or high. null is not an omitted field.
+
+--replace-proposed-labels explicitly replaces the label set in single-item mode, including with an empty set when no --proposed-label is given. --action '' clears the action independently; action 'none' records an assessed choice of no conversation or state operation. Omitted action, confidence, reason and notes preserve their saved values. Notes-only rows and --agent-notes alone preserve decision attribution; editing any decision field records who and when, using --by or the row's proposed_by (default agent).
 
 This records an attributed local decision. It does not authorize a GitHub write or add the item to Pending review; bin/review-request owns that explicit queue.
 
@@ -20,9 +22,9 @@ This records an attributed local decision. It does not authorize a GitHub write 
 
 --clear takes back the decision: the item is untriaged again (proposed labels, action, confidence, reason, who and when, and its batch are blanked). Agent notes, maintainer notes and an explicit Pending review request remain. Items with no decision are skipped. The ledger's git diff records what was taken back.
 
---agent-notes on its own (no --action/--proposed-label) only replaces the item's agent_notes, leaving its decision untouched: how prompts/review-pr.md attaches a code review to a PR someone already triaged.
+--agent-notes on its own (no decision-field flags) only replaces the item's agent_notes, leaving its decision untouched: how prompts/review-pr.md attaches a code review to a PR someone already triaged.
 
---batch-id stamps a single-item decision with the batch it was made in (default "tui"), so decisions made while working through a batch in the TUI stay attributable to that batch. --only-untriaged skips decisions-file rows whose item already has proposed labels or an action, so applying an agent's proposals never overwrites a decision someone already saved.
+--batch-id stamps a single-item decision with the batch it was made in (default "tui"), so decisions made while working through a batch in the TUI stay attributable to that batch. --only-untriaged skips decisions-file rows whose item already has proposed labels or an action, and edits already recorded from that batch, so applying an agent's proposals never overwrites a decision someone already saved.
 
 --expected-repo refuses the operation if the install's configured repository changed after the caller selected it.
 """
@@ -33,10 +35,8 @@ from contextlib import nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
-from _triage import LEDGER_PATH, REPO, TRIAGE_DEFAULTS, action_operation, has_decision, here, load_jsonl, load_ledger, load_taxonomy, now_iso, observed_catalog, parse_key, save_ledger
+from _triage import LEDGER_PATH, REPO, TRIAGE_DEFAULTS, DECISION_FIELDS, proposal_fulfilled, action_operation, has_decision, here, load_jsonl, load_ledger, load_taxonomy, now_iso, observed_catalog, parse_key, save_ledger
 from _storage import locked
-
-DECISION_FIELDS = ("proposed_labels", "action", "confidence", "reason")
 
 
 def main():
@@ -49,7 +49,7 @@ def main():
     ap.add_argument("--proposed-label", action="append", dest="proposed_labels", help="repeat to propose GitHub labels separately from observed labels")
     ap.add_argument("--replace-proposed-labels", action="store_true", help="single-item mode: replace proposed labels, including with an empty set and a blank action")
     ap.add_argument("--action", help="single-item mode: action")
-    ap.add_argument("--confidence", choices=["low", "medium", "high"])
+    ap.add_argument("--confidence", choices=["", "low", "medium", "high"])
     ap.add_argument("--reason")
     ap.add_argument(
         "--agent-notes",
@@ -74,7 +74,7 @@ def main():
     ap.add_argument(
         "--only-untriaged",
         action="store_true",
-        help="decisions-file mode: skip rows whose item already has proposed labels or an action",
+        help="decisions-file mode: skip triaged items and edits already recorded from this batch",
     )
     ap.add_argument(
         "--key",
@@ -94,11 +94,15 @@ def main():
     if args.expected_repo is not None and args.expected_repo != REPO:
         ap.error(f"repository changed: expected {args.expected_repo!r}, found {REPO!r}")
 
-    if args.clear and (args.decisions_path is not None or args.action or args.proposed_labels is not None or args.replace_proposed_labels or args.agent_notes is not None):
+    single_edits = {field: getattr(args, field) for field in ("action", "confidence", "reason", "agent_notes") if getattr(args, field) is not None}
+    if args.proposed_labels is not None or args.replace_proposed_labels:
+        single_edits["proposed_labels"] = args.proposed_labels or []
+
+    if args.clear and (args.decisions_path is not None or single_edits):
         sys.exit("error: --clear only takes --number/--kind or --key (plus --by, --dry-run)")
 
     if args.key:
-        if not args.clear or args.number is not None or args.decisions_path is not None or args.action or args.proposed_labels is not None or args.replace_proposed_labels:
+        if not args.clear or args.number is not None or args.decisions_path is not None or single_edits:
             sys.exit("error: --key only goes with --clear (and not with --number or a decisions file)")
 
         decisions = []
@@ -111,7 +115,7 @@ def main():
 
         batch_id = args.batch_id
     elif args.decisions_path is not None:
-        if args.number is not None or args.action or args.proposed_labels is not None or args.replace_proposed_labels or args.agent_notes is not None:
+        if args.number is not None or single_edits:
             sys.exit(
                 "error: pass a decisions file OR --number/--kind (+ flags), not both"
             )
@@ -125,28 +129,10 @@ def main():
         if not args.kind:
             sys.exit("error: --number requires --kind")
 
-        if args.clear:
-            decisions = [{"number": args.number, "kind": args.kind}]
-        elif args.action or args.proposed_labels is not None or args.replace_proposed_labels:
-            decisions = [
-                {
-                    "number": args.number,
-                    "kind": args.kind,
-                    **({"proposed_labels": args.proposed_labels or []} if args.proposed_labels is not None or args.replace_proposed_labels else {}),
-                    **({"action": args.action} if args.action is not None else {}),
-                    **({"confidence": args.confidence} if args.confidence is not None else {}),
-                    **({"reason": args.reason} if args.reason is not None else {}),
-                }
-            ]
-        elif args.agent_notes is not None:
-            decisions = [{"number": args.number, "kind": args.kind, "agent_notes": args.agent_notes, "notes_only": True}]
-        else:
-            sys.exit(
-                "error: --number requires --action, --proposed-label, --replace-proposed-labels, --clear, or --agent-notes"
-            )
+        if not args.clear and not single_edits:
+            sys.exit("error: --number requires --action, --proposed-label, --replace-proposed-labels, --confidence, --reason, --clear, or --agent-notes")
 
-        if args.agent_notes is not None and not decisions[0].get("notes_only"):
-            decisions[0]["agent_notes"] = args.agent_notes
+        decisions = [{"number": args.number, "kind": args.kind, **single_edits}]
 
         batch_id = args.batch_id
     else:
@@ -162,7 +148,30 @@ def main():
         by_key = {(r["kind"], r["number"]): r for r in ledger}
 
         ts = now_iso()
-        applied, blank, kept, warnings, nothing = 0, [], [], [], []
+        applied, blank, kept, recorded, warnings, nothing = 0, [], [], [], [], []
+
+        for d in decisions:
+            if not isinstance(d, dict) or d.get("kind") not in ("issue", "pr") or type(d.get("number")) is not int:
+                sys.exit("error: each decisions row needs kind issue|pr and an integer number")
+
+            for field in ("action", "confidence", "reason", "agent_notes", "proposed_by"):
+                if field in d and not isinstance(d[field], str):
+                    sys.exit(f"error: #{d['number']} {field} must be a string")
+
+            if "confidence" in d and d["confidence"] not in ("", "low", "medium", "high"):
+                sys.exit(f"error: #{d['number']} confidence must be empty, low, medium or high")
+
+            if "proposed_labels" in d:
+                proposed = d["proposed_labels"]
+                if not isinstance(proposed, list) or any(not isinstance(name, str) or not name for name in proposed) or len(set(proposed)) != len(proposed):
+                    sys.exit(f"error: #{d['number']} proposed_labels must be a list of distinct label names")
+
+                if proposed and not catalog_names:
+                    sys.exit(f"error: #{d['number']} cannot propose labels until this repository's label catalog is observed")
+
+                unknown = set(proposed) - set(catalog_names)
+                if unknown:
+                    sys.exit(f"error: #{d['number']} proposed labels are absent from the current catalog: {sorted(unknown)}")
 
         for d in decisions:
             key = (d.get("kind"), d.get("number"))
@@ -184,49 +193,35 @@ def main():
 
                 continue
 
-            if d.get("notes_only"):
-                rec["agent_notes"] = d["agent_notes"]
-                applied += 1
-
-                continue
-
-            if "action" not in d:
-                d = {**d, "action": rec.get("action") or ""}
-
-            if not d.get("action") and not d.get("proposed_labels") and not args.replace_proposed_labels:
-                blank.append((d["kind"], d["number"]))
+            edits = set(d).intersection(DECISION_FIELDS + ("agent_notes",))
+            if not edits:
+                blank.append(key)
 
                 continue
 
             if args.only_untriaged and has_decision(rec):
-                kept.append((d["kind"], d["number"]))
+                kept.append(key)
 
                 continue
 
-            if d["action"] and d["action"] not in valid_actions:
-                warnings.append(f"#{d['number']}: unrecognized action {d['action']!r}")
-            elif d["action"] and not action_operation(taxonomy, d["action"]):
-                warnings.append(f"#{d['number']}: action {d['action']!r} has no GitHub operation in taxonomy.json")
+            if args.only_untriaged and proposal_fulfilled(d, rec, batch_id):
+                recorded.append(key)
 
-            desired_labels = rec.get("proposed_labels", [])
-            if "proposed_labels" in d:
-                proposed = d["proposed_labels"]
-                if not isinstance(proposed, list) or any(not isinstance(name, str) or not name for name in proposed) or len(set(proposed)) != len(proposed):
-                    sys.exit(f"error: #{d['number']} proposed_labels must be a list of distinct label names")
-                if proposed and not catalog_names:
-                    sys.exit(f"error: #{d['number']} cannot propose labels until this repository's label catalog is observed")
-                unknown = set(proposed) - set(catalog_names)
-                if unknown:
-                    sys.exit(f"error: #{d['number']} proposed labels are absent from the current catalog: {sorted(unknown)}")
-                desired_labels = [name for name in catalog_names if name in proposed]
+                continue
 
-            if "proposed_labels" in d:
-                rec["proposed_labels"] = desired_labels
-            rec["action"] = d["action"]
-            rec["confidence"] = d.get("confidence", rec.get("confidence", ""))
-            rec["reason"] = d.get("reason", rec.get("reason", ""))
-            if "agent_notes" in d:
-                rec["agent_notes"] = d["agent_notes"] or ""
+            action = d.get("action", "")
+            if action and action not in valid_actions:
+                warnings.append(f"#{d['number']}: unrecognized action {action!r}")
+            elif action and not action_operation(taxonomy, action):
+                warnings.append(f"#{d['number']}: action {action!r} has no GitHub operation in taxonomy.json")
+
+            for field in edits:
+                rec[field] = [name for name in catalog_names if name in d[field]] if field == "proposed_labels" else d[field]
+
+            if not edits.intersection(DECISION_FIELDS):
+                applied += 1
+
+                continue
 
             by = args.by or d.get("proposed_by") or "agent"
             rec["triaged_at"] = ts
@@ -235,7 +230,7 @@ def main():
 
             applied += 1
 
-        if not args.dry_run:
+        if not args.dry_run and applied:
             save_ledger(list(by_key.values()))
 
     label = (
@@ -255,13 +250,16 @@ def main():
         print(f"Skipped {len(nothing)} not triaged, nothing to take back: {nothing[:10]}{' ...' if len(nothing) > 10 else ''}")
     if blank:
         print(
-            f"Skipped {len(blank)} rows still blank: {blank[:10]}{' ...' if len(blank) > 10 else ''}"
+            f"Skipped {len(blank)} rows without edits: {blank[:10]}{' ...' if len(blank) > 10 else ''}"
         )
 
     if kept:
         print(
             f"Kept {len(kept)} existing decisions (--only-untriaged): {kept[:10]}{' ...' if len(kept) > 10 else ''}"
         )
+
+    if recorded:
+        print(f"Skipped {len(recorded)} edits already recorded (--only-untriaged): {recorded[:10]}{' ...' if len(recorded) > 10 else ''}")
 
     for w in warnings:
         print(f"warning: {w}")

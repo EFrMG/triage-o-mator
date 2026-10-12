@@ -10,7 +10,7 @@ Usage:
     bin/apply (--number N --kind issue|pr | --key issue:N ...) --clear
     any of the above with --dry-run to validate and report without writing the ledger
 
-Each line in the decisions file needs number, kind and an action field, which may be blank when labels are proposed before an action is assessed. It may carry `proposed_labels` (a list of names from this repository's observed GitHub label catalog), confidence, reason, agent_notes and proposed_by. Observed GitHub `labels` are separate from these local proposals. A row without `proposed_labels` leaves the item's proposal unchanged; an empty list clears it. `--replace-proposed-labels` does the same in single-item mode, including when no `--proposed-label` is given. Unknown proposed labels are refused until the catalog is refreshed. A row without `agent_notes` leaves the item's existing notes alone.
+Each line in the decisions file needs number, kind and an action field, which may be blank when labels are proposed before an action is assessed. It may carry `proposed_labels` (a list of names from this repository's observed GitHub label catalog), confidence, reason, agent_notes and proposed_by. Observed GitHub `labels` are separate from these local proposals. A row without `proposed_labels` leaves the item's proposal unchanged; an empty list clears it when the row has a nonblank action. Rows with both a blank action and no proposed labels remain untouched batch placeholders. In single-item mode, `--replace-proposed-labels` explicitly replaces the set, including with an empty set when no `--proposed-label` is given and the action is omitted or blank. An omitted action keeps the saved action; an explicit blank action clears it. Unknown proposed labels are refused until the catalog is refreshed. A row without `agent_notes` leaves the item's existing notes alone.
 
 This records an attributed local decision. It does not authorize a GitHub write or add the item to Pending review; bin/review-request owns that explicit queue.
 
@@ -40,14 +40,14 @@ DECISION_FIELDS = ("proposed_labels", "action", "confidence", "reason")
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("decisions_path", type=Path, nargs="?", default=None)
     ap.add_argument("--number", type=int, help="single-item mode: item number")
     ap.add_argument(
         "--kind", choices=["issue", "pr"], help="single-item mode: item kind"
     )
     ap.add_argument("--proposed-label", action="append", dest="proposed_labels", help="repeat to propose GitHub labels separately from observed labels")
-    ap.add_argument("--replace-proposed-labels", action="store_true", help="replace the proposed label set, including with an empty set")
+    ap.add_argument("--replace-proposed-labels", action="store_true", help="single-item mode: replace proposed labels, including with an empty set and a blank action")
     ap.add_argument("--action", help="single-item mode: action")
     ap.add_argument("--confidence", choices=["low", "medium", "high"])
     ap.add_argument("--reason")
@@ -142,7 +142,7 @@ def main():
             decisions = [{"number": args.number, "kind": args.kind, "agent_notes": args.agent_notes, "notes_only": True}]
         else:
             sys.exit(
-                "error: --number requires --action, --proposed-label, --clear, or --agent-notes"
+                "error: --number requires --action, --proposed-label, --replace-proposed-labels, --clear, or --agent-notes"
             )
 
         if args.agent_notes is not None and not decisions[0].get("notes_only"):
@@ -193,7 +193,7 @@ def main():
             if "action" not in d:
                 d = {**d, "action": rec.get("action") or ""}
 
-            if not d.get("action") and not d.get("proposed_labels"):
+            if not d.get("action") and not d.get("proposed_labels") and not args.replace_proposed_labels:
                 blank.append((d["kind"], d["number"]))
 
                 continue

@@ -768,6 +768,31 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.assertIn("| bug | 1 |", report)
         self.json_cli("review-request", "mark", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "2", "--by", "agent:triage", "--reason", "Check the reported behavior")
         self.assertEqual(self.ledger()[("issue", 2)]["review_request"]["reason"], "Check the reported behavior")
+        before = self.ledger()[("issue", 2)]
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--agent-notes", "Retain this evidence")
+        noted = self.ledger()[("issue", 2)]
+        self.assertEqual(noted, {**before, "agent_notes": "Retain this evidence"})
+
+        decisions = self.root / "placeholder.decisions.jsonl"
+        decisions.write_text(json.dumps(dict(number=2, kind="issue", proposed_labels=[], action="", confidence="", reason="", agent_notes="", proposed_by="")) + "\n")
+        self.assertIn("Skipped 1 rows still blank", self.run_cli("apply", str(decisions)).stdout)
+        self.assertEqual(self.ledger()[("issue", 2)], noted)
+
+        args = ("--number", "2", "--kind", "issue", "--replace-proposed-labels", "--action", "", "--by", "human")
+        self.run_cli("apply", *args, "--dry-run")
+        self.assertEqual(self.ledger()[("issue", 2)], noted)
+        self.assertIn("Applied 1 decisions", self.run_cli("apply", *args).stdout)
+        cleared = self.ledger()[("issue", 2)]
+        self.assertEqual(cleared["proposed_labels"], [])
+        self.assertEqual(cleared["action"], "")
+        self.assertEqual(cleared["triaged_by"], "human")
+        self.assertEqual(cleared["agent_notes"], "Retain this evidence")
+        self.assertEqual(cleared["review_request"], noted["review_request"])
+
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--proposed-label", "bug")
+        self.run_cli("apply", "--number", "2", "--kind", "issue", "--replace-proposed-labels")
+        self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], [])
+        self.assertEqual(self.ledger()[("issue", 2)]["action"], "")
         self.run_cli("apply", "--number", "2", "--kind", "issue", "--replace-proposed-labels", "--action", "none", "--by", "human")
         self.assertEqual(self.ledger()[("issue", 2)]["proposed_labels"], [])
         self.assertIsNotNone(self.ledger()[("issue", 2)]["review_request"])
@@ -777,6 +802,19 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.assertEqual(self.ledger()[("issue", 1)]["confidence"], "high")
         self.assertEqual(self.ledger()[("issue", 1)]["reason"], "Existing call")
         self.assertIsNone(self.ledger()[("issue", 1)]["review_request"])
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--replace-proposed-labels")
+        self.assertEqual(self.ledger()[("issue", 1)]["proposed_labels"], [])
+        self.assertEqual(self.ledger()[("issue", 1)]["action"], "none")
+        self.assertEqual(self.ledger()[("issue", 1)]["confidence"], "high")
+        self.assertEqual(self.ledger()[("issue", 1)]["reason"], "Existing call")
+
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--proposed-label", "bug")
+        decisions.write_text(json.dumps(dict(number=1, kind="issue", proposed_labels=[], action="none")) + "\n")
+        self.run_cli("apply", str(decisions))
+        self.assertEqual(self.ledger()[("issue", 1)]["proposed_labels"], [])
+        self.assertEqual(self.ledger()[("issue", 1)]["action"], "none")
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--replace-proposed-labels", "--action", "")
+        self.assertEqual(self.ledger()[("issue", 1)]["action"], "")
 
         request = self.ledger()[("issue", 2)]["review_request"]
         self.run_cli("review-request", "clear", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "2", "--by", "agent:other", ok=False)

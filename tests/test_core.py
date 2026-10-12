@@ -453,23 +453,39 @@ with (root / "calls.jsonl").open("a") as out:
 method = args[args.index("--method") + 1]
 endpoint = args[args.index("--method") + 2]
 live = json.loads((root / "live.json").read_text())
+if endpoint.startswith("repos/owner/repo/labels/") and method == "GET":
+    name = endpoint.rsplit("/", 1)[-1]
+    catalog = json.loads((root / "catalog.json").read_text())
+    label = next((row for row in catalog if row["name"] == name), None)
+    if label is None:
+        sys.exit("label not found")
+    print(json.dumps(label))
+    sys.exit(0)
 if endpoint == "repos/owner/repo/issues/1" and method == "GET":
     print(json.dumps(live))
     sys.exit(0)
 if endpoint == "repos/owner/repo/issues/2" and method == "GET":
+    if (root / "replace-before-second").exists() and live["labels"]:
+        (root / "catalog.json").write_text(json.dumps([dict(id=70, name="bug")]))
+        live["labels"] = [row for row in live["labels"] if row["id"] != 7]
+        (root / "live.json").write_text(json.dumps(live))
     print(json.dumps(dict(number=2, state="open", labels=[])))
     sys.exit(0)
 if endpoint == "repos/owner/repo/issues/1/labels" and method == "POST":
     names = json.load(sys.stdin)["labels"]
     for name in names:
         if name not in [label["name"] for label in live["labels"]]:
-            live["labels"].append(dict(name=name))
+            live["labels"].append(next(dict(id=row["id"], name=row["name"]) for row in json.loads((root / "catalog.json").read_text()) if row["name"] == name))
 elif endpoint.startswith("repos/owner/repo/issues/1/labels/") and method == "DELETE":
     name = endpoint.rsplit("/", 1)[-1]
     live["labels"] = [label for label in live["labels"] if label["name"] != name]
 else:
     sys.exit("unexpected GitHub operation")
 (root / "live.json").write_text(json.dumps(live))
+if method == "POST" and (root / "replace-after-write").exists():
+    (root / "catalog.json").write_text(json.dumps([dict(id=70, name="bug"), dict(id=10, name="feature")]))
+    live["labels"] = [row for row in live["labels"] if row["id"] != 7]
+    (root / "live.json").write_text(json.dumps(live))
 if method == "POST" and (root / "uncertain").exists():
     print("{invalid response")
     sys.exit(0)
@@ -481,6 +497,7 @@ print(json.dumps(live["labels"]))
         taxonomy = json.loads(taxonomy_path.read_text())
         taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
         taxonomy_path.write_text(json.dumps(taxonomy))
+        (self.mock / "catalog.json").write_text(json.dumps(taxonomy["label_catalog"]["labels"]))
         ledger_path = self.root / "data/owner/repo/ledger.jsonl"
         first = dict(item(1, "Bug"), proposed_labels=["bug"], action="", confidence="high", reason="Agent proposal")
         second = dict(item(2, "Unlabeled"), proposed_labels=["bug"], action="", confidence="medium", reason="Agent proposal")
@@ -505,21 +522,66 @@ print(json.dumps(live["labels"]))
         preview = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(preview["items"][0]["add"], ["bug"])
         self.assertFalse(any("POST" in call for call in self.calls()))
-        (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[dict(name="manual")])))
+        original_catalog = taxonomy["label_catalog"]["labels"]
+        changed_metadata = [dict(original_catalog[0], description="Changed description", color="00ff00"), dict(id=9, name="unrelated", description="Other", color="000000")]
+        taxonomy["label_catalog"]["labels"] = changed_metadata
+        taxonomy["label_catalog"]["observed_at"] = "2026-02-01T00:00:00Z"
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        (self.mock / "catalog.json").write_text(json.dumps(changed_metadata))
+        same = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertEqual(same["preview_sha256"], preview["preview_sha256"])
+        self.assertEqual(same["items"][0]["label_bindings"], [dict(id=7, name="bug")])
+        limited = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1", "--request-budget", "6")
+        calls = len(self.calls())
+        self.run_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--request-budget", "6", "--preview-sha256", limited["preview_sha256"], ok=False)
+        self.assertFalse(any("POST" in call or "DELETE" in call for call in self.calls()[calls:]))
+
+        for changed in ([], [dict(id=7, name="renamed")], [dict(id=70, name="bug")]):
+            (self.mock / "catalog.json").write_text(json.dumps(changed))
+            calls = len(self.calls())
+            self.run_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", preview["preview_sha256"], ok=False)
+            self.assertFalse(any("POST" in call or "DELETE" in call for call in self.calls()[calls:]))
+
+        for changed in ([], [dict(id=7, name="renamed")]):
+            taxonomy["label_catalog"]["labels"] = changed
+            taxonomy_path.write_text(json.dumps(taxonomy))
+            stale = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+            self.assertEqual(stale["items"][0]["status"], "stale-proposal")
+            self.assertNotEqual(stale["preview_sha256"], preview["preview_sha256"])
+
+        taxonomy["label_catalog"]["labels"] = [dict(id=70, name="bug")]
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        (self.mock / "catalog.json").write_text(json.dumps(taxonomy["label_catalog"]["labels"]))
+        replaced = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertNotEqual(replaced["preview_sha256"], preview["preview_sha256"])
+        self.run_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", preview["preview_sha256"], ok=False)
+        taxonomy["label_catalog"]["labels"] = original_catalog
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        (self.mock / "catalog.json").write_text(json.dumps(original_catalog))
+        (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[dict(id=8, name="manual")])))
         self.run_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", preview["preview_sha256"], ok=False)
         self.assertFalse(any("POST" in call for call in self.calls()))
         (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[])))
         preview = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         result = self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", preview["preview_sha256"])
         self.assertEqual(result["outcomes"][0]["status"], "written")
-        self.assertEqual(json.loads((self.mock / "live.json").read_text())["labels"], [dict(name="bug")])
-        self.assertEqual(json.loads((self.root / "data/owner/repo/local/item-labels-state.json").read_text())["items"]["issue:1"]["managed"], ["bug"])
+        self.assertEqual(json.loads((self.mock / "live.json").read_text())["labels"], [dict(id=7, name="bug")])
+        self.assertEqual(json.loads((self.root / "data/owner/repo/local/item-labels-state.json").read_text())["items"]["issue:1"]["managed"], [dict(id=7, name="bug")])
 
         row = json.loads(ledger_path.read_text())
         row["proposed_labels"] = []
         ledger_path.write_text(json.dumps(row) + "\n")
         removal = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(removal["items"][0]["remove"], ["bug"])
+        (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[dict(id=70, name="bug")])))
+        (self.mock / "catalog.json").write_text(json.dumps([dict(id=70, name="bug")]))
+        calls = len(self.calls())
+        self.run_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", removal["preview_sha256"], ok=False)
+        correction = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        self.assertEqual(correction["items"][0]["status"], "human-correction")
+        self.assertFalse(any("POST" in call or "DELETE" in call for call in self.calls()[calls:]))
+        (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[dict(id=7, name="bug")])))
+        (self.mock / "catalog.json").write_text(json.dumps(original_catalog))
         self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", removal["preview_sha256"])
         self.assertEqual(json.loads((self.mock / "live.json").read_text())["labels"], [])
         row["proposed_labels"] = ["bug"]
@@ -536,7 +598,7 @@ print(json.dumps(live["labels"]))
         paused = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(paused["items"][0]["status"], "paused-after-correction")
         reset = self.json_cli("item-labels", "reset-item", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1")
-        self.assertEqual(reset["before"]["managed"], ["bug"])
+        self.assertEqual(reset["before"]["managed"], [dict(id=7, name="bug")])
         self.json_cli("item-labels", "reset-item", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--apply", "--preview-sha256", reset["preview_sha256"])
         renewed = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(renewed["items"][0]["add"], ["bug"])
@@ -544,6 +606,8 @@ print(json.dumps(live["labels"]))
         uncertain = self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", renewed["preview_sha256"])
         self.assertEqual(uncertain["outcomes"][0]["status"], "uncertain")
         self.assertIn("issue:1", self.json_cli("item-labels", "status", "--expected-repo", "owner/repo")["pending_items"])
+        saved_attempt = json.loads((self.root / "data/owner/repo/local/item-labels-state.json").read_text())["items"]["issue:1"]["attempt"]
+        self.assertEqual(saved_attempt["label_bindings"], [dict(id=7, name="bug")])
         blocked = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(blocked["items"][0]["status"], "uncertain-write")
         ledger_path.write_text(json.dumps(row) + "\n" + json.dumps(second) + "\n")
@@ -552,7 +616,38 @@ print(json.dumps(live["labels"]))
         scoped = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1", "--key", "issue:2")
         self.assertEqual(scoped["selected_keys"], ["issue:2"])
         self.run_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--key", "issue:1", "--preview-sha256", scoped["preview_sha256"], ok=False)
-        self.assertEqual(json.loads((self.mock / "live.json").read_text())["labels"], [dict(name="bug")])
+        self.assertEqual(json.loads((self.mock / "live.json").read_text())["labels"], [dict(id=7, name="bug")])
+
+        (self.root / "data/owner/repo/local/item-labels-state.json").unlink()
+        (self.mock / "uncertain").unlink()
+        (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[])))
+        first["proposed_labels"] = ["bug"]
+        ledger_path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
+        bounded = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "2")
+        (self.mock / "replace-before-second").touch()
+        calls = len(self.calls())
+        changed_mid_pass = self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "2", "--preview-sha256", bounded["preview_sha256"])
+        self.assertEqual([row["status"] for row in changed_mid_pass["outcomes"]], ["written", "changed-catalog"])
+        self.assertEqual(sum("POST" in call for call in self.calls()[calls:]), 1)
+        self.assertEqual(self.json_cli("item-labels", "status", "--expected-repo", "owner/repo")["pending_items"], [])
+
+        (self.mock / "replace-before-second").unlink()
+        (self.mock / "replace-after-write").touch()
+        (self.mock / "live.json").write_text(json.dumps(dict(number=1, state="open", labels=[dict(id=7, name="bug")])))
+        expanded_catalog = [dict(id=7, name="bug"), dict(id=10, name="feature")]
+        taxonomy["label_catalog"]["labels"] = expanded_catalog
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        (self.mock / "catalog.json").write_text(json.dumps(expanded_catalog))
+        first["proposed_labels"] = ["feature"]
+        ledger_path.write_text(json.dumps(first) + "\n")
+        replacement = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
+        calls = len(self.calls())
+        stopped_after_addition = self.json_cli("item-labels", "run", "--expected-repo", "owner/repo", "--limit", "1", "--preview-sha256", replacement["preview_sha256"])
+        self.assertEqual(stopped_after_addition["outcomes"][0]["status"], "uncertain")
+        self.assertFalse(any("DELETE" in call for call in self.calls()[calls:]))
+        saved = json.loads((self.root / "data/owner/repo/local/item-labels-state.json").read_text())
+        self.assertTrue(saved["items"]["issue:1"]["pending"])
+        self.assertEqual(saved["items"]["issue:1"]["attempt"]["label_bindings"], expanded_catalog)
 
 
 class LedgerTests(Workspace):

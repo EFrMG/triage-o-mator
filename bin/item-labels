@@ -59,9 +59,27 @@ def enabled():
     return policy()["repositories"].get(REPO, {}).get("enabled", True) is True
 
 
+class LabelIdentityChanged(ValueError):
+    pass
+
+
+def label_pairs(value):
+    if not isinstance(value, list) or any(not isinstance(row, dict) or type(row.get("id")) is not int or row["id"] <= 0 or not isinstance(row.get("name"), str) or not row["name"] for row in value):
+        raise ValueError("label identities must contain positive IDs and nonempty names")
+
+    if len({row["id"] for row in value}) != len(value) or len({row["name"].casefold() for row in value}) != len(value):
+        raise ValueError("label identities must have distinct IDs and names")
+
+    return sorted(({"id": row["id"], "name": row["name"]} for row in value), key=lambda row: row["name"])
+
+
+def label_names(value):
+    return [row["name"] for row in value]
+
+
 def state():
-    value = read_json(STATE_PATH, {"version": 1, "repository": REPO, "items": {}, "next_order": 0})
-    if value.get("version") != 1 or value.get("repository") != REPO or not isinstance(value.get("items"), dict) or type(value.get("next_order", 0)) is not int or value.get("next_order", 0) < 0:
+    value = read_json(STATE_PATH, {"version": 2, "repository": REPO, "items": {}, "next_order": 0})
+    if value.get("version") != 2 or value.get("repository") != REPO or not isinstance(value.get("items"), dict) or type(value.get("next_order", 0)) is not int or value.get("next_order", 0) < 0:
         raise ValueError("item-label state is malformed or belongs to another repository")
 
     for key, row in value["items"].items():
@@ -69,11 +87,10 @@ def state():
             raise ValueError("item-label state has an invalid item identity")
 
         for field in ("last_labels", "managed"):
-            names = row.get(field, [])
-            if not isinstance(names, list) or any(not isinstance(name, str) or not name for name in names) or len(names) != len(set(names)):
+            if label_pairs(row.get(field, [])) != row.get(field, []):
                 raise ValueError(f"item-label state has invalid {field} for {key}")
 
-        if not set(row.get("managed", [])).issubset(row.get("last_labels", [])):
+        if any(label not in row.get("last_labels", []) for label in row.get("managed", [])):
             raise ValueError(f"item-label state has managed labels absent from its observation for {key}")
 
         if type(row.get("pending", False)) is not bool or type(row.get("paused", False)) is not bool:
@@ -150,16 +167,13 @@ class Transport:
         if not isinstance(value, dict) or value.get("number") != number or value.get("state") not in ("open", "closed") or not isinstance(value.get("labels"), list):
             raise ValueError(f"invalid GitHub item #{number} response")
 
-        labels = []
+        return value["state"], label_pairs(value["labels"])
 
-        for row in value["labels"]:
-            name = row.get("name") if isinstance(row, dict) else None
-            if not isinstance(name, str) or not name or name in labels:
-                raise ValueError(f"invalid GitHub labels for #{number}")
-
-            labels.append(name)
-
-        return value["state"], labels
+    def validate_labels(self, labels):
+        for label in labels:
+            value = self.api("GET", f"repos/{REPO}/labels/{quote(label['name'], safe='')}")
+            if label_pairs([value]) != [label]:
+                raise LabelIdentityChanged(f"GitHub label identity changed for {label['name']!r}; sync Labels and preview again")
 
 
 def decision_digest(row):
@@ -211,12 +225,8 @@ def build_plan(saved, limit, transport, selected_keys=()):
         raise ValueError("this repository's label catalog is pending; sync Labels first")
 
     definitions = catalog["labels"]
-    if any(not isinstance(row, dict) or type(row.get("id")) is not int or not isinstance(row.get("name"), str) or not row["name"] for row in definitions):
-        raise ValueError("this repository's label catalog is malformed")
-
-    names = {row["name"] for row in definitions}
-    if len(names) != len(definitions) or len({row["id"] for row in definitions}) != len(definitions):
-        raise ValueError("this repository's label catalog has duplicate label identities")
+    identities = {row["name"]: row for row in label_pairs(definitions)}
+    names = set(identities)
 
     rows = []
 
@@ -233,15 +243,22 @@ def build_plan(saved, limit, transport, selected_keys=()):
             item["status"] = "paused-after-correction"
 
         if item["status"] == "ready":
+            bindings = label_pairs([identities[name] for name in desired])
+            for label in prior.get("managed", []):
+                if label not in bindings:
+                    bindings.append(label)
+
+            item["label_bindings"] = label_pairs(bindings)
             live_state, live_labels = transport.item(decision["number"])
             item["observed_state"], item["observed_labels"] = live_state, live_labels
             if live_state != decision["state"]:
                 item["status"] = "changed-state"
-            elif "last_labels" in prior and set(live_labels) != set(prior["last_labels"]):
+            elif "last_labels" in prior and live_labels != prior["last_labels"]:
                 item["status"] = "human-correction"
             else:
-                item["add"] = [name for name in desired if name not in live_labels]
-                item["remove"] = [name for name in prior.get("managed", []) if name not in desired and name in live_labels]
+                transport.validate_labels(item["label_bindings"])
+                item["add"] = [name for name in desired if name not in label_names(live_labels)]
+                item["remove"] = [label["name"] for label in prior.get("managed", []) if label["name"] not in desired and label in live_labels]
                 if not item["add"] and not item["remove"]:
                     item["status"] = "no-change"
 
@@ -273,7 +290,7 @@ def run_pass(parser, args):
         if not enabled():
             fail(parser, "Labeling is OFF for this repository in Settings → Automations")
 
-        remaining = sum(2 + 2 * bool(row.get("add")) + 2 * len(row.get("remove", [])) for row in plan["items"] if row["status"] in ("ready", "no-change"))
+        remaining = sum(2 + (2 + len(row.get("label_bindings", []))) * bool(row.get("add")) + 3 * len(row.get("remove", [])) for row in plan["items"] if row["status"] in ("ready", "no-change"))
         if transport.used + remaining > transport.budget:
             fail(parser, "request budget cannot cover revalidation and outcomes for this preview")
 
@@ -299,7 +316,7 @@ def run_pass(parser, args):
                 continue
 
             live_state, live_labels = transport.item(row["number"])
-            if live_state != row.get("observed_state") or set(live_labels) != set(row.get("observed_labels", [])):
+            if live_state != row.get("observed_state") or live_labels != row.get("observed_labels", []):
                 mark_checked(saved, key, saved["items"].get(key, {}))
                 record_outcome({"key": key, "status": "changed-on-github", "preview_sha256": args.preview_sha256})
                 outcomes.append({"key": key, "status": "changed-on-github"})
@@ -312,38 +329,62 @@ def run_pass(parser, args):
                 outcomes.append({"key": key, "status": "no-change"})
                 continue
 
-            mark_checked(saved, key, {"last_labels": live_labels, "managed": prior.get("managed", []), "pending": True,
-                                      "attempt": {"add": row["add"], "remove": row["remove"], "preview_sha256": args.preview_sha256}})
-            record_outcome({"key": key, "status": "attempting", "add": row["add"], "remove": row["remove"], "preview_sha256": args.preview_sha256})
             endpoint = f"repos/{REPO}/issues/{row['number']}/labels"
+            attempted = False
+
+            def begin_write():
+                nonlocal attempted
+                if attempted:
+                    return
+
+                mark_checked(saved, key, {"last_labels": live_labels, "managed": prior.get("managed", []), "pending": True,
+                                          "attempt": {"add": row["add"], "remove": row["remove"], "label_bindings": row["label_bindings"], "preview_sha256": args.preview_sha256}})
+                record_outcome({"key": key, "status": "attempting", "add": row["add"], "remove": row["remove"], "label_bindings": row["label_bindings"], "preview_sha256": args.preview_sha256})
+                attempted = True
 
             try:
-                expected = set(live_labels)
+                expected = live_labels
                 if row["add"]:
+                    transport.validate_labels(row["label_bindings"])
+                    begin_write()
                     transport.api("POST", endpoint, {"labels": row["add"]})
                     _, added_state = transport.item(row["number"])
-                    if set(added_state) != expected | set(row["add"]):
+                    additions = [label for label in row["label_bindings"] if label["name"] in row["add"]]
+                    if added_state != label_pairs([*expected, *additions]):
                         raise ValueError("GitHub label state changed during addition")
 
-                    expected = set(added_state)
+                    expected = added_state
 
                 for name in row["remove"]:
                     _, before_remove = transport.item(row["number"])
-                    if set(before_remove) != expected:
+                    if before_remove != expected:
                         raise ValueError("GitHub labels changed before removal")
 
+                    transport.validate_labels([label for label in row["label_bindings"] if label["name"] == name])
+                    begin_write()
                     transport.api("DELETE", endpoint + "/" + quote(name, safe=""))
-                    expected.discard(name)
+                    expected = [label for label in expected if label["name"] != name]
 
                 _, after = transport.item(row["number"])
-                if set(after) != expected or any(name not in after for name in row["add"]) or any(name in after for name in row["remove"]):
+                if after != expected:
                     raise ValueError("GitHub did not report the requested label state after the write")
             except ValueError as error:
-                record_outcome({"key": key, "status": "uncertain", "reason": str(error), "preview_sha256": args.preview_sha256})
-                outcomes.append({"key": key, "status": "uncertain", "reason": str(error)})
+                if attempted:
+                    outcome = "uncertain"
+                elif isinstance(error, LabelIdentityChanged):
+                    outcome = "changed-catalog"
+                else:
+                    outcome = "pre-write-stopped"
+
+                if not attempted:
+                    mark_checked(saved, key, prior)
+
+                record_outcome({"key": key, "status": outcome, "reason": str(error), "preview_sha256": args.preview_sha256})
+                outcomes.append({"key": key, "status": outcome, "reason": str(error)})
                 break
 
-            managed = [name for name in dict.fromkeys([*prior.get("managed", []), *row["add"]]) if name not in row["remove"]]
+            added = [label for label in row["label_bindings"] if label["name"] in row["add"]]
+            managed = label_pairs([label for label in [*prior.get("managed", []), *added] if label["name"] not in row["remove"]])
             saved["items"][key] = {"last_labels": after, "managed": managed, "pending": False, "checked_order": saved["next_order"]}
             save_json(STATE_PATH, saved)
             record_outcome({"key": key, "status": "written", "before": live_labels, "after": after, "managed": managed, "preview_sha256": args.preview_sha256})

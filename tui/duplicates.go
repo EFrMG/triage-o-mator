@@ -309,7 +309,7 @@ func (m model) handleDupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// markCandidateDuplicate prefills the candidate's own decision as a duplicate of the item on the top card, and opens it so the confidence and reason can be checked. Nothing is written until s or S, here or on the item.
+// markCandidateDuplicate prefills the candidate's own decision as a duplicate of the item on the top card, and opens it so the reason can be checked. Nothing is written until s or S, here or on the item.
 func (m model) markCandidateDuplicate(c dupCandidate) (tea.Model, tea.Cmd) {
 	original, ok := m.findItem(m.dups.source)
 	if !ok {
@@ -330,7 +330,7 @@ func (m model) markCandidateDuplicate(c dupCandidate) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	m.status = fmt.Sprintf("Prefilled #%d as a duplicate of #%d. Check confidence and reason before saving.", c.Number, original.Number)
+	m.status = fmt.Sprintf("Prefilled #%d as a duplicate of #%d. Check the reason before saving.", c.Number, original.Number)
 	// The older report is usually the one to keep, so say when this closes it in favour of a later one.
 	if it, found := m.findItem(c.Key()); found && it.CreatedAt != "" && original.CreatedAt != "" && it.CreatedAt < original.CreatedAt {
 		m.status = fmt.Sprintf("#%d (%s) is older than #%d (%s): check which one should stay. The decision is still unsaved.", c.Number, shortDate(it.CreatedAt), original.Number, shortDate(original.CreatedAt))

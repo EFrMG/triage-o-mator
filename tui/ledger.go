@@ -29,7 +29,6 @@ type Item struct {
 	HeadSHA         string         `json:"head_sha"` // PRs only, when a refresh read it for a scored PR
 	ItemScore       *ItemScore     `json:"item_score"`
 	Action          string         `json:"action"`
-	Confidence      string         `json:"confidence"`
 	Reason          string         `json:"reason"`
 	TriagedAt       string         `json:"triaged_at"`
 	TriagedBy       string         `json:"triaged_by"`
@@ -138,8 +137,8 @@ func (i Item) PendingReview() bool { return i.ReviewRequest != nil }
 // readyLabel mirrors READY_LABEL in bin/_triage.py: on a PR the `ready` starter label means its code was read and nothing blocks merging.
 const readyLabel = "ready"
 
-func (i Item) MergeReadyHighConfidence() bool {
-	return i.Kind == "pr" && slices.Contains(i.ProposedLabels, readyLabel) && i.Confidence == "high"
+func (i Item) MergeReady() bool {
+	return i.Kind == "pr" && slices.Contains(i.ProposedLabels, readyLabel)
 }
 
 // LoadLedger reads repo's ledger, data/<owner>/<repo>/ledger.jsonl.

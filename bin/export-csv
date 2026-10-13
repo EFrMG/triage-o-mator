@@ -6,7 +6,7 @@ Usage:
     bin/export-csv [--open-only] [--pending-review]
     -> data/<owner>/<repo>/exports/ledger-<date>.csv
 
-Edit proposed_labels (a JSON list), action, confidence, reason or maintainer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. The review_request column is read-only; use bin/review-request to change Pending review. Keep `number`, `kind`, and `row_revision` intact; the revision rejects stale rows.
+Edit proposed_labels (a JSON list), action, reason or maintainer_notes in the spreadsheet, then run bin/import-csv on the file to merge changes back. The review_request column is read-only; use bin/review-request to change Pending review. Keep `number`, `kind`, and `row_revision` intact; the revision rejects stale rows.
 """
 
 import argparse

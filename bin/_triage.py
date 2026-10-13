@@ -62,7 +62,6 @@ FIELDS = [
     "comments_count",
     "proposed_labels",
     "action",
-    "confidence",
     "reason",
     "triaged_at",
     "triaged_by",
@@ -74,12 +73,11 @@ FIELDS = [
     "last_synced_at",
 ]
 
-DECISION_FIELDS = ("proposed_labels", "action", "confidence", "reason")
+DECISION_FIELDS = ("proposed_labels", "action", "reason")
 
 TRIAGE_DEFAULTS = {
     "proposed_labels": [],
     "action": "",
-    "confidence": "",
     "reason": "",
     "triaged_at": "",
     "triaged_by": "",

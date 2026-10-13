@@ -45,7 +45,7 @@ A repository you don't control can carry the install locally instead using `--so
 2. **Proposals and reviews are separate states.** A decision is first _triaged_ (by an agent or a person) and then _reviewed_ (only by a person). Nothing crosses that line by itself.
 3. **One ledger per repo, tracked in git.** `triage-o-mator/data/<owner>/<repo>/ledger.jsonl`, one JSON line per item, inside the repository it describes, so every decision and every correction shows up as a normal diff.
 4. **Scripts underneath, a TUI on top.** Scripts own the ledger, groups, proposals, evidence and GitHub writes. The TUI calls those same scripts, which agents and people can also use directly.
-5. **Team-owned vocabulary.** Proposed labels come from the repository's own GitHub label catalog; actions and confidence levels come from a small, documented taxonomy that each team owns and edits. Neither human nor clanky model invents one on the fly.
+5. **Team-owned vocabulary.** Proposed labels come from the repository's own GitHub label catalog; actions come from a small, documented taxonomy that each team owns and edits. Neither human nor clanky model invents one on the fly.
 
 ## Main features
 
@@ -55,7 +55,7 @@ _triage-o-mator_ is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) a
 
 - **Lists in the sidebar:** Untriaged—with kind and age-order controls—Merge-Ready PRs and All Items, then Batches, **Groups**, Possible Duplicates and Notifications. Review saved calls in All Items; prepare and review exact actions in Notifications.
 - **A full-screen reader** with Body, Agent notes, Comments and Diff tabs.
-- **A decision form** whose labels are picked from the repository's GitHub catalog and whose action and confidence cycle through the taxonomy's exact values; with a one-sentence reason for free text.
+- **A decision form** whose labels are picked from the repository's GitHub catalog and whose action cycles through the taxonomy's exact values; with a one-sentence reason for free text.
 - **Unsaved drafts per item** for the session, so you can compare several reports before deciding; switching repositories warns about those drafts.
 - A footer showing available controls, a breadcrumb showing location, full command output for failures, and bundled or custom themes.
 

@@ -145,7 +145,7 @@ def suggestions(ledger):
     if unscored:
         add("agent", f"Score a bounded selection of {len(unscored)} new or stale items",
             "prompts/score-items.md (select up to 20 exact item keys and saved snapshots)",
-            "quality/readiness scores remain separate from triage confidence, Pending review and GitHub approval")
+            "quality/readiness scores remain separate from triage decisions, Pending review and GitHub approval")
 
     pairs = [p for p in TitleVerdicts().pairs(TitleIndex(ledger), min_score=STRONG_PAIR)
              if not has_decision(by_key[(p["item"]["kind"], p["item"]["number"])])]

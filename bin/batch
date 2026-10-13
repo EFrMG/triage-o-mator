@@ -14,7 +14,7 @@ Writes:
     data/<owner>/<repo>/batches/<batch_id>.items.jsonl       full context, one item per line, including `duplicate_candidates` (the top title matches from bin/similar, minus pairs already ruled out; leads to check, not proof)
     data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl   template to fill in and pass to bin/apply
 
-The template contains only number and kind. Add only the fields you want to edit: proposed_labels, action, confidence, reason and agent_notes, plus proposed_by for attribution (e.g. "agent:<contributor>"). Omitted fields preserve saved values; [] clears proposed labels and "" clears a text field. An untouched identity row is a no-op. Choose labels from the observed catalog and assess actions per config/taxonomy.json and docs/taxonomy.md, then run:
+The template contains only number and kind. Add only the fields you want to edit: proposed_labels, action, reason and agent_notes, plus proposed_by for attribution (e.g. "agent:<contributor>"). Omitted fields preserve saved values; [] clears proposed labels and "" clears a text field. An untouched identity row is a no-op. Choose labels from the observed catalog and assess actions per config/taxonomy.json and docs/taxonomy.md, then run:
 
     bin/apply data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl
 

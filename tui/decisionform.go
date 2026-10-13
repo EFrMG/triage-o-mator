@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// formField indexes the Tab-cycle stops within the detail panel: the enrichment content (Body/Comments/Diff, owned by detailModel) plus the four decision fields.
+// formField indexes the Tab-cycle stops within the detail panel: the item content tabs (owned by detailModel) plus proposed labels, action and reason.
 // fieldContent is the default on selecting an item, so Enter / H / L / j / k / gg / G immediately act on the content sections rather than being swallowed by the label picker.
 type formField int
 
@@ -21,12 +21,11 @@ const (
 	fieldContent formField = iota
 	fieldLabels
 	fieldAction
-	fieldConfidence
 	fieldReason
 	fieldCount
 )
 
-// decisionForm edits proposed labels, action, confidence and reason for the selected item.
+// decisionForm edits proposed labels, action and reason for the selected item.
 type decisionForm struct {
 	taxonomy Taxonomy
 	repo     string
@@ -34,16 +33,14 @@ type decisionForm struct {
 	focused  formField
 
 	// A negative index preserves a blank field in an existing decision or proposal.
-	actionIdx        int
-	confidenceIdx    int
-	ledgerConfidence string
-	proposedLabels   []string
+	actionIdx      int
+	proposedLabels []string
 	// The reason editor grows up to reasonMaxLines visible rows; Enter saves rather than inserting a newline.
 	reason textarea.Model
 
 	dirty bool
 	saved bool // true right after a successful save, until the item changes again
-	// touched is false while labels/action/confidence are still the placeholder defaults LoadItem seeds for an untriaged item; saving untouched defaults needs a repeated save action.
+	// touched is false while labels/action are still the placeholder defaults LoadItem seeds for an untriaged item; saving untouched defaults needs a repeated save action.
 	touched bool
 	// proposed is true while the fields show a batch proposal that hasn't been saved to the ledger yet.
 	proposed bool
@@ -53,16 +50,16 @@ type decisionForm struct {
 	proposalEdit     proposal
 	proposalSnapshot decisionSnapshot
 	// Unlisted values from the ledger or a proposal stay visible and block saving until the contributor picks supported values.
-	badAction, badConfidence string
-	badLabels                []string
+	badAction string
+	badLabels []string
 	// pick is the list a choice field opens on Enter.
 	pick dropdown
 }
 
 const (
 	reasonMaxLines = 5
-	// formLabelWidth fits "confidence" plus the focus marker.
-	formLabelWidth = 13
+	// formLabelWidth fits the field labels plus the focus marker.
+	formLabelWidth = 9
 )
 
 func newDecisionForm(tax Taxonomy, repo string) decisionForm {
@@ -79,18 +76,13 @@ func newDecisionForm(tax Taxonomy, repo string) decisionForm {
 }
 
 func (f *decisionForm) SetTaxonomy(tax Taxonomy) {
-	action, confidence := f.Action(), f.Confidence()
+	action := f.Action()
 	f.taxonomy = tax
 	f.actionIdx = indexOrZero(tax.SelectableActions(), action)
-	f.confidenceIdx = indexOrZero(tax.Confidence, confidence)
 	if action == "" {
 		f.actionIdx = -1
 	}
-	if confidence == "" {
-		f.confidenceIdx = -1
-	}
 	f.badAction = unlisted(tax.SelectableActions(), action)
-	f.badConfidence = unlisted(tax.Confidence, confidence)
 	f.badLabels = f.unlistedLabels()
 }
 
@@ -114,12 +106,10 @@ func (f *decisionForm) SetWidth(width int) {
 // decisionSnapshot is an in-memory, unsaved draft of a decision for one item: lets a reviewer jump between items without losing edits made before pressing ctrl+s. See model.drafts.
 type decisionSnapshot struct {
 	actionIdx       int
-	confidenceIdx   int
 	proposedLabels  []string
 	reason          string
 	badLabels       []string
 	badAction       string
-	badConfidence   string
 	proposalContext *proposalDraft
 }
 
@@ -132,8 +122,8 @@ type proposalDraft struct {
 }
 
 func (s decisionSnapshot) FieldsEqual(other decisionSnapshot) bool {
-	return s.actionIdx == other.actionIdx && s.confidenceIdx == other.confidenceIdx &&
-		s.reason == other.reason && s.badAction == other.badAction && s.badConfidence == other.badConfidence &&
+	return s.actionIdx == other.actionIdx &&
+		s.reason == other.reason && s.badAction == other.badAction &&
 		slices.Equal(s.proposedLabels, other.proposedLabels) && slices.Equal(s.badLabels, other.badLabels)
 }
 
@@ -149,7 +139,7 @@ func (s decisionSnapshot) Equal(other decisionSnapshot) bool {
 
 	return a.proposed == b.proposed && a.notes == b.notes && a.by == b.by &&
 		a.original.Equal(b.original) && a.edit.Number == b.edit.Number && a.edit.Kind == b.edit.Kind &&
-		a.edit.Action == b.edit.Action && a.edit.Confidence == b.edit.Confidence && a.edit.Reason == b.edit.Reason &&
+		a.edit.Action == b.edit.Action && a.edit.Reason == b.edit.Reason &&
 		a.edit.AgentNotes == b.edit.AgentNotes && a.edit.ProposedBy == b.edit.ProposedBy &&
 		slices.Equal(a.edit.ProposedLabels, b.edit.ProposedLabels) && maps.Equal(a.edit.fields, b.edit.fields)
 }
@@ -157,12 +147,10 @@ func (s decisionSnapshot) Equal(other decisionSnapshot) bool {
 func (f decisionForm) Snapshot() decisionSnapshot {
 	return decisionSnapshot{
 		actionIdx:       f.actionIdx,
-		confidenceIdx:   f.confidenceIdx,
 		proposedLabels:  slices.Clone(f.proposedLabels),
 		reason:          f.reason.Value(),
 		badLabels:       slices.Clone(f.badLabels),
 		badAction:       f.badAction,
-		badConfidence:   f.badConfidence,
 		proposalContext: &proposalDraft{proposed: f.proposed, notes: f.proposalNotes, by: f.proposalBy, edit: f.proposalEdit, original: f.proposalSnapshot},
 	}
 }
@@ -170,10 +158,9 @@ func (f decisionForm) Snapshot() decisionSnapshot {
 // ApplyDraft overrides whatever LoadItem just seeded from the ledger with an unsaved draft, and marks the form dirty so "unsaved changes" shows again.
 func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 	f.actionIdx = s.actionIdx
-	f.confidenceIdx = s.confidenceIdx
 	f.proposedLabels = slices.Clone(s.proposedLabels)
 	f.reason.SetValue(s.reason)
-	f.badLabels, f.badAction, f.badConfidence = slices.Clone(s.badLabels), s.badAction, s.badConfidence
+	f.badLabels, f.badAction = slices.Clone(s.badLabels), s.badAction
 	if context := s.proposalContext; context != nil {
 		f.proposed = context.proposed
 		f.proposalNotes, f.proposalBy = context.notes, context.by
@@ -198,16 +185,6 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 		}
 		f.badAction = unlisted(f.taxonomy.SelectableActions(), p.Action)
 	}
-	if p.has("confidence") {
-		f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, p.Confidence)
-		if p.Confidence == "" {
-			f.confidenceIdx = -1
-		}
-		f.badConfidence = unlisted(f.taxonomy.Confidence, p.Confidence)
-	}
-	if !p.has("confidence") && f.ledgerConfidence == "" {
-		f.confidenceIdx = -1
-	}
 	if p.has("reason") {
 		f.reason.SetValue(p.Reason)
 	}
@@ -220,7 +197,7 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 	f.proposalSnapshot.proposalContext = nil
 }
 
-// MarkDuplicate prefills a matching GitHub label and a close operation, leaving confidence for the contributor to set.
+// MarkDuplicate prefills a matching GitHub label and a close operation, leaving the reason for the contributor to check.
 func (f *decisionForm) MarkDuplicate(number int, title string) error {
 	label := "duplicate"
 
@@ -251,30 +228,22 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 	f.reason.SetValue(fmt.Sprintf("Duplicate of #%d (%s).", number, title))
 	f.reason.CursorEnd()
 	f.dirty, f.saved, f.touched, f.proposed = true, false, true, false
-	f.reason.Blur()
-	f.focused = fieldConfidence
+	f.FocusField(fieldReason)
 
 	return nil
 }
 
 // LoadItem seeds the form from an existing ledger row (empty strings if untriaged).
 func (f *decisionForm) LoadItem(it Item) {
-	f.ledgerConfidence = it.Confidence
 	f.kind = it.Kind
 	f.proposedLabels = slices.Clone(it.ProposedLabels)
 	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), it.Action)
-	f.confidenceIdx = indexOrZero(f.taxonomy.Confidence, it.Confidence)
-	hasDecision := !it.Untriaged() || it.Confidence != "" || it.Reason != ""
+	hasDecision := !it.Untriaged() || it.Reason != ""
 	if it.Action == "" {
 		f.actionIdx = -1
 	}
-	if hasDecision {
-		if it.Confidence == "" {
-			f.confidenceIdx = -1
-		}
-	}
 
-	f.badLabels, f.badAction, f.badConfidence = f.unlistedLabels(), unlisted(f.taxonomy.SelectableActions(), it.Action), unlisted(f.taxonomy.Confidence, it.Confidence)
+	f.badLabels, f.badAction = f.unlistedLabels(), unlisted(f.taxonomy.SelectableActions(), it.Action)
 	f.reason.SetValue(it.Reason)
 	f.focused = fieldContent
 	f.dirty = false
@@ -313,10 +282,6 @@ func (f decisionForm) InvalidValues() string {
 
 	if f.badAction != "" {
 		bad = append(bad, fmt.Sprintf("action %q", f.badAction))
-	}
-
-	if f.badConfidence != "" {
-		bad = append(bad, fmt.Sprintf("confidence %q", f.badConfidence))
 	}
 
 	return strings.Join(bad, " and ")
@@ -388,22 +353,6 @@ func (f *decisionForm) ClearAction() {
 	f.dirty, f.saved, f.touched = true, false, true
 }
 
-func (f decisionForm) Confidence() string {
-	if f.badConfidence != "" {
-		return f.badConfidence
-	}
-
-	if f.confidenceIdx < 0 {
-		return ""
-	}
-
-	if opts := f.taxonomy.Confidence; len(opts) > 0 {
-		return opts[f.confidenceIdx%len(opts)]
-	}
-
-	return ""
-}
-
 func (f decisionForm) Reason() string { return f.reason.Value() }
 
 func (f *decisionForm) NextField() {
@@ -441,8 +390,6 @@ func (f decisionForm) options() ([]string, int) {
 		return f.labelOptions(), 0
 	case fieldAction:
 		return f.taxonomy.SelectableActions(), f.actionIdx
-	case fieldConfidence:
-		return f.taxonomy.Confidence, f.confidenceIdx
 	}
 
 	return nil, 0
@@ -496,8 +443,6 @@ func (f *decisionForm) PickKey(msg tea.KeyPressMsg) {
 	switch f.focused {
 	case fieldAction:
 		f.actionIdx = f.pick.cursor
-	case fieldConfidence:
-		f.confidenceIdx = f.pick.cursor
 	}
 
 	f.NextField()
@@ -521,14 +466,10 @@ func (f *decisionForm) CycleValue(delta int) {
 		f.badAction = ""
 		n := len(f.taxonomy.SelectableActions())
 		f.actionIdx = ((f.actionIdx+delta)%n + n) % n
-	case fieldConfidence:
-		f.badConfidence = ""
-		n := len(f.taxonomy.Confidence)
-		f.confidenceIdx = ((f.confidenceIdx+delta)%n + n) % n
 	}
 }
 
-// View renders the form to width: the three choices, the reason (wrapping over up to reasonMaxLines), and its state.
+// View renders the form to width: the choices, the reason (wrapping over up to reasonMaxLines), and its state.
 func (f decisionForm) View(width int) string {
 	accent := lipgloss.NewStyle().Foreground(focusedBorderColor).Bold(true)
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted))
@@ -575,7 +516,6 @@ func (f decisionForm) View(width int) string {
 	}{
 		{fieldLabels, "labels", "", labels},
 		{fieldAction, "action", f.badAction, action},
-		{fieldConfidence, "confidence", f.badConfidence, f.Confidence()},
 	} {
 		rows = append(rows, ansi.Truncate(label(field.id, field.name)+value(field.id, field.bad, field.value), width, "…"))
 		if f.pick.open && f.focused == field.id {

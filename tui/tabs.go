@@ -78,7 +78,7 @@ var tabs = []Tab{
 	{Name: "Merge-Ready PRs", Filter: func(items []Item, _ Taxonomy) []Item {
 		var out []Item
 		for _, it := range openOnly(items) {
-			if it.MergeReadyHighConfidence() {
+			if it.MergeReady() {
 				out = append(out, it)
 			}
 		}

@@ -18,7 +18,7 @@ AGENT_ROOT = Path(os.environ.get("TRIAGE_EVAL_AGENT_ROOT", "/tmp")).resolve()
 
 # Ledger fields that describe the GitHub item. Everything else is a local decision by whoever used the source install, and is reset.
 INVENTORY_FIELDS = ("number", "kind", "state", "title", "url", "author", "created_at", "updated_at", "labels", "comments_count", "first_seen_at", "last_synced_at", "state_reason")
-DECISION_DEFAULTS = {"proposed_labels": [], "action": "", "confidence": "", "reason": "", "triaged_at": "", "triaged_by": "", "batch_id": "", "agent_notes": "", "review_request": None, "maintainer_notes": ""}
+DECISION_DEFAULTS = {"proposed_labels": [], "action": "", "reason": "", "triaged_at": "", "triaged_by": "", "batch_id": "", "agent_notes": "", "review_request": None, "maintainer_notes": ""}
 EXCLUDE_BLOCK = "\n# triage-o-mator, installed here but not part of this repository.\n/triage-o-mator/\n"
 
 

@@ -118,7 +118,7 @@ class WriteTests(Workspace):
         self.assertFalse((self.root / "data/owner/repo/writes" / f"{preview['plan']['request_id']}.json").exists())
 
         # The same refusal through a staged proposal leaves it pending but marks it out of date, so readers stop offering it for approval.
-        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(dict(item(1, "Needs a reproduction"), action="comment", confidence="medium", reason="The report lacks steps")) + "\n")
+        (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(dict(item(1, "Needs a reproduction"), action="comment", reason="The report lacks steps")) + "\n")
         args = ("--expected-repo", "owner/repo")
         context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
         comment = self.root / "request-info.md"
@@ -146,7 +146,7 @@ class WriteTests(Workspace):
         live = json.loads((self.mock / "item.json").read_text())
         live["updated_at"] = timestamp
         (self.mock / "item.json").write_text(json.dumps(live))
-        decision = dict(item(1, "Needs a reproduction"), action="comment", confidence="medium",
+        decision = dict(item(1, "Needs a reproduction"), action="comment",
                         reason="The report lacks steps")
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         ledger.write_text(json.dumps(decision) + "\n")
@@ -203,7 +203,7 @@ class WriteTests(Workspace):
         live.update(state="closed", updated_at=timestamp)
         (self.mock / "item.json").write_text(json.dumps(live))
         decision = dict(item(1, "Closed too early"), state="closed", action="reopen",
-                        confidence="high", reason="The reported behavior still reproduces")
+                        reason="The reported behavior still reproduces")
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
         args = ("--expected-repo", "owner/repo")
         context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
@@ -260,7 +260,7 @@ class WriteTests(Workspace):
 
     def test_action_target_operation_and_comment_edits_invalidate_exact_approval(self):
         timestamp = "2026-10-04T01:00:00Z"
-        decision = dict(item(1, "Needs feedback"), action="comment", confidence="medium", reason="A focused response is useful")
+        decision = dict(item(1, "Needs feedback"), action="comment", reason="A focused response is useful")
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(decision) + "\n")
         args = ("--expected-repo", "owner/repo")
         context = self.json_cli("item-context", *args, "read", "--kind", "issue", "--number", "1")
@@ -440,7 +440,7 @@ class ClosureWriteTests(Workspace):
 
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[0].update(action="close", confidence="high", reason="Superseded by #2")
+        rows[0].update(action="close", reason="Superseded by #2")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         self.propose_action_close(1, "--action", "close", "--evidence", f"pr:1:{snapshot}")
         assessed = self.json_cli("pr-assessment", "--expected-repo", "owner/repo", "record", "--purpose", "closure",
@@ -461,7 +461,7 @@ class ClosureWriteTests(Workspace):
         self.run_cli("action-pass", "run", *selected, "--preview-sha256", staged["preview_sha256"], ok=False)
         self.assertEqual(self.write_calls(), [])
 
-        rows[1].update(action="close", confidence="high", reason="Also superseded")
+        rows[1].update(action="close", reason="Also superseded")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         self.propose_action_close(2, "--action", "close")
         gap_review = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "2")
@@ -504,7 +504,7 @@ class ClosureWriteTests(Workspace):
 
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[0].update(action="close", confidence="high", reason="Possibly superseded by #2")
+        rows[0].update(action="close", reason="Possibly superseded by #2")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         held = self.propose_action_close(1, "--action", "close", "--evidence", f"pr:1:{snapshot}",
                                          "--decision-question", "Does #2 fully replace this PR?")
@@ -551,7 +551,7 @@ class ClosureWriteTests(Workspace):
 
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]
-        rows[0].update(action="comment", confidence="high", reason="The change needs a focused follow-up")
+        rows[0].update(action="comment", reason="The change needs a focused follow-up")
         ledger.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")
         comment = self.root / "feedback.md"

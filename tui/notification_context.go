@@ -99,7 +99,7 @@ func (c actionProposalContext) guidanceBlocks() []guidanceBlock {
 			if len(row.Fields) == 0 {
 				block.lines = append(block.lines, "No local ledger row for this item")
 			} else {
-				call := strings.Trim(strings.Join([]string{contextField(row.Fields, "action"), contextField(row.Fields, "confidence")}, " · "), " ·")
+				call := contextField(row.Fields, "action")
 				if call == "" {
 					block.lines = append(block.lines, "No local triage decision yet")
 				} else {

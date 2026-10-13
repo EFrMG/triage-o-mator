@@ -16,9 +16,8 @@ from _triage import DATA_DIR, REPO, load_ledger, parse_key
 
 RECORDS = DATA_DIR / "duplicate-assessments"
 OUTCOMES = ("duplicate", "distinct", "competing", "unresolved")
-CONFIDENCE = ("low", "medium", "high")
 MAX_RECORD_BYTES = 32768
-FIELDS = ("repository", "pair", "outcome", "confidence", "shared", "difference", "evidence", "gaps", "assessed_by")
+FIELDS = ("repository", "pair", "outcome", "shared", "difference", "evidence", "gaps", "assessed_by")
 
 
 def evidence_argument(value):
@@ -67,11 +66,8 @@ def compare(args):
             if reference["coverage"].get(component) != "complete":
                 gaps.append(f"{key[0]}:{key[1]}: {component} is not complete")
 
-    if args.confidence == "high" and gaps:
-        raise ValueError("high confidence requires current, complete selected evidence and no declared gaps")
-
     content = dict(repository=REPO, pair=dict(kind=pair[0], a=pair[1], b=pair[2]), outcome=args.outcome,
-                   confidence=args.confidence, shared=args.shared.strip(), difference=args.difference.strip(),
+                   shared=args.shared.strip(), difference=args.difference.strip(),
                    evidence=references, gaps=gaps, assessed_by=args.by.strip())
     return save_record(RECORDS, "duplicate-assessment", content, FIELDS, MAX_RECORD_BYTES)
 
@@ -100,7 +96,6 @@ def main():
     saving.add_argument("--evidence", action="append", default=[], help="KIND:NUMBER:SNAPSHOT_ID; repeat for both items")
     saving.add_argument("--host", default="github.com")
     saving.add_argument("--outcome", choices=OUTCOMES, required=True)
-    saving.add_argument("--confidence", choices=CONFIDENCE, required=True)
     saving.add_argument("--shared", required=True)
     saving.add_argument("--difference", required=True)
     saving.add_argument("--gap", action="append", default=[])

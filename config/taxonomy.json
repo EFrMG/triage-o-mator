@@ -23,10 +23,5 @@
     "comment": "Use Reason to say what to ask or explain. Draft the exact public comment during the action pass.",
     "close": "Use Reason to name the checkable closure basis. Publish an explanation before closing.",
     "reopen": "Use Reason to explain what remains unresolved. Publish an explanation before reopening."
-  },
-  "confidence": [
-    "low",
-    "medium",
-    "high"
-  ]
+  }
 }

@@ -2,7 +2,7 @@
 
 **Use when** someone asks to "review PR #N", "code-review the merge-ready PRs", "which PRs are actually safe to merge?", or `bin/next` suggests code review.
 
-**Produces** a code review in the ledger's `agent_notes`. For an untriaged PR it also adds a local decision (proposed labels / action / confidence / reason) based on the code. Nothing is posted to GitHub: the review is for maintainers deciding what to do next.
+**Produces** a code review in the ledger's `agent_notes`. For an untriaged PR it also adds a local decision (proposed labels / action / reason) based on the code. Nothing is posted to GitHub: the review is for maintainers deciding what to do next.
 
 ## 1. Pick the PRs
 

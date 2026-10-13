@@ -259,7 +259,7 @@ func applyDecisionCmd(installRoot, repo string, key Key, p proposal, by, batchID
 		}
 
 		for _, field := range []struct{ name, value string }{
-			{"action", p.Action}, {"confidence", p.Confidence}, {"reason", p.Reason}, {"agent_notes", p.AgentNotes},
+			{"action", p.Action}, {"reason", p.Reason}, {"agent_notes", p.AgentNotes},
 		} {
 			if p.has(field.name) {
 				args = append(args, "--"+strings.ReplaceAll(field.name, "_", "-"), field.value)

@@ -1227,10 +1227,10 @@ func (m *model) diffIfNeeded() tea.Cmd {
 }
 
 func formFieldIsEnum(f formField) bool {
-	return f == fieldLabels || f == fieldAction || f == fieldConfidence
+	return f == fieldLabels || f == fieldAction
 }
 
-// requestSave saves the decision, but first warns (and requires a repeated save action) when the fields are still the untouched defaults or the reason is empty, so a stray keypress can't record "bug / no-action-needed / low" with no justification.
+// requestSave saves the decision, but first warns (and requires a repeated save action) when the fields are still the untouched defaults or the reason is empty, so a stray keypress can't record "bug / no-action-needed" with no justification.
 func (m model) requestSave() (tea.Model, tea.Cmd) {
 	return m.requestDecisionSave()
 }
@@ -1285,8 +1285,8 @@ func (m model) saveDecisionCmd() tea.Cmd {
 		}
 	}
 
-	p := proposal{ProposedLabels: m.form.ProposedLabels(), Action: m.form.Action(), Confidence: m.form.Confidence(), Reason: m.form.Reason(), AgentNotes: m.form.proposalNotes,
-		fields: map[string]bool{"action": true, "confidence": true, "reason": true, "proposed_labels": m.form.ReplaceProposedLabels(), "agent_notes": m.form.proposalEdit.has("agent_notes")},
+	p := proposal{ProposedLabels: m.form.ProposedLabels(), Action: m.form.Action(), Reason: m.form.Reason(), AgentNotes: m.form.proposalNotes,
+		fields: map[string]bool{"action": true, "reason": true, "proposed_labels": m.form.ReplaceProposedLabels(), "agent_notes": m.form.proposalEdit.has("agent_notes")},
 	}
 	unchangedProposal := m.form.proposed && snapshot.FieldsEqual(m.form.proposalSnapshot)
 	if unchangedProposal {

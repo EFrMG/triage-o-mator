@@ -60,7 +60,7 @@ def ready_groups_section(groups, by_key):
 
                 continue
 
-            decision = f"`{decision_text(r)}` {r['confidence']}".strip() if has_decision(r) else "untriaged"
+            decision = f"`{decision_text(r)}`" if has_decision(r) else "untriaged"
             review = "pending review" if r.get("review_request") else ""
             note = f": {m['notes'].strip()}" if m["notes"].strip() else ""
             lines.append(f"- [{r['kind']} #{r['number']}]({r['url']}) {r['title']} ({r['state']}; {decision}{'; ' + review if review else ''}){notes_mark(r)}{note}")
@@ -158,15 +158,10 @@ def render(ledger):
                 lines.append(f"| {name} | {n} | {pct(n, len(items))} |")
             lines.append("")
 
-    merge_ready_items = [
-        r
-        for r in prs
-        if merge_ready(r)
-        and r["confidence"] == "high"
-    ]
+    merge_ready_items = [r for r in prs if merge_ready(r)]
     if merge_ready_items:
         lines.append(
-            f"## High-confidence merge-ready PR suggestions ({len(merge_ready_items)})"
+            f"## Merge-ready PR suggestions ({len(merge_ready_items)})"
         )
         lines.append("")
         for r in sorted(merge_ready_items, key=lambda r: r["created_at"])[:30]:

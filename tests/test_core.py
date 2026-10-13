@@ -499,8 +499,8 @@ print(json.dumps(live["labels"]))
         taxonomy_path.write_text(json.dumps(taxonomy))
         (self.mock / "catalog.json").write_text(json.dumps(taxonomy["label_catalog"]["labels"]))
         ledger_path = self.root / "data/owner/repo/ledger.jsonl"
-        first = dict(item(1, "Bug"), proposed_labels=["bug"], action="", confidence="high", reason="Agent proposal")
-        second = dict(item(2, "Unlabeled"), proposed_labels=["bug"], action="", confidence="medium", reason="Agent proposal")
+        first = dict(item(1, "Bug"), proposed_labels=["bug"], action="", reason="Agent proposal")
+        second = dict(item(2, "Unlabeled"), proposed_labels=["bug"], action="", reason="Agent proposal")
         first["labels"] = ["manual"]
         ledger_path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
 
@@ -929,7 +929,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
 
     def test_sync_preserves_proposals(self):
         self.sync()
-        self.run_cli("apply", "--number", "1", "--kind", "issue", "--action", "none", "--confidence", "high", "--reason", "Existing call", "--by", "agent:triage")
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--action", "none", "--reason", "Existing call", "--by", "agent:triage")
         taxonomy_path = self.root / "config/taxonomy.json"
         taxonomy = json.loads(taxonomy_path.read_text())
         taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", observed_at="2026-01-01T00:00:00Z", labels=[dict(id=7, name="bug", description="Defect", color="ff0000")], retired=[])
@@ -947,6 +947,19 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         report = self.run_cli("report", "--stdout").stdout
         self.assertIn("Issue proposed labels", report)
         self.assertIn("| bug | 1 |", report)
+
+        ledger_path = self.root / "data/owner/repo/ledger.jsonl"
+        before_report = ledger_path.read_bytes()
+        ready_pr = dict(item(3, "Reviewed change", "pr"), proposed_labels=["ready"], action="", reason="Code reviewed", triaged_by="agent:review")
+        other_pr = dict(item(4, "Unreviewed change", "pr"), proposed_labels=[], action="none", reason="No requested action", triaged_by="agent:review")
+        with ledger_path.open("a") as ledger_file:
+            ledger_file.write(json.dumps(ready_pr) + "\n" + json.dumps(other_pr) + "\n")
+
+        ready_report = self.run_cli("report", "--stdout").stdout
+        merge_section = ready_report.split("## Merge-ready PR suggestions (1)\n", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("Reviewed change", merge_section)
+        self.assertNotIn("Unreviewed change", merge_section)
+        ledger_path.write_bytes(before_report)
         self.json_cli("review-request", "mark", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "2", "--by", "agent:triage", "--reason", "Check the reported behavior")
         self.assertEqual(self.ledger()[("issue", 2)]["review_request"]["reason"], "Check the reported behavior")
         before = self.ledger()[("issue", 2)]
@@ -968,17 +981,12 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.assertEqual(self.ledger()[("issue", 2)], {**noted, "agent_notes": "Batch evidence"})
         self.run_cli("apply", "--number", "2", "--kind", "issue", "--agent-notes", "Retain this evidence")
 
-        for field in ("proposed_labels", "action", "confidence", "reason", "agent_notes", "proposed_by"):
+        for field in ("proposed_labels", "action", "reason", "agent_notes", "proposed_by"):
             for invalid in (None, False, 0):
                 with self.subTest(field=field, invalid=invalid):
                     decisions.write_text(json.dumps(dict(number=1, kind="issue", reason="Must not be partially saved")) + "\n" + json.dumps({"number": 2, "kind": "issue", field: invalid}) + "\n")
                     self.run_cli("apply", str(decisions), ok=False)
                     self.assertEqual(ledger_path.read_bytes(), before_bytes)
-
-        for invalid in ("certain", [], {}):
-            decisions.write_text(json.dumps(dict(number=2, kind="issue", confidence=invalid)) + "\n")
-            self.run_cli("apply", str(decisions), ok=False)
-            self.assertEqual(ledger_path.read_bytes(), before_bytes)
 
         decisions.write_text(json.dumps(dict(number=2, kind="issue", proposed_labels=[])) + "\n")
         self.run_cli("apply", str(decisions), "--only-untriaged")
@@ -1012,13 +1020,11 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--proposed-label", "bug", "--by", "agent:labels")
         self.assertEqual(self.ledger()[("issue", 1)]["action"], "none")
         self.assertEqual(self.ledger()[("issue", 1)]["proposed_labels"], ["bug"])
-        self.assertEqual(self.ledger()[("issue", 1)]["confidence"], "high")
         self.assertEqual(self.ledger()[("issue", 1)]["reason"], "Existing call")
         self.assertIsNone(self.ledger()[("issue", 1)]["review_request"])
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--replace-proposed-labels")
         self.assertEqual(self.ledger()[("issue", 1)]["proposed_labels"], [])
         self.assertEqual(self.ledger()[("issue", 1)]["action"], "none")
-        self.assertEqual(self.ledger()[("issue", 1)]["confidence"], "high")
         self.assertEqual(self.ledger()[("issue", 1)]["reason"], "Existing call")
 
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--proposed-label", "bug")
@@ -1028,8 +1034,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.assertEqual(self.ledger()[("issue", 1)]["action"], "none")
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--replace-proposed-labels", "--action", "")
         self.assertEqual(self.ledger()[("issue", 1)]["action"], "")
-        self.run_cli("apply", "--number", "1", "--kind", "issue", "--confidence", "", "--reason", "")
-        self.assertEqual(self.ledger()[("issue", 1)]["confidence"], "")
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--reason", "")
         self.assertEqual(self.ledger()[("issue", 1)]["reason"], "")
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--agent-notes", "Notes to clear")
         before_notes_clear = self.ledger()[("issue", 1)]
@@ -1038,7 +1043,7 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
         self.assertEqual(self.ledger()[("issue", 1)], {**before_notes_clear, "agent_notes": ""})
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--reason", "Reason without action")
         self.assertEqual(self.ledger()[("issue", 1)]["reason"], "Reason without action")
-        decisions.write_text(json.dumps(dict(number=1, kind="issue", action="", confidence="", reason="")) + "\n")
+        decisions.write_text(json.dumps(dict(number=1, kind="issue", action="", reason="")) + "\n")
         self.run_cli("apply", str(decisions))
         self.assertEqual(self.ledger()[("issue", 1)]["reason"], "")
 
@@ -1067,6 +1072,8 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
             reader = csv.DictReader(source)
             fields, rows = reader.fieldnames, list(reader)
 
+        self.assertNotIn("confidence", fields)
+        self.assertTrue(all("confidence" not in row for row in self.ledger().values()))
         rows[0].update(action="none", maintainer_notes="Check before changing the default")
         with csv_path.open("w", newline="") as out:
             writer = csv.DictWriter(out, fieldnames=fields)

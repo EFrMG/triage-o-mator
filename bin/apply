@@ -5,14 +5,14 @@ Apply a filled-in decisions file (from bin/batch) back into the ledger, or apply
 Usage:
     bin/apply data/<owner>/<repo>/batches/<batch_id>.decisions.jsonl [--by NAME] [--only-untriaged]
     bin/apply --number N --kind issue|pr [--action A] [--proposed-label NAME ...] \\
-        [--replace-proposed-labels] [--confidence L] [--reason TEXT] [--agent-notes TEXT] [--by NAME] [--batch-id ID]
+        [--replace-proposed-labels] [--reason TEXT] [--agent-notes TEXT] [--by NAME] [--batch-id ID]
     bin/apply --number N --kind issue|pr --agent-notes TEXT
     bin/apply (--number N --kind issue|pr | --key issue:N ...) --clear
     any of the above with --dry-run to validate and report without writing the ledger
 
-Each decisions row needs number and kind. Add only fields to edit: proposed_labels, action, confidence, reason and agent_notes. Omitted fields preserve saved values; proposed_labels: [] clears proposals and an empty string clears a text field. An identity-only row, including one with only proposed_by metadata, changes nothing. proposed_labels must contain distinct names from this repository's observed GitHub label catalog; observed GitHub labels are separate. Text fields must be strings, and confidence must be empty, low, medium or high. null is not an omitted field.
+Each decisions row needs number and kind. Add only fields to edit: proposed_labels, action, reason and agent_notes. Omitted fields preserve saved values; proposed_labels: [] clears proposals and an empty string clears a text field. An identity-only row, including one with only proposed_by metadata, changes nothing. proposed_labels must contain distinct names from this repository's observed GitHub label catalog; observed GitHub labels are separate. Text fields must be strings. null is not an omitted field.
 
---replace-proposed-labels explicitly replaces the label set in single-item mode, including with an empty set when no --proposed-label is given. --action '' clears the action independently; action 'none' records an assessed choice of no conversation or state operation. Omitted action, confidence, reason and notes preserve their saved values. Notes-only rows and --agent-notes alone preserve decision attribution; editing any decision field records who and when, using --by or the row's proposed_by (default agent).
+--replace-proposed-labels explicitly replaces the label set in single-item mode, including with an empty set when no --proposed-label is given. --action '' clears the action independently; action 'none' records an assessed choice of no conversation or state operation. Omitted action, reason and notes preserve their saved values. Notes-only rows and --agent-notes alone preserve decision attribution; editing any decision field records who and when, using --by or the row's proposed_by (default agent).
 
 This records an attributed local decision. It does not authorize a GitHub write or add the item to Pending review; bin/review-request owns that explicit queue.
 
@@ -20,7 +20,7 @@ This records an attributed local decision. It does not authorize a GitHub write 
 
 --key KIND:NUMBER (repeatable) clears several decisions in one ledger write.
 
---clear takes back the decision: the item is untriaged again (proposed labels, action, confidence, reason, who and when, and its batch are blanked). Agent notes, maintainer notes and an explicit Pending review request remain. Items with no decision are skipped. The ledger's git diff records what was taken back.
+--clear takes back the decision: the item is untriaged again (proposed labels, action, reason, who and when, and its batch are blanked). Agent notes, maintainer notes and an explicit Pending review request remain. Items with no decision are skipped. The ledger's git diff records what was taken back.
 
 --agent-notes on its own (no decision-field flags) only replaces the item's agent_notes, leaving its decision untouched: how prompts/review-pr.md attaches a code review to a PR someone already triaged.
 
@@ -49,7 +49,6 @@ def main():
     ap.add_argument("--proposed-label", action="append", dest="proposed_labels", help="repeat to propose GitHub labels separately from observed labels")
     ap.add_argument("--replace-proposed-labels", action="store_true", help="single-item mode: replace proposed labels, including with an empty set and a blank action")
     ap.add_argument("--action", help="single-item mode: action")
-    ap.add_argument("--confidence", choices=["", "low", "medium", "high"])
     ap.add_argument("--reason")
     ap.add_argument(
         "--agent-notes",
@@ -94,7 +93,7 @@ def main():
     if args.expected_repo is not None and args.expected_repo != REPO:
         ap.error(f"repository changed: expected {args.expected_repo!r}, found {REPO!r}")
 
-    single_edits = {field: getattr(args, field) for field in ("action", "confidence", "reason", "agent_notes") if getattr(args, field) is not None}
+    single_edits = {field: getattr(args, field) for field in ("action", "reason", "agent_notes") if getattr(args, field) is not None}
     if args.proposed_labels is not None or args.replace_proposed_labels:
         single_edits["proposed_labels"] = args.proposed_labels or []
 
@@ -130,7 +129,7 @@ def main():
             sys.exit("error: --number requires --kind")
 
         if not args.clear and not single_edits:
-            sys.exit("error: --number requires --action, --proposed-label, --replace-proposed-labels, --confidence, --reason, --clear, or --agent-notes")
+            sys.exit("error: --number requires --action, --proposed-label, --replace-proposed-labels, --reason, --clear, or --agent-notes")
 
         decisions = [{"number": args.number, "kind": args.kind, **single_edits}]
 
@@ -154,12 +153,9 @@ def main():
             if not isinstance(d, dict) or d.get("kind") not in ("issue", "pr") or type(d.get("number")) is not int:
                 sys.exit("error: each decisions row needs kind issue|pr and an integer number")
 
-            for field in ("action", "confidence", "reason", "agent_notes", "proposed_by"):
+            for field in ("action", "reason", "agent_notes", "proposed_by"):
                 if field in d and not isinstance(d[field], str):
                     sys.exit(f"error: #{d['number']} {field} must be a string")
-
-            if "confidence" in d and d["confidence"] not in ("", "low", "medium", "high"):
-                sys.exit(f"error: #{d['number']} confidence must be empty, low, medium or high")
 
             if "proposed_labels" in d:
                 proposed = d["proposed_labels"]

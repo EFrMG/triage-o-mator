@@ -28,14 +28,13 @@ type proposal struct {
 	Kind           string   `json:"kind"`
 	ProposedLabels []string `json:"proposed_labels"`
 	Action         string   `json:"action"`
-	Confidence     string   `json:"confidence"`
 	Reason         string   `json:"reason"`
 	AgentNotes     string   `json:"agent_notes"`
 	ProposedBy     string   `json:"proposed_by"`
 	fields         map[string]bool
 }
 
-var proposalFields = []string{"proposed_labels", "action", "confidence", "reason", "agent_notes"}
+var proposalFields = []string{"proposed_labels", "action", "reason", "agent_notes"}
 
 func (p *proposal) UnmarshalJSON(data []byte) error {
 	type values proposal
@@ -65,10 +64,6 @@ func (p *proposal) UnmarshalJSON(data []byte) error {
 
 	if decoded.Kind != "issue" && decoded.Kind != "pr" || decoded.Number < 1 {
 		return fmt.Errorf("proposal requires an issue or PR identity")
-	}
-
-	if decoded.fields["confidence"] && !slices.Contains([]string{"", "low", "medium", "high"}, decoded.Confidence) {
-		return fmt.Errorf("invalid confidence %q", decoded.Confidence)
 	}
 
 	seen := map[string]bool{}
@@ -110,14 +105,14 @@ func (p proposal) fulfilled(it Item, batchID string) bool {
 	}
 
 	for _, field := range []struct{ name, proposed, saved string }{
-		{"action", p.Action, it.Action}, {"confidence", p.Confidence, it.Confidence}, {"reason", p.Reason, it.Reason}, {"agent_notes", p.AgentNotes, it.AgentNotes},
+		{"action", p.Action, it.Action}, {"reason", p.Reason, it.Reason}, {"agent_notes", p.AgentNotes, it.AgentNotes},
 	} {
 		if p.has(field.name) && field.proposed != field.saved {
 			return false
 		}
 	}
 
-	for _, name := range proposalFields[:4] {
+	for _, name := range proposalFields[:3] {
 		if p.has(name) {
 			return it.BatchID == batchID
 		}
@@ -137,7 +132,7 @@ func (p proposal) summary() string {
 	}
 
 	for _, field := range []struct{ name, title, value string }{
-		{"action", "action", p.Action}, {"confidence", "confidence", p.Confidence}, {"reason", "reason", p.Reason}, {"agent_notes", "notes", p.AgentNotes},
+		{"action", "action", p.Action}, {"reason", "reason", p.Reason}, {"agent_notes", "notes", p.AgentNotes},
 	} {
 		if !p.has(field.name) {
 			continue

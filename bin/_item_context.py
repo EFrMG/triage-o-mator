@@ -8,7 +8,7 @@ from _read_commands import command
 from _triage import REPO, TRIAGE_DEFAULTS, load_ledger, review_request
 
 POLICY = "item-context-v1"
-LEDGER_FIELDS = ("action", "confidence", "reason", "triaged_by", "triaged_at", "agent_notes", "maintainer_notes")
+LEDGER_FIELDS = ("action", "reason", "triaged_by", "triaged_at", "agent_notes", "maintainer_notes")
 GROUP_FIELDS = ("id", "title", "description", "status")
 MEMBER_FIELDS = ("kind", "number", "notes", "added_by", "added_at", "updated_by", "updated_at")
 PREVIEW_BYTES = 512

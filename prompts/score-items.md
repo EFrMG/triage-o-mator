@@ -8,7 +8,7 @@ Use the named items or one existing batch as the scope. Score at most 20 keys in
 
 ## 2. Apply the 0–5 quality/readiness rubric
 
-Score the item's own presentation and proposed solution at the selected revision. Each dimension needs a short reason. A high score means the item is well formed and ready for a maintainer decision; it does not mean high priority, high triage confidence, complete evidence, an explicit Pending review request or permission to write on GitHub.
+Score the item's own presentation and proposed solution at the selected revision. Each dimension needs a short reason. A high score means the item is well formed and ready for a maintainer decision; it does not mean high priority, complete evidence, an explicit Pending review request or permission to write on GitHub.
 
 | Issue dimension | 0                                                      | 1                                                                    | 2                                                                                                                 |
 | --------------- | ------------------------------------------------------ | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |

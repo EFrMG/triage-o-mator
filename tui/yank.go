@@ -45,7 +45,7 @@ func itemLine(item Item, proposal string) string {
 	line := fmt.Sprintf("- %s #%d — %s [%s]", item.Kind, item.Number, item.Title, item.ScoreLabel())
 	switch {
 	case !item.Untriaged():
-		line += fmt.Sprintf(" [%s / %s, %s, by %s", item.DecisionLabel(), item.Action, item.Confidence, item.TriagedBy)
+		line += fmt.Sprintf(" [%s / %s, by %s", item.DecisionLabel(), item.Action, item.TriagedBy)
 		line += "]"
 	case proposal != "":
 		line += fmt.Sprintf(" [proposed: %s]", proposal)
@@ -71,7 +71,7 @@ func (m model) itemBlock(item Item, enriched EnrichedItem, withBody bool) string
 	if item.URL != "" {
 		fmt.Fprintf(&b, "%s\n", item.URL)
 	}
-	fmt.Fprintf(&b, "Item quality/readiness: %s (separate from triage confidence and review).\n", item.ScoreLabel())
+	fmt.Fprintf(&b, "Item quality/readiness: %s (separate from triage and review).\n", item.ScoreLabel())
 	if item.ItemScore != nil {
 		fmt.Fprintf(&b, "Score reason: %s\n", item.ItemScore.Reason)
 		if item.ItemScore.Suggestion != "" {
@@ -84,7 +84,7 @@ func (m model) itemBlock(item Item, enriched EnrichedItem, withBody bool) string
 	}
 
 	if !item.Untriaged() {
-		fmt.Fprintf(&b, "\nDecision: %s / %s (%s) by %s — %s\n", item.DecisionLabel(), item.Action, item.Confidence, item.TriagedBy, item.Reason)
+		fmt.Fprintf(&b, "\nDecision: %s / %s by %s — %s\n", item.DecisionLabel(), item.Action, item.TriagedBy, item.Reason)
 	} else {
 		b.WriteString("\nUntriaged.\n")
 	}

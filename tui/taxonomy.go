@@ -16,7 +16,6 @@ type Taxonomy struct {
 	ActionGuidance   map[string]string `json:"action_guidance"`
 	ActionOperations map[string]string `json:"action_operations"`
 	LabelCatalog     LabelCatalog      `json:"label_catalog"`
-	Confidence       []string          `json:"confidence"`
 }
 
 type LabelCatalog struct {

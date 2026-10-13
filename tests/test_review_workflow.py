@@ -90,7 +90,7 @@ class CandidateTests(Workspace):
 
 class GroupTests(Workspace):
     def test_ready_group_never_changes_member_decision(self):
-        row = dict(item(1, "Related issue"), action="none", confidence="medium", reason="Proposal")
+        row = dict(item(1, "Related issue"), action="none", reason="Proposal")
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         ledger.write_text(json.dumps(row) + "\n")
         original = ledger.read_bytes()
@@ -103,7 +103,7 @@ class GroupTests(Workspace):
         self.assertEqual(self.calls(), [])
 
     def test_group_export_carries_shared_context_and_missing_members(self):
-        first = dict(item(1, "First fix", "pr"), action="keep-open", confidence="high",
+        first = dict(item(1, "First fix", "pr"), action="keep-open",
                      reason="Wait for the dependency", triaged_by="maintainer", agent_notes="Agent comparison",
                      maintainer_notes="Check compatibility")
         second = item(2, "Related issue")
@@ -164,7 +164,7 @@ class ItemContextTests(Workspace):
         self.assertEqual(absent["group_count"], 0)
         self.assertEqual(absent["rows"][0]["fields"], {})
 
-        row = dict(item(1, "Keep this change", "pr"), action="keep-open", confidence="high",
+        row = dict(item(1, "Keep this change", "pr"), action="keep-open",
                    reason="Maintainer wants the work", triaged_by="maintainer", triaged_at="2026-09-29T00:00:00Z",
                    agent_notes="Agent comparison", maintainer_notes="Wait for the dependency", last_synced_at="2026-09-29T02:00:00Z")
         ledger = self.root / "data/owner/repo/ledger.jsonl"

@@ -107,7 +107,7 @@ They are listed here in sidebar order.
 
    ![Pending review](captures/flow-2.webp)
 
-3. **Merge-Ready PRs.** Open PRs whose saved decision proposes the `ready` label with high confidence. It is a reading queue: the tool does not approve or merge PRs.
+3. **Merge-Ready PRs.** Open PRs whose saved decision proposes the `ready` label. It is a reading queue: the tool does not approve or merge PRs.
 
    ![Merge-Ready PRs](captures/flow-3.webp)
 
@@ -152,7 +152,7 @@ They are listed here in sidebar order.
 
 These work the same wherever an item or a list is in front of you.
 
-- **Read an item and save a decision.** An item shows its body, agent notes, comments and, for a PR, the diff. Set labels, suggest an action, and give a short reason and a confidence. A label-first pass can leave Action blank.
+- **Read an item and save a decision.** An item shows its body, agent notes, comments and, for a PR, the diff. Set labels, suggest an action, and give a short reason. A label-first pass can leave Action blank.
 
   ![Read an item and save a decision](captures/flow-12.webp)
 
@@ -186,7 +186,7 @@ Paths below are relative to an install, such as `data/<owner>/<repo>/ledger.json
 
 ### Local records
 
-A ledger row keeps the labels observed on GitHub apart from the labels proposed locally. It also records the recommended action, confidence and reason, who triaged the item, and optional agent and maintainer notes. An optional `review_request` says why the item needs human attention; [the playbook](prompts/PLAYBOOK.md#explicit-pending-review) explains it.
+A ledger row keeps the labels observed on GitHub apart from the labels proposed locally. It also records the recommended action and reason, who triaged the item, and optional agent and maintainer notes. An optional `review_request` says why the item needs human attention; [the playbook](prompts/PLAYBOOK.md#explicit-pending-review) explains it.
 
 Each install owns its [taxonomy.json](config/taxonomy.json); the [taxonomy guidance](docs/taxonomy.md) explains how to use it.
 

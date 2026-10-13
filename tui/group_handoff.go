@@ -23,7 +23,6 @@ type groupHandoffItem struct {
 	State             string         `json:"state"`
 	ProposedLabels    []string       `json:"proposed_labels"`
 	Action            string         `json:"action"`
-	Confidence        string         `json:"confidence"`
 	Reason            string         `json:"reason"`
 	TriagedBy         string         `json:"triaged_by"`
 	AgentNotes        string         `json:"agent_notes"`
@@ -182,10 +181,8 @@ func groupHandoffText(header string, msg groupHandoffMsg) string {
 			if len(item.ProposedLabels) > 0 {
 				decision = append(decision, "labels "+strings.Join(item.ProposedLabels, ", "))
 			}
-			for _, part := range []struct{ label, value string }{{"action", item.Action}, {"confidence", item.Confidence}} {
-				if part.value != "" {
-					decision = append(decision, part.label+" "+part.value)
-				}
+			if item.Action != "" {
+				decision = append(decision, "action "+item.Action)
 			}
 			if len(decision) > 0 {
 				fmt.Fprintf(&b, "- Local decision: %s\n", strings.Join(decision, " · "))

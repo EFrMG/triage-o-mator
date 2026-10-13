@@ -23,7 +23,7 @@ func baselineItems() []Item {
 }
 
 func baselineTaxonomy() Taxonomy {
-	return Taxonomy{Actions: []string{"none"}, ActionOperations: map[string]string{"none": "none"}, Confidence: []string{"low", "medium", "high"}}
+	return Taxonomy{Actions: []string{"none"}, ActionOperations: map[string]string{"none": "none"}}
 }
 
 func baselineSend(m model, msg tea.Msg) model {
@@ -32,7 +32,7 @@ func baselineSend(m model, msg tea.Msg) model {
 }
 
 func baselineRow(number int) string {
-	row := map[string]any{"number": number, "kind": "issue", "state": "open", "title": "issue", "url": "https://github.com/owner/repo/issues/1", "author": "author", "created_at": "2026-01-01T00:00:00Z", "updated_at": "", "labels": []string{}, "comments_count": 0, "action": "", "confidence": "", "reason": ""}
+	row := map[string]any{"number": number, "kind": "issue", "state": "open", "title": "issue", "url": "https://github.com/owner/repo/issues/1", "author": "author", "created_at": "2026-01-01T00:00:00Z", "updated_at": "", "labels": []string{}, "comments_count": 0, "action": "", "reason": ""}
 	data, _ := json.Marshal(row)
 	return string(data) + "\n"
 }
@@ -476,7 +476,7 @@ func TestItemCardMetadataLayout(t *testing.T) {
 	}
 
 	m := baselineModel(t, baselineRoot(t))
-	m.items = []Item{{Kind: "pr", Number: 9, State: "open", Title: "Ready", ProposedLabels: []string{"ready"}, Confidence: "high", TriagedBy: "agent", CommentsCount: 2,
+	m.items = []Item{{Kind: "pr", Number: 9, State: "open", Title: "Ready", ProposedLabels: []string{"ready"}, TriagedBy: "agent", CommentsCount: 2,
 		ReviewRequest: &ReviewRequest{By: "maintainer"}}, {Kind: "issue", Number: 10, State: "open", Title: "Reviewed", Action: "close", TriagedBy: "maintainer", Labels: []string{"bug"}, CommentsCount: 1}}
 	for _, tab := range []int{pendingReviewTab, mergeReadyTab, allItemsTab} {
 		m.activateTab(tab)
@@ -1172,6 +1172,19 @@ func TestBaselineItemTabsLeadIntoForm(t *testing.T) {
 	if m.detail.active != 0 || m.form.focused != fieldContent {
 		t.Fatal("H did not select the previous tab")
 	}
+
+	if err := m.form.MarkDuplicate(2, "Earlier report"); err != nil {
+		t.Fatal(err)
+	}
+	if m.form.focused != fieldReason || !m.form.reason.Focused() {
+		t.Fatal("duplicate prefill did not focus the reason editor")
+	}
+	before := m.form.Reason()
+	m = baselineSend(m, tea.KeyPressMsg{Text: "x"})
+	if m.form.Reason() != before+"x" {
+		t.Fatal("duplicate reason could not be edited immediately")
+	}
+
 }
 
 func TestBaselineNotificationItemCommentActions(t *testing.T) {
@@ -1305,7 +1318,7 @@ func TestBaselineSaveAndExplicitPendingReviewAreSeparate(t *testing.T) {
 	m := baselineModel(t, root)
 	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
-	m.form.ApplyProposal(proposal{Action: "none", Confidence: "medium", Reason: "Checked source", ProposedBy: "agent:triage", fields: map[string]bool{"action": true, "confidence": true, "reason": true}})
+	m.form.ApplyProposal(proposal{Action: "none", Reason: "Checked source", ProposedBy: "agent:triage", fields: map[string]bool{"action": true, "reason": true}})
 	next, cmd := m.Update(tea.KeyPressMsg{Text: "s"})
 	if cmd == nil {
 		t.Fatal("save produced no script command")
@@ -1392,7 +1405,6 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	root := baselineRoot(t)
 	path := filepath.Join(root, "data/owner/repo/ledger.jsonl")
 	row := strings.Replace(baselineRow(1), `"action":""`, `"action":"archive"`, 1)
-	row = strings.Replace(row, `"confidence":""`, `"confidence":"obsolete"`, 1)
 	if err := os.WriteFile(path, []byte(row+baselineRow(2)), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1400,7 +1412,7 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	m := baselineModel(t, root)
 	m.activateTab(untriagedTab)
 	m.openItem(m.items[0])
-	if m.form.Action() != "archive" || m.form.Confidence() != "obsolete" {
+	if m.form.Action() != "archive" {
 		t.Fatal("unlisted decision values changed on load")
 	}
 	if _, cmd := m.requestSave(); cmd != nil {
@@ -1414,13 +1426,9 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	m.form.CycleValue(0)
 	m.commitDraftIfDirty()
 	m.loadForm(m.items[0])
-	if m.form.Action() != "none" || m.form.Confidence() != "obsolete" {
+	if m.form.Action() != "none" {
 		t.Fatal("draft lost corrected or unlisted values")
 	}
-	m.form.FocusField(fieldConfidence)
-	m.form.CycleValue(0)
-	m.commitDraftIfDirty()
-	m.loadForm(m.items[0])
 	if m.form.InvalidValues() != "" {
 		t.Fatal("corrected draft retained an invalid flag")
 	}
@@ -1432,7 +1440,7 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	if result := cmd().(applyDoneMsg); result.err != nil {
 		t.Fatal(result.err)
 	}
-	if got := baselineLedgerRow(t, root); got["action"] != "none" || got["confidence"] != "low" || got["reason"] != "Explicitly checked" {
+	if got := baselineLedgerRow(t, root); got["action"] != "none" || got["reason"] != "Explicitly checked" {
 		t.Fatalf("corrected decision = %v", got)
 	}
 }
@@ -1445,7 +1453,7 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 	if err := json.Unmarshal([]byte(baselineRow(1)), &row); err != nil {
 		t.Fatal(err)
 	}
-	row["action"], row["confidence"], row["reason"] = "none", "", reason
+	row["action"], row["reason"] = "none", reason
 	data, err := json.Marshal(row)
 	if err != nil {
 		t.Fatal(err)
@@ -1460,16 +1468,13 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 	if m.form.Reason() != reason {
 		t.Fatal("loaded reason was truncated")
 	}
-	if m.form.Confidence() != "" {
-		t.Fatal("blank saved confidence became a taxonomy default")
-	}
 	m.form.ApplyDraft(m.form.Snapshot())
 	if m.form.Reason() != reason {
 		t.Fatal("draft reason was truncated")
 	}
-	m.form.ApplyProposal(proposal{Action: "none", Confidence: "", Reason: reason, fields: map[string]bool{"action": true, "confidence": true, "reason": true}})
-	if m.form.Reason() != reason || m.form.Confidence() != "" {
-		t.Fatal("proposal reason or confidence changed")
+	m.form.ApplyProposal(proposal{Action: "none", Reason: reason, fields: map[string]bool{"action": true, "reason": true}})
+	if m.form.Reason() != reason {
+		t.Fatal("proposal reason changed")
 	}
 	_, cmd := m.requestSave()
 	if cmd == nil {
@@ -1478,7 +1483,7 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 	if result := cmd().(applyDoneMsg); result.err != nil {
 		t.Fatal(result.err)
 	}
-	if got := baselineLedgerRow(t, root); got["reason"] != reason || got["confidence"] != "" {
+	if got := baselineLedgerRow(t, root); got["reason"] != reason {
 		t.Fatalf("saved long reason changed: %v", got)
 	}
 }
@@ -1684,7 +1689,6 @@ func TestBaselineFixedBatchDoesNotMixLiveEvidence(t *testing.T) {
 		`{"kind":"issue","number":1,"agent_notes":null}`,
 		`{"kind":"issue","number":1,"reason":false}`,
 		`{"kind":"issue","number":1,"proposed_labels":["bug","bug"]}`,
-		`{"kind":"issue","number":1,"confidence":"unknown"}`,
 	} {
 		if err := os.WriteFile(decisions, []byte(invalid+"\n"), 0o644); err != nil {
 			t.Fatal(err)
@@ -1702,7 +1706,7 @@ func TestBaselineFixedBatchDoesNotMixLiveEvidence(t *testing.T) {
 		t.Fatalf("identity/metadata became an edit: %v", err)
 	}
 	row := baselineLedgerRow(t, root)
-	row["agent_notes"], row["reason"], row["confidence"], row["triaged_by"] = "old notes", "existing reason", "medium", "agent:original"
+	row["agent_notes"], row["reason"], row["triaged_by"] = "old notes", "existing reason", "agent:original"
 	saved, _ := json.Marshal(row)
 	if err := os.WriteFile(filepath.Join(root, "data/owner/repo/ledger.jsonl"), append(saved, '\n'), 0o644); err != nil {
 		t.Fatal(err)
@@ -1711,7 +1715,7 @@ func TestBaselineFixedBatchDoesNotMixLiveEvidence(t *testing.T) {
 	m.batches.records = records
 	m.openBatch(records[0].ID)
 	m.openItem(m.items[0])
-	if m.detail.item.AgentNotes != "" || m.form.Reason() != "existing reason" || m.form.Confidence() != "medium" {
+	if m.detail.item.AgentNotes != "" || m.form.Reason() != "existing reason" {
 		t.Fatal("partial notes proposal overwrote omitted decision fields or failed to clear notes")
 	}
 	if m.pendingProposals(records[0]) != 1 {
@@ -1732,7 +1736,7 @@ func TestBaselineFixedBatchDoesNotMixLiveEvidence(t *testing.T) {
 		t.Fatal(msg.err)
 	}
 	row = baselineLedgerRow(t, root)
-	if row["agent_notes"] != "" || row["reason"] != "existing reason" || row["confidence"] != "medium" || row["triaged_by"] != "agent:original" {
+	if row["agent_notes"] != "" || row["reason"] != "existing reason" || row["triaged_by"] != "agent:original" {
 		t.Fatalf("accepting notes patch changed omitted values or attribution: %v", row)
 	}
 	m.items, err = LoadLedger(root, "owner/repo")
@@ -1741,13 +1745,13 @@ func TestBaselineFixedBatchDoesNotMixLiveEvidence(t *testing.T) {
 	}
 
 	var clear proposal
-	if err := json.Unmarshal([]byte(`{"kind":"issue","number":1,"proposed_labels":[],"action":"","confidence":"","reason":""}`), &clear); err != nil {
+	if err := json.Unmarshal([]byte(`{"kind":"issue","number":1,"proposed_labels":[],"action":"","reason":""}`), &clear); err != nil {
 		t.Fatal(err)
 	}
 	records[0].Proposals[Key{Kind: "issue", Number: 1}] = clear
 	m.batches.records = records
 	m.openItem(m.items[0])
-	if m.form.Reason() != "" || m.form.Confidence() != "" || m.form.Action() != "" || m.pendingProposals(records[0]) != 1 {
+	if m.form.Reason() != "" || m.form.Action() != "" || m.pendingProposals(records[0]) != 1 {
 		t.Fatal("explicit empty decision was not recognized")
 	}
 	if msg := m.saveDecisionCmd()().(applyDoneMsg); msg.err != nil {
@@ -2651,7 +2655,7 @@ func TestGroupHandoffCopiesCurrentEditedContextForSelectedMembers(t *testing.T) 
 		t.Fatal(err)
 	}
 	pr["kind"], pr["number"], pr["title"] = "pr", 3, "Selected candidate"
-	pr["url"], pr["action"], pr["confidence"] = "https://github.com/owner/repo/pull/3", "keep-open", "high"
+	pr["url"], pr["action"] = "https://github.com/owner/repo/pull/3", "keep-open"
 	pr["reason"], pr["maintainer_notes"] = "Maintainer guidance", "Check compatibility first"
 	pr["review_request"] = map[string]string{"by": "agent:helper", "at": "2026-09-29T00:00:00Z", "reason": "Check project compatibility"}
 	prJSON, err := json.Marshal(pr)
@@ -2906,10 +2910,10 @@ func TestSuggestedActionsAndExplicitPendingReviewHaveSeparateTabs(t *testing.T) 
 	if listed := tabs[pendingReviewTab].Filter(flagged, Taxonomy{}); len(listed) != 1 || listed[0].Number != 7 {
 		t.Fatalf("Pending review did not follow the explicit flag independent of state or triage: %+v", listed)
 	}
-	ready := []Item{{Kind: "pr", Number: 1, State: "open", ProposedLabels: []string{"ready"}, Confidence: "high"}, {Kind: "issue", Number: 2, State: "open", ProposedLabels: []string{"ready"}, Confidence: "high"},
-		{Kind: "pr", Number: 4, State: "open", ProposedLabels: []string{"ready"}, Confidence: "medium"}}
-	if listed := tabs[mergeReadyTab].Filter(ready, Taxonomy{}); len(listed) != 1 || listed[0].Number != 1 {
-		t.Fatalf("Merge-Ready PRs did not list exactly the high-confidence ready PRs: %+v", listed)
+	ready := []Item{{Kind: "pr", Number: 1, State: "open", ProposedLabels: []string{"ready"}}, {Kind: "issue", Number: 2, State: "open", ProposedLabels: []string{"ready"}},
+		{Kind: "pr", Number: 4, State: "open", ProposedLabels: []string{"ready"}}, {Kind: "pr", Number: 5, State: "closed", ProposedLabels: []string{"ready"}}, {Kind: "pr", Number: 6, State: "open", Labels: []string{"ready"}}}
+	if listed := tabs[mergeReadyTab].Filter(ready, Taxonomy{}); len(listed) != 2 || listed[0].Number != 1 || listed[1].Number != 4 {
+		t.Fatalf("Merge-Ready PRs did not list the open ready PRs: %+v", listed)
 	}
 
 	m := baselineModel(t, baselineRoot(t))

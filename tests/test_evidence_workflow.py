@@ -257,7 +257,7 @@ class EvidenceTests(Workspace):
 
         calls = len(self.calls())
         args = ("--expected-repo", "owner/repo", "record", "--evidence", f"issue:2:{snapshots[2]}",
-                "--evidence", f"issue:3:{snapshots[3]}", "--outcome", "unresolved", "--confidence", "low",
+                "--evidence", f"issue:3:{snapshots[3]}", "--outcome", "unresolved",
                 "--shared", "Both describe the same screen", "--difference", "The trigger is not established",
                 "--gap", "Need a reproduction from #3", "--by", "agent:tester")
         saved = self.json_cli("duplicate-assessment", *args)
@@ -285,8 +285,20 @@ class EvidenceTests(Workspace):
         self.assertEqual([row["current"] for row in changed["current"]], [True, False])
         group_status = self.json_cli("group-assessment", "--expected-repo", "owner/repo", "show", grouped["assessment_id"])
         self.assertEqual([row["ledger_revision_current"] for row in group_status["current"]["sources"]], [True, False])
-        self.assertIn("high confidence requires", self.run_cli("duplicate-assessment", *args[:args.index("--confidence")],
-                                                                  "--confidence", "high", *args[args.index("--shared"):], ok=False).stderr)
+        refreshed = self.json_cli("duplicate-assessment", *args)
+        self.assertNotIn("confidence", refreshed)
+        self.assertIn("Need a reproduction from #3", refreshed["gaps"])
+        self.assertIn("issue:3: selected revision differs from the ledger", refreshed["gaps"])
+        self.assertIn("unrecognized arguments: --confidence high", self.run_cli("duplicate-assessment", *args, "--confidence", "high", ok=False).stderr)
+
+        partial = self.cache("fetch", "--kind", "issue", "--number", "2", "--profile", "discussion", "--mode", "refresh", "--request-budget", "2")
+        partial_args = [f"issue:2:{partial['snapshot_id']}" if value == f"issue:2:{snapshots[2]}" else value for value in args]
+        calls = len(self.calls())
+        incomplete = self.json_cli("duplicate-assessment", *partial_args)
+        self.assertIn("issue:2: comments is not complete", incomplete["gaps"])
+        self.assertIn("Need a reproduction from #3", incomplete["gaps"])
+        self.assertIn("issue:3: selected revision differs from the ledger", incomplete["gaps"])
+        self.assertEqual(len(self.calls()), calls)
 
         self.json_cli("not-duplicate", "--key", "issue:2", "--key", "issue:3", "--by", "maintainer", "--note", "Different triggers")
         duplicate = list(args)
@@ -327,7 +339,7 @@ class EvidenceTests(Workspace):
         self.responses["repos/owner/repo/issues/2/comments?per_page=100&page=1"] = dict(data=[])
         row = item(2, issue["title"])
         row["updated_at"] = issue["updated_at"]
-        row.update(action="", confidence="")
+        row.update(action="")
         (self.root / "data/owner/repo/ledger.jsonl").write_text(json.dumps(row) + "\n")
 
         selected = self.cache("fetch", "--kind", "issue", "--number", "2", "--profile", "discussion")

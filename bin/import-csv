@@ -3,7 +3,7 @@
 
 Usage: bin/import-csv PATH [--by NAME]
 
-Editable columns: proposed_labels (a JSON list), action, confidence, reason, maintainer_notes.
+Editable columns: proposed_labels (a JSON list), action, reason, maintainer_notes.
 Keep kind, number, and row_revision from the export. Use bin/review-request for Pending review. Export again after any ledger change.
 """
 
@@ -19,7 +19,7 @@ from _row_revision import row_revision
 from _triage import LEDGER_PATH, load_ledger, load_taxonomy, now_iso, observed_catalog, save_ledger
 from _storage import locked
 
-DECISION = ("proposed_labels", "action", "confidence", "reason")
+DECISION = ("proposed_labels", "action", "reason")
 EDITABLE = (*DECISION, "maintainer_notes")
 REQUIRED = {"kind", "number", "row_revision"}
 

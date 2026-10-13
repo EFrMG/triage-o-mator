@@ -13,11 +13,11 @@ import time
 from _acquire import GitHubReader, ReadFailure, now
 from _cache import EvidenceCache
 from _checks import FAILURES, bounded, verify
-from _evidence import artifact_ref, canonical, fields, repository, same_repository, timestamp
+from _evidence import artifact_ref, canonical, digest, fields, repository, same_repository, timestamp, validate_ref
 from _jobs import Cooldown
 from _pr_evidence import pages
 from _reader import read_evidence
-from _storage import locked
+from _storage import atomic_writer, locked, sync_directory
 from _triage import REPO
 
 
@@ -42,6 +42,70 @@ def selected(number, snapshot, check_id, source_repo, host):
         raise ValueError("selected check does not belong to the selected PR head")
 
     return evidence, entry
+
+
+def association_scope(identity, number, snapshot, source_repo, check_id):
+    return dict(repository=identity, number=number, snapshot_id=snapshot, source_repository=source_repo, check_id=check_id)
+
+
+def association_path(cache, scope):
+    return cache.path("ci-logs", digest(canonical(scope)) + ".json")
+
+
+def publish_association(cache, packet, ref):
+    scope = association_scope(packet["repository"], packet["number"], packet["snapshot_id"], packet["source_repository"]["full_name"], packet["check_id"])
+    pointer = dict(schema_version=1, artifact="ci-failure-log-pointer", scope=scope, log_object=ref)
+    payload = canonical(pointer) + "\n"
+    if len(payload.encode("utf-8")) > 4096:
+        raise ValueError("CI log association exceeds its bounded size")
+
+    with locked(cache.path("cache.json")):
+        cache.require_ready(bound=True)
+        path = association_path(cache, scope)
+        path.parent.mkdir(exist_ok=True)
+        sync_directory(cache.root)
+        previous = path.stat().st_blocks * 512 if path.exists() else 0
+        used = cache._check_capacity(max(0, cache._estimated_allocation(len(payload.encode("utf-8"))) - previous))
+        with atomic_writer(path) as output:
+            output.write(payload)
+
+        cache._record_growth(used, path.stat().st_blocks * 512 - previous)
+
+
+def associated(identity, number, snapshot, source_repo, check_id, host="github.com"):
+    """The pointer selects one immutable packet; a failed selection never searches older objects."""
+    cache = EvidenceCache(identity)
+    scope = association_scope(identity, number, snapshot, source_repo, check_id)
+    path = association_path(cache, scope)
+    if not path.exists():
+        return None
+
+    if not path.is_file() or path.stat().st_size > 4096:
+        raise ValueError("CI log association is invalid or exceeds its bounded size")
+
+    with path.open("rb") as source:
+        payload = source.read(4097)
+    if len(payload) > 4096:
+        raise ValueError("CI log association exceeds its bounded size")
+    pointer = json.loads(payload)
+    fields(pointer, ("schema_version", "artifact", "scope", "log_object"))
+    if type(pointer["schema_version"]) is not int or pointer["schema_version"] != 1 or pointer["artifact"] != "ci-failure-log-pointer" or canonical(pointer["scope"]) != canonical(scope):
+        raise ValueError("CI log association differs from the selected source/snapshot")
+
+    ref = pointer["log_object"]
+    validate_ref(ref)
+    if ref["format"] != "json":
+        raise ValueError("CI log association must select a typed JSON packet")
+
+    result = read(number, snapshot, ref["sha256"], ref["bytes"], host=host, max_lines=20, pins=dict(check_id=check_id))
+    if result["packet"]["source_repository"]["full_name"] != source_repo:
+        raise ValueError("CI log association selects a foreign check source")
+    with path.open("rb") as source:
+        current = source.read(4097)
+    if current != payload:
+        raise ValueError("CI log association changed during verification; read it again")
+
+    return result
 
 
 def api_url(host, resource):
@@ -307,6 +371,7 @@ def fetch(number, snapshot, check_id, source_repo, run_id, attempt, job_id, host
         if ref["bytes"] > 2000000:
             raise ValueError("CI log metadata packet exceeds the bounded object limit")
         cache.store_object(ref, payload)
+        publish_association(cache, packet, ref)
 
     return dict(log_object=ref, status="retained" if segments else "unavailable", **presentation(packet))
 

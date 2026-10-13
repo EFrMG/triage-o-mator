@@ -23,12 +23,13 @@ def main():
     parser.add_argument("--request-budget", type=int, default=100)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--include-failure-logs", action="store_true", help="include bounded cached failure excerpts offline; never acquire logs")
     args = parser.parse_args()
     if args.expected_repo != REPO:
         parser.error("selected repository changed")
 
     result = read(args.number, mode=args.mode, host=args.host, snapshot_id=args.snapshot, max_age=args.max_age,
-                  budget=args.request_budget, offset=args.offset, limit=args.limit)
+                  budget=args.request_budget, offset=args.offset, limit=args.limit, include_logs=args.include_failure_logs)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

@@ -1195,8 +1195,61 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 	missing.data = page
 	m = baselineSend(m, missing)
 	text := ansi.Strip(m.detail.View())
-	if !strings.Contains(text, "old-head") || !strings.Contains(text, "new-head") || !strings.Contains(renderChecks(page), "3 historical or suite") || !strings.Contains(renderChecks(page), "fork/repo") {
+	if !strings.Contains(text, "Checks differ from the selected PR head") || strings.Contains(renderChecks(page), "old-head") || strings.Contains(renderChecks(page), "https://github.com/") || !strings.Contains(renderChecks(page), "3 historical or suite") || !strings.Contains(renderChecks(page), "fork/repo") {
 		t.Fatal("checks view hid revision/source/omission distinctions")
+	}
+	// Captured failure text stays inline, literal and bounded, while empty coverage stays distinct from missing evidence.
+	failure := page
+	failure.Rows = append([]checkRow{}, page.Rows...)
+	failure.Rows[0].Result = "failed"
+	failure.Rows[0].Conclusion = "failure"
+	failure.Result = "failed"
+	failure.ObservedAt = "2026-10-13T09:36:12.123456+00:00"
+	failure.ResultCounts.Passed, failure.ResultCounts.Failed = 19, 1
+	logText := "##[error] Compile failed\n````\n# Source output, not a heading\n"
+	failure.Rows[0].FailureLog = &checkFailureLog{State: "retained", LogObject: &checkLogObject{SHA256: strings.Repeat("a", 64), Bytes: 1000, Format: "json"}, WorkflowName: "Build", JobName: "Linux tests", SelectionBasis: "error-pattern context", DownloadPartial: true, Windows: []checkLogWindow{{StartLine: 10, EndLine: 12, Text: logText}}, Omissions: []string{"Intervening lines omitted"}}
+	if err := validateChecksPage(failure, m.repo, 3, "offline", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	rendered := renderChecks(failure)
+	for _, want := range []string{"Captured failure excerpt", "Selection: error-pattern context", "Linux tests", "Source lines 10–12", "Partial log capture", "Intervening lines omitted", "`````\n" + logText} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("failure view omitted %q", want)
+		}
+	}
+	if !strings.Contains(rendered, "Observed 2026-10-13 09:36 UTC") || strings.Index(rendered, "Selection:") < strings.Index(rendered, logText) || strings.Index(rendered, "Partial log capture") < strings.Index(rendered, logText) {
+		t.Fatal("failure view put capture metadata before the compact excerpt")
+	}
+	if strings.Contains(rendered, strings.Repeat("a", 64)) {
+		t.Fatal("failure view exposed storage object identity")
+	}
+	log := failure.Rows[0].FailureLog
+	log.Windows[0].Text = strings.Repeat("x", 8193)
+	if err := validateChecksPage(failure, m.repo, 3, "offline", "", 0); err == nil {
+		t.Fatal("oversize failure excerpt was accepted")
+	}
+	log.Windows[0].Text = logText
+	log.Windows[0].EndLine = 30
+	if err := validateChecksPage(failure, m.repo, 3, "offline", "", 0); err == nil {
+		t.Fatal("failure excerpt line budget was ignored")
+	}
+	log.Windows[0].EndLine = 12
+	log.State, log.Windows = "invalid", nil
+	if !strings.Contains(renderChecks(failure), "could not be verified") {
+		t.Fatal("unverifiable failure excerpt was hidden")
+	}
+	failure.Rows[0].FailureLog = &checkFailureLog{State: "unavailable", Omissions: []string{"The job log expired (HTTP 404)"}, DisplayProblems: []string{"No source lines retained"}, DownloadPartial: true}
+	unavailable := renderChecks(failure)
+	if !strings.Contains(unavailable, "HTTP 404") || !strings.Contains(unavailable, "No source lines retained") || !strings.Contains(unavailable, "Partial log capture") {
+		t.Fatal("unavailable failure excerpt hid capture limitations")
+	}
+	failure.Rows[0].FailureLog = &checkFailureLog{State: "missing"}
+	if !strings.Contains(renderChecks(failure), "No captured failure excerpt") {
+		t.Fatal("missing failure excerpt was hidden")
+	}
+	empty := checksPage{Coverage: "complete", Freshness: "within-window", Result: "empty"}
+	if !strings.Contains(renderChecks(empty), "No checks or statuses were recorded") || strings.Contains(renderChecks(empty), "Coverage remains incomplete") {
+		t.Fatal("complete empty CI became missing evidence")
 	}
 	if !strings.Contains(fmt.Sprint(m.footerGroups()), "refresh checks") {
 		t.Fatal("Checks refresh key was missing from help")

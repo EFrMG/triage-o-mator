@@ -278,13 +278,80 @@ def summarize(entries):
 
             rows.append(suite_row)
 
-    rows.sort(key=lambda value: (value["repository"], value["source"], value["app"] or "", value["name"], value["internal_id"]))
+    rows.sort(key=lambda value: (value["result"] != "failed", value["repository"], value["source"], value["app"] or "", value["name"], value["internal_id"]))
     results = {value["result"] for value in rows}
     observed = "failed" if "failed" in results else "pending" if "pending" in results else "unknown" if "unknown" in results else "passed" if rows else "empty"
     return rows, observed
 
 
-def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86400, budget=100, offset=0, limit=20):
+def failure_logs(rows, evidence, host):
+    from _ci_logs import associated
+
+    attempted = 0
+    for value in rows:
+        if value["result"] != "failed":
+            continue
+
+        log = dict(state="unavailable", windows=[], omissions=[], display_problems=[])
+        value["failure_log"] = log
+        if value["source"] != "check-run":
+            log["problem"] = "This observation has no individual Actions job log linkage"
+            continue
+
+        if attempted >= 8:
+            log.update(state="not-shown", problem="Failure excerpt lookup limit reached for this page")
+            continue
+
+        attempted += 1
+        try:
+            result = associated(evidence["repository"], evidence["identity"]["number"], evidence["snapshot_id"], value["repository"], value["internal_id"], host)
+            if result is None:
+                source = evidence["data"]["checks"][value["source_index"]]["data"]
+                slug = object_field(source, "app").get("slug")
+                if isinstance(slug, str) and slug and slug != "github-actions":
+                    log.update(state="unavailable", problem="Failure log acquisition supports GitHub Actions jobs; this provider has no retained Actions job linkage")
+                else:
+                    log.update(state="missing", problem="No retained failure log for this exact check source and snapshot")
+                continue
+
+            packet = result["packet"]
+            log.update(state="retained" if result["windows"] else "unavailable", log_object=result["log_object"],
+                       **{key: packet[key] for key in ("workflow_name", "job_name", "fetched_at", "selection_basis", "download_partial", "binding_revalidated", "omissions")},
+                       display_problems=list(result["display_problems"]), continuation=result["continuation"])
+            remaining = 8192
+            for source in result["windows"]:
+                if remaining <= 0:
+                    log["display_problems"].append("Failure excerpt display reached its 8192-byte limit")
+                    log["continuation"] = dict(log_object=result["log_object"], number=evidence["identity"]["number"], snapshot_id=evidence["snapshot_id"], start_line=source["start_line"])
+                    break
+
+                encoded = source["text"].encode("utf-8")
+                text = encoded[:remaining].decode("utf-8", errors="ignore")
+                clipped = len(encoded) > remaining
+                if not text:
+                    log["display_problems"].append("Failure excerpt display cannot fit the next UTF-8 source character")
+                    log["continuation"] = dict(log_object=result["log_object"], number=evidence["identity"]["number"], snapshot_id=evidence["snapshot_id"], start_line=source["start_line"])
+                    break
+
+                end_line = source["start_line"] + len(text.splitlines(keepends=True)) - 1
+                log["windows"].append(dict(start_line=source["start_line"], end_line=end_line, text=text, display_truncated=source["display_truncated"] or clipped))
+                remaining -= len(text.encode("utf-8"))
+                if clipped:
+                    log["display_problems"].append("Source line display was shortened; read the exact cached log object for full retained context")
+                    log["continuation"] = dict(log_object=result["log_object"], number=evidence["identity"]["number"], snapshot_id=evidence["snapshot_id"], start_line=end_line)
+                    break
+
+            if not result["windows"]:
+                log["problem"] = "Selected capture retained no log bytes; inspect its omissions"
+            elif not log["windows"]:
+                log.update(state="not-shown", problem="Retained log source could not fit the bounded display")
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            log.clear()
+            log.update(windows=[], omissions=[], display_problems=[])
+            log.update(state="invalid", problem=bounded(str(error), 512))
+
+
+def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86400, budget=100, offset=0, limit=20, include_logs=False):
     window(offset, limit, 50)
     if offset and snapshot_id is None:
         raise ValueError("continuation requires an explicit --snapshot; select the first page's snapshot ID")
@@ -321,9 +388,13 @@ def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86
 
     raw_command = ["bin/cache", "--expected-repo", REPO, "--host", host, "chunk", "--snapshot", snapshot, "--kind", "pr", "--number", str(number), "--component", "checks"] if snapshot and descriptor and descriptor["object"] else None
     counts = {value: sum(row["result"] == value for row in rows) for value in ("passed", "failed", "pending", "unknown")}
+    selected_rows = rows[offset:offset + limit]
+    if include_logs:
+        failure_logs(selected_rows, evidence, host)
+
     return dict(repository=evidence["repository"], allowed_repositories=allowed, kind="pr", number=number, mode=mode, snapshot_id=snapshot,
                 observed_head_sha=(evidence["revision"] or {}).get("head_sha"), checks_head_sha=descriptor["revision"]["head_sha"] if descriptor else None,
                 observed_at=descriptor["fetched_at"] if descriptor else None, coverage=coverage, freshness=freshness, freshness_basis=evidence["freshness_basis"],
                 problems=problems[:20], observed_result=observed, result_counts=counts, raw_count=len(entries), historical_or_suite_omissions=len(entries) - len(rows),
-                rows=rows[offset:offset + limit], pagination=pagination,
+                rows=selected_rows, pagination=pagination,
                 next_offset=pagination["next_offset"], requests=evidence["stats"]["requests"], raw_command=raw_command)

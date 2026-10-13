@@ -4,6 +4,8 @@ The Reposition bridge adds `bin/cache search-index`, `query`, `retrieve` and `se
 
 It searches explicit immutable snapshots or frozen corpora and resolves selected hits to verified source fragments. The default literal `bin/cache search` and existing readers remain usable without Reposition, although it is recommended to use it.
 
+Snapshot indexing includes the `checks` component, so check names, statuses and other retained CI metadata can be queried and retrieved offline. Separately captured failure-log objects and their display associations are not snapshot components and are not indexed by Reposition. The Checks tab uses the owning `pr-checks` and `pr-check-log` readers for those exact sources; it does not require a ranked search index.
+
 ## Supported versions and installation
 
 This bridge supports Reposition **0.2.0.dev1**, with evidence-cache format **1**. The checked-in release bundle under `vendor/reposition/0.2.0.dev1/` contains the wheel, the source archive from commit `10bd0641b50d514984dad6dee480f140ab86ee44`, pinned pip and setuptools wheels, an exact-wheel requirements file and a checksummed manifest. Reposition's adapted MIT evidence validator originates at triage-o-mator commit `dddc487660ffda17ba7e3626c9d9be72e29a6dce`; the current-master compatibility check uses `80cdcdd77d875c4fdcd96f3367f2f8a7d253e63a`. This validates the selected build and cache format, not every future Python or Reposition release.

@@ -402,6 +402,71 @@ print(json.dumps(label))
         self.assertEqual(saved["action_operations"]["request-review"], "comment")
 
 
+class VerificationSettingsTests(Workspace):
+    def test_local_settings_preserve_permission_guidance_and_repository_boundaries(self):
+        args = ("--expected-repo", "owner/repo")
+        path = self.root / "config/local/agentic-verification.json"
+        initial = self.json_cli("verification-settings", "status", *args)
+        self.assertEqual(initial["repository"], "owner/repo")
+        self.assertEqual((initial["enabled"], initial["guidance"]), (False, ""))
+        self.assertRegex(initial["revision"], r"^[0-9a-f]{64}$")
+        self.assertFalse(path.parent.exists())
+
+        draft = self.root / "verification-guidance.txt"
+        draft.write_text("Use the prepared sandbox. Limit checks to 60 seconds.\nUnicode: café", encoding="utf-8")
+        guidance = self.json_cli("verification-settings", "set-guidance", *args, "--expected-revision", initial["revision"], "--guidance-file", str(draft))
+        self.assertFalse(guidance["enabled"])
+        self.assertEqual(guidance["guidance"], draft.read_text(encoding="utf-8"))
+        saved = path.read_bytes()
+        self.run_cli("verification-settings", "set-enabled", *args, "--enabled", "on", "--expected-revision", initial["revision"], ok=False)
+        self.assertEqual(path.read_bytes(), saved)
+        enabled = self.json_cli("verification-settings", "set-enabled", *args, "--enabled", "on", "--expected-revision", guidance["revision"])
+        self.assertTrue(enabled["enabled"])
+        self.assertEqual(enabled["guidance"], guidance["guidance"])
+        draft.write_text("Updated sandbox instructions")
+        updated = self.json_cli("verification-settings", "set-guidance", *args, "--expected-revision", enabled["revision"], "--guidance-file", str(draft))
+        self.assertTrue(updated["enabled"])
+
+        (self.root / "config/repo").write_text("other/repo\n")
+        other_args = ("--expected-repo", "other/repo")
+        other = self.json_cli("verification-settings", "status", *other_args)
+        self.assertEqual((other["enabled"], other["guidance"]), (False, ""))
+        self.assertNotEqual(other["revision"], initial["revision"])
+        saved = path.read_bytes()
+        self.run_cli("verification-settings", "set-enabled", *args, "--enabled", "off", "--expected-revision", updated["revision"], ok=False)
+        self.run_cli("verification-settings", "set-enabled", *other_args, "--enabled", "on", "--expected-revision", updated["revision"], ok=False)
+        self.assertEqual(path.read_bytes(), saved)
+        self.json_cli("verification-settings", "set-guidance", *other_args, "--guidance-file", str(draft), "--expected-revision", other["revision"])
+        (self.root / "config/repo").write_text("owner/repo\n")
+        self.assertEqual(self.json_cli("verification-settings", "status", *args), updated)
+        disabled = self.json_cli("verification-settings", "set-enabled", *args, "--enabled", "off", "--expected-revision", updated["revision"])
+        self.assertEqual(disabled["guidance"], updated["guidance"])
+        self.assertFalse(disabled["enabled"])
+        self.assertEqual(json.loads(path.read_text())["repositories"]["other/repo"]["guidance"], draft.read_text())
+
+        saved = path.read_bytes()
+        for invalid in ("x" * 16001, "has\x00nul"):
+            draft.write_text(invalid)
+            self.run_cli("verification-settings", "set-guidance", *args, "--expected-revision", disabled["revision"], "--guidance-file", str(draft), ok=False)
+            self.assertEqual(path.read_bytes(), saved)
+
+        draft.write_bytes(b"\xff")
+        self.run_cli("verification-settings", "set-guidance", *args, "--expected-revision", disabled["revision"], "--guidance-file", str(draft), ok=False)
+        self.assertEqual(path.read_bytes(), saved)
+        malformed = ["not JSON", '{"schema_version":1,"schema_version":1,"repositories":{}}',
+                     json.dumps({"schema_version": True, "repositories": {}}),
+                     json.dumps({"schema_version": 1, "repositories": {"owner/repo": {"enabled": "false", "guidance": ""}}}),
+                     json.dumps({"schema_version": 1, "repositories": {"owner/repo": {"enabled": False, "guidance": "", "command": "run"}}})]
+        for invalid in malformed:
+            path.write_text(invalid)
+            self.run_cli("verification-settings", "status", *args, ok=False)
+            self.run_cli("verification-settings", "set-enabled", *args, "--enabled", "on", "--expected-revision", disabled["revision"], ok=False)
+            self.assertEqual(path.read_text(), invalid)
+
+        self.assertEqual(self.calls(), [])
+        self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
+
+
 class LabelApplicationTests(Workspace):
     def test_action_modes_are_explicit_per_repository_and_reset_after_guidance_changes(self):
         args = ("--expected-repo", "owner/repo")

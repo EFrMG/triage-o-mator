@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -12,16 +14,17 @@ type automationsUI struct {
 	pendingReviewHold       bool
 	pending, paused         []string
 	actions                 []automationAction
+	verification            verificationStatus
 }
 
-// automationCard is one row of Settings → Automations: Labeling, Scoring, the Pending review hold, then one card per action type.
+// automationCard is one row of Settings → Automations: Labeling, Scoring, Agentic verification, the Pending review hold, then one card per action type.
 type automationCard struct {
 	kind   string
 	action automationAction
 }
 
 func (m model) automationCards() []automationCard {
-	cards := []automationCard{{kind: "labeling"}, {kind: "scoring"}, {kind: "review-hold"}}
+	cards := []automationCard{{kind: "labeling"}, {kind: "scoring"}, {kind: "verification"}, {kind: "review-hold"}}
 	for _, action := range m.settings.automations.actions {
 		cards = append(cards, automationCard{kind: "action", action: action})
 	}
@@ -74,11 +77,19 @@ type automationPlan struct {
 	PreviewSHA256 string `json:"preview_sha256"`
 }
 
+type verificationStatus struct {
+	Repository string `json:"repository"`
+	Enabled    bool   `json:"enabled"`
+	Guidance   string `json:"guidance"`
+	Revision   string `json:"revision"`
+}
+
 type automationMsg struct {
 	root, repo, operation string
 	request               uint64
 	status                automationStatus
 	actions               actionPolicyStatus
+	verification          verificationStatus
 	err                   error
 }
 
@@ -94,7 +105,14 @@ func readAutomationStatus(root, repo string, msg *automationMsg) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal([]byte(out), &msg.actions)
+	if err := json.Unmarshal([]byte(out), &msg.actions); err != nil {
+		return err
+	}
+	out, err = runScript(root, "verification-settings", "status", "--expected-repo", repo)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(out), &msg.verification)
 }
 
 func automationStatusCmd(root, repo string, request uint64) tea.Cmd {
@@ -191,6 +209,53 @@ func automationReviewHoldCmd(root, repo string, request uint64, before, after bo
 	}
 }
 
+func verificationSaveCmd(root, repo string, request uint64, revision string, enabled *bool, guidance string) tea.Cmd {
+	return func() tea.Msg {
+		msg := automationMsg{root: root, repo: repo, request: request, operation: "verification"}
+		args := []string{"--expected-repo", repo, "--expected-revision", revision}
+		if enabled != nil {
+			mode := "off"
+			if *enabled {
+				mode = "on"
+			}
+			args = append([]string{"set-enabled", "--enabled", mode}, args...)
+		} else {
+			file, err := os.CreateTemp("", "triage-verification-*.md")
+			if err != nil {
+				msg.err = err
+				return msg
+			}
+			path := file.Name()
+			defer os.Remove(path)
+			_, writeErr := file.WriteString(guidance)
+			closeErr := file.Close()
+			if writeErr != nil {
+				msg.err = writeErr
+				return msg
+			}
+			if closeErr != nil {
+				msg.err = closeErr
+				return msg
+			}
+			args = append([]string{"set-guidance", "--guidance-file", path}, args...)
+		}
+		if _, err := runScript(root, "verification-settings", args...); err != nil {
+			msg.err = err
+			return msg
+		}
+		msg.err = readAutomationStatus(root, repo, &msg)
+		return msg
+	}
+}
+
+func (m model) verificationPrompt() string {
+	return m.yankHeader("Agentic verification") + fmt.Sprintf(`
+Please follow prompts/verify-locally.md for %s from %s. Read this repository's current setting through bin/verification-settings status --expected-repo %s before running checks.
+
+Help maintain the editable environment guidance if needed; empty guidance does not require profile creation when the prepared environment is clear. The user prepares the local environment; the agent chooses relevant bounded reproduction, build and test checks for the exact named issues or PRs in the requested task. Ask for item keys when scope is unclear. With no selected items, prepare the setup/profile only and do not invent items. ON authorizes those local checks in the requested task; OFF grants no standing permission; an explicit task request may separately authorize checks. Report the selected revision, commands, outcomes and gaps. Do not provision an environment or act on GitHub.
+`, m.repo, m.installRoot, m.repo)
+}
+
 func (m model) automationsView() string {
 	state := "Loading…"
 	labeling := "Reading repository setting…"
@@ -217,6 +282,12 @@ func (m model) automationsView() string {
 			cards = append(cards, [2]string{"Labeling", labeling})
 		case "scoring":
 			cards = append(cards, [2]string{"Scoring", "Local · 0–5 quality/readiness · y copies a bounded pass prompt"})
+		case "verification":
+			summary := "OFF · e edits environment guidance · agent chooses relevant local checks"
+			if m.settings.automations.verification.Enabled {
+				summary = "ON · Relevant local checks authorized for the requested task · e edits guidance"
+			}
+			cards = append(cards, [2]string{"Agentic verification", summary})
 		case "review-hold":
 			summary := "OFF · Pending review does not change direct action eligibility"
 			if m.settings.automations.pendingReviewHold {
@@ -293,7 +364,15 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.settings.busy = true
 		m.settings.request++
 		return m, automationStatusCmd(m.installRoot, m.repo, m.settings.request)
-	case "enter", "l", "right", "space", "e":
+	case "e":
+		if m.automationCard().kind == "verification" {
+			if !m.settings.automations.loaded {
+				return m, nil
+			}
+			return m.openSettingsEditor(settingsRow{kind: "verification", name: "Agentic verification", description: m.settings.automations.verification.Guidance}, false)
+		}
+		fallthrough
+	case "enter", "l", "right", "space":
 		card := m.automationCard()
 		if card.kind == "scoring" {
 			m.status = "Press y to copy the bounded local scoring prompt."
@@ -305,6 +384,10 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.settings.busy = true
 		m.settings.request++
+		if card.kind == "verification" {
+			after := !m.settings.automations.verification.Enabled
+			return m, verificationSaveCmd(m.installRoot, m.repo, m.settings.request, m.settings.automations.verification.Revision, &after, "")
+		}
 		if card.kind == "action" {
 			action := card.action
 			after := "execute"
@@ -321,6 +404,10 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, automationToggleCmd(m.installRoot, m.repo, m.settings.request, before, !before)
 	case "y":
 		card := m.automationCard()
+		if card.kind == "verification" {
+			m.status = "Taking Agentic verification prompt…"
+			return m, yankCmd(m.installRoot, m.repo, "Agentic verification prompt", m.verificationPrompt())
+		}
 		if card.kind == "scoring" {
 			m.status = "Taking Item scoring prompt…"
 			return m, yankCmd(m.installRoot, m.repo, "Item scoring prompt", m.scoringPrompt())
@@ -352,19 +439,29 @@ func (m model) finishAutomation(msg automationMsg) (tea.Model, tea.Cmd) {
 		m.failErr("Couldn't update Automations", msg.err)
 		return m, nil
 	}
-	if msg.status.Repository != m.repo || msg.actions.Repository != m.repo {
+	if msg.status.Repository != m.repo || msg.actions.Repository != m.repo || msg.verification.Repository != m.repo {
 		m.fail("Automation status belongs to another repository.")
 		return m, nil
 	}
+	if _, err := hex.DecodeString(msg.verification.Revision); err != nil || len(msg.verification.Revision) != 64 {
+		m.fail("Agentic verification status has an invalid revision; refresh Automations.")
+		return m, nil
+	}
+
 	actions := []automationAction{}
 	for _, action := range msg.actions.Actions {
 		if action.Writable {
 			actions = append(actions, action)
 		}
 	}
-	m.settings.automations = automationsUI{loaded: true, labelingEnabled: msg.status.Enabled, pendingReviewHold: msg.actions.PendingReviewHold, pending: msg.status.Pending, paused: msg.status.Paused, actions: actions}
-	m.settings.selected = minInt(m.settings.selected, 2+len(actions))
-	if msg.operation == "toggle" {
+	m.settings.automations = automationsUI{loaded: true, labelingEnabled: msg.status.Enabled, pendingReviewHold: msg.actions.PendingReviewHold, pending: msg.status.Pending, paused: msg.status.Paused, actions: actions, verification: msg.verification}
+	m.settings.selected = minInt(m.settings.selected, len(m.automationCards())-1)
+	if msg.operation == "verification" {
+		if m.settings.editor != nil && m.settings.editor.row.kind == "verification" {
+			m.settings.editor = nil
+		}
+		m.status = "Agentic verification setting saved for " + m.repo + "."
+	} else if msg.operation == "toggle" {
 		state := "OFF"
 		if msg.status.Enabled {
 			state = "ON"

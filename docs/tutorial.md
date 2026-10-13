@@ -92,6 +92,8 @@ Keep exploit details out of the flag reason. The **Pending review** tab lists fl
 
 `u` twice clears a saved decision while keeping notes and any explicit Pending review request. **Settings → Automations → Labeling** controls the separate proposed-label pass and is ON by default. **Hold actions for Pending review** defaults to OFF; turn it ON if flagged items should stage otherwise executable action proposals for a person. The separate [Item Score](item-score.md) assesses an item's quality and readiness from saved evidence; press `y` on Scoring to copy its bounded pass prompt.
 
+**Settings → Automations → Agentic verification** lets an agent choose relevant local checks in your prepared environment during a requested triage or review task. It defaults to OFF; Enter or Space toggles it, `e` edits environment guidance and `y` copies an agent prompt. The [verification playbook](../prompts/verify-locally.md) keeps the tested version and observed results in notes, separate from CI evidence and GitHub approval.
+
 ## 8. Resolve likely duplicates
 
 - Candidate scores come from title similarity in the local ledger. They are prompts to compare items, not evidence by themselves, and differently worded duplicates may not appear.

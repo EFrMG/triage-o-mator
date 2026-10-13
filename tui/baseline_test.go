@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "verification-settings"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -806,7 +806,91 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	if m.settings.selected != 2 || m.settings.automations.pendingReviewHold {
+	if m.settings.selected != 2 || m.settings.automations.verification.Enabled {
+		t.Fatal("Agentic verification did not default to OFF after Scoring")
+	}
+	if prompt := m.verificationPrompt(); !strings.Contains(prompt, "prompts/verify-locally.md") || !strings.Contains(prompt, m.repo) || !strings.Contains(prompt, m.installRoot) {
+		t.Fatal("verification prompt lacked pinned scope")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("verification toggle did not save")
+	}
+	m = baselineSend(m, cmd().(automationMsg))
+	if !m.settings.automations.verification.Enabled {
+		t.Fatal("verification did not enable")
+	}
+	m.settings.automations.verification.Guidance = strings.Repeat("Prepared environment.\n", 400)
+	longGuidance := m.settings.automations.verification.Guidance
+	m = baselineSend(m, tea.KeyPressMsg{Text: "e"})
+	if m.settings.editor == nil || m.settings.editor.field != 1 {
+		t.Fatal("verification guidance did not open focused")
+	}
+	if strings.Contains(ansi.Strip(m.viewContent()), "The user prepares the environment; the agent chooses relevant checks.") {
+		t.Fatal("verification composer retained the removed instruction")
+	}
+	if m.settings.editor.description.Value() != longGuidance {
+		t.Fatal("opening verification editor truncated saved guidance")
+	}
+	m = baselineSend(m, settingsEditorMsg{root: root, repo: m.repo, kind: "verification", originalName: "Agentic verification", field: 1, request: m.settings.request, text: "Prepared checkout at /tmp/project.\nUse installed dependencies.\n"})
+	if !m.settings.editor.previewing || !strings.Contains(m.settings.editor.description.Value(), "\nUse installed dependencies.\n") {
+		t.Fatal("verification external editor did not retain multiline guidance for review")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	if m.settings.editor.previewing {
+		t.Fatal("Ctrl-P did not return verification preview to the editor")
+	}
+	m.settings.editor.description.SetValue("Use prepared checkout at /tmp/project. Run relevant tests.")
+	beforeGuidance := m.settings.editor.description.Value()
+	m = baselineSend(m, settingsEditorMsg{root: root, repo: "other/repo", kind: "verification", originalName: "Agentic verification", field: 1, request: m.settings.request, text: "stale"})
+	if m.settings.editor.description.Value() != beforeGuidance {
+		t.Fatal("stale verification editor replaced guidance")
+	}
+	persisted, err := runScript(root, "verification-settings", "status", "--expected-repo", m.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := m.settings.request
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd != nil || !m.settings.editor.previewing || m.settings.busy || m.settings.request != request {
+		t.Fatal("first verification save did not stop at a local preview")
+	}
+	afterPreview, err := runScript(root, "verification-settings", "status", "--expected-repo", m.repo)
+	if err != nil || afterPreview != persisted {
+		t.Fatal("preview changed persisted verification guidance")
+	}
+	if !strings.Contains(strings.Join(strings.Fields(ansi.Strip(m.settingsDraftPreview(m.settings.editor.preview.Width()))), " "), beforeGuidance) {
+		t.Fatal("verification preview did not contain the updated draft")
+	}
+	// Returning to edit requires reviewing the newly edited draft again.
+	m = baselineSend(m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
+	m.settings.editor.description.SetValue(beforeGuidance + " Updated.")
+	beforeGuidance = m.settings.editor.description.Value()
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd != nil || !m.settings.editor.previewing || !strings.Contains(strings.Join(strings.Fields(ansi.Strip(m.settingsDraftPreview(m.settings.editor.preview.Width()))), " "), beforeGuidance) {
+		t.Fatal("edited verification guidance did not require an updated preview")
+	}
+	// A concurrent settings change must leave the editable draft available.
+	revision := m.settings.editor.revision
+	m.settings.editor.revision = strings.Repeat("0", 64)
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	m = baselineSend(m, cmd().(automationMsg))
+	if m.settings.editor == nil || m.settings.editor.description.Value() != beforeGuidance {
+		t.Fatal("failed verification save lost draft")
+	}
+	m.settings.editor.revision = revision
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = next.(model)
+	m = baselineSend(m, cmd().(automationMsg))
+	if m.settings.editor != nil || m.settings.automations.verification.Guidance != beforeGuidance {
+		t.Fatal("verification guidance did not save")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.settings.selected != 3 || m.settings.automations.pendingReviewHold {
 		t.Fatal("Pending review action hold did not default to OFF after Scoring")
 	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -819,7 +903,7 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 		t.Fatal("Pending review action hold did not turn on for the selected repository")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	if m.settings.selected != 3 || m.settings.automations.actions[0].Name != "comment" {
+	if m.settings.selected != 4 || m.settings.automations.actions[0].Name != "comment" {
 		t.Fatal("first writing action did not appear after Pending review hold")
 	}
 	if prompt := m.actionPrompt(m.settings.automations.actions[0]); !strings.Contains(prompt, "prompts/automated-actions.md") || !strings.Contains(prompt, "comment") || !strings.Contains(prompt, m.repo) {

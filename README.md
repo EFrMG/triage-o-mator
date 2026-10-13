@@ -216,6 +216,7 @@ bin/briefs plan --all
 | Read PR check metadata                          | `bin/pr-checks`                                                                                     |
 | Read guidance and evidence                      | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`                             |
 | Edit action settings                            | `bin/taxonomy-settings`, `bin/action-policy`                                                        |
+| Configure agent-led local verification          | `bin/verification-settings`                                                                         |
 | Preview, initialize and reconcile GitHub labels | `bin/label-definitions`                                                                             |
 | Record no-fit assessments and apply labels      | `bin/label-assessment`, `bin/item-labels`                                                           |
 | Assess, propose and publish actions             | `bin/action-assessment`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus`              |
@@ -256,6 +257,12 @@ bin/briefs --expected-repo OWNER/REPO mark-read NAME.md --apply --preview-sha256
 
 The Markdown stays on disk, unchanged, and leaves the TUI menus. Pending review and GitHub state are untouched.
 
+#### Agentic verification
+
+Prepare the project's local environment, then enable **Settings → Automations → Agentic verification** for the selected repository. Enabling it permits the agent to choose and run bounded issue reproduction and PR solution checks during requested triage and review tasks. The agent chooses suitable project tools and commands; optional freeform guidance can describe the environment, constraints and useful named checks. Enter or Space toggles the setting, `e` edits guidance, and `y` copies a preparation prompt. The setting defaults to OFF and never starts checks in the background. An explicit local verification request also permits checks within its stated scope.
+
+The [local verification guide](docs/local-verification.md) explains environment preparation, permission limits and how findings retain the version actually tested. Missing setup keeps the source-based workflow available, including existing CI evidence.
+
 #### Further guides
 
 - The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md), [comment publishing guide](docs/comment-plus.md) and [item score guide](docs/item-score.md) cover the commands and their limits.
@@ -267,22 +274,23 @@ The Markdown stays on disk, unchanged, and leaves the TUI menus. Pending review 
 
 [`prompts/PLAYBOOK.md`](prompts/PLAYBOOK.md) is linked into each install as its agent instructions. Ask in plain words; the matching task prompt says what to read and what may be saved.
 
-| Ask                                             | Prompt                                                                                            | Result                                      |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| “triage 25 issues”                              | [Auto triage](prompts/auto-triage.md)                                                             | Attributed local batch decisions            |
-| “label the backlog”                             | [Label items](prompts/label-items.md)                                                             | Bounded proposed-label pass                 |
-| “run an action pass”                            | [Automated actions](prompts/automated-actions.md)                                                 | Staged proposals or recorded write outcomes |
-| “prepare offline analysis”                      | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps            |
-| “is #N a duplicate?”                            | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal            |
-| “review PR #N”                                  | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and a local decision      |
-| “recommend PR closures”                         | [Recommend PR closures](prompts/recommend-closure.md)                                             | Pending, unapproved PR closure proposals    |
-| “organize these items”                          | [Organize groups](prompts/organize-groups.md)                                                     | Draft maintainer groups                     |
-| “assess this edited group”                      | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons       |
-| “review an appeal”                              | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment            |
-| “brief the maintainers” or “polish the report”  | [Maintainer brief](prompts/maintainer-brief.md)                                                   | A short overview or focused decision brief  |
-| “brief issue #N” or “brief PR #N”               | [Item brief](prompts/item-brief.md)                                                               | A detailed case and recommendation          |
-| “polish these briefs” or “write a master brief” | [Polish briefs](prompts/polish-briefs.md)                                                         | A short synthesis of selected briefs        |
-| “score these items” or “run a scoring pass”     | [Score selected items](prompts/score-items.md)                                                    | A bounded, source-bound quality score       |
+| Ask                                                    | Prompt                                                                                            | Result                                      |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| “triage 25 issues”                                     | [Auto triage](prompts/auto-triage.md)                                                             | Attributed local batch decisions            |
+| “label the backlog”                                    | [Label items](prompts/label-items.md)                                                             | Bounded proposed-label pass                 |
+| “run an action pass”                                   | [Automated actions](prompts/automated-actions.md)                                                 | Staged proposals or recorded write outcomes |
+| “prepare offline analysis”                             | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps            |
+| “is #N a duplicate?”                                   | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal            |
+| “review PR #N”                                         | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and a local decision      |
+| “reproduce issue #N locally” or “verify PR #N locally” | [Verify locally](prompts/verify-locally.md)                                                       | Attributed, scoped runtime observations     |
+| “recommend PR closures”                                | [Recommend PR closures](prompts/recommend-closure.md)                                             | Pending, unapproved PR closure proposals    |
+| “organize these items”                                 | [Organize groups](prompts/organize-groups.md)                                                     | Draft maintainer groups                     |
+| “assess this edited group”                             | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons       |
+| “review an appeal”                                     | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment            |
+| “brief the maintainers” or “polish the report”         | [Maintainer brief](prompts/maintainer-brief.md)                                                   | A short overview or focused decision brief  |
+| “brief issue #N” or “brief PR #N”                      | [Item brief](prompts/item-brief.md)                                                               | A detailed case and recommendation          |
+| “polish these briefs” or “write a master brief”        | [Polish briefs](prompts/polish-briefs.md)                                                         | A short synthesis of selected briefs        |
+| “score these items” or “run a scoring pass”            | [Score selected items](prompts/score-items.md)                                                    | A bounded, source-bound quality score       |
 
 > [!IMPORTANT]
 > Agents save attributed local decisions. Pending review is an explicit request for attention. Bounded passes, enabled per repository, can separately apply labels or execute eligible actions.

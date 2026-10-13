@@ -29,6 +29,8 @@ The `inspect` command makes exactly two REST GETs and reports the current PR tit
 
 Compare the current local decision, maintainer notes, group notes and earlier objections. If attributed human guidance conflicts, hold the proposal and describe the disagreement; a maintainer must resolve it in an attributed ledger decision or group member note. Do not choose a source by recency, group readiness or an unsupported agent judgment. When guidance has been resolved, explain the resolution and how it affects the recommendation. A prior successful close records an action outcome, not proof that its reasoning was correct.
 
+When a closure claim would benefit from a runtime check, read `bin/verification-settings status --expected-repo OWNER/REPO` and follow [local verification](verify-locally.md). ON or an explicit verification request permits bounded checks in the prepared environment. Save findings in attributed `agent_notes` and retain the exact tested version and limits; a failed reproduction alone does not establish resolution or justify closure. OFF otherwise keeps the source-based assessment, including available CI evidence.
+
 ## Save an explained proposal when justified
 
 Put an explanation in the proposed comment that a contributor can understand without access to the triage ledger. Cite a referenced issue or PR in the comment when it is the reason for closure. Write the exact proposed comment with your editor in a UTF-8 file inside `data/<owner>/<repo>/exports/` (which is disposable and ignored); do not interpolate untrusted GitHub text into a shell command. Then run:

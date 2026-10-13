@@ -162,6 +162,15 @@ func (m model) contextFooterGroups() []footerGroup {
 				save = "confirm GitHub change"
 			}
 		}
+		if m.settings.editor.row.kind == "verification" {
+			save = "preview"
+			preview := "preview"
+			if m.settings.editor.previewing {
+				save = "confirm save"
+				preview = "edit"
+			}
+			return []footerGroup{group("Environment guidance", hint{"Ctrl-P", preview}, bind("", keys.ComposerEditor), hint{"Ctrl-S", save}, hint{"Esc", "discard"}), group("Navigation", bind("exit", keys.ForceQuit))}
+		}
 		return []footerGroup{group(label, hint{"Tab/Shift-Tab", "field"}, hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", save}, hint{"Esc", "discard"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.settings.open:
 		if m.settings.busy {
@@ -174,6 +183,9 @@ func (m model) contextFooterGroups() []footerGroup {
 			card := m.automationCard()
 			if card.kind == "scoring" {
 				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+			}
+			if card.kind == "verification" {
+				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle local checks"}, hint{"e", "edit environment"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}
 			if card.kind == "review-hold" {
 				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle Pending review hold"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}

@@ -123,6 +123,11 @@ def suggestions(ledger):
         add("agent", f"Code-review {len(code_queue)} triaged PRs with no agent notes ({marked} marked ready to merge)",
             f"prompts/review-pr.md (e.g. {sample})", "their code evidence has not been reviewed")
 
+    if open_items:
+        add("agent", "Consider focused local verification for a selected issue or PR",
+            "prompts/verify-locally.md (read bin/verification-settings status --expected-repo " + REPO + "; select a concrete claim)",
+            "optional within requested triage or review: Agentic verification ON or an explicit verification request permits bounded checks in the person's prepared environment; otherwise continue source-based")
+
     open_prs = [r for r in open_items if r["kind"] == "pr"]
     if open_prs:
         add("agent", f"Assess a named PR for an explained closure proposal ({len(open_prs)} open PRs available)",

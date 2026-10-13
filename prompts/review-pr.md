@@ -51,7 +51,7 @@ What the tree answers, that a diff cannot:
 - **Claims with a version in them.** "Fixed in 1.4", "this file was removed": check the base ref with `git -C "$repo" log`, `show`, `blame`, `describe --tags`.
 - **Current applicability.** When the request needs today's mergeability or target-branch state, check it separately through authorized reads. A diff against a historical base does not establish present conflicts or a current superseding fix.
 
-Read-only, always: never `checkout`, `switch`, `fetch`, `pull`, `stash` or write in that clone, and don't run its build or tests unless you were asked to ([PLAYBOOK.md](PLAYBOOK.md), rule 8). Read files from the recorded commits rather than the working tree. The PR's proposed content comes from its selected diff or exact head commit. If those files are missing locally and online reads are authorized, use only the pinned repository's contents GET endpoint:
+Preserve the original checkout: never `checkout`, `switch`, `fetch`, `pull`, `stash` or write its source files ([PLAYBOOK.md](PLAYBOOK.md), rule 8). When runtime checks would help resolve a concrete claim, read `bin/verification-settings status --expected-repo OWNER/REPO` and follow [local verification](verify-locally.md). ON or an explicit verification request permits bounded checks in the person's prepared environment. OFF otherwise keeps this source-based review; available CI and tester reports remain useful independently of local setup. Read files from the recorded commits rather than the working tree. The PR's proposed content comes from its selected diff or exact head commit. If those files are missing locally and online reads are authorized, use only the pinned repository's contents GET endpoint:
 
 ```sh
 gh api --method GET "repos/<owner>/<repo>/contents/<path>?ref=<base_sha>" --jq .content | base64 -d
@@ -69,7 +69,7 @@ Before adopting a review comment or automated finding as a blocker, state its co
 3. **Compatibility:** compare previously valid inputs and configuration against the pinned base and proposed change, tracing relevant callers. For changed conditions, types or ranges, inspect values at and around the boundaries. When a claim depends on earlier changes, releases or an already-landed fix, inspect the relevant Git history. Distinguish source-based conclusions from runtime verification.
 4. **Safety:** anything that touches install/upgrade paths, system files, `sudo`, `curl | sh`, network downloads, credentials or user data, or deletes things. These always need a human even when they look right.
 5. **Conventions:** compare with the neighbouring files you read in the tree (naming, structure, how similar features are wired up). A PR that fits the project's patterns is far cheaper to accept.
-6. **Tests and verification:** tests added or updated? Did testers in the comments confirm it works, on which versions?
+6. **Tests and verification:** tests added or updated? Did testers in the comments confirm it works, on which versions? When authorized and useful, choose focused local reproduction and solution checks under [verify-locally.md](verify-locally.md); bind results to the actual tested source, distinct from the selected PR snapshot. A passing check supports its stated claim and scope; it does not prove the whole PR correct.
 7. **Feedback addressed:** were earlier review comments dealt with? Unanswered maintainer requests mean it needs revision or has gone stale.
 8. **Overlap:** `bin/similar --kind pr --number N`, plus what the tree's history showed. Competing PRs for the same change are `duplicate` candidates (see `prompts/find-duplicates.md`) or belong in a group together.
 9. **State:** a draft, `mergeable: CONFLICTING`, or an author silent since feedback points to a needed revision or a stale PR.
@@ -78,7 +78,7 @@ Before adopting a review comment or automated finding as a blocker, state its co
 
 Use only labels actually present in this repository's observed `label_catalog`, and actions in `config/taxonomy.json`. The following names are examples when the repository has them:
 
-- `ready` + `none`: you read the whole diff, found nothing blocking, the scope is focused and the checks above pass. Propose the available label separately; the labeling pass handles it whether or not it is already present. Put the merge recommendation in `agent_notes`; the TUI does not merge PRs. Use `high` only for small diffs with no safety-sensitive changes.
+- `ready` + `none`: you read the whole diff, found nothing blocking, the scope is focused and the checks above pass. Propose the available label separately; the labeling pass handles it whether or not it is already present. Put the merge recommendation in `agent_notes`; the TUI does not merge PRs.
 - `trivial` + `none`: typo-, formatting- or lint-only. Propose the available label separately.
 - `needs-revision` + `comment`: good direction, but it has blocking findings that can be stated in a conversation comment. The notes list them. This is not a formal GitHub review.
 - No further label + `none`: the code may be fine, but it makes a design or scope decision (new default, new dependency, new user-facing behaviour). State the decision as one question in `agent_notes` before proposing any write.
@@ -99,6 +99,7 @@ Findings:
 Checked in the tree: <what you read there, e.g. "callers of X in lib/", "log -S shows this landed in abc1234"> / not checked (no clone of this repo here).
 Safety: touches <sensitive area> / none.
 Tests: added / none; verified by testers on <versions> / not verified.
+Local verification: <claim, outcome, commands, actual source/build binding, selected snapshot base/head, guidance revision, limitations or report link> / not attempted (reason).
 Overlap: #M (same change, further along) / none.
 Reviewer: the one thing a human should check first.
 ```

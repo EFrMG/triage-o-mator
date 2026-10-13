@@ -31,6 +31,7 @@ type settingsEditor struct {
 	preview        viewport.Model
 	previewing     bool
 	previewHash    string
+	revision       string
 	plan           labelDefinitionPlan
 	confirmDiscard bool
 }
@@ -272,6 +273,9 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				fields = 3
 			}
 			editor.field = (editor.field + delta + fields) % fields
+			if editor.row.kind == "verification" {
+				editor.field = 1
+			}
 			return m, m.focusSettingsEditor()
 		case "left", "right", "space":
 			if editor.row.kind == "action" && editor.field == 2 && !editor.previewing {
@@ -286,6 +290,9 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if m.settingsEditorChanged() && !editor.confirmDiscard {
 				editor.confirmDiscard = true
 				m.status = "Unsaved changes. Esc again discards them; Ctrl-S saves."
+				if editor.row.kind == "verification" && !editor.previewing {
+					m.status = "Unsaved changes. Esc again discards them; Ctrl-S previews."
+				}
 				return m, nil
 			}
 			m.settings.editor = nil
@@ -411,7 +418,13 @@ func (m model) openSettingsEditor(row settingsRow, creating bool) (tea.Model, te
 
 	description := textarea.New()
 	description.Placeholder = "Short description"
+	if row.kind == "verification" {
+		description.Placeholder = "Describe the prepared environment, working directory and relevant constraints"
+	}
 	description.CharLimit = 4000
+	if row.kind == "verification" {
+		description.CharLimit = 16000
+	}
 	if row.kind == "label" {
 		description.CharLimit = 100
 	}
@@ -426,6 +439,11 @@ func (m model) openSettingsEditor(row settingsRow, creating bool) (tea.Model, te
 	m.settings.editor = &settingsEditor{row: row, creating: creating, title: title, description: description, operation: operation, preview: viewport.New()}
 	m.status = ""
 	m.layoutSettingsEditor()
+	if row.kind == "verification" {
+		m.settings.editor.field = 1
+		m.settings.editor.revision = m.settings.automations.verification.Revision
+		return m, m.settings.editor.description.Focus()
+	}
 	return m, m.settings.editor.title.Focus()
 }
 
@@ -484,6 +502,9 @@ func (m model) settingsDraftPreview(width int) string {
 	bodyWidth := maxInt(width-2, 1)
 	lines := []string{}
 
+	if e.row.kind == "verification" {
+		return heading.Render("Repository") + "\n" + wrapText(m.repo, width) + "\n\n" + heading.Render("Current environment guidance") + "\n" + wrapText(settingsDescription(e.row.description), width) + "\n\n" + heading.Render("After save") + "\n" + wrapText(settingsDescription(e.description.Value()), width)
+	}
 	currentName, currentDescription := e.row.name, e.row.description
 	if e.row.kind == "label" && e.plan.Current != nil {
 		currentName, currentDescription = e.plan.Current.Name, e.plan.Current.Description
@@ -540,6 +561,9 @@ func (m model) settingsOverlay(background string) string {
 	if e.row.kind == "action" {
 		kind = "action"
 	}
+	if e.row.kind == "verification" {
+		kind = "Agentic verification"
+	}
 	header := composerHeader(mode+" "+kind, "Preview "+kind, e.row.name, e.previewing, m.commentWidth()-4)
 	if e.previewing {
 		return m.composerOverlay(background, m.composerPanel(header, e.preview.View()))
@@ -551,6 +575,9 @@ func (m model) settingsOverlay(background string) string {
 		return mutedText("  " + name)
 	}
 	parts := []string{label(0, "Title"), e.title.View(), label(1, "Description"), e.description.View()}
+	if e.row.kind == "verification" {
+		parts = []string{label(1, "Environment guidance"), e.description.View()}
+	}
 	if e.row.kind == "action" {
 		operation := e.operation
 		if operation == "" {
@@ -566,6 +593,11 @@ func (m model) saveSettingsEditor() (tea.Model, tea.Cmd) {
 	e := m.settings.editor
 	if problem := m.settingsEditorProblem(); problem != "" {
 		m.fail(problem)
+		return m, nil
+	}
+	if e.row.kind == "verification" && !e.previewing {
+		m.showSettingsPreview()
+		m.status = "Review the environment guidance, then Ctrl-S to save."
 		return m, nil
 	}
 	if !e.creating && !m.settingsEditorChanged() {
@@ -585,6 +617,10 @@ func (m model) saveSettingsEditor() (tea.Model, tea.Cmd) {
 	}
 	m.settings.busy = true
 	m.settings.request++
+	if e.row.kind == "verification" {
+		m.status = "Saving Agentic verification guidance…"
+		return m, verificationSaveCmd(m.installRoot, m.repo, m.settings.request, e.revision, nil, e.description.Value())
+	}
 	m.status = "Saving action…"
 	return m, settingsActionSaveCmd(m.installRoot, m.repo, m.settings.request, *e)
 }
@@ -597,6 +633,9 @@ func (m model) settingsEditorProblem() string {
 	}
 	if e.row.kind == "label" && (utf8.RuneCountInString(description) > 100 || strings.ContainsAny(description, "\n\x00")) {
 		return "GitHub label descriptions must be one line and at most 100 characters."
+	}
+	if e.row.kind == "verification" && (utf8.RuneCountInString(description) > 16000 || strings.ContainsRune(description, '\x00')) {
+		return "Environment guidance must be at most 16000 characters and contain no NUL characters."
 	}
 	if e.row.kind == "action" && !slices.Contains(actionOperations, e.operation) {
 		return "Choose a GitHub operation for this action."

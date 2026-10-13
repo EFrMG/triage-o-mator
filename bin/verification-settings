@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Read or edit install-local repository settings for agentic verification."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _triage import REPO
+from _verification_settings import status, update
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("status", "set-enabled", "set-guidance"))
+    parser.add_argument("--expected-repo", required=True)
+    parser.add_argument("--expected-revision")
+    parser.add_argument("--enabled", choices=("on", "off"))
+    parser.add_argument("--guidance-file", type=Path)
+    args = parser.parse_args()
+    if args.expected_repo != REPO:
+        raise ValueError("configured repository changed; reopen Agentic verification")
+
+    if args.command == "status":
+        if args.expected_revision or args.enabled or args.guidance_file:
+            parser.error("status takes no change arguments")
+
+        result = status()
+    elif args.command == "set-enabled":
+        if not args.expected_revision or args.enabled is None or args.guidance_file:
+            parser.error("set-enabled requires --enabled and --expected-revision")
+
+        result = update(args.expected_revision, enabled=args.enabled == "on")
+    else:
+        if not args.expected_revision or args.guidance_file is None or args.enabled:
+            parser.error("set-guidance requires --guidance-file and --expected-revision")
+
+        result = update(args.expected_revision, guidance=args.guidance_file.read_text(encoding="utf-8"))
+
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, TypeError, UnicodeError) as error:
+        sys.exit(f"error: {error}")

@@ -1054,7 +1054,7 @@ func TestBaselineViewDeclaresTerminalState(t *testing.T) {
 	}
 }
 
-func TestBaselineErrorShortcutMatchesFooterAcrossViews(t *testing.T) {
+func TestBaselineFooterAcrossViews(t *testing.T) {
 	for _, view := range []string{"sidebar", "list", "item", "notifications"} {
 		t.Run(view, func(t *testing.T) {
 			m := baselineModel(t, baselineRoot(t))
@@ -1077,6 +1077,19 @@ func TestBaselineErrorShortcutMatchesFooterAcrossViews(t *testing.T) {
 			}
 			if !shown {
 				t.Fatal("footer omitted the error shortcut")
+			}
+
+			if view == "list" {
+				m.width = 80
+				compact := ansi.Strip(m.footerView())
+				if strings.Contains(compact, "g/G") || strings.Contains(compact, "Menus:") || !strings.Contains(compact, "Nav:") {
+					t.Fatal("narrow footer did not compact secondary navigation")
+				}
+				m = baselineSend(m, tea.KeyPressMsg{Text: "?"})
+				expanded := ansi.Strip(m.footerView())
+				if !strings.Contains(expanded, "g/G ends") || !strings.Contains(expanded, "R full fetch") || !strings.Contains(expanded, "t themes") {
+					t.Fatal("expanded help did not restore secondary shortcuts")
+				}
 			}
 
 			m = baselineSend(m, tea.KeyPressMsg{Text: "!"})
@@ -1141,12 +1154,54 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 	}{
 		{"L", 0, 1},
 		{"H", 0, 0},
+		{"1–3", 2, 2},
+		{"1–3", 0, 0},
+		{"Tab/⇧Tab", 0, 1},
+		{"Tab/⇧Tab", 4, 0},
 	} {
-		key := mouseHintActionAt(click.label, click.x)
-		next, _ := m.mousePress(key)
-		m = next.(model)
-		if m.detail.active != click.want {
-			t.Fatalf("footer %q selected tab %d, want %d", key, m.detail.active, click.want)
+		for _, width := range []int{80, 110} {
+			m.width = width
+			for _, expanded := range []bool{false, true} {
+				m.showHelp = expanded
+				label := click.label
+				if expanded {
+					label = strings.ReplaceAll(label, "⇧Tab", "Shift-Tab")
+				}
+				found := false
+				for row, line := range m.footerRows() {
+					plain := ansi.Strip(line)
+					start := strings.Index(plain, label)
+					if start < 0 {
+						continue
+					}
+					next, _ := m.handleFooterClick(ansi.StringWidth(plain[:start])+click.x, row)
+					if selected := next.(model).detail.active; selected != click.want {
+						t.Fatalf("footer %q at width %d selected tab %d, want %d", label, width, selected, click.want)
+					}
+					found = true
+				}
+				if !found {
+					t.Fatalf("footer omitted %q", label)
+				}
+			}
+		}
+		m.showHelp = false
+		m = baselineSend(m, mouseKey(mouseHintActionAt(click.label, click.x)))
+	}
+
+	for _, click := range []struct {
+		label string
+		x     int
+		want  string
+	}{
+		{"↵/l", 0, "enter"}, {"↵/l", 2, "l"},
+		{"↑↓", 1, "down"}, {"←→", 1, "right"}, {"[]", 1, "]"},
+		{"Tab/⇧Tab", 4, "shift+tab"}, {"⌫", 0, "backspace"},
+		{"Ctrl-D/U", 7, "ctrl+u"}, {bind("editor", keys.ComposerEditor, keys.CommentEditor).keys, 7, "C"}, {"Ctrl-E C", 0, "ctrl+e"},
+		{"/", 0, "/"}, {"↑/↓ Ctrl-J/N/K/P", 15, "ctrl+p"},
+	} {
+		if action := mouseKey(mouseHintActionAt(click.label, click.x)).String(); action != click.want {
+			t.Fatalf("click %q at %d sent %q, want %q", click.label, click.x, action, click.want)
 		}
 	}
 

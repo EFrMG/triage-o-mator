@@ -2,6 +2,8 @@
 
 A tour of the TUI and its controls. Start with the focused review loop below, then use the sections you need. The [README](../README.md) explains what the project is. The footer and `?` show the keys available on the current screen.
 
+The footer uses `↵` for Enter, `⇧Tab` for Shift-Tab and `⌫` for Backspace. A range such as `1–5` covers the available tabs. Press `?` for descriptions, additional aliases and shortcuts hidden on narrow screens.
+
 Install it into the repository you want to triage ([install.md](install.md)), then launch it from there:
 
 ```sh

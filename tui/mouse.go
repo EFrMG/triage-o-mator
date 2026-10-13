@@ -27,6 +27,13 @@ func (m *model) mouseTargetRepeat(target string) bool {
 }
 
 func mouseKey(name string) tea.KeyPressMsg {
+	if strings.HasPrefix(name, "ctrl+") {
+		letters := []rune(strings.TrimPrefix(name, "ctrl+"))
+		if len(letters) == 1 {
+			return tea.KeyPressMsg{Code: letters[0], Mod: tea.ModCtrl}
+		}
+	}
+
 	switch name {
 	case "enter":
 		return tea.KeyPressMsg{Code: tea.KeyEnter}
@@ -46,16 +53,8 @@ func mouseKey(name string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyLeft}
 	case "right":
 		return tea.KeyPressMsg{Code: tea.KeyRight}
-	case "ctrl+c":
-		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
-	case "ctrl+s":
-		return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
-	case "ctrl+p":
-		return tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}
-	case "ctrl+d":
-		return tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}
-	case "ctrl+u":
-		return tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}
+	case "backspace":
+		return tea.KeyPressMsg{Code: tea.KeyBackspace}
 	}
 
 	return tea.KeyPressMsg{Text: name}
@@ -140,7 +139,8 @@ func (m model) footerGroupAction(group footerGroup, line string, x int) string {
 		if h.keys == "" {
 			continue
 		}
-		part := h.keys
+		label := m.hintKeys(h)
+		part := label
 		if m.showHelp {
 			part += " " + h.desc
 		}
@@ -154,7 +154,7 @@ func (m model) footerGroupAction(group footerGroup, line string, x int) string {
 			if (start == 0 || plain[start-1] == ' ') && (end == len(plain) || plain[end] == ' ' || strings.HasPrefix(plain[end:], "│") || strings.HasPrefix(plain[end:], "·")) {
 				left := ansi.StringWidth(plain[:start])
 				if x >= left && x < left+ansi.StringWidth(part) {
-					return mouseHintActionAt(h.keys, x-left)
+					return mouseHintActionAt(label, x-left)
 				}
 			}
 			offset = start + len(part)
@@ -164,9 +164,48 @@ func (m model) footerGroupAction(group footerGroup, line string, x int) string {
 }
 
 func mouseHintActionAt(label string, x int) string {
+	if label == "/" {
+		return "/"
+	}
+	if label == "any key" {
+		return "esc"
+	}
+
+	// Clicking a help description uses the first key; modifiers apply only within a slash-separated word.
+	if x >= ansi.StringWidth(label) {
+		x = 0
+	}
+	position := 0
+	for _, word := range strings.Fields(label) {
+		if x < position+ansi.StringWidth(word)+1 {
+			label = word
+			x -= position
+			break
+		}
+		position += ansi.StringWidth(word) + 1
+	}
+
+	if first, last, ok := strings.Cut(label, "–"); ok {
+		start, startErr := strconv.Atoi(first)
+		end, endErr := strconv.Atoi(last)
+		if startErr == nil && endErr == nil && start >= 1 && end <= 9 && start <= end {
+			if x >= ansi.StringWidth(first)+1 {
+				return last
+			}
+			return first
+		}
+	}
+	if label == "↑↓" || label == "←→" || label == "[]" {
+		letters := []rune(label)
+		label = string(letters[0])
+		if x >= ansi.StringWidth(label) {
+			label = string(letters[1])
+		}
+	}
+
 	parts := strings.Split(label, "/")
 	chosen := parts[0]
-	position := 0
+	position = 0
 	for _, part := range parts {
 		if x < position+ansi.StringWidth(part)+1 {
 			chosen = part
@@ -188,21 +227,21 @@ func mouseHintActionAt(label string, x int) string {
 		return "right"
 	case "Space":
 		return "space"
-	case "any key":
-		return "esc"
-	case "1–4", "1-4":
-		return "1"
+	case "↵":
+		return "enter"
+	case "⌫":
+		return "backspace"
 	}
 	if strings.HasPrefix(chosen, "Ctrl-") {
 		return "ctrl+" + strings.ToLower(strings.TrimPrefix(chosen, "Ctrl-"))
 	}
-	if chosen == "Shift-Tab" {
+	if chosen == "Shift-Tab" || chosen == "⇧Tab" {
 		return "shift+tab"
 	}
 	if len(chosen) == 1 {
 		return chosen
 	}
-	if chosen == "Enter" || chosen == "Esc" || chosen == "Tab" {
+	if chosen == "Enter" || chosen == "Esc" || chosen == "Tab" || chosen == "Backspace" {
 		return strings.ToLower(chosen)
 	}
 	return ""

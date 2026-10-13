@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The footer is the only home of in-app key hints. It shows groups of related keys side by side, centered, wrapping a whole group at a time; keys only by default, and with descriptions once ? is toggled on. The status row above it carries "? help" on the right.
+// The footer is the only home of in-app key hints. It shows compact keys by default, and full aliases with descriptions once ? is toggled on. Groups wrap together; the status row carries "? help" on the right.
 
 type hint struct{ keys, desc string }
 
@@ -21,10 +21,19 @@ type footerGroup struct {
 // bind turns bindings into one hint, labelled with desc (or the first binding's own description) and all their keys joined, e.g. "j/k move".
 func bind(desc string, bindings ...key.Binding) hint {
 	labels := make([]string, len(bindings))
+	control, plain := false, false
+	for _, binding := range bindings {
+		if strings.HasPrefix(binding.Help().Key, "Ctrl-") {
+			control = true
+		} else {
+			plain = true
+		}
+	}
+
 	for i, b := range bindings {
 		labels[i] = b.Help().Key
 		// Ctrl-D/Ctrl-U reads as Ctrl-D/U.
-		if i > 0 && strings.HasPrefix(labels[i], "Ctrl-") && strings.HasPrefix(labels[0], "Ctrl-") {
+		if i > 0 && control && !plain {
 			labels[i] = strings.TrimPrefix(labels[i], "Ctrl-")
 		}
 	}
@@ -33,7 +42,54 @@ func bind(desc string, bindings ...key.Binding) hint {
 		desc = bindings[0].Help().Desc
 	}
 
-	return hint{keys: strings.Join(labels, "/"), desc: desc}
+	separator := "/"
+	if control && plain {
+		// A plain C must remain distinct from Ctrl-C when an editor has both Ctrl-E and C aliases.
+		separator = " "
+	}
+	return hint{keys: strings.Join(labels, separator), desc: desc}
+}
+
+func (m model) hintKeys(h hint) string {
+	if m.showHelp {
+		return h.keys
+	}
+
+	label := h.keys
+	switch label {
+	case "j/k/↑/↓", "j/k/Tab":
+		label = "j/k"
+	case "Enter/l/→", "Enter/l":
+		label = "Enter/l"
+	case "Enter/e", "Enter/Tab":
+		label = "Enter"
+	case "Enter/Space":
+		label = "Space"
+	case "Esc/h", "m or Esc":
+		label = "Esc"
+	case "Tab/Shift-Tab/J/K":
+		label = "Tab/Shift-Tab"
+	case "Tab/j/k":
+		label = "Tab"
+	case "↑/↓ Ctrl-J/N/K/P":
+		label = "↑/↓"
+	}
+	if strings.HasPrefix(label, "Ctrl-E ") {
+		label = "Ctrl-E"
+	}
+	return strings.NewReplacer("Shift-Tab", "⇧Tab", "Enter", "↵", "Backspace", "⌫", "↑/↓", "↑↓", "←/→", "←→", "[/]", "[]").Replace(label)
+}
+
+func (m model) footerGroupName(name string) string {
+	if !m.showHelp {
+		switch name {
+		case "Navigation":
+			return "Nav"
+		case "Menus":
+			return "App"
+		}
+	}
+	return name
 }
 
 func group(name string, hints ...hint) footerGroup { return footerGroup{name: name, hints: hints} }
@@ -43,7 +99,11 @@ func (m model) navigationGroup() footerGroup {
 }
 
 func (m model) menusGroup() footerGroup {
-	menus := group("Menus", bind("", keys.Yank), bind("", keys.Group), bind("", keys.Corpus), bind("", keys.Theme), bind("", keys.RefreshFull))
+	menus := group("Menus")
+	if m.focus != FocusDetail {
+		menus.hints = append(menus.hints, bind("", keys.Yank))
+	}
+	menus.hints = append(menus.hints, bind("", keys.Group), bind("", keys.Corpus), bind("", keys.Theme), bind("", keys.RefreshFull))
 	if !m.checksKeyScope() {
 		menus.hints = append(menus.hints, bind("", keys.Refresh))
 	}
@@ -54,10 +114,31 @@ func (m model) menusGroup() footerGroup {
 func (m model) footerGroups() []footerGroup {
 	groups := m.contextFooterGroups()
 	if m.lastError.text != "" && m.canOpenErrorDetails() && m.width >= 60 && m.height >= 24 {
-		return append([]footerGroup{group("Error", bind("", keys.ErrorDetails))}, groups...)
+		groups = append([]footerGroup{group("Error", bind("", keys.ErrorDetails))}, groups...)
+	}
+	if m.showHelp {
+		return groups
 	}
 
-	return groups
+	var visible []footerGroup
+	for _, g := range groups {
+		var hints []hint
+		for _, h := range g.hints {
+			if h.keys == "Ctrl-R" && m.checksKeyScope() {
+				continue
+			}
+			secondary := h.keys == "g/G" || h.keys == "B" || g.name == "Menus" && (h.keys == "t" || h.keys == "R")
+			if m.width < 100 && secondary {
+				continue
+			}
+			hints = append(hints, h)
+		}
+		if len(hints) > 0 {
+			visible = append(visible, group(g.name, hints...))
+		}
+	}
+
+	return visible
 }
 
 func (m model) contextFooterGroups() []footerGroup {
@@ -433,11 +514,14 @@ func (m model) contextFooterGroups() []footerGroup {
 }
 
 func (m model) tabJumpHint() hint {
-	var numbers []string
-	for i := range m.detail.sections {
-		numbers = append(numbers, fmt.Sprint(i+1))
+	switch count := len(m.detail.sections); count {
+	case 0:
+		return hint{}
+	case 1:
+		return hint{"1", "jump to tab"}
+	default:
+		return hint{fmt.Sprintf("1–%d", count), "jump to tab"}
 	}
-	return hint{strings.Join(numbers, "/"), "jump to tab"}
 }
 
 func (m model) itemFooter() []footerGroup {
@@ -527,9 +611,9 @@ func (m model) renderGroup(g footerGroup, width int) []string {
 		separator = muted.Render(" · ")
 	}
 
-	lines := []string{muted.Render(g.name + ":")}
+	lines := []string{muted.Render(m.footerGroupName(g.name) + ":")}
 	for i, h := range g.hints {
-		part := keyStyle.Render(h.keys)
+		part := keyStyle.Render(m.hintKeys(h))
 		switch {
 		case h.keys == "":
 			part = h.desc

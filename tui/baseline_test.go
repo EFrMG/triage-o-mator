@@ -62,6 +62,10 @@ func baselineRoot(t *testing.T) string {
 		}
 	}
 
+	if err := os.WriteFile(filepath.Join(root, "bin", "gh"), []byte("#!/bin/sh\necho 'unexpected GitHub access in a disposable Go test' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Join(root, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
 	taxonomy, err := os.ReadFile(filepath.Join("..", "config", "taxonomy.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -1098,7 +1102,7 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 	m.notifications.open = true
 	next, _ := m.openNotificationItemAt(Key{Kind: "pr", Number: 3}, 1)
 	m = next.(model)
-	if !m.notificationPR.open || m.detail.active != 1 || len(m.detail.sections) != 4 {
+	if !m.notificationPR.open || m.detail.active != 1 || len(m.detail.sections) != 3 {
 		t.Fatal("notification PR did not open on its comments tab")
 	}
 	m.detail.Resize(80, 20)
@@ -1151,27 +1155,94 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 		t.Fatal("h did not return from the notification item")
 	}
 
-	// Opening Checks acquires no evidence, and replies remain bound to both the item and selected packet.
+	tabs := newDetailModel()
+	tabs.Resize(80, 20)
+	tabs.SetItem(Item{Kind: "pr", Number: 3})
+	tabs.loading = false
+	if len(tabs.sections) != 3 || tabs.sections[2].name != "Diff" {
+		t.Fatal("unobserved CI added an empty Checks tab")
+	}
+	tabs.JumpSection(2)
+	shown := checksPage{Coverage: "complete", Result: "passed"}
+	shown.Pagination.Total = 1
+	tabs.setChecksPage(&shown)
+	if tabs.sections[2].name != "Checks" || tabs.sections[3].name != "Diff" || tabs.active != 3 {
+		t.Fatal("Checks insertion moved the selected Diff")
+	}
+	if !tabs.NeedsActiveDiff() || tabs.NeedsActiveDiff() {
+		t.Fatal("Diff no longer requests its lazy read exactly once")
+	}
+	tabs.JumpSection(2)
+	if tabs.NeedsActiveDiff() {
+		t.Fatal("Checks requested a diff")
+	}
+	tabs.setChecksPage(nil)
+	if tabs.sections[tabs.active].name != "Diff" {
+		t.Fatal("hiding empty Checks lost the selected content")
+	}
+
+	// A disposable script records bounded acquisition mode without making any GitHub request.
+	script := `#!/usr/bin/env python3
+import json, pathlib, sys
+root = pathlib.Path(__file__).parent.parent
+args = sys.argv[1:]
+(root / "checks-args.json").write_text(json.dumps(args))
+value = json.loads((root / "checks-fixture.json").read_text())
+value["mode"] = args[args.index("--mode") + 1]
+print(json.dumps(value))
+`
+	if err := os.WriteFile(filepath.Join(m.installRoot, "bin", "pr-checks"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	emptyPage := checksPage{Repository: checksRepository{Host: evidenceHost, FullName: m.repo}, Kind: "pr", Number: 3, Coverage: "missing", Freshness: "unknown", Result: "unknown"}
+	writePage := func(value checksPage) {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(m.installRoot, "checks-fixture.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writePage(emptyPage)
 	m.openItem(Item{Kind: "pr", Number: 3})
 	m.notifications.open = false
 	m.focus = FocusDetail
 	m.detail.Resize(80, 20)
 	m.form.reason.SetValue("preserve this draft")
-	next, cmd := m.Update(tea.KeyPressMsg{Text: "4"})
+	m.form.FocusField(fieldContent)
+	if cmd := m.checksIfNeeded(); cmd != nil {
+		t.Fatal("unresolved item source acquired CI")
+	}
+	next, cmd := m.Update(enrichedMsg{root: m.installRoot, repo: m.repo, key: m.detail.key, generation: m.detail.generation, data: EnrichedItem{Kind: "pr", Number: 3, Body: "Resolved current item"}})
 	m = next.(model)
 	if cmd == nil || !m.checks.busy || m.checksRequest == 0 || m.checksLifecycle == nil {
-		t.Fatal("opening Checks did not request an offline read")
+		t.Fatal("resolved current PR did not start its opening CI probe")
 	}
 	missing := cmd().(checksMsg)
-	if missing.err != nil || missing.data.Mode != "offline" || missing.data.Requests != 0 {
-		t.Fatalf("offline Checks read: %v", missing.err)
+	if missing.err != nil || missing.data.Mode != "cache-preferred" || missing.data.Requests != 0 {
+		t.Fatalf("opening CI probe: %v", missing.err)
+	}
+	argsData, err := os.ReadFile(filepath.Join(m.installRoot, "checks-args.json"))
+	if err != nil || !strings.Contains(string(argsData), `"20"`) || !strings.Contains(string(argsData), `"--include-failure-logs"`) {
+		t.Fatal("opening CI probe lacked its bounded metadata budget")
 	}
 	m = baselineSend(m, missing)
-	if !strings.Contains(ansi.Strip(m.detail.View()), "missing") || m.form.Reason() != "preserve this draft" {
-		t.Fatal("missing checks became coverage or discarded form draft")
+	if len(m.detail.sections) != 3 || m.form.Reason() != "preserve this draft" {
+		t.Fatal("missing CI added an empty tab or discarded the draft")
 	}
 	if cmd := m.checksIfNeeded(); cmd != nil {
-		t.Fatal("Checks automatically repeated an observation")
+		t.Fatal("empty CI automatically repeated an observation")
+	}
+	// Focused refresh is available even when there is no Checks tab.
+	next, cmd = m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	m = next.(model)
+	if cmd == nil || !m.checks.busy || m.refreshing {
+		t.Fatalf("hidden Checks could not request focused CI: cmd=%v busy=%v refreshing=%v scope=%v focus=%v field=%v loading=%v error=%v", cmd != nil, m.checks.busy, m.refreshing, m.prChecksKeyScope(), m.focus, m.form.focused, m.detail.loading, m.lastError.open)
+	}
+	missing = cmd().(checksMsg)
+	if missing.err != nil || missing.data.Mode != "refresh" {
+		t.Fatal("focused refresh did not request bounded metadata acquisition")
 	}
 
 	page := checksPage{Kind: "pr", Number: 3, Mode: "offline", Snapshot: "checks-pin", Head: "new-head", ChecksHead: "old-head", Coverage: "partial", Freshness: "stale", Result: "unknown", RawCount: 24, HistoryOmissions: 3}
@@ -1194,6 +1265,7 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 	}
 	missing.data = page
 	m = baselineSend(m, missing)
+	m.detail.JumpSection(2)
 	text := ansi.Strip(m.detail.View())
 	if !strings.Contains(text, "Checks differ from the selected PR head") || strings.Contains(renderChecks(page), "old-head") || strings.Contains(renderChecks(page), "https://github.com/") || !strings.Contains(renderChecks(page), "3 historical or suite") || !strings.Contains(renderChecks(page), "fork/repo") {
 		t.Fatal("checks view hid revision/source/omission distinctions")
@@ -1217,8 +1289,18 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 			t.Fatalf("failure view omitted %q", want)
 		}
 	}
-	if !strings.Contains(rendered, "Observed 2026-10-13 09:36 UTC") || strings.Index(rendered, "Selection:") < strings.Index(rendered, logText) || strings.Index(rendered, "Partial log capture") < strings.Index(rendered, logText) {
+	if strings.Contains(rendered, "Observed 2026-10-13") || strings.Contains(rendered, "CI observations alone") || strings.Index(rendered, "Selection:") < strings.Index(rendered, logText) || strings.Index(rendered, "Partial log capture") < strings.Index(rendered, logText) {
 		t.Fatal("failure view put capture metadata before the compact excerpt")
+	}
+	view := renderChecksView(failure, 80)
+	for _, colored := range []struct{ text, role string }{{"1", currentTheme.Error}, {"0", currentTheme.Warning}, {"19", currentTheme.Success}, {"1", currentTheme.Muted}, {"unknown", currentTheme.Muted}, {"partial", currentTheme.Muted}, {"stale", currentTheme.Muted}} {
+		expected := lipgloss.NewStyle().Foreground(lipgloss.Color(colored.role)).Render(colored.text)
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Checks did not render %q with its semantic color", colored.text)
+		}
+	}
+	if strings.Contains(rendered, "\x1b") || strings.Contains(view, "Observed 2026-10-13") || strings.Contains(view, "CI observations alone") {
+		t.Fatal("Checks styling leaked into source or restored removed header text")
 	}
 	if strings.Contains(rendered, strings.Repeat("a", 64)) {
 		t.Fatal("failure view exposed storage object identity")
@@ -1261,17 +1343,23 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 	}
 	process, request := m.checksLifecycle.current, m.checksRequest
 	m = baselineSend(m, tea.KeyPressMsg{Text: "1"})
-	if !process.cancelled || m.checksRequest == request || m.checks.busy {
-		t.Fatal("leaving Checks did not cancel its reader")
+	if process.cancelled || m.checksRequest != request || !m.checks.busy {
+		t.Fatal("tab navigation cancelled the opening CI reader")
 	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if !process.cancelled || m.checks.busy || m.focus == FocusDetail {
+		t.Fatal("leaving the item did not cancel its CI reader")
+	}
+	statusAfterBack := m.status
 	stale := missing
 	stale.request = request
 	m = baselineSend(m, stale)
-	if m.checks.busy {
-		t.Fatal("late checks page restarted the reader")
+	if m.checks.busy || m.status != statusAfterBack {
+		t.Fatal("late checks page changed the reader after Back")
 	}
+	m.focus = FocusDetail
 
-	m.detail.JumpSection(len(m.detail.sections) - 1)
+	m.detail.JumpSection(len(m.detail.sections) - 2)
 	next, refreshCmd := m.Update(tea.KeyPressMsg{Text: "r"})
 	m = next.(model)
 	if refreshCmd == nil || !m.checks.busy || m.refreshing || m.checks.pendingSnapshot != "" || m.checks.snapshot != "checks-pin" {
@@ -1293,15 +1381,69 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 	}
 	m.form.FocusField(fieldContent)
 	m.stopChecks()
+	// A failed replacement hides the formerly displayed result and completes the probe without retrying.
+	_ = m.readChecks("refresh", 0)
+	failedReply := checksMsg{root: m.installRoot, repo: m.repo, key: m.detail.key, generation: m.detail.generation, request: m.checksRequest, snapshot: m.checks.pendingSnapshot, err: errors.New("fixture CI transport failed")}
+	m = baselineSend(m, failedReply)
+	if len(m.detail.sections) != 3 || !m.checks.loaded || m.checksIfNeeded() != nil || !strings.Contains(m.status, "unavailable") {
+		t.Fatal("failed CI refresh retained an old result or automatically retried")
+	}
+
+	// Issues and unresolved fixed sources never acquire CI; an ordinary detail error permits only one independent metadata probe.
+	probe := m
+	probe.detail, probe.checks, probe.checksLifecycle = newDetailModel(), checksUI{}, nil
+	probe.detail.SetItem(Item{Kind: "issue", Number: 3})
+	probe.detail.loading = false
+	if probe.checksIfNeeded() != nil {
+		t.Fatal("issue opening acquired CI")
+	}
+	probe.detail.SetItem(Item{Kind: "pr", Number: 3})
+	probe.detail.loading = false
+	probe.activeBatch = "frozen-batch"
+	if probe.checksIfNeeded() != nil {
+		t.Fatal("unresolved batch packet acquired CI")
+	}
+	probe.activeBatch = ""
+	probe.detail.blockDirect = true
+	if probe.checksIfNeeded() != nil {
+		t.Fatal("unresolved notification packet acquired CI")
+	}
+	probe.detail.blockDirect = false
+	probe.detail.loadErr = errors.New("fixture body read failed")
+	cmd = probe.checksIfNeeded()
+	if cmd == nil {
+		t.Fatal("known current PR could not independently inspect CI after body failure")
+	}
+	probe = baselineSend(probe, cmd().(checksMsg))
+	if !probe.checks.loaded || probe.checksIfNeeded() != nil {
+		t.Fatal("body read error caused repeated CI acquisition")
+	}
+	probe.checks = checksUI{}
+	_ = probe.checksIfNeeded()
+	quitProcess := probe.checksLifecycle.current
+	quitNext, quitCmd := probe.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	probe = quitNext.(model)
+	if _, ok := quitCmd().(tea.QuitMsg); !ok || !quitProcess.cancelled || probe.checks.busy {
+		t.Fatal("quit restarted cancelled CI acquisition")
+	}
+
 	m.detail.enriched.Evidence = &batchEvidence{SnapshotID: "fixed-packet"}
-	m.detail.JumpSection(len(m.detail.sections) - 1)
+	m.detail.JumpSection(len(m.detail.sections) - 2)
 	m.checks = checksUI{}
 	cmd = m.checksIfNeeded()
 	if cmd == nil || m.checks.pendingSnapshot != "fixed-packet" {
 		t.Fatal("fixed packet Checks used latest evidence")
 	}
+	fixedPage := emptyPage
+	fixedPage.Snapshot = "fixed-packet"
+	writePage(fixedPage)
+	fixedReply := cmd().(checksMsg)
+	if fixedReply.err != nil || fixedReply.data.Mode != "offline" || fixedReply.data.Requests != 0 || fixedReply.data.Snapshot != "fixed-packet" {
+		t.Fatal("fixed packet CI escaped its exact offline snapshot")
+	}
+
 	before := m.detail.sections[m.detail.active].source
-	next, refresh, handled := m.handleChecksKey(tea.KeyPressMsg{Text: "r"})
+	next, refresh, handled := m.handleChecksKey(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	m = next.(model)
 	if !handled || refresh != nil || m.detail.sections[m.detail.active].source != before {
 		t.Fatal("fixed checks refresh changed source or started acquisition")
@@ -1310,7 +1452,7 @@ func TestBaselineNotificationItemTabNavigation(t *testing.T) {
 	pinned := m.checks.snapshot
 	next, _ = m.openNotificationItem(Key{Kind: "pr", Number: 8})
 	m = next.(model)
-	m.detail.JumpSection(len(m.detail.sections) - 1)
+	m.detail.JumpSection(len(m.detail.sections) - 2)
 	readReply := evidenceReadMsg{root: m.installRoot, repo: m.repo, key: m.detail.key, request: m.evidenceRequest, generation: m.detail.generation, data: EnrichedItem{Kind: "pr", Number: 8, Evidence: &batchEvidence{SnapshotID: "notification-pin", Mode: "refresh"}}}
 	next, notificationCmd := m.finishEvidenceRead(readReply)
 	m = next.(model)

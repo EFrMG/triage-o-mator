@@ -32,7 +32,7 @@ Terminals smaller than 60×24 show a resize prompt.
 
 ## 2. Refresh the backlog
 
-- `r` fetches changed issues and PRs from GitHub and syncs them into the ledger. The app also checks tracked comments during this normal refresh. While reading a PR's Checks tab, `r` instead requests focused CI metadata.
+- `r` fetches changed issues and PRs from GitHub and syncs them into the ledger. The app also checks tracked comments during this normal refresh. While reading a PR's Checks tab, `r` instead requests focused CI metadata. `Ctrl-R` requests focused CI from any PR content tab, including when Checks is hidden.
 - `R` performs a full fetch. An incremental fetch cannot detect an issue or PR that was deleted or transferred; the next full fetch, run automatically at least daily or manually with `R`, marks items missing from the open list closed.
 - Refreshes are read-only against GitHub and preserve local decisions and Pending review requests.
 
@@ -47,18 +47,18 @@ Terminals smaller than 60×24 show a resize prompt.
 ## 4. Read an item
 
 - Open any item with `Enter`.
-- Its tabs, Body, Agent notes when present, Comments, and Diff and Checks for PRs, run across the top. `H`/`L` switch between them, `1`–`5` jump to one, and `Enter` shows one full screen.
+- Its tabs, Body, Agent notes when present, Comments, then Checks when data is available and Diff for PRs, run across the top. `H`/`L` switch between them, `1`–`5` jump to one, and `Enter` shows one full screen.
 - `o` opens the item on GitHub.
 
 The author below the title is blue; open and closed states are green and red. Each comment shows its creation date at the bottom right in UTC when that date is available. Older saved comments without dates remain undated.
 
 Read comments as well as the body: workarounds, links to the real duplicate, and evidence that a problem remains current often live there.
 
-The **Checks** tab opens saved CI metadata offline. It shows the recorded commit and observation time, evidence coverage and freshness, and observed results separately. `[` and `]` page through check runs, commit statuses and unresolved suites. Earlier attempts remain in the source evidence; the view reports observations omitted from its summary and page. Ambiguous histories, skipped or neutral outcomes, incomplete acquisition and stale evidence remain explicit. An empty observation does not mean checks passed, and passing observations do not establish required-check policy or merge readiness.
+Opening a current PR automatically reads fresh saved CI metadata or acquires missing or stale metadata within a 20-request budget. **Checks** appears before Diff when check or status rows are available. It shows head-match information, evidence coverage and freshness, and observed results separately. Failed, pending, passed and unknown counts use red, yellow, green and muted theme colors. `[` and `]` page through check runs, commit statuses and unresolved suites. Earlier attempts remain in the source evidence; the view reports observations omitted from its summary and page. Ambiguous histories, skipped or neutral outcomes, incomplete acquisition and stale evidence remain explicit. An empty observation does not mean checks passed, and passing observations do not establish required-check policy or merge readiness.
 
-While reading Checks for a current item, `r` explicitly acquires focused CI metadata within a request budget. A fixed item packet keeps its selected snapshot and refuses that refresh; use a separately selected current item to acquire newer checks. Opening or paging a fixed packet never fetches missing CI evidence. This view does not collect CI logs or execute checks.
+From any PR content tab, `Ctrl-R` explicitly refreshes focused CI metadata; `r` does the same while reading Checks. A fixed item packet keeps its selected snapshot and refuses that refresh; use a separately selected current item to acquire newer checks. Opening or paging a fixed packet never fetches missing CI evidence. Cached failure excerpts appear inline, but metadata acquisition never downloads logs or executes checks.
 
-The optional **Settings → Automations → CI for readiness** requirement defaults OFF. When ON, `ready` review assessments need complete, fresh, nonempty passing CI for the reviewed head. Agents can separately capture [focused failure-log excerpts](ci.md#capture-focused-failure-context); the Checks tab remains a metadata view.
+The optional **Settings → Automations → CI for readiness** requirement defaults OFF. When ON, `ready` review assessments need complete, fresh, nonempty passing CI for the reviewed head. Agents can separately capture [focused failure-log excerpts](ci.md#capture-focused-failure-context), which Checks then reads from the cache.
 
 ## 5. Record a decision
 

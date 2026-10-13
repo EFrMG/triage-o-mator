@@ -5,16 +5,17 @@ import "charm.land/bubbles/v2/key"
 // Every key the TUI understands is defined here, once. Handlers match against these bindings and the footer renders its hints from them, so the two can't drift apart. Context-specific handlers may reuse keys; text fields consume printable input before shortcuts.
 type keyMap struct {
 	// General browsing, outside modal handlers and text fields.
-	Help          key.Binding
-	Theme         key.Binding
-	Refresh       key.Binding
-	RefreshFull   key.Binding
-	ChecksRefresh key.Binding
-	ChecksPrev    key.Binding
-	ChecksNext    key.Binding
-	Quit          key.Binding
-	ForceQuit     key.Binding
-	Back          key.Binding
+	Help                 key.Binding
+	Theme                key.Binding
+	Refresh              key.Binding
+	RefreshFull          key.Binding
+	ChecksRefresh        key.Binding
+	ChecksFocusedRefresh key.Binding
+	ChecksPrev           key.Binding
+	ChecksNext           key.Binding
+	Quit                 key.Binding
+	ForceQuit            key.Binding
+	Back                 key.Binding
 
 	// Navigation.
 	Up       key.Binding
@@ -86,14 +87,15 @@ type keyMap struct {
 }
 
 var keys = keyMap{
-	Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-	Theme:         key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "themes")),
-	ChecksRefresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh checks")),
-	ChecksPrev:    key.NewBinding(key.WithKeys("["), key.WithHelp("[", "previous checks")),
-	ChecksNext:    key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next checks")),
-	Refresh:       key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "fetch")),
-	RefreshFull:   key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "full fetch")),
-	Quit:          key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
+	Help:                 key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+	Theme:                key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "themes")),
+	ChecksFocusedRefresh: key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("Ctrl-R", "refresh CI")),
+	ChecksRefresh:        key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh checks")),
+	ChecksPrev:           key.NewBinding(key.WithKeys("["), key.WithHelp("[", "previous checks")),
+	ChecksNext:           key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next checks")),
+	Refresh:              key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "fetch")),
+	RefreshFull:          key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "full fetch")),
+	Quit:                 key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	// ForceQuit always exits immediately, even while typing or mid-confirmation; q is just a letter in a text field, so Quit alone must not be the only way out.
 	ForceQuit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("Ctrl-C", "force quit")),
 	// Back is Esc or h (or ←, as → opens). Uppercase H and L move through item tabs. Text fields take their keys first, so printable characters stay editable there.

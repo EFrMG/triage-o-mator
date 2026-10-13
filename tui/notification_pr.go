@@ -59,6 +59,7 @@ func (m model) finishNotificationPREvidence(msg evidenceReadMsg) (tea.Model, tea
 
 	m.stopChecks()
 	m.checks = checksUI{}
+	m.detail.setChecksPage(nil)
 	m.detail.item.Title, m.detail.item.State, m.detail.item.URL = msg.data.Title, msg.data.State, msg.data.URL
 	m.detail.populate(msg.data)
 	m.status = ""
@@ -86,6 +87,7 @@ func (m *model) refreshNotificationItem() tea.Cmd {
 		return nil
 	}
 
+	m.stopChecks()
 	m.evidenceLifecycle.stop()
 	m.evidenceLifecycle.current = &readProcess{}
 	m.evidenceRequest++

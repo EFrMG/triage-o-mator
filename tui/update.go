@@ -12,8 +12,24 @@ import (
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	result := next.(model)
-	if m.detail.checksActive() && (!result.detail.checksActive() || m.detail.key != result.detail.key || m.detail.generation != result.detail.generation || m.focus == FocusDetail && result.focus != FocusDetail && !result.notificationPR.open) {
+	previousSource, previousFixed := m.checksSource()
+	source, fixed := result.checksSource()
+	contextChanged := m.installRoot != result.installRoot || m.repo != result.repo || m.detail.key != result.detail.key || m.detail.generation != result.detail.generation || previousSource != source || previousFixed != fixed
+	if contextChanged && m.checksRequest == result.checksRequest {
 		result.stopChecks()
+		result.checks = checksUI{}
+		result.detail.setChecksPage(nil)
+	}
+	leavingReader := m.focus == FocusDetail && result.focus != FocusDetail && !result.notificationPR.open
+	if leavingReader && m.checksRequest == result.checksRequest {
+		result.stopChecks()
+	}
+	if probe := result.checksIfNeeded(); probe != nil {
+		if cmd == nil {
+			cmd = probe
+		} else {
+			cmd = tea.Batch(cmd, probe)
+		}
 	}
 	result.trackStatus(m)
 	result.layout()
@@ -436,6 +452,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.actionHistoryLifecycle.stop()
 		m.attentionLifecycle.stop()
 		m.stopChecks()
+		m.checks.loaded = true
 		return m, tea.Quit
 	}
 
@@ -661,6 +678,7 @@ func (m model) requestQuit() (tea.Model, tea.Cmd) {
 	m.stopChecks()
 	m.commitDraftIfDirty()
 	if len(m.drafts) == 0 {
+		m.checks.loaded = true
 		return m, tea.Quit
 	}
 
@@ -1216,9 +1234,6 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // diffIfNeeded fetches the PR diff the first time its tab is shown.
 func (m *model) diffIfNeeded() tea.Cmd {
-	if m.detail.checksActive() {
-		return m.checksIfNeeded()
-	}
 	if m.detail.NeedsActiveDiff() {
 		return m.enrichDetailCmd(true)
 	}

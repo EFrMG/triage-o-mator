@@ -11,6 +11,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const checksPageSize = 20
@@ -125,13 +127,13 @@ func (m model) checksSource() (string, bool) {
 	if evidence := m.detail.enriched.Evidence; evidence != nil {
 		return evidence.SnapshotID, true
 	}
-	return "", m.detail.blockDirect
+	return "", m.detail.blockDirect || m.activeBatch != "" && !m.notificationPR.open
 }
 
 func checksReadCmd(root, repo string, item Key, mode, sourceSnapshot, snapshot string, fixed bool, offset int, generation, request uint64, process *readProcess) tea.Cmd {
 	return func() tea.Msg {
 		msg := checksMsg{root: root, repo: repo, key: item, sourceSnapshot: sourceSnapshot, snapshot: snapshot, fixed: fixed, generation: generation, request: request}
-		args := []string{"--include-failure-logs", "--expected-repo", repo, "--number", strconv.Itoa(item.Number), "--mode", mode, "--host", evidenceHost, "--max-age", cacheMaxAgeArg, "--request-budget", "100", "--offset", strconv.Itoa(offset), "--limit", strconv.Itoa(checksPageSize)}
+		args := []string{"--include-failure-logs", "--expected-repo", repo, "--number", strconv.Itoa(item.Number), "--mode", mode, "--host", evidenceHost, "--max-age", cacheMaxAgeArg, "--request-budget", "20", "--offset", strconv.Itoa(offset), "--limit", strconv.Itoa(checksPageSize)}
 		if snapshot != "" {
 			args = append(args, "--snapshot", snapshot)
 		}
@@ -156,7 +158,7 @@ func validateChecksPage(page checksPage, repo string, number int, mode, snapshot
 	if page.Repository.Host != evidenceHost || page.Repository.FullName != repo || page.Kind != "pr" || page.Number != number || page.Mode != mode || snapshot != "" && page.Snapshot != snapshot {
 		return fmt.Errorf("checks response identity, mode or selected snapshot mismatch")
 	}
-	if page.Requests < 0 || page.Requests > 100 || mode == "offline" && page.Requests != 0 || len(page.Rows) > checksPageSize || p.Returned != len(page.Rows) || p.Offset != offset || p.Total < 0 || page.HistoryOmissions < 0 || page.RawCount != p.Total+page.HistoryOmissions || p.Before != offset || p.After < 0 || p.Total != p.Before+p.Returned+p.After || p.Next != nil && (*p.Next != offset+len(page.Rows) || p.After == 0 || len(page.Rows) == 0) {
+	if page.Requests < 0 || page.Requests > 20 || mode == "offline" && page.Requests != 0 || len(page.Rows) > checksPageSize || p.Returned != len(page.Rows) || p.Offset != offset || p.Total < 0 || page.HistoryOmissions < 0 || page.RawCount != p.Total+page.HistoryOmissions || p.Before != offset || p.After < 0 || p.Total != p.Before+p.Returned+p.After || p.Next != nil && (*p.Next != offset+len(page.Rows) || p.After == 0 || len(page.Rows) == 0) {
 		return fmt.Errorf("checks response budget or pagination mismatch")
 	}
 	if !slices.Contains([]string{"complete", "partial", "missing", "failed", "unavailable"}, page.Coverage) || !slices.Contains([]string{"within-window", "stale", "unknown"}, page.Freshness) || !slices.Contains([]string{"passed", "failed", "pending", "unknown", "empty"}, page.Result) {
@@ -235,24 +237,15 @@ func validateChecksPage(page checksPage, repo string, number int, mode, snapshot
 func (m *model) stopChecks() {
 	m.checksLifecycle.stop()
 	m.checksRequest++
-	if m.checks.busy && m.checks.loaded && m.checks.page.Coverage != "" {
-		m.checksText(renderChecks(m.checks.page))
-	}
 	m.checks.busy = false
 }
 
-func (m *model) checksText(text string) {
-	for i := range m.detail.sections {
-		s := &m.detail.sections[i]
-		if s.name == "Checks" {
-			s.source, s.loaded, s.renderedFor = text, true, ""
-		}
-	}
-	m.detail.renderActive()
+func (m *model) checksPageText(page checksPage) {
+	m.detail.setChecksPage(&page)
 }
 
 func (m *model) readChecks(mode string, offset int) tea.Cmd {
-	if !m.detail.checksActive() {
+	if m.detail.key.Kind != "pr" || m.detail.key.Number < 1 || m.detail.loading {
 		return nil
 	}
 	source, fixed := m.checksSource()
@@ -261,8 +254,6 @@ func (m *model) readChecks(mode string, offset int) tea.Cmd {
 		return nil
 	}
 	if fixed && source == "" {
-		m.checksText("No selected checks snapshot is available in this item packet. No automatic fetch.")
-		m.checks.loaded = !m.detail.loading
 		return nil
 	}
 	snapshot := m.checks.snapshot
@@ -275,25 +266,30 @@ func (m *model) readChecks(mode string, offset int) tea.Cmd {
 	if offset > 0 && snapshot == "" {
 		return nil
 	}
-
 	m.stopChecks()
 	if m.checksLifecycle == nil {
 		m.checksLifecycle = &readLifecycle{}
 	}
 	m.checksLifecycle.current = &readProcess{}
 	m.checks.pendingSnapshot, m.checks.busy = snapshot, true
-	m.checksText("Reading checks " + mode + "…")
+	m.status = "Reading focused CI…"
 	return checksReadCmd(m.installRoot, m.repo, m.detail.key, mode, source, snapshot, fixed, offset, m.detail.generation, m.checksRequest, m.checksLifecycle.current)
 }
 
+// checksIfNeeded runs once after the selected PR's source resolves, independently of its active tab.
 func (m *model) checksIfNeeded() tea.Cmd {
-	if !m.detail.checksActive() {
+	if m.detail.key.Kind != "pr" || m.detail.key.Number < 1 || m.detail.loading || m.checks.loaded || m.checks.busy || m.confirmQuit || (!m.notificationPR.open && m.focus != FocusDetail) {
 		return nil
 	}
-	if !m.checks.loaded && !m.checks.busy {
-		return m.readChecks("offline", 0)
+	source, fixed := m.checksSource()
+	if fixed && source == "" {
+		return nil
 	}
-	return nil
+	mode := "cache-preferred"
+	if fixed {
+		mode = "offline"
+	}
+	return m.readChecks(mode, 0)
 }
 
 // checksLiteral keeps captured output inside a fence even when the source contains Markdown fences.
@@ -319,154 +315,229 @@ func checksTime(value string) string {
 	return parsed.UTC().Format("2006-01-02 15:04 UTC")
 }
 
-func renderChecks(page checksPage) string {
-	var b strings.Builder
+type checksSpan struct {
+	text string
+	role string
+	bold bool
+}
+
+type checksBlock struct {
+	spans    []checksSpan
+	markdown string
+}
+
+// checksBlocks keeps trusted presentation roles separate from source text and captured logs.
+func checksBlocks(page checksPage) []checksBlock {
 	counts := page.ResultCounts
-	fmt.Fprintf(&b, "%d failed · %d pending · %d passed · %d unknown\n\nCoverage: %s · Freshness: %s", counts.Failed, counts.Pending, counts.Passed, counts.Unknown, page.Coverage, page.Freshness)
-	if page.ObservedAt != "" {
-		fmt.Fprintf(&b, " · Observed %s", checksTime(page.ObservedAt))
-	}
-	b.WriteString("\n\n")
+	blocks := []checksBlock{{spans: []checksSpan{
+		{text: strconv.Itoa(counts.Failed), role: currentTheme.Error}, {text: " failed · "},
+		{text: strconv.Itoa(counts.Pending), role: currentTheme.Warning}, {text: " pending · "},
+		{text: strconv.Itoa(counts.Passed), role: currentTheme.Success}, {text: " passed · "},
+		{text: strconv.Itoa(counts.Unknown), role: currentTheme.Muted}, {text: " unknown"},
+	}}, {spans: []checksSpan{{text: "Coverage: "}, {text: page.Coverage, role: currentTheme.Muted}, {text: " · Freshness: "}, {text: page.Freshness, role: currentTheme.Muted}}}}
 	revision := "Revision match unknown"
+	role := currentTheme.Muted
 	if page.Head != "" && page.ChecksHead != "" {
-		revision = "Checks match the selected PR head"
+		revision, role = "Checks match the selected PR head", ""
 		if page.Head != page.ChecksHead {
 			revision = "Checks differ from the selected PR head"
 		}
 	}
-	fmt.Fprintf(&b, "%s. CI observations alone do not establish readiness.\n\n", revision)
+	blocks = append(blocks, checksBlock{spans: []checksSpan{{text: revision, role: role}}})
 	for _, problem := range page.Problems {
-		fmt.Fprintf(&b, "- %s\n", singleLine(problem))
+		blocks = append(blocks, checksBlock{spans: []checksSpan{{text: singleLine(problem)}}})
 	}
 	if page.Pagination.Total == 0 {
+		message := "No check rows are available in this observation. Coverage remains incomplete or unknown."
 		if page.Coverage == "complete" && page.Result == "empty" {
-			b.WriteString("No checks or statuses were recorded for this PR head.\n\n")
-		} else {
-			b.WriteString("No check rows are available in this observation. Coverage remains incomplete or unknown.\n\n")
+			message = "No checks or statuses were recorded for this PR head."
 		}
+		blocks = append(blocks, checksBlock{spans: []checksSpan{{text: message}}})
 	}
+	var compact []checksSpan
 	for _, row := range page.Rows {
 		name := singleLine(row.Name)
 		if name == "" {
 			name = "Unnamed check"
 		}
 		if row.Result != "failed" {
-			fmt.Fprintf(&b, "- %s · %s", name, row.Result)
+			if len(compact) > 0 {
+				compact = append(compact, checksSpan{text: "\n"})
+			}
+			compact = append(compact, checksSpan{text: name + " · "}, checksSpan{text: row.Result, role: currentTheme.Muted})
 			if row.Conclusion != "" {
-				fmt.Fprintf(&b, " · %s", singleLine(row.Conclusion))
+				compact = append(compact, checksSpan{text: " · "}, checksSpan{text: singleLine(row.Conclusion), role: currentTheme.Muted})
 			}
 			if row.Repository != page.Repository.FullName {
-				fmt.Fprintf(&b, " · %s", singleLine(row.Repository))
+				compact = append(compact, checksSpan{text: " · " + singleLine(row.Repository)})
 			}
-			b.WriteString("\n")
 			for _, problem := range row.Problems {
-				fmt.Fprintf(&b, "  %s\n", singleLine(problem))
+				compact = append(compact, checksSpan{text: "\n" + singleLine(problem)})
 			}
 			continue
 		}
-		fmt.Fprintf(&b, "\n### %s\n\nFailed", name)
+		blocks = append(blocks, checksBlock{spans: []checksSpan{{text: name, role: currentTheme.Accent, bold: true}}})
+		meta := []checksSpan{{text: "Failed", role: currentTheme.Muted}}
 		if row.App != "" {
-			fmt.Fprintf(&b, " · %s", singleLine(row.App))
+			meta = append(meta, checksSpan{text: " · " + singleLine(row.App)})
 		}
 		if log := row.FailureLog; log != nil && log.State == "retained" {
 			if log.WorkflowName != "" {
-				fmt.Fprintf(&b, " · %s", singleLine(log.WorkflowName))
+				meta = append(meta, checksSpan{text: " · " + singleLine(log.WorkflowName)})
 			}
 			if log.JobName != "" {
-				fmt.Fprintf(&b, " / %s", singleLine(log.JobName))
+				meta = append(meta, checksSpan{text: " / " + singleLine(log.JobName)})
 			}
 		}
 		if row.Repository != page.Repository.FullName {
-			fmt.Fprintf(&b, " · %s", singleLine(row.Repository))
+			meta = append(meta, checksSpan{text: " · " + singleLine(row.Repository)})
 		}
-		b.WriteString("\n\n")
+		blocks = append(blocks, checksBlock{spans: meta})
 		for _, problem := range row.Problems {
-			fmt.Fprintf(&b, "- %s\n", singleLine(problem))
+			blocks = append(blocks, checksBlock{spans: []checksSpan{{text: singleLine(problem)}}})
 		}
-		log := row.FailureLog
-		if log == nil {
-			b.WriteString("No captured failure excerpt. Capture requires an explicit request.\n\n")
+		blocks = append(blocks, checksBlock{markdown: checksFailureSource(row)})
+	}
+	if len(compact) > 0 {
+		blocks = append(blocks, checksBlock{spans: compact})
+	}
+	footer := fmt.Sprintf("%d rows · %d omitted before · %d omitted after", page.Pagination.Total, page.Pagination.Before, page.Pagination.After)
+	if page.HistoryOmissions > 0 {
+		footer += fmt.Sprintf(" · %d historical or suite observations omitted", page.HistoryOmissions)
+	}
+	blocks = append(blocks, checksBlock{spans: []checksSpan{{text: footer, role: currentTheme.Muted}}})
+	return blocks
+}
+
+// renderChecks exports plain source, without terminal styling.
+func renderChecks(page checksPage) string {
+	var blocks []string
+	for _, block := range checksBlocks(page) {
+		if block.markdown != "" {
+			blocks = append(blocks, strings.TrimSpace(block.markdown))
 			continue
 		}
-		if log.State != "retained" {
-			label := map[string]string{"missing": "No captured failure excerpt. Capture requires an explicit request", "unavailable": "Failure excerpt unavailable", "invalid": "Captured failure excerpt could not be verified", "not-shown": "Failure excerpt omitted by this page's display budget"}[log.State]
-			fmt.Fprintf(&b, "%s.\n\n", label)
-			if log.Problem != "" {
-				fmt.Fprintf(&b, "%s\n\n", singleLine(log.Problem))
-			}
-			if log.DownloadPartial {
-				b.WriteString("Partial log capture; complete job log coverage is unknown.\n\n")
-			}
-			if log.LogObject != nil && !log.BindingRevalidated {
-				b.WriteString("Source binding could not be revalidated after capture.\n\n")
-			}
-			for _, problem := range append(append([]string{}, log.Omissions...), log.DisplayProblems...) {
-				fmt.Fprintf(&b, "- %s\n", singleLine(problem))
-			}
+		var text strings.Builder
+		for _, span := range block.spans {
+			text.WriteString(span.text)
+		}
+		blocks = append(blocks, text.String())
+	}
+	return strings.Join(blocks, "\n\n") + "\n"
+}
+
+func renderChecksView(page checksPage, width int) string {
+	var blocks []string
+	for _, block := range checksBlocks(page) {
+		if block.markdown != "" {
+			blocks = append(blocks, renderMarkdown(block.markdown, width))
 			continue
 		}
-		for _, window := range log.Windows {
-			fmt.Fprintf(&b, "Captured failure excerpt · Source lines %d–%d", window.StartLine, window.EndLine)
-			if log.DownloadPartial {
-				b.WriteString(" · partial capture")
+		var text strings.Builder
+		for _, span := range block.spans {
+			style := lipgloss.NewStyle().Bold(span.bold)
+			if span.role != "" {
+				style = style.Foreground(lipgloss.Color(span.role))
 			}
-			b.WriteString("\n\n")
-			b.WriteString(checksLiteral(window.Text))
-			if window.DisplayTruncated {
-				b.WriteString("This excerpt was truncated for display.\n\n")
-			}
+			text.WriteString(style.Render(sanitize(span.text)))
 		}
-		if log.SelectionBasis != "" {
-			fmt.Fprintf(&b, "Selection: %s", singleLine(log.SelectionBasis))
-		}
-		if log.FetchedAt != "" {
-			if log.SelectionBasis != "" {
-				b.WriteString(" · ")
-			}
-			fmt.Fprintf(&b, "Captured %s", checksTime(log.FetchedAt))
-		}
-		if log.SelectionBasis != "" || log.FetchedAt != "" {
-			b.WriteString("\n\n")
+		blocks = append(blocks, ansi.Wrap(text.String(), maxInt(width, 1), ""))
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+func checksFailureSource(row checkRow) string {
+	var b strings.Builder
+	log := row.FailureLog
+	if log == nil {
+		b.WriteString("No captured failure excerpt. Capture requires an explicit request.\n\n")
+		return b.String()
+	}
+	if log.State != "retained" {
+		label := map[string]string{"missing": "No captured failure excerpt. Capture requires an explicit request", "unavailable": "Failure excerpt unavailable", "invalid": "Captured failure excerpt could not be verified", "not-shown": "Failure excerpt omitted by this page's display budget"}[log.State]
+		fmt.Fprintf(&b, "%s.\n\n", label)
+		if log.Problem != "" {
+			fmt.Fprintf(&b, "%s\n\n", singleLine(log.Problem))
 		}
 		if log.DownloadPartial {
 			b.WriteString("Partial log capture; complete job log coverage is unknown.\n\n")
 		}
-		if !log.BindingRevalidated {
+		if log.LogObject != nil && !log.BindingRevalidated {
 			b.WriteString("Source binding could not be revalidated after capture.\n\n")
 		}
 		for _, problem := range append(append([]string{}, log.Omissions...), log.DisplayProblems...) {
 			fmt.Fprintf(&b, "- %s\n", singleLine(problem))
 		}
-		if len(log.Continuation) > 0 && string(log.Continuation) != "null" {
-			b.WriteString("\nMore retained context is available through the pinned offline log reader.\n")
+		return b.String()
+	}
+	for _, window := range log.Windows {
+		fmt.Fprintf(&b, "Captured failure excerpt · Source lines %d–%d", window.StartLine, window.EndLine)
+		if log.DownloadPartial {
+			b.WriteString(" · partial capture")
+		}
+		b.WriteString("\n\n")
+		b.WriteString(checksLiteral(window.Text))
+		if window.DisplayTruncated {
+			b.WriteString("This excerpt was truncated for display.\n\n")
 		}
 	}
-	fmt.Fprintf(&b, "\n%d rows · %d omitted before · %d omitted after", page.Pagination.Total, page.Pagination.Before, page.Pagination.After)
-	if page.HistoryOmissions > 0 {
-		fmt.Fprintf(&b, " · %d historical or suite observations omitted", page.HistoryOmissions)
+	if log.SelectionBasis != "" {
+		fmt.Fprintf(&b, "Selection: %s", singleLine(log.SelectionBasis))
 	}
-	b.WriteString("\n")
+	if log.FetchedAt != "" {
+		if log.SelectionBasis != "" {
+			b.WriteString(" · ")
+		}
+		fmt.Fprintf(&b, "Captured %s", checksTime(log.FetchedAt))
+	}
+	if log.SelectionBasis != "" || log.FetchedAt != "" {
+		b.WriteString("\n\n")
+	}
+	if log.DownloadPartial {
+		b.WriteString("Partial log capture; complete job log coverage is unknown.\n\n")
+	}
+	if !log.BindingRevalidated {
+		b.WriteString("Source binding could not be revalidated after capture.\n\n")
+	}
+	for _, problem := range append(append([]string{}, log.Omissions...), log.DisplayProblems...) {
+		fmt.Fprintf(&b, "- %s\n", singleLine(problem))
+	}
+	if len(log.Continuation) > 0 && string(log.Continuation) != "null" {
+		b.WriteString("\nMore retained context is available through the pinned offline log reader.\n")
+	}
 	return b.String()
 }
 
 func (m model) finishChecks(msg checksMsg) (tea.Model, tea.Cmd) {
 	source, fixed := m.checksSource()
-	if msg.root != m.installRoot || msg.repo != m.repo || msg.key != m.detail.key || msg.generation != m.detail.generation || msg.request != m.checksRequest || !m.detail.checksActive() || source != msg.sourceSnapshot || fixed != msg.fixed || m.checks.pendingSnapshot != msg.snapshot {
+	if !m.checks.busy || msg.root != m.installRoot || msg.repo != m.repo || msg.key != m.detail.key || msg.generation != m.detail.generation || msg.request != m.checksRequest || source != msg.sourceSnapshot || fixed != msg.fixed || !m.notificationPR.open && m.focus != FocusDetail || m.checks.pendingSnapshot != msg.snapshot {
 		return m, nil
 	}
 	m.checks.busy, m.checks.loaded = false, true
 	if msg.err != nil {
-		m.checksText("Checks unavailable: " + msg.err.Error() + "\n\nNo automatic fetch. Press r to request focused CI for a current item.")
+		m.checks.page = checksPage{}
+		m.detail.setChecksPage(nil)
+		m.status = "CI read unavailable. ! shows details; Ctrl-R retries focused CI."
 		m.recordError("Checks unavailable", msg.err)
 		return m, nil
 	}
 	m.checks.page, m.checks.snapshot = msg.data, msg.data.Snapshot
-	m.checksText(renderChecks(msg.data))
+	if msg.data.Pagination.Total > 0 {
+		m.checksPageText(msg.data)
+		m.status = "Focused CI loaded."
+	} else {
+		m.detail.setChecksPage(nil)
+		m.status = "No CI check or status observations. Ctrl-R refreshes focused CI."
+		if msg.data.Coverage == "failed" || msg.data.Coverage == "unavailable" || len(msg.data.Problems) > 0 {
+			m.status = "CI observations unavailable. ! shows details; Ctrl-R retries focused CI."
+			m.recordError("Checks unavailable", fmt.Errorf("%s: %s", msg.data.Coverage, strings.Join(msg.data.Problems, "; ")))
+		}
+	}
 	return m, nil
 }
 
-func (m model) checksKeyScope() bool {
-	if !m.detail.checksActive() || m.comment.open || m.themePicker.open || m.lastError.open || m.confirmQuit {
+func (m model) prChecksKeyScope() bool {
+	if m.detail.key.Kind != "pr" || m.comment.open || m.themePicker.open || m.lastError.open || m.confirmQuit {
 		return false
 	}
 	if m.notificationPR.open {
@@ -476,7 +547,14 @@ func (m model) checksKeyScope() bool {
 		!m.notifications.open && !m.attention.open && !m.actionHistory.open && !m.settings.open && !m.corpus.open && !m.groups.open && !m.batches.open && !m.briefs.open && !m.dups.open
 }
 
+func (m model) checksKeyScope() bool {
+	return m.detail.checksActive() && m.prChecksKeyScope()
+}
+
 func (m model) handleChecksKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
+	if m.prChecksKeyScope() && key.Matches(msg, keys.ChecksFocusedRefresh) {
+		return m, m.readChecks("refresh", 0), true
+	}
 	if !m.checksKeyScope() {
 		return m, nil, false
 	}

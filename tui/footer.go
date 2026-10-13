@@ -208,7 +208,7 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.notifications.actionReview != nil {
 			back = "back to proposal"
 		}
-		read := group("Item", bind("previous tab", keys.TabPrev), bind("next tab", keys.TabNext), hint{"Tab/Shift-Tab", "tabs"}, hint{"1/2/3/4/5", "jump to tab"}, hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, bind("", keys.Track))
+		read := group("Item", bind("previous tab", keys.TabPrev), bind("next tab", keys.TabNext), hint{"Tab/Shift-Tab", "tabs"}, m.tabJumpHint(), hint{"j/k/↑/↓", "scroll"}, hint{"Ctrl-D/U", "page"}, bind("", keys.Track))
 		if it, ok := m.notificationActionItem(); ok {
 			read.hints = append(read.hints, bind("", keys.Comment, keys.CommentEditor))
 			if it.State == "open" {
@@ -216,6 +216,9 @@ func (m model) contextFooterGroups() []footerGroup {
 			} else {
 				read.hints = append(read.hints, bind("", keys.Reopen, keys.ReopenEditor))
 			}
+		}
+		if m.prChecksKeyScope() {
+			read.hints = append(read.hints, bind("", keys.ChecksFocusedRefresh))
 		}
 		if m.checksKeyScope() {
 			read.hints = append(read.hints, bind("", keys.ChecksRefresh), bind("pages", keys.ChecksPrev, keys.ChecksNext))
@@ -429,6 +432,14 @@ func (m model) contextFooterGroups() []footerGroup {
 	return append(groups, group("Menus", bind("", keys.Theme), bind("", keys.Refresh), bind("", keys.RefreshFull)), m.navigationGroup())
 }
 
+func (m model) tabJumpHint() hint {
+	var numbers []string
+	for i := range m.detail.sections {
+		numbers = append(numbers, fmt.Sprint(i+1))
+	}
+	return hint{strings.Join(numbers, "/"), "jump to tab"}
+}
+
 func (m model) itemFooter() []footerGroup {
 	item := group("Item", bind("", keys.Save), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Close, keys.CloseEditor), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Yank))
 	if it, ok := m.findItem(m.detail.key); ok && it.PendingReview() {
@@ -438,7 +449,10 @@ func (m model) itemFooter() []footerGroup {
 	if m.sideBySide() {
 		tabAction = "tabs / form"
 	}
-	read := group("Read", bind(tabAction, keys.TabPrev, keys.TabNext), bind("", keys.TabJump), bind("expand", keys.Enter), bind("scroll", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("page", keys.HalfDown, keys.HalfUp))
+	read := group("Read", bind(tabAction, keys.TabPrev, keys.TabNext), m.tabJumpHint(), bind("expand", keys.Enter), bind("scroll", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("page", keys.HalfDown, keys.HalfUp))
+	if m.prChecksKeyScope() {
+		read.hints = append(read.hints, bind("", keys.ChecksFocusedRefresh))
+	}
 	if m.checksKeyScope() {
 		read.hints = append(read.hints, bind("", keys.ChecksRefresh), bind("pages", keys.ChecksPrev, keys.ChecksNext))
 	}
@@ -456,14 +470,14 @@ func (m model) itemFooter() []footerGroup {
 	fields := group("Fields", bind("fields", keys.FieldNext, keys.FieldPrev), hint{"h/l", "content / form"})
 	if m.form.focused == fieldLabels {
 		fields = group("Labels", bind("fields", keys.FieldNext, keys.FieldPrev), hint{"l/→", "choose labels"})
-		read = group("Read", bind("focus tab", keys.TabPrev), bind("", keys.TabJump))
+		read = group("Read", bind("focus tab", keys.TabPrev), m.tabJumpHint())
 	}
 	if formFieldIsEnum(m.form.focused) && m.form.focused != fieldLabels {
 		fields = group("Fields", bind("fields", keys.FieldNext, keys.FieldPrev, keys.ChoiceNext, keys.ChoicePrev), hint{"h", "content"}, bind("change", keys.ValueNext, keys.ValuePrev), bind("", keys.OpenList), bind("next", keys.Confirm))
 		if m.form.focused == fieldAction {
 			fields.hints = append(fields.hints, hint{"Backspace", "clear action"})
 		}
-		read = group("Read", bind("focus tab", keys.TabPrev), bind("", keys.TabJump))
+		read = group("Read", bind("focus tab", keys.TabPrev), m.tabJumpHint())
 	}
 
 	return []footerGroup{item, fields, read, m.menusGroup(), m.navigationGroup()}

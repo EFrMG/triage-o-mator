@@ -20,6 +20,7 @@ const (
 	markdownSection sectionKind = iota
 	commentsSection
 	diffSection
+	checksSection
 )
 
 // detailSection is one tab of the item view. Its text renders (Markdown through glamour, the diff highlighted) only when it's shown, and again only when the width or theme changed, since rendering a long thread is the expensive part.
@@ -27,6 +28,7 @@ type detailSection struct {
 	name           string
 	kind           sectionKind
 	source         string
+	checks         *checksPage
 	comments       []string
 	commentAuthors []string
 	commentDates   []string
@@ -47,7 +49,7 @@ func (s detailSection) empty() bool {
 	return s.loaded && strings.TrimSpace(s.source) == ""
 }
 
-// detailModel owns the item view's tabs (Body, Agent notes, Comments, Diff, Checks) for the selected item: one is active, shown beside the decision form, or full screen.
+// detailModel owns the item view's tabs (Body, Agent notes, Comments, Checks, Diff) for the selected item: one is active, shown beside the decision form, or full screen.
 type detailModel struct {
 	key              Key
 	item             Item
@@ -84,7 +86,7 @@ func (d *detailModel) SetItem(it Item) (needsFetch bool) {
 
 	d.sections = append(d.sections, detailSection{name: "Comments", kind: commentsSection})
 	if it.Kind == "pr" {
-		d.sections = append(d.sections, detailSection{name: "Diff", kind: diffSection}, detailSection{name: "Checks", kind: markdownSection, loaded: true, source: "Open this tab to read retained checks offline. No automatic acquisition."})
+		d.sections = append(d.sections, detailSection{name: "Diff", kind: diffSection})
 	}
 
 	for i := range d.sections {
@@ -101,6 +103,49 @@ func (d *detailModel) SetItem(it Item) (needsFetch bool) {
 	d.loading = true
 
 	return true
+}
+
+// setChecksPage adds observed CI before Diff without moving the selected content or its viewport.
+func (d *detailModel) setChecksPage(page *checksPage) {
+	selected := ""
+	if d.active >= 0 && d.active < len(d.sections) {
+		selected = d.sections[d.active].name
+	}
+	checksIndex, diffIndex := -1, len(d.sections)
+	for i := range d.sections {
+		if d.sections[i].kind == checksSection {
+			checksIndex = i
+		}
+		if d.sections[i].kind == diffSection {
+			diffIndex = i
+		}
+	}
+	if page == nil {
+		if checksIndex >= 0 {
+			d.sections = append(d.sections[:checksIndex], d.sections[checksIndex+1:]...)
+		}
+		if selected == "Checks" {
+			selected = "Diff"
+		}
+	} else {
+		if checksIndex < 0 {
+			section := detailSection{name: "Checks", kind: checksSection, viewport: viewport.New(viewport.WithWidth(maxInt(d.width, 1)), viewport.WithHeight(maxInt(d.height, 1)))}
+			d.sections = append(d.sections, detailSection{})
+			copy(d.sections[diffIndex+1:], d.sections[diffIndex:])
+			d.sections[diffIndex] = section
+			checksIndex = diffIndex
+		}
+		section := &d.sections[checksIndex]
+		section.source, section.loaded, section.renderedFor, section.checks = renderChecks(*page), true, "", page
+	}
+	for i := range d.sections {
+		if d.sections[i].name == selected {
+			d.active = i
+			break
+		}
+	}
+	d.active = minInt(d.active, maxInt(len(d.sections)-1, 0))
+	d.renderActive()
 }
 
 func (d *detailModel) populate(e EnrichedItem) {
@@ -361,6 +406,8 @@ func (d *detailModel) renderActive() {
 		}
 	case s.kind == diffSection:
 		text = renderDiff(s.source, d.width)
+	case s.kind == checksSection && s.checks != nil:
+		text = renderChecksView(*s.checks, d.width)
 	case strings.TrimSpace(s.source) == "":
 		text = mutedText("(no description)")
 	default:

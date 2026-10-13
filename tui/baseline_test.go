@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "verification-settings"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "verification-settings"), filepath.Join("..", "bin", "ci-policy"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -890,7 +890,48 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 		t.Fatal("verification guidance did not save")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	if m.settings.selected != 3 || m.settings.automations.pendingReviewHold {
+	if m.settings.selected != 3 || m.settings.automations.ci.Enabled {
+		t.Fatal("CI readiness requirement did not default to OFF after Agentic verification")
+	}
+	revisionCI := m.settings.automations.ci.Revision
+	m.settings.automations.ci.Revision = strings.Repeat("0", 64)
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	m = baselineSend(m, cmd().(automationMsg))
+	if m.settings.automations.ci.Enabled {
+		t.Fatal("stale CI policy revision toggled the requirement")
+	}
+	m.settings.automations.ci.Revision = revisionCI
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if cmd == nil {
+		t.Fatal("CI readiness card did not toggle")
+	}
+	ciReply := cmd().(automationMsg)
+	foreignCI := ciReply
+	foreignCI.ci.Repository = "other/repo"
+	m = baselineSend(m, foreignCI)
+	if m.settings.automations.ci.Enabled {
+		t.Fatal("foreign CI policy status changed the selected repository")
+	}
+	invalidCI := ciReply
+	invalidCI.ci.Revision = strings.Repeat("g", 64)
+	m = baselineSend(m, invalidCI)
+	if m.settings.automations.ci.Enabled {
+		t.Fatal("invalid CI policy revision was accepted")
+	}
+	m = baselineSend(m, ciReply)
+	if !m.settings.automations.ci.Enabled || !m.settings.automations.verification.Enabled || !m.settings.automations.labelingEnabled || m.settings.automations.pendingReviewHold || m.settings.automations.actions[0].Mode != "stage" {
+		t.Fatal("CI readiness toggle changed unrelated automation permissions")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	m = next.(model)
+	m = baselineSend(m, cmd().(automationMsg))
+	if m.settings.automations.ci.Enabled {
+		t.Fatal("CI readiness requirement did not turn off")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	if m.settings.selected != 4 || m.settings.automations.pendingReviewHold {
 		t.Fatal("Pending review action hold did not default to OFF after Scoring")
 	}
 	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -903,7 +944,7 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 		t.Fatal("Pending review action hold did not turn on for the selected repository")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	if m.settings.selected != 4 || m.settings.automations.actions[0].Name != "comment" {
+	if m.settings.selected != 5 || m.settings.automations.actions[0].Name != "comment" {
 		t.Fatal("first writing action did not appear after Pending review hold")
 	}
 	if prompt := m.actionPrompt(m.settings.automations.actions[0]); !strings.Contains(prompt, "prompts/automated-actions.md") || !strings.Contains(prompt, "comment") || !strings.Contains(prompt, m.repo) {

@@ -403,6 +403,47 @@ print(json.dumps(label))
 
 
 class VerificationSettingsTests(Workspace):
+    def test_ci_readiness_policy_is_explicit_repository_scoped_and_revision_guarded(self):
+        args = ("--expected-repo", "owner/repo")
+        path = self.root / "config/ci-readiness.json"
+        initial = self.json_cli("ci-policy", "status", *args)
+        self.assertFalse(initial["enabled"])
+        self.assertRegex(initial["revision"], r"^[0-9a-f]{64}$")
+        self.assertFalse(path.exists())
+        self.assertFalse((self.root / "config/local").exists())
+        enabled = self.json_cli("ci-policy", "set-enabled", *args, "--enabled", "on", "--expected-revision", initial["revision"])
+        self.assertTrue(enabled["enabled"])
+        saved = path.read_bytes()
+        self.run_cli("ci-policy", "set-enabled", *args, "--enabled", "off", "--expected-revision", initial["revision"], ok=False)
+        self.assertEqual(path.read_bytes(), saved)
+
+        (self.root / "config/repo").write_text("other/repo\n")
+        other_args = ("--expected-repo", "other/repo")
+        other = self.json_cli("ci-policy", "status", *other_args)
+        self.assertFalse(other["enabled"])
+        self.assertNotEqual(other["revision"], initial["revision"])
+        self.run_cli("ci-policy", "set-enabled", *args, "--enabled", "off", "--expected-revision", enabled["revision"], ok=False)
+        self.run_cli("ci-policy", "set-enabled", *other_args, "--enabled", "on", "--expected-revision", enabled["revision"], ok=False)
+        self.assertEqual(path.read_bytes(), saved)
+        self.json_cli("ci-policy", "set-enabled", *other_args, "--enabled", "on", "--expected-revision", other["revision"])
+        (self.root / "config/repo").write_text("owner/repo\n")
+        self.assertEqual(self.json_cli("ci-policy", "status", *args), enabled)
+        disabled = self.json_cli("ci-policy", "set-enabled", *args, "--enabled", "off", "--expected-revision", enabled["revision"])
+        self.assertFalse(disabled["enabled"])
+        self.assertTrue(json.loads(path.read_text())["repositories"]["other/repo"]["enabled"])
+
+        malformed = ["not JSON", '{"schema_version":1,"schema_version":1,"repositories":{}}',
+                     json.dumps(dict(schema_version=True, repositories={})),
+                     json.dumps(dict(schema_version=1, repositories={"owner/repo": dict(enabled="false")})),
+                     json.dumps(dict(schema_version=1, repositories={"owner/repo": dict(enabled=False, command="run")}))]
+        for invalid in malformed:
+            path.write_text(invalid)
+            self.run_cli("ci-policy", "status", *args, ok=False)
+            self.run_cli("ci-policy", "set-enabled", *args, "--enabled", "on", "--expected-revision", disabled["revision"], ok=False)
+            self.assertEqual(path.read_text(), invalid)
+
+        self.assertEqual(self.calls(), [])
+
     def test_local_settings_preserve_permission_guidance_and_repository_boundaries(self):
         args = ("--expected-repo", "owner/repo")
         path = self.root / "config/local/agentic-verification.json"

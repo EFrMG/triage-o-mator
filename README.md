@@ -139,6 +139,8 @@ They are listed here in sidebar order.
 
 10. **Settings.** **Labels** edits the repository's GitHub labels, each change previewed before it is written. **Actions** edits the local list of actions a decision can suggest, with guidance for each. **Automations** decides what a bounded pass may do without asking again:
     - Labeling is ON by default. Its pass applies proposed labels whatever the suggested action or Pending review state, and runs only when an agent or a person asks for it.
+    - Agentic verification defaults OFF. ON permits relevant bounded local checks in your prepared environment during a requested triage or review task.
+    - CI for readiness defaults OFF. ON requires fresh, complete, nonempty passing CI observations for a ready PR review assessment.
     - Each action type stages its proposals for approval in Notifications, unless you set it to execute directly.
     - A hold, OFF by default, keeps Pending review items staged even then.
 
@@ -213,10 +215,11 @@ bin/briefs plan --all
 | Prepare and edit decisions                      | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv`                      |
 | Flag items for human attention                  | `bin/review-request`                                                                                |
 | Compare and group                               | `bin/similar`, `bin/duplicate-assessment`, `bin/not-duplicate`, `bin/group`, `bin/group-assessment` |
-| Read PR check metadata                          | `bin/pr-checks`                                                                                     |
+| Read PR checks and focused failure context      | `bin/pr-checks`, `bin/pr-check-log`                                                                 |
 | Read guidance and evidence                      | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`                             |
 | Edit action settings                            | `bin/taxonomy-settings`, `bin/action-policy`                                                        |
 | Configure agent-led local verification          | `bin/verification-settings`                                                                         |
+| Configure CI requirements for ready assessments | `bin/ci-policy`                                                                                     |
 | Preview, initialize and reconcile GitHub labels | `bin/label-definitions`                                                                             |
 | Record no-fit assessments and apply labels      | `bin/label-assessment`, `bin/item-labels`                                                           |
 | Assess, propose and publish actions             | `bin/action-assessment`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus`              |
@@ -265,6 +268,7 @@ The [local verification guide](docs/local-verification.md) explains environment 
 
 #### Further guides
 
+- [CI observations and readiness](docs/ci.md) covers the optional CI readiness requirement and explicit bounded failure-log excerpts. The requirement defaults OFF; logs are acquired only for a selected failed Actions job.
 - The [evidence reference](docs/evidence-reference.md), [group guide](docs/groups.md), [comment publishing guide](docs/comment-plus.md) and [item score guide](docs/item-score.md) cover the commands and their limits.
 - Closed-PR [watches](docs/appeal-evidence.md) and [external closure records](docs/external-closures.md) have separate guides.
 - [Bounded evidence readers](docs/evidence-reference.md#bounded-offline-snapshot-readers) expose selected snapshots and their gaps without filling missing data from GitHub. The [agent preparation prompt](prompts/prepare-analysis.md) starts from saved evidence and asks for a focused source review before any recommendation.
@@ -282,6 +286,7 @@ The [local verification guide](docs/local-verification.md) explains environment 
 | “prepare offline analysis”                             | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps            |
 | “is #N a duplicate?”                                   | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal            |
 | “review PR #N”                                         | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and a local decision      |
+| “what failed in PR #N's CI?”                           | [Inspect CI](prompts/inspect-ci.md)                                                               | Selected CI outcomes and failure context    |
 | “reproduce issue #N locally” or “verify PR #N locally” | [Verify locally](prompts/verify-locally.md)                                                       | Attributed, scoped runtime observations     |
 | “recommend PR closures”                                | [Recommend PR closures](prompts/recommend-closure.md)                                             | Pending, unapproved PR closure proposals    |
 | “organize these items”                                 | [Organize groups](prompts/organize-groups.md)                                                     | Draft maintainer groups                     |

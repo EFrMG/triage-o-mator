@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Read or change the selected repository's observed-CI readiness requirement."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _ci_policy import set_enabled, status
+from _triage import REPO
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    showing = commands.add_parser("status")
+    showing.add_argument("--expected-repo", required=True)
+    setting = commands.add_parser("set-enabled")
+    setting.add_argument("--expected-repo", required=True)
+    setting.add_argument("--enabled", choices=("on", "off"), required=True)
+    setting.add_argument("--expected-revision", required=True)
+    args = parser.parse_args()
+    if args.expected_repo != REPO:
+        raise ValueError("configured repository changed; reopen Settings")
+
+    result = status() if args.command == "status" else set_enabled(args.enabled == "on", args.expected_revision)
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
+        sys.exit(f"error: {error}")

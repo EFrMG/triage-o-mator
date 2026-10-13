@@ -30,6 +30,127 @@ class EvidenceTests(Workspace):
         self.run_cli("fetch", "--cache-inventory")
         return self.cache("import-inventory")["snapshot_id"]
 
+    def test_failed_job_logs_are_bounded_pinned_and_read_offline(self):
+        sha = "b" * 40
+        app = dict(id=11, slug="github-actions")
+        suite = dict(id=10, head_sha=sha, app=app, status="completed", conclusion="failure", created_at="2026-09-22T02:00:00Z")
+        check = dict(id=20, head_sha=sha, app=app, check_suite=dict(id=10), name="build", status="completed", conclusion="failure",
+                     started_at="2026-09-22T02:00:00Z", completed_at="2026-09-22T02:01:00Z")
+        prefix = f"repos/owner/repo/commits/{sha}"
+        self.responses[prefix + "/check-suites?per_page=100&page=1"] = dict(data=dict(total_count=1, check_suites=[suite]))
+        self.responses["repos/owner/repo/check-suites/10/check-runs?filter=all&per_page=100&page=1"] = dict(data=dict(total_count=1, check_runs=[check]))
+        self.responses[prefix + "/statuses?per_page=100&page=1"] = dict(data=[])
+        snapshot = self.json_cli("pr-checks", "--expected-repo", "owner/repo", "--number", "1", "--mode", "refresh")["snapshot_id"]
+        run = dict(id=30, run_attempt=2, head_sha=sha, check_suite_id=10, repository=repository(), url="https://api.github.com/repos/owner/repo/actions/runs/30", name="CI")
+        job = dict(id=40, run_id=30, head_sha=sha, status="completed", conclusion="failure", name="test",
+                   url="https://api.github.com/repos/owner/repo/actions/jobs/40", check_run_url="https://api.github.com/repos/owner/repo/check-runs/20")
+        run_resource = "repos/owner/repo/actions/runs/30/attempts/2"
+        job_resource = "repos/owner/repo/actions/jobs/40"
+        discovery_resource = f"repos/owner/repo/actions/runs?check_suite_id=10&head_sha={sha}&per_page=100&page=1"
+        self.responses[discovery_resource] = dict(data=dict(total_count=1, workflow_runs=[run]))
+        self.responses[run_resource] = dict(data=run)
+        self.responses[job_resource] = dict(data=job)
+        self.responses[run_resource + "/jobs?per_page=100&page=1"] = dict(data=dict(total_count=1, jobs=[job]))
+        log = "".join(f"line {number}\n" if number != 50 else "error: expected 1, got 2\n" for number in range(1, 150))
+        self.responses[job_resource + "/logs"] = dict(text=log)
+        args = ("--expected-repo", "owner/repo", "--number", "1", "--snapshot", snapshot)
+        located = self.json_cli("pr-check-log", "locate", *args, "--check-id", "20")
+        self.assertEqual((located["run_id"], located["attempt"], located["job_id"]), (30, 2, 40))
+        self.responses[discovery_resource]["data"]["total_count"] = 2
+        self.run_cli("pr-check-log", "locate", *args, "--check-id", "20", ok=False)
+        self.responses[discovery_resource]["data"]["total_count"] = 1
+        capture_args = (*args, "--check-id", "20", "--run-id", "30", "--attempt", "2", "--job-id", "40")
+        captured = self.json_cli("pr-check-log", "fetch", *capture_args)
+        self.assertEqual(captured["reserved_requests"], 11)
+        self.assertLessEqual(captured["requests"] + captured["reserved_requests"], 20)
+        self.assertEqual(captured["status"], "retained")
+        self.assertEqual((captured["check_name"], captured["workflow_name"], captured["job_name"]), ("build", "CI", "test"))
+        self.assertEqual((captured["request_budget"], captured["max_log_bytes"]), (20, 1048576))
+        self.assertFalse(captured["download_partial"])
+        self.assertEqual((captured["segments"][0]["start_line"], captured["segments"][0]["end_line"]), (40, 60))
+        self.assertTrue(any("intervening" in omission for omission in captured["omissions"]))
+        ref = captured["log_object"]
+        read_args = (*args, "--log-object", ref["sha256"], "--log-bytes", str(ref["bytes"]))
+        before = len(self.calls())
+        offline = self.json_cli("pr-check-log", "read", *read_args, "--start-line", "45", "--max-lines", "10")
+        self.assertIn("line 45\n", offline["windows"][0]["text"])
+        self.assertIn("error: expected 1, got 2", offline["windows"][0]["text"])
+        self.assertNotIn("content_base64", json.dumps(offline))
+        self.assertNotIn("run", offline["packet"])
+        self.run_cli("pr-check-log", "read", *read_args, "--start-line", "5", ok=False)
+        self.run_cli("pr-check-log", "read", *read_args, "--job-id", "20", ok=False)
+        self.run_cli("pr-check-log", "read", *read_args, "--source-repo", "other/repo", ok=False)
+        object_path = self.root / "data/owner/repo/cache/objects" / (ref["sha256"] + ".json")
+        saved_packet = object_path.read_bytes()
+        object_path.write_bytes(saved_packet.replace(b'"head_sha":"b', b'"head_sha":"a', 1))
+        self.run_cli("pr-check-log", "read", *read_args, ok=False)
+        object_path.write_bytes(saved_packet)
+        foreign_packet = json.loads(saved_packet)
+        foreign_packet["head_sha"] = "a" * 40
+        foreign_payload = (json.dumps(foreign_packet, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+        foreign_sha = hashlib.sha256(foreign_payload).hexdigest()
+        object_path.with_name(foreign_sha + ".json").write_bytes(foreign_payload)
+        self.run_cli("pr-check-log", "read", *args, "--log-object", foreign_sha, "--log-bytes", str(len(foreign_payload)), ok=False)
+        self.assertEqual(len(self.calls()), before)
+
+        truncated = self.json_cli("pr-check-log", "fetch", *capture_args, "--max-log-bytes", "60")
+        self.assertTrue(truncated["download_partial"])
+        self.assertEqual(truncated["observed_bytes"], 60)
+        self.assertTrue(any("observed prefix" in omission for omission in truncated["omissions"]))
+        self.responses[job_resource + "/logs"] = dict(text="x" * 100000)
+        long_line = self.json_cli("pr-check-log", "fetch", *capture_args, "--max-log-bytes", "60000")
+        self.assertFalse(long_line["segments"][0]["last_line_complete"])
+        self.responses[job_resource + "/logs"] = dict(text="".join(f"context {number}\n" for number in range(1, 150)))
+        context = self.json_cli("pr-check-log", "fetch", *capture_args)
+        context_ref = context["log_object"]
+        bounded = self.json_cli("pr-check-log", "read", *args, "--log-object", context_ref["sha256"], "--log-bytes", str(context_ref["bytes"]), "--max-lines", "5")
+        self.assertEqual(sum(len(window["text"].splitlines()) for window in bounded["windows"]), 5)
+        self.assertEqual(bounded["continuation"]["start_line"], 6)
+        self.assertEqual(bounded["continuation"]["log_object"], context_ref)
+        self.responses[job_resource + "/logs"] = dict(text=log)
+        fake_path = self.mock / "gh"
+        original_fake = fake_path.read_text()
+        changing_fake = original_fake.replace('response = responses[endpoint]\n', 'response = responses[endpoint]\nif endpoint.endswith("/logs"):\n    responses["' + run_resource + '"]["data"]["name"] = "Changed during download"\n    (root / "responses.json").write_text(json.dumps(responses))\n')
+        self.assertNotEqual(changing_fake, original_fake)
+        fake_path.write_text(changing_fake)
+        changed = self.json_cli("pr-check-log", "fetch", *capture_args)
+        self.assertEqual(changed["status"], "retained")
+        self.assertFalse(changed["binding_revalidated"])
+        self.assertTrue(changed["download_partial"])
+        self.assertTrue(any("changed during capture" in omission for omission in changed["omissions"]))
+        fake_path.write_text(original_fake)
+        budgeted = self.json_cli("pr-check-log", "fetch", *capture_args, "--request-budget", "6")
+        self.assertEqual((budgeted["status"], budgeted["reserved_requests"]), ("unavailable", 0))
+        self.assertTrue(any("budget" in omission for omission in budgeted["omissions"]))
+        self.responses[job_resource] = dict(data=dict(job, check_run_url="https://api.github.com/repos/owner/repo/check-runs/999"))
+        before = len(self.calls())
+        self.run_cli("pr-check-log", "fetch", *capture_args, ok=False)
+        self.assertFalse(any(job_resource + "/logs" in call for call in self.calls()[before:]))
+        self.responses[job_resource] = dict(data=job)
+        self.responses[run_resource + "/jobs?per_page=100&page=1"] = dict(data=dict(total_count=0, jobs=[]))
+        self.run_cli("pr-check-log", "fetch", *capture_args, ok=False)
+        self.run_cli("pr-check-log", "locate", *args, "--check-id", "20", ok=False)
+        self.responses[run_resource + "/jobs?per_page=100&page=1"] = dict(data=dict(total_count=1, jobs=[job]))
+        self.responses[run_resource] = dict(data=dict(run, repository="foreign"))
+        self.run_cli("pr-check-log", "fetch", *capture_args, ok=False)
+        self.responses[run_resource] = dict(data=run)
+        for expired_status in (404, 410):
+            self.responses[job_resource + "/logs"] = dict(status=expired_status, text="expired log body")
+            expired = self.json_cli("pr-check-log", "fetch", *capture_args)
+            self.assertEqual(expired["status"], "unavailable")
+            self.assertTrue(expired["download_partial"])
+            self.assertTrue(any(f"HTTP {expired_status}" in omission for omission in expired["omissions"]))
+            self.assertEqual(expired["segments"], [])
+        self.responses[job_resource + "/logs"] = dict(status=403, text="private error body must not become log evidence")
+        denied = self.json_cli("pr-check-log", "fetch", *capture_args)
+        self.assertEqual(denied["status"], "unavailable")
+        self.assertFalse(denied["binding_revalidated"])
+        self.assertTrue(any("HTTP 403" in omission for omission in denied["omissions"]))
+        before = len(self.calls())
+        self.run_cli("pr-check-log", "fetch", *capture_args, ok=False)
+        self.assertEqual(len(self.calls()), before)
+        self.assertFalse((self.root / "data/owner/repo/ledger.jsonl").exists())
+
     def test_missing_offline_read_does_not_fetch_or_initialize(self):
         result = self.cache("read", "--kind", "pr", "--number", "1", "--profile", "discussion")
         self.assertIsNone(result["snapshot_id"])
@@ -327,6 +448,99 @@ class EvidenceTests(Workspace):
                                                                             "--outcome", "close", "--reason", "Superseded", ok=False).stderr)
         shown = self.json_cli("pr-assessment", "--expected-repo", "owner/repo", "show", review["assessment_id"])
         self.assertTrue(shown["current"]["ledger_revision_current"])
+        self.assertEqual(len(self.calls()), calls)
+
+        patch_text = "@@ -1,1 +1,1 @@\n-old\n+new"
+        self.responses["repos/owner/repo/pulls/1"]["data"].update(changed_files=1, additions=1, deletions=1)
+        self.responses["repos/owner/repo/pulls/1#diff"] = dict(text="diff --git a/app.py b/app.py\nindex 1111111..2222222 100644\n--- a/app.py\n+++ b/app.py\n" + patch_text)
+        self.responses["repos/owner/repo/pulls/1/files?per_page=100&page=1"] = dict(data=[dict(filename="app.py", status="modified", additions=1, deletions=1, changes=2, patch=patch_text)])
+        complete = self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "pr-code", "--mode", "refresh")
+        ready_args = ("--expected-repo", "owner/repo", "record", "--number", "1", "--snapshot", complete["snapshot_id"],
+                      "--code-read", "full", "--base-comparison", "verified", "--by", "agent:tester",
+                      "--purpose", "review", "--outcome", "ready", "--reason", "Reviewed the complete change")
+        calls = len(self.calls())
+        disabled_ready = self.json_cli("pr-assessment", *ready_args)
+        self.assertFalse(disabled_ready["ci"]["required"])
+        self.assertIsNone(disabled_ready["ci"]["evidence"])
+        policy_args = ("--expected-repo", "owner/repo")
+        disabled = self.json_cli("ci-policy", "status", *policy_args)
+        enabled = self.json_cli("ci-policy", "set-enabled", *policy_args, "--enabled", "on", "--expected-revision", disabled["revision"])
+        self.run_cli("pr-assessment", *ready_args, ok=False)
+        self.assertFalse(self.json_cli("pr-assessment", *policy_args, "show", disabled_ready["assessment_id"])["current"]["ci_policy_current"])
+        self.assertEqual(self.json_cli("pr-assessment", *common, "--purpose", "review", "--outcome", "blocked", "--reason", "Awaiting further evidence")["outcome"], "blocked")
+        self.assertEqual(self.json_cli("pr-assessment", *common, "--purpose", "closure", "--outcome", "keep-open", "--reason", "Code needs review")["outcome"], "keep-open")
+        self.assertEqual(len(self.calls()), calls)
+
+        sha = "b" * 40
+        prefix = f"repos/owner/repo/commits/{sha}"
+        self.responses[prefix + "/check-suites?per_page=100&page=1"] = dict(data=dict(total_count=0, check_suites=[]))
+        check_args = ("--expected-repo", "owner/repo", "--number", "1", "--mode", "refresh")
+        for conclusion in ("skipped", "neutral"):
+            app = dict(id=11, name="CI")
+            suite = dict(id=10, head_sha=sha, app=app, status="completed", conclusion="success")
+            run = dict(id=20, head_sha=sha, app=app, check_suite=dict(id=10), name="build", status="completed", conclusion=conclusion,
+                       started_at="2026-09-22T02:00:00Z", completed_at="2026-09-22T02:01:00Z")
+            self.responses[prefix + "/check-suites?per_page=100&page=1"] = dict(data=dict(total_count=1, check_suites=[suite]))
+            self.responses["repos/owner/repo/check-suites/10/check-runs?filter=all&per_page=100&page=1"] = dict(data=dict(total_count=1, check_runs=[run]))
+            self.responses[prefix + "/statuses?per_page=100&page=1"] = dict(data=[])
+            checks = self.json_cli("pr-checks", *check_args)
+            calls = len(self.calls())
+            self.run_cli("pr-assessment", *ready_args, "--checks-snapshot", checks["snapshot_id"], ok=False)
+            self.assertEqual(len(self.calls()), calls)
+
+        self.responses[prefix + "/check-suites?per_page=100&page=1"] = dict(data=dict(total_count=0, check_suites=[]))
+        for state in ("failure", "pending", "unknown", None, "success"):
+            statuses = [] if state is None else [dict(id=30, context="build", state=state, created_at="2026-09-22T02:00:00Z")]
+            self.responses[prefix + "/statuses?per_page=100&page=1"] = dict(data=statuses)
+            checks = self.json_cli("pr-checks", *check_args)
+            calls = len(self.calls())
+            if state != "success":
+                self.run_cli("pr-assessment", *ready_args, "--checks-snapshot", checks["snapshot_id"], ok=False)
+            else:
+                passed = self.json_cli("pr-assessment", *ready_args, "--checks-snapshot", checks["snapshot_id"])
+                self.assertTrue(passed["ci"]["required"])
+                self.assertEqual(passed["ci"]["evidence"]["snapshot_id"], checks["snapshot_id"])
+                self.assertEqual(passed["ci"]["evidence"]["observed_result"], "passed")
+                self.assertEqual(passed["ci"]["evidence"]["head_sha"], sha)
+
+            self.assertEqual(len(self.calls()), calls)
+
+        # Retain a valid historical snapshot with old observation times; fixed reads must not refresh it.
+        manifest = self.cache("show", checks["snapshot_id"])
+        cache_root = self.root / "data/owner/repo/cache"
+        old = copy.deepcopy(manifest)
+        descriptor = old["items"][0]["components"]["checks"]
+        payload = json.loads((cache_root / "objects" / (descriptor["object"]["sha256"] + ".json")).read_text())
+        descriptor["fetched_at"] = "2026-09-23T00:00:00Z"
+        for value in payload:
+            value["fetched_at"] = descriptor["fetched_at"]
+
+        text = json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+        descriptor["object"] = dict(sha256=hashlib.sha256(text.encode()).hexdigest(), bytes=len(text.encode()), format="json")
+        (cache_root / "objects" / (descriptor["object"]["sha256"] + ".json")).write_text(text)
+        old.pop("snapshot_id")
+        old_id = hashlib.sha256(json.dumps(old, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        old["snapshot_id"] = old_id
+        (cache_root / "snapshots" / (old_id + ".json")).write_text(json.dumps(old))
+        self.run_cli("pr-assessment", *ready_args, "--checks-snapshot", old_id, ok=False)
+        self.assertEqual(len(self.calls()), calls)
+
+        partial = self.json_cli("pr-checks", *check_args, "--request-budget", "2")
+        calls = len(self.calls())
+        self.assertNotEqual(partial["coverage"], "complete")
+        self.run_cli("pr-assessment", *ready_args, "--checks-snapshot", partial["snapshot_id"], ok=False)
+        self.assertEqual(len(self.calls()), calls)
+        self.responses["repos/owner/repo/pulls/1"]["data"]["head"]["sha"] = "c" * 40
+        self.responses[f"repos/owner/repo/commits/{'c' * 40}/check-suites?per_page=100&page=1"] = dict(data=dict(total_count=0, check_suites=[]))
+        self.responses[f"repos/owner/repo/commits/{'c' * 40}/statuses?per_page=100&page=1"] = dict(data=[dict(id=31, context="build", state="success", created_at="2026-09-22T02:00:00Z")])
+        moved = self.json_cli("pr-checks", *check_args)
+        calls = len(self.calls())
+        self.assertIn("exact selected PR head", self.run_cli("pr-assessment", *ready_args, "--checks-snapshot", moved["snapshot_id"], ok=False).stderr)
+        self.json_cli("ci-policy", "set-enabled", *policy_args, "--enabled", "off", "--expected-revision", enabled["revision"])
+        historical = self.json_cli("pr-assessment", *policy_args, "show", passed["assessment_id"])
+        self.assertFalse(historical["current"]["ci_policy_current"])
+        self.assertFalse(historical["current"]["ci_policy"]["enabled"])
+        self.assertEqual(historical["record"], passed)
         self.assertEqual(len(self.calls()), calls)
 
         pr["updated_at"] = "2026-10-07T00:00:00Z"

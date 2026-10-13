@@ -130,6 +130,9 @@ def suggestions(ledger):
 
     open_prs = [r for r in open_items if r["kind"] == "pr"]
     if open_prs:
+        add("agent", "Inspect CI for a named PR before a readiness assessment",
+            "prompts/inspect-ci.md (select the PR and exact checks snapshot; read saved evidence first)",
+            "optional focused failure context; repository CI requirements and GitHub approval remain separate")
         add("agent", f"Assess a named PR for an explained closure proposal ({len(open_prs)} open PRs available)",
             "prompts/recommend-closure.md (select the PR; reuse cached evidence first)",
             "a scoped recommendation can keep the PR open; a saved proposal is staged unless a separate action pass finds it eligible under repository policy")

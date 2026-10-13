@@ -10,6 +10,11 @@ sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _action_proposal_records import load as load_proposal, proposal_path
 from _assessment_evidence import selected_item
 from _assessment_records import list_records as stored_records, read as read_record, save as save_record
+from _acquire import now
+from _checks import read as read_checks
+from _ci_policy import POLICY_PATH, status as ci_policy_status
+from _evidence import same_item, same_repository, timestamp
+from _storage import locked
 from _triage import DATA_DIR, REPO, load_ledger
 
 
@@ -17,7 +22,35 @@ RECORDS = DATA_DIR / "pr-assessments"
 OUTCOMES = {"review": {"ready", "needs-revision", "blocked", "no-finding", "deferred"},
             "closure": {"close", "keep-open", "deferred"}}
 MAX_RECORD_BYTES = 32768
-FIELDS = ("repository", "purpose", "number", "outcome", "reason", "evidence", "code", "gaps", "proposal", "assessed_by")
+FIELDS = ("repository", "purpose", "number", "outcome", "reason", "evidence", "code", "ci", "gaps", "proposal", "assessed_by")
+CHECKS_MAX_AGE = 86400
+
+
+def selected_ci(args, evidence):
+    policy = ci_policy_status()
+    required = policy["enabled"] and args.purpose == "review" and args.outcome == "ready"
+    result = dict(policy=policy, required=required, evidence=None)
+    if not required:
+        return result
+
+    snapshot = args.checks_snapshot or args.snapshot
+    selected = selected_item("pr", args.number, snapshot, host=args.host)
+    for scope in ("repository", "identity"):
+        if any(value[scope].get(key) is None for value in (selected, evidence) for key in ("database_id", "node_id")):
+            raise ValueError("ready reviews require stable PR and repository identity for CI evidence")
+
+    same_repository(evidence["repository"], selected["repository"])
+    same_item(evidence["identity"], selected["identity"])
+    checks = read_checks(args.number, mode="offline", host=args.host, snapshot_id=snapshot, max_age=CHECKS_MAX_AGE)
+    if checks["checks_head_sha"] != evidence["revision"]["head_sha"] or checks["observed_head_sha"] != evidence["revision"]["head_sha"]:
+        raise ValueError("ready reviews require CI evidence for the exact selected PR head")
+    if checks["coverage"] != "complete" or checks["freshness"] != "within-window" or checks["observed_result"] != "passed" or not checks["raw_count"]:
+        raise ValueError("ready reviews require complete, fresh, nonempty passing observed CI evidence")
+
+    result["evidence"] = dict(snapshot_id=snapshot, repository=selected["repository"], identity=selected["identity"],
+                              observed_result=checks["observed_result"], coverage=checks["coverage"], freshness=checks["freshness"],
+                              head_sha=checks["checks_head_sha"], observed_at=checks["observed_at"], max_age_seconds=CHECKS_MAX_AGE)
+    return result
 
 
 def assess(args):
@@ -66,8 +99,9 @@ def assess(args):
     if args.purpose == "closure" and args.outcome == "close" and proposal["head_sha"] != evidence["revision"]["head_sha"]:
         raise ValueError("closure proposal head differs from selected evidence")
 
+    ci = selected_ci(args, evidence)
     content = dict(repository=REPO, purpose=args.purpose, number=args.number, outcome=args.outcome, reason=args.reason.strip(),
-                   evidence=evidence, code=code, gaps=gaps, proposal=proposal if args.purpose == "closure" else None,
+                   evidence=evidence, code=code, ci=ci, gaps=gaps, proposal=proposal if args.purpose == "closure" else None,
                    assessed_by=args.by.strip())
     return save_record(RECORDS, "pr-assessment", content, FIELDS, MAX_RECORD_BYTES)
 
@@ -84,8 +118,16 @@ def current(record):
         path = proposal_path("pr", record["number"])
         proposal_current = path.exists() and load_proposal(path, REPO)["checksum"] == proposal["checkpoint"]
 
+    policy = ci_policy_status()
+    checks = record["ci"]["evidence"]
+    ci_freshness = None
+    if checks is not None:
+        age = (timestamp(now()) - timestamp(checks["observed_at"])).total_seconds()
+        ci_freshness = "within-window" if 0 <= age <= checks["max_age_seconds"] else "stale"
+
     return dict(ledger_revision_current=row is not None and row.get("updated_at") == record["evidence"]["revision"]["updated_at"],
-                proposal_current=proposal_current)
+                proposal_current=proposal_current, ci_policy_current=policy["revision"] == record["ci"]["policy"]["revision"],
+                ci_policy=policy, ci_freshness=ci_freshness)
 
 
 def list_records(limit):
@@ -101,6 +143,7 @@ def main():
     saving.add_argument("--purpose", choices=OUTCOMES, required=True)
     saving.add_argument("--number", type=int, required=True)
     saving.add_argument("--snapshot", required=True)
+    saving.add_argument("--checks-snapshot", help="explicit immutable CI snapshot; defaults to --snapshot")
     saving.add_argument("--host", default="github.com")
     saving.add_argument("--outcome", required=True)
     saving.add_argument("--code-read", choices=("full", "partial", "none"), required=True)
@@ -118,7 +161,8 @@ def main():
         raise ValueError("selected repository changed")
 
     if args.command == "record":
-        result = assess(args)
+        with locked(POLICY_PATH):
+            result = assess(args)
     elif args.command == "show":
         record = read(args.assessment_id)
         result = dict(record=record, current=current(record))

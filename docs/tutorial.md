@@ -58,6 +58,8 @@ The **Checks** tab opens saved CI metadata offline. It shows the recorded commit
 
 While reading Checks for a current item, `r` explicitly acquires focused CI metadata within a request budget. A fixed item packet keeps its selected snapshot and refuses that refresh; use a separately selected current item to acquire newer checks. Opening or paging a fixed packet never fetches missing CI evidence. This view does not collect CI logs or execute checks.
 
+The optional **Settings → Automations → CI for readiness** requirement defaults OFF. When ON, `ready` review assessments need complete, fresh, nonempty passing CI for the reviewed head. Agents can separately capture [focused failure-log excerpts](ci.md#capture-focused-failure-context); the Checks tab remains a metadata view.
+
 ## 5. Record a decision
 
 - In an untriaged item, `l` moves into the form: Labels, Action, and Reason.

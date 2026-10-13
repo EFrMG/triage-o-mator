@@ -187,6 +187,9 @@ func (m model) contextFooterGroups() []footerGroup {
 			if card.kind == "verification" {
 				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle local checks"}, hint{"e", "edit environment"}, hint{"y", "copy agent prompt"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}
+			if card.kind == "ci" {
+				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle CI readiness requirement"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+			}
 			if card.kind == "review-hold" {
 				return []footerGroup{group("Automations", hint{"j/k", "select"}, hint{"Enter/Space", "toggle Pending review hold"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 			}

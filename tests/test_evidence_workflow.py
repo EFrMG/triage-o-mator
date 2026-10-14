@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from unittest.mock import patch
@@ -84,6 +85,33 @@ class EvidenceTests(Workspace):
         refreshed_args = ("--expected-repo", "owner/repo", "--number", "1", "--snapshot", refreshed["snapshot_id"])
         reused_read = self.json_cli("pr-check-log", "read", *refreshed_args, "--log-object", combined_ref["sha256"], "--log-bytes", str(combined_ref["bytes"]))
         self.assertEqual((reused_read["selected_snapshot_id"], reused_read["capture_snapshot_id"]), (refreshed["snapshot_id"], snapshot))
+        if importlib.util.find_spec("reposition"):
+            shutil.copytree(ROOT / "vendor/reposition", self.root / "vendor/reposition")
+            self.assertTrue(self.json_cli("reposition-env", "enable")["enabled"])
+            cache_root = self.root / "data/owner/repo/cache"
+            ranked_before = {str(path.relative_to(cache_root)): path.read_bytes() for path in cache_root.rglob("*") if path.is_file()}
+            ranked_calls = len(self.calls())
+            indexed = self.cache("search-index", "--snapshot", refreshed["snapshot_id"], "--component", "ci_logs")
+            self.assertEqual(indexed["coverage"]["ci_logs"]["captures"], 1)
+            query = self.cache("query", "--snapshot", refreshed["snapshot_id"], "--component", "ci_logs", "--query", '"expected 1"')
+            fragment = query["items"][0]["fragments"][0]
+            retrieved = self.cache("retrieve", "--snapshot", refreshed["snapshot_id"], "--unit", fragment["unit_id"], "--checkpoint", query["checkpoint"])
+            raw = retrieved["items"][0]["fragments"][0]
+            self.assertTrue(raw["verified"])
+            self.assertEqual(raw["component"], "ci_logs")
+            self.assertEqual(raw["object"], combined_ref)
+            self.assertEqual((raw["ci_log"]["selected_snapshot_id"], raw["ci_log"]["capture_snapshot_id"]), (refreshed["snapshot_id"], snapshot))
+            segment = combined_packet["segments"][raw["locator"]["segment_index"]]
+            segment_bytes = base64.b64decode(segment["content_base64"])
+            excerpt = raw["excerpt"]
+            self.assertEqual(excerpt["text"].encode(), segment_bytes[excerpt["start"]:excerpt["end"]])
+            self.assertIn("error: expected 1, got 2", excerpt["text"])
+            self.assertEqual((excerpt["original_start_byte"], excerpt["original_end_byte"]), (segment["start_byte"] + excerpt["start"], segment["start_byte"] + excerpt["end"]))
+            self.assertEqual((raw["locator"]["original_start_line"], raw["locator"]["original_end_line"]), (segment["start_line"], segment["end_line"]))
+            ranked_after = {str(path.relative_to(cache_root)): path.read_bytes() for path in cache_root.rglob("*") if path.is_file()}
+            self.assertEqual(ranked_after, ranked_before)
+            self.assertEqual(len(self.calls()), ranked_calls)
+
         reused_pointer = next(path for path in (self.root / "data/owner/repo/cache/ci-logs").glob("*.json") if json.loads(path.read_text())["scope"]["snapshot_id"] == refreshed["snapshot_id"])
         reused_pointer_bytes = reused_pointer.read_bytes()
         reused_pointer.write_text("corrupt")

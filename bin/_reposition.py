@@ -17,9 +17,9 @@ COMMANDS = {
     "retrieve": "cache-retrieve",
     "search-info": "cache-info",
 }
-SUPPORTED_REPOSITION = "0.2.0.dev2+triage.1"
+SUPPORTED_REPOSITION = "0.2.0.dev2+triage.2"
 BUNDLE = CODE_ROOT / "vendor/reposition" / SUPPORTED_REPOSITION
-APPROVED_MANIFEST_SHA256 = "7c0ec841c7e6b624c1c84621b4abc0ff7f220f65c83902861831b638064349ef"
+APPROVED_MANIFEST_SHA256 = "8428fbb3b64504b5bb52baf8abe66afb150626a1b31de5ed3e23f405b1363c49"
 WHEEL_NAME = f"reposition-{SUPPORTED_REPOSITION}-py3-none-any.whl"
 PIP_NAME = "pip-25.3-py3-none-any.whl"
 DEFAULT_INDEX_BYTES = 512 * 1024 * 1024

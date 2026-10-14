@@ -1279,7 +1279,7 @@ print(json.dumps(value))
 		t.Fatalf("opening CI probe: %v", missing.err)
 	}
 	argsData, err := os.ReadFile(filepath.Join(m.installRoot, "checks-args.json"))
-	if err != nil || !strings.Contains(string(argsData), `"20"`) || !strings.Contains(string(argsData), `"--include-failure-logs"`) {
+	if err != nil || !strings.Contains(string(argsData), `"80"`) || !strings.Contains(string(argsData), `"--acquire-failure-logs"`) {
 		t.Fatal("opening CI probe lacked its bounded metadata budget")
 	}
 	m = baselineSend(m, missing)
@@ -1325,7 +1325,7 @@ print(json.dumps(value))
 	if !strings.Contains(text, "Checks differ from the selected PR head") || strings.Contains(renderChecks(page), "old-head") || strings.Contains(renderChecks(page), "https://github.com/") || !strings.Contains(renderChecks(page), "3 historical or suite") || !strings.Contains(renderChecks(page), "fork/repo") {
 		t.Fatal("checks view hid revision/source/omission distinctions")
 	}
-	// Captured failure text stays inline, literal and bounded, while empty coverage stays distinct from missing evidence.
+	// The Checks page stays compact; the floating reader displays literal retained text.
 	failure := page
 	failure.Rows = append([]checkRow{}, page.Rows...)
 	failure.Rows[0].Result = "failed"
@@ -1333,19 +1333,19 @@ print(json.dumps(value))
 	failure.Result = "failed"
 	failure.ObservedAt = "2026-10-13T09:36:12.123456+00:00"
 	failure.ResultCounts.Passed, failure.ResultCounts.Failed = 19, 1
-	logText := "##[error] Compile failed\n````\n# Source output, not a heading\n"
+	logText := "2026-10-13T09:36:12.123456Z ##[error] Compile failed\n````\n# Source output, not a heading\n"
 	failure.Rows[0].FailureLog = &checkFailureLog{State: "retained", LogObject: &checkLogObject{SHA256: strings.Repeat("a", 64), Bytes: 1000, Format: "json"}, WorkflowName: "Build", JobName: "Linux tests", SelectionBasis: "error-pattern context", DownloadPartial: true, Windows: []checkLogWindow{{StartLine: 10, EndLine: 12, Text: logText}}, Omissions: []string{"Intervening lines omitted"}}
 	if err := validateChecksPage(failure, m.repo, 3, "offline", "", 0); err != nil {
 		t.Fatal(err)
 	}
 	rendered := renderChecks(failure)
-	for _, want := range []string{"Captured failure excerpt", "Selection: error-pattern context", "Linux tests", "Source lines 10–12", "Partial failure excerpt", "Intervening lines omitted", "`````\n" + logText} {
+	for _, want := range []string{"Failure log retained", "e opens the reader", "Linux tests", "Partial retained log"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("failure view omitted %q", want)
 		}
 	}
-	if strings.Contains(rendered, "Observed 2026-10-13") || strings.Contains(rendered, "CI observations alone") || strings.Index(rendered, "Selection:") < strings.Index(rendered, logText) || strings.Index(rendered, "Partial failure excerpt") < strings.Index(rendered, logText) {
-		t.Fatal("failure view put capture metadata before the compact excerpt")
+	if strings.Contains(rendered, logText) {
+		t.Fatal("Checks embedded the retained log instead of its reader hint")
 	}
 	view := renderChecksView(failure, 80)
 	for _, colored := range []struct{ text, role string }{{"1", currentTheme.Error}, {"0", currentTheme.Warning}, {"19", currentTheme.Success}, {"1", currentTheme.Muted}, {"unknown", currentTheme.Muted}, {"partial", currentTheme.Muted}, {"stale", currentTheme.Muted}} {
@@ -1361,150 +1361,183 @@ print(json.dumps(value))
 		t.Fatal("failure view exposed storage object identity")
 	}
 
-	// Explicit capture selects one verified Actions check and reloads only its pinned offline page.
-	capturePage := failure
-	capturePage.Rows = append([]checkRow{}, failure.Rows...)
-	capturePage.Rows[0].InternalID, capturePage.Rows[0].CaptureSupported = 42, true
-	capturePage.Rows[0].App = "github-actions"
-	receipt := checksCaptureResponse{Repository: failure.Repository, SourceRepository: checksRepository{Host: evidenceHost, FullName: "fork/repo"}, Number: 3, Snapshot: failure.Snapshot, CheckID: 42, Head: "old-head", Status: "retained", Stage: "fetch", LogObject: capturePage.Rows[0].FailureLog.LogObject, Requests: 8, ReservedRequests: 11, RequestBudget: checksCaptureBudget, MaxLogBytes: checksCaptureBytes}
-	writeReceipt := func(value checksCaptureResponse) {
+	acquisitionPage := failure
+	acquisitionPage.Mode = "refresh"
+	acquisitionPage.Requests = 70
+	acquisitionPage.ReservedRequests = 11
+	acquisitionPage.LogAcquisition = &checksLogAcquisition{Requests: 55, ReservedRequests: 11, Attempted: 3, Omissions: []string{"Automatic failure log acquisition reached its page or shared request limit"}}
+	if validateChecksPage(acquisitionPage, m.repo, 3, "refresh", "", 0) == nil {
+		t.Fatal("checks accepted known plus reserved requests above the shared budget")
+	}
+	acquisitionPage.Requests = 69
+	if err := validateChecksPage(acquisitionPage, m.repo, 3, "refresh", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(renderChecks(acquisitionPage), "Failure logs: Automatic failure log acquisition reached") {
+		t.Fatal("Checks hid the automatic acquisition limit")
+	}
+	acquisitionPage.LogAcquisition.Requests = 40
+	if validateChecksPage(acquisitionPage, m.repo, 3, "refresh", "", 0) == nil {
+		t.Fatal("checks accepted metadata requests above its independent limit")
+	}
+	acquisitionPage.LogAcquisition.Requests = 55
+	if validateChecksPage(acquisitionPage, m.repo, 3, "offline", acquisitionPage.Snapshot, 0) == nil {
+		t.Fatal("offline Checks accepted automatic acquisition")
+	}
+
+	// Reading uses only an exact retained object, including for a fixed item packet.
+	readerPage := failure
+	readerPage.Rows = append([]checkRow{}, failure.Rows...)
+	readerPage.Rows[0].InternalID = 42
+	readerPage.Rows[0].App = "github-actions"
+	readerReply := checksLogPage{LogObject: *readerPage.Rows[0].FailureLog.LogObject, SelectedSnapshot: readerPage.Snapshot, CaptureSnapshot: readerPage.Snapshot, Windows: []checkLogWindow{{StartLine: 10, EndLine: 12, Text: logText, SectionTitle: "Compile"}}}
+	readerReply.Packet.Repository = readerPage.Repository
+	readerReply.Packet.SourceRepository = checksRepository{Host: evidenceHost, FullName: "fork/repo"}
+	readerReply.Packet.Number, readerReply.Packet.CheckID = 3, 42
+	readerReply.Packet.Head, readerReply.Packet.Snapshot = "old-head", readerPage.Snapshot
+	readerReply.Packet.checkFailureLog = *readerPage.Rows[0].FailureLog
+	readerReply.Continuation = &checksLogContinuation{LogObject: readerReply.LogObject, Number: 3, Snapshot: readerPage.Snapshot, StartLine: 30}
+	writeReaderPage := func(value checksLogPage) {
 		data, err := json.Marshal(value)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(m.installRoot, "capture-fixture.json"), data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(m.installRoot, "log-fixture.json"), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	captureScript := `#!/usr/bin/env python3
+	readerScript := `#!/usr/bin/env python3
 import pathlib, json, sys
 root = pathlib.Path(__file__).parent.parent
-(root / "capture-args.json").write_text(json.dumps(sys.argv[1:]))
-print((root / "capture-fixture.json").read_text())
+(root / "log-args.json").write_text(json.dumps(sys.argv[1:]))
+print((root / "log-fixture.json").read_text())
 `
-	if err := os.WriteFile(filepath.Join(m.installRoot, "bin", "pr-check-log"), []byte(captureScript), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(m.installRoot, "bin", "pr-check-log"), []byte(readerScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeReceipt(receipt)
-	writePage(capturePage)
-	captureModel := baselineModel(t, m.installRoot)
-	captureModel.detail.SetItem(Item{Kind: "pr", Number: 3})
-	captureModel.detail.loading = false
-	captureModel.detail.Resize(80, 20)
-	captureModel.focus = FocusDetail
-	captureModel.form.FocusField(fieldContent)
-	captureModel.form.reason.SetValue("preserve the capture draft")
-	captureModel.checks = checksUI{loaded: true, snapshot: capturePage.Snapshot, page: capturePage}
-	captureModel.checksPageText(capturePage)
-	captureModel.detail.JumpSection(2)
-	if !strings.Contains(fmt.Sprint(captureModel.footerGroups()), "capture failure log") {
-		t.Fatal("Checks omitted the explicit capture shortcut")
+	writeReaderPage(readerReply)
+	readerModel := baselineModel(t, m.installRoot)
+	readerModel.width, readerModel.height = 100, 35
+	readerModel.detail.SetItem(Item{Kind: "pr", Number: 3})
+	readerModel.detail.loading = false
+	readerModel.detail.Resize(80, 20)
+	readerModel.focus = FocusDetail
+	readerModel.form.FocusField(fieldContent)
+	readerModel.form.reason.SetValue("preserve the reader draft")
+	readerModel.checks = checksUI{loaded: true, snapshot: readerPage.Snapshot, page: readerPage}
+	readerModel.checksPageText(readerPage)
+	readerModel.detail.JumpSection(2)
+	if !strings.Contains(fmt.Sprint(readerModel.footerGroups()), "read failure logs") {
+		t.Fatal("Checks omitted reader shortcut")
 	}
-	nextCapture, captureCmd := captureModel.Update(tea.KeyPressMsg{Text: "e"})
-	captureModel = nextCapture.(model)
-	if captureCmd == nil || !captureModel.checks.capturing || captureModel.checks.picker != nil {
-		t.Fatal("one supported failure did not start one capture directly")
+	nextReader, readerCmd := readerModel.Update(tea.KeyPressMsg{Text: "e"})
+	readerModel = nextReader.(model)
+	if readerCmd == nil || readerModel.checks.reader == nil || !readerModel.checks.reader.busy {
+		t.Fatal("one failure did not open reader directly")
 	}
-	captureReply := captureCmd().(checksCaptureMsg)
-	if captureReply.err != nil {
-		t.Fatal(captureReply.err)
+	reply := readerCmd().(checksLogMsg)
+	if reply.err != nil {
+		t.Fatal(reply.err)
 	}
-	captureArgs, err := os.ReadFile(filepath.Join(m.installRoot, "capture-args.json"))
-	if err != nil || !strings.Contains(string(captureArgs), `"42"`) || !strings.Contains(string(captureArgs), `"262144"`) || !strings.Contains(string(captureArgs), `"checks-pin"`) || strings.Contains(string(captureArgs), "Linux tests") {
-		t.Fatal("capture command lost exact bounded pins or treated presentation text as command arguments")
+	args, err := os.ReadFile(filepath.Join(m.installRoot, "log-args.json"))
+	if err != nil || !strings.Contains(string(args), `"read"`) || !strings.Contains(string(args), `"--log-object"`) || !strings.Contains(string(args), `"42"`) || strings.Contains(string(args), `"capture"`) {
+		t.Fatal("reader did not use exact offline object")
 	}
-	staleCapture := captureReply
-	staleCapture.snapshot = "another-snapshot"
-	staleModel, staleCmd := captureModel.finishChecksCapture(staleCapture)
-	if staleCmd != nil || !staleModel.(model).checks.capturing {
-		t.Fatal("foreign capture snapshot changed the selected reader")
+	staleReply := reply
+	staleReply.snapshot = "another-snapshot"
+	readerModel = baselineSend(readerModel, staleReply)
+	if !readerModel.checks.reader.busy {
+		t.Fatal("stale log changed reader")
 	}
-	nextCapture, reloadCmd := captureModel.Update(captureReply)
-	captureModel = nextCapture.(model)
-	if reloadCmd == nil || captureModel.checks.capturing || captureModel.checks.pendingSnapshot != capturePage.Snapshot {
-		t.Fatal("capture did not reload its same checks snapshot")
+	readerModel = baselineSend(readerModel, reply)
+	content := ansi.Strip(readerModel.checks.reader.viewport.View())
+	if !strings.Contains(content, "Compile · Source lines 10–12") || !strings.Contains(content, "# Source output, not a heading") || readerModel.form.Reason() != "preserve the reader draft" {
+		t.Fatal("reader lost literal source, section title or draft")
 	}
-	reloaded := reloadCmd().(checksMsg)
-	if reloaded.err != nil || reloaded.data.Mode != "offline" || reloaded.data.Snapshot != capturePage.Snapshot || reloaded.data.Requests != 0 {
-		t.Fatal("capture reload acquired new evidence or changed its source")
+	if strings.Contains(content, "2026-10-13T") || !strings.Contains(content, "Error:  Compile failed") {
+		t.Fatal("reader retained per-line timestamps or raw error markers")
 	}
-	priorityArgs, err := os.ReadFile(filepath.Join(m.installRoot, "checks-args.json"))
-	if err != nil || !strings.Contains(string(priorityArgs), `"--failure-log-check-id"`) || !strings.Contains(string(priorityArgs), `"--failure-log-source-repo"`) {
-		t.Fatal("capture reload did not prioritize the exact selected log within display bounds")
+	nextLogPage := readerReply
+	nextLogPage.Windows = []checkLogWindow{{StartLine: 30, EndLine: 109, Text: strings.Repeat("retained source line\n", 80)}}
+	nextLogPage.Continuation = nil
+	writeReaderPage(nextLogPage)
+	nextReader, readerCmd = readerModel.Update(tea.KeyPressMsg{Text: "n"})
+	readerModel = nextReader.(model)
+	if readerCmd == nil {
+		t.Fatal("reader could not continue retained context")
 	}
-	captureModel = baselineSend(captureModel, reloaded)
-	if !strings.Contains(captureModel.status, "captured and verified") || captureModel.form.Reason() != "preserve the capture draft" {
-		t.Fatal("verified capture lost the draft or outcome")
+	readerModel = baselineSend(readerModel, readerCmd())
+	if readerModel.checks.reader.page.Windows[0].StartLine != 30 {
+		t.Fatal("reader continuation changed source page")
 	}
-	badReceipt := receipt
-	badReceipt.Requests = 21
-	if validateChecksCapture(badReceipt, captureModel.repo, captureModel.detail.key, capturePage.Snapshot, capturePage.Rows[0]) == nil {
-		t.Fatal("capture accepted an exceeded shared request budget")
+	readerModel = baselineSend(readerModel, tea.KeyPressMsg{Text: "G"})
+	offsetBeforeResize := readerModel.checks.reader.viewport.YOffset()
+	readerModel = baselineSend(readerModel, tea.WindowSizeMsg{Width: 90, Height: 32})
+	if offsetBeforeResize == 0 || readerModel.checks.reader.viewport.YOffset() == 0 {
+		t.Fatal("reader resize lost scrolling position")
 	}
-	badReceipt = receipt
-	badReceipt.SourceRepository.FullName = "other/repo"
-	if validateChecksCapture(badReceipt, captureModel.repo, captureModel.detail.key, capturePage.Snapshot, capturePage.Rows[0]) == nil {
-		t.Fatal("capture accepted a foreign source repository")
+	writeReaderPage(readerReply)
+	nextReader, readerCmd = readerModel.Update(tea.KeyPressMsg{Text: "p"})
+	readerModel = nextReader.(model)
+	if readerCmd == nil {
+		t.Fatal("reader could not return to preceding retained context")
 	}
-	// A failed new attempt never relabels an older retained excerpt as new success.
-	unavailableReceipt := receipt
-	unavailableReceipt.Status, unavailableReceipt.LogObject = "unavailable", nil
-	unavailableReceipt.Omissions = []string{"The selected job could not be located"}
-	writeReceipt(unavailableReceipt)
-	nextCapture, captureCmd = captureModel.Update(tea.KeyPressMsg{Text: "e"})
-	captureModel = nextCapture.(model)
-	nextCapture, reloadCmd = captureModel.Update(captureCmd().(checksCaptureMsg))
-	captureModel = nextCapture.(model)
-	captureModel = baselineSend(captureModel, reloadCmd().(checksMsg))
-	if !strings.Contains(captureModel.status, "Failure log unavailable") || !strings.Contains(captureModel.status, "Previous excerpt still displayed") || captureModel.lastError.what != "Failure log capture unavailable" {
-		t.Fatal("failed capture claimed an older excerpt as new success")
+	readerModel = baselineSend(readerModel, readerCmd())
+	if readerModel.checks.reader.page.Windows[0].StartLine != 10 {
+		t.Fatal("reader changed source when returning")
 	}
-	// Multiple supported failures require choosing one name; ordinary refresh cannot race that picker.
-	secondFailure := capturePage.Rows[0]
+	forgedContinuation := readerReply
+	forgedContinuation.Continuation = &checksLogContinuation{LogObject: readerReply.LogObject, Number: 3, Snapshot: "foreign", StartLine: 30}
+	if validateChecksLogPage(forgedContinuation, readerModel.repo, readerModel.detail.key, readerPage.Snapshot, readerPage.Rows[0], 0) == nil {
+		t.Fatal("reader accepted foreign continuation")
+	}
+	bad := readerReply
+	bad.LogObject.SHA256 = strings.Repeat("b", 64)
+	if validateChecksLogPage(bad, readerModel.repo, readerModel.detail.key, readerPage.Snapshot, readerPage.Rows[0], 0) == nil {
+		t.Fatal("reader accepted another object")
+	}
+	readerModel = baselineSend(readerModel, tea.KeyPressMsg{Text: "q"})
+	if readerModel.checks.reader != nil {
+		t.Fatal("q failed to close reader")
+	}
+	readerModel.detail.enriched.Evidence = &batchEvidence{SnapshotID: readerPage.Snapshot}
+	nextReader, readerCmd = readerModel.Update(tea.KeyPressMsg{Text: "e"})
+	readerModel = nextReader.(model)
+	if readerCmd == nil || readerModel.checks.reader == nil {
+		t.Fatal("fixed packet could not read retained logs offline")
+	}
+	process, request := readerModel.checks.reader.process, readerModel.checksRequest
+	readerModel = baselineSend(readerModel, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if !process.cancelled || readerModel.checks.reader != nil || readerModel.checksRequest == request {
+		t.Fatal("reader cancellation left read active")
+	}
+	readerModel.detail.enriched.Evidence = nil
+	secondFailure := readerPage.Rows[0]
 	secondFailure.InternalID, secondFailure.Name = 43, "Another failed build"
-	captureModel.checks.page.Rows[1] = secondFailure
-	nextCapture, captureCmd = captureModel.Update(tea.KeyPressMsg{Text: "e"})
-	captureModel = nextCapture.(model)
-	if captureCmd != nil || captureModel.checks.picker == nil {
-		t.Fatal("multiple failed checks bypassed the selector")
+	secondFailure.FailureLog = &checkFailureLog{State: "unavailable", Problem: "Expired log"}
+	readerModel.checks.page.Rows[1] = secondFailure
+	nextReader, readerCmd = readerModel.Update(tea.KeyPressMsg{Text: "e"})
+	readerModel = nextReader.(model)
+	if readerCmd != nil || readerModel.checks.picker == nil {
+		t.Fatal("multiple failures bypassed picker")
 	}
-	pickerRequest := captureModel.checksRequest
-	captureModel = baselineSend(captureModel, tea.KeyPressMsg{Text: "r"})
-	if captureModel.checksRequest != pickerRequest || captureModel.checks.busy {
-		t.Fatal("metadata refresh raced the capture picker")
+	request = readerModel.checksRequest
+	readerModel = baselineSend(readerModel, tea.KeyPressMsg{Text: "r"})
+	if readerModel.checksRequest != request {
+		t.Fatal("refresh escaped log picker")
 	}
-	captureModel = baselineSend(captureModel, tea.KeyPressMsg{Text: "j"})
-	if captureModel.checks.picker.selected != 1 || !strings.Contains(ansi.Strip(captureModel.viewContent()), "Another failed build") {
-		t.Fatal("capture picker did not select by check name")
+	readerModel = baselineSend(readerModel, tea.KeyPressMsg{Text: "j"})
+	nextReader, readerCmd = readerModel.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	readerModel = nextReader.(model)
+	if readerCmd != nil || readerModel.checks.reader == nil || !strings.Contains(readerModel.checks.reader.problem, "Expired log") {
+		t.Fatal("unavailable log did not stay inspectable")
 	}
-	nextCapture, captureCmd = captureModel.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	captureModel = nextCapture.(model)
-	if captureCmd == nil || captureModel.checks.captureRow.InternalID != 43 {
-		t.Fatal("capture picker did not target exactly the selected check")
-	}
-	captureProcess, captureRequest := captureModel.checksLifecycle.current, captureModel.checksRequest
-	captureModel = baselineSend(captureModel, tea.KeyPressMsg{Code: tea.KeyEsc})
-	if !captureProcess.cancelled || captureModel.checks.capturing || captureModel.checksRequest == captureRequest {
-		t.Fatal("capture cancellation left its reader running")
-	}
-	staleCapture.request, staleCapture.row = captureRequest, secondFailure
-	statusAfterCaptureCancel := captureModel.status
-	captureModel = baselineSend(captureModel, staleCapture)
-	if captureModel.status != statusAfterCaptureCancel {
-		t.Fatal("cancelled capture reply changed the current item")
-	}
-	captureModel.detail.enriched.Evidence = &batchEvidence{SnapshotID: capturePage.Snapshot}
-	nextCapture, captureCmd = captureModel.Update(tea.KeyPressMsg{Text: "e"})
-	captureModel = nextCapture.(model)
-	if captureCmd != nil || captureModel.checks.capturing || !strings.Contains(captureModel.status, "stays offline") || strings.Contains(fmt.Sprint(captureModel.footerGroups()), "capture failure log") {
-		t.Fatal("fixed packet offered online UI log capture")
-	}
-	captureModel.detail.enriched.Evidence = nil
-	captureModel.form.FocusField(fieldReason)
-	captureRequest = captureModel.checksRequest
-	captureModel = baselineSend(captureModel, tea.KeyPressMsg{Text: "e"})
-	if captureModel.checksRequest != captureRequest || !strings.HasSuffix(captureModel.form.Reason(), "e") {
-		t.Fatal("capture shortcut intercepted reason typing")
+	readerModel = baselineSend(readerModel, tea.KeyPressMsg{Code: tea.KeyEsc})
+	readerModel.form.FocusField(fieldReason)
+	request = readerModel.checksRequest
+	readerModel = baselineSend(readerModel, tea.KeyPressMsg{Text: "e"})
+	if readerModel.checksRequest != request || !strings.HasSuffix(readerModel.form.Reason(), "e") {
+		t.Fatal("reader shortcut intercepted draft typing")
 	}
 	writePage(emptyPage)
 	log := failure.Rows[0].FailureLog
@@ -1534,25 +1567,8 @@ print((root / "capture-fixture.json").read_text())
 	if strings.Count(legacyView, "log download ended unsuccessfully") != 1 || strings.Contains(legacyView, "prefix") || strings.Contains(legacyView, "coverage") || len(legacy.Omissions) != 2 || !strings.Contains(legacy.Omissions[0], "prefix") {
 		t.Fatal("legacy failed download boilerplate was repeated or source evidence was changed")
 	}
-	legacy.State, legacy.Windows, legacy.LogObject = "retained", []checkLogWindow{{StartLine: 10, EndLine: 12, Text: logText, DisplayTruncated: true}}, &checkLogObject{SHA256: strings.Repeat("a", 64), Bytes: 1000, Format: "json"}
-	legacy.Omissions = append(legacy.Omissions, "Intervening lines omitted")
-	legacyView = checksFailureSource(failure.Rows[0])
-	for _, want := range []string{"Partial failure excerpt", "Source binding could not be revalidated", "truncated for display", "Intervening lines omitted", "log download ended unsuccessfully"} {
-		if !strings.Contains(legacyView, want) {
-			t.Fatalf("partial retained excerpt hid %q", want)
-		}
-	}
-	if strings.Count(legacyView, "coverage is unknown") != 1 || strings.Contains(legacyView, "observed prefix") {
-		t.Fatal("retained partial excerpt repeated legacy coverage notices")
-	}
-
-	captureModel.checks.captureOutcome = &checksCaptureOutcome{response: unavailableReceipt, row: capturePage.Rows[0]}
-	captureModel.finishCaptureOutcome(checksPage{Rows: []checkRow{secondFailure}})
-	if strings.Contains(captureModel.status, "Previous excerpt") {
-		t.Fatal("failed capture claimed an excerpt displayed for a different check")
-	}
 	failure.Rows[0].FailureLog = &checkFailureLog{State: "missing"}
-	if !strings.Contains(renderChecks(failure), "No captured failure excerpt") {
+	if !strings.Contains(renderChecks(failure), "No retained failure log") {
 		t.Fatal("missing failure excerpt was hidden")
 	}
 	empty := checksPage{Coverage: "complete", Freshness: "within-window", Result: "empty"}
@@ -1567,7 +1583,7 @@ print((root / "capture-fixture.json").read_text())
 	if !handled || pageCmd == nil || m.checks.pendingSnapshot != "checks-pin" {
 		t.Fatal("checks continuation did not retain selected snapshot")
 	}
-	process, request := m.checksLifecycle.current, m.checksRequest
+	process, request = m.checksLifecycle.current, m.checksRequest
 	m = baselineSend(m, tea.KeyPressMsg{Text: "1"})
 	if process.cancelled || m.checksRequest != request || !m.checks.busy {
 		t.Fatal("tab navigation cancelled the opening CI reader")

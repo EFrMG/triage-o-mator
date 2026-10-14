@@ -13,11 +13,11 @@ bin/pr-checks --expected-repo OWNER/REPO --number N --snapshot CHECKS_HASH
 bin/ci-policy status --expected-repo OWNER/REPO
 ```
 
-Add `--include-failure-logs` to read any saved failure excerpts alongside the checks. This stays offline and verifies each excerpt against the selected snapshot and failed check. The TUI Checks tab displays the same bounded context. For more retained lines, preserve the returned exact object reference and use `pr-check-log read`; missing context requires a separate explicit acquisition.
+Add `--include-failure-logs` to read any saved failure excerpts alongside the checks. This stays offline and verifies each excerpt against the selected snapshot and failed check, retaining its original capture snapshot when an unchanged source was reused after refresh. The TUI Checks tab shows saved-log availability and opens the context in an offline floating reader with `e`. For more retained lines, preserve the returned exact object reference and use `pr-check-log read`; missing context requires a separate explicit acquisition.
 
 Read every page needed for the selected question using the same snapshot. Separate missing, partial and stale coverage from observed failures, pending checks and complete-empty observations. A check suite is not an individual test, and ambiguous rerun history remains ambiguous. Passing observations do not establish required-check policy or merge authorization.
 
-When online acquisition is authorized and necessary, explicitly request focused metadata with `bin/pr-checks --expected-repo OWNER/REPO --number N --mode refresh --request-budget 20`. Retain its returned snapshot and head; do not silently substitute it into a fixed item packet or a review of another revision. Offline tasks retain the gap.
+When online acquisition is authorized and necessary, explicitly request focused metadata with `bin/pr-checks --expected-repo OWNER/REPO --number N --mode refresh --request-budget 20`. To include bounded missing failure context, add `--acquire-failure-logs --include-failure-logs` and use a shared `--request-budget 80`; metadata remains capped at 20, with at most three failed-job captures of 256 KiB each. Retain its returned snapshot and head; do not silently substitute it into a fixed item packet or a review of another revision. Offline tasks retain the gap.
 
 ## 2. Select one failure and its context
 

@@ -2,7 +2,7 @@
 
 from urllib.parse import urlsplit
 
-from _acquire import now, summary_identity
+from _acquire import ReadFailure, now, summary_identity
 from _chunks import page, window
 from _evidence import repository, same_item, same_repository, timestamp
 from _reader import read_evidence
@@ -325,7 +325,7 @@ def failure_logs(rows, evidence, host, priority=None):
                 continue
 
             packet = result["packet"]
-            log.update(state="retained" if result["windows"] else "unavailable", log_object=result["log_object"],
+            log.update(state="retained" if result["windows"] else "unavailable", log_object=result["log_object"], capture_snapshot_id=result["capture_snapshot_id"],
                        **{key: packet[key] for key in ("workflow_name", "job_name", "fetched_at", "selection_basis", "download_partial", "binding_revalidated", "omissions")},
                        display_problems=list(result["display_problems"]), continuation=result["continuation"])
             remaining = 8192
@@ -344,7 +344,7 @@ def failure_logs(rows, evidence, host, priority=None):
                     break
 
                 end_line = source["start_line"] + len(text.splitlines(keepends=True)) - 1
-                log["windows"].append(dict(start_line=source["start_line"], end_line=end_line, text=text, display_truncated=source["display_truncated"] or clipped))
+                log["windows"].append(dict(start_line=source["start_line"], end_line=end_line, text=text, display_truncated=source["display_truncated"] or clipped, section_title=source.get("section_title")))
                 remaining -= len(text.encode("utf-8"))
                 if clipped:
                     log["display_problems"].append("Source line display was shortened; read the exact cached log object for full retained context")
@@ -361,7 +361,63 @@ def failure_logs(rows, evidence, host, priority=None):
             log.update(state="invalid", problem=bounded(str(error), 512))
 
 
-def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86400, budget=100, offset=0, limit=20, include_logs=False, failure_log_check_id=None, failure_log_source_repo=None):
+def acquire_failure_logs(rows, evidence, host, previous, budget):
+    from _ci_logs import associated, capture, reuse
+
+    result = dict(requests=0, reserved_requests=0, attempted=0, reused=0, omissions=[])
+    lookups = 0
+    for value in rows:
+        if not value["log_capture_supported"]:
+            continue
+
+        if value["head_sha"] != (evidence["revision"] or {}).get("head_sha"):
+            result["omissions"].append("Failure log acquisition skipped: retained check belongs to a different PR head")
+            continue
+
+        if lookups >= 8:
+            result["omissions"].append("Automatic failure log lookup limit reached for this page")
+            break
+
+        lookups += 1
+        try:
+            existing = associated(evidence["repository"], evidence["identity"]["number"], evidence["snapshot_id"], value["repository"], value["internal_id"], host)
+            if existing is not None:
+                continue
+
+        except (OSError, ValueError, KeyError, TypeError):
+            # Invalid current selections remain visible; never replace them by searching older objects.
+            continue
+
+        try:
+            if reuse(evidence["identity"]["number"], evidence["snapshot_id"], previous, value["repository"], value["internal_id"], host):
+                result["reused"] += 1
+                continue
+        except (OSError, ValueError, KeyError, TypeError):
+            # An unusable prior source cannot supply reused evidence; capture the current source instead.
+            pass
+
+        remaining = budget - result["requests"] - result["reserved_requests"]
+        if result["attempted"] >= 3 or remaining < 20:
+            result["omissions"].append("Automatic failure log acquisition reached its page or shared request limit")
+            break
+
+        result["attempted"] += 1
+        try:
+            captured = capture(evidence["identity"]["number"], evidence["snapshot_id"], value["internal_id"], value["repository"], host=host, budget=min(remaining, 100), maximum=262144)
+        except (OSError, ValueError, KeyError, TypeError, ReadFailure) as error:
+            result["omissions"].append(bounded(str(error), 512))
+            continue
+
+        result["requests"] += captured["requests"]
+        result["reserved_requests"] += captured["reserved_requests"]
+        if captured["status"] != "retained":
+            result["omissions"].extend(captured["omissions"][:2])
+
+    result["omissions"] = result["omissions"][:6]
+    return result
+
+
+def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86400, budget=100, offset=0, limit=20, include_logs=False, failure_log_check_id=None, failure_log_source_repo=None, acquire_logs=False):
     window(offset, limit, 50)
     if offset and snapshot_id is None:
         raise ValueError("continuation requires an explicit --snapshot; select the first page's snapshot ID")
@@ -374,7 +430,19 @@ def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86
 
         priority = (failure_log_source_repo, failure_log_check_id)
 
-    evidence = read_evidence("pr", number, profile="pr-checks", mode=mode, host=host, max_age=max_age, budget=budget, snapshot_id=snapshot_id)
+    if acquire_logs and (mode == "offline" or snapshot_id is not None):
+        raise ValueError("automatic failure logs require an explicit online checks read without a fixed snapshot")
+
+    previous = None
+    if acquire_logs:
+        from _cache import EvidenceCache
+        try:
+            cached = EvidenceCache(repository(REPO, host=host)).latest("pr", number)
+            previous = cached[0]["snapshot_id"] if cached else None
+        except (OSError, ValueError, KeyError, TypeError):
+            previous = None
+
+    evidence = read_evidence("pr", number, profile="pr-checks", mode=mode, host=host, max_age=max_age, budget=min(budget, 20) if acquire_logs else budget, snapshot_id=snapshot_id)
     entries, allowed = verify(evidence)
     checks_descriptor = evidence["components"].get("checks")
     rows, observed = summarize(entries, complete=checks_descriptor is not None and checks_descriptor["status"] == "complete")
@@ -408,7 +476,8 @@ def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86
     selected_rows = rows[offset:offset + limit]
     if priority is not None and not any(value["source"] == "check-run" and value["result"] == "failed" and (value["repository"], value["internal_id"]) == priority for value in selected_rows):
         raise ValueError("priority failure log check is not a failed check-run on the selected page")
-    if include_logs:
+    acquisition = acquire_failure_logs(selected_rows, evidence, host, previous, budget - evidence["stats"]["requests"]) if acquire_logs else None
+    if include_logs or acquire_logs:
         failure_logs(selected_rows, evidence, host, priority)
 
     return dict(repository=evidence["repository"], allowed_repositories=allowed, kind="pr", number=number, mode=mode, snapshot_id=snapshot,
@@ -416,4 +485,5 @@ def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86
                 observed_at=descriptor["fetched_at"] if descriptor else None, coverage=coverage, freshness=freshness, freshness_basis=evidence["freshness_basis"],
                 problems=problems[:20], observed_result=observed, result_counts=counts, raw_count=len(entries), historical_or_suite_omissions=len(entries) - len(rows),
                 rows=selected_rows, pagination=pagination,
-                next_offset=pagination["next_offset"], requests=evidence["stats"]["requests"], raw_command=raw_command)
+                next_offset=pagination["next_offset"], requests=evidence["stats"]["requests"] + (acquisition["requests"] if acquisition else 0),
+                reserved_requests=acquisition["reserved_requests"] if acquisition else 0, failure_log_acquisition=acquisition, raw_command=raw_command)

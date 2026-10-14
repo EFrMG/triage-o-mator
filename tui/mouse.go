@@ -318,6 +318,9 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.checks.picker != nil || m.checks.reader != nil {
+		return m, nil
+	}
 	if m.confirmQuit {
 		return m, nil
 	}
@@ -845,6 +848,17 @@ func (m model) handleMouseWheel(event tea.Mouse) (tea.Model, tea.Cmd) {
 	} else if event.Button != tea.MouseWheelDown {
 		return m, nil
 	}
+	if m.checks.reader != nil {
+		for range 3 {
+			next, _ := m.handleChecksLogReader(mouseKey(name))
+			m = next.(model)
+		}
+		return m, nil
+	}
+	if m.checks.picker != nil {
+		return m.handleChecksLogPicker(mouseKey(name))
+	}
+
 	if m.mouseHasSidebar() && event.X < m.mouseMainX() {
 		m.overview = false
 		if name == "down" {

@@ -219,8 +219,10 @@ func (m model) contextFooterGroups() []footerGroup {
 			edit.hints = append(edit.hints, bind("", keys.ComposerEditor))
 		}
 		return []footerGroup{edit}
+	case m.checks.reader != nil:
+		return []footerGroup{group("Failure log", hint{"j/k", "scroll"}, hint{"Ctrl-D/U", "page"}, hint{"g/G", "ends"}, hint{"n/p", "retained context"}, hint{"Esc/q", "close"})}
 	case m.checks.picker != nil:
-		return []footerGroup{group("Capture one failure log", hint{"j/k", "select check"}, hint{"Enter", "capture selected"}, hint{"Esc", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
+		return []footerGroup{group("Failure logs", hint{"j/k", "select check"}, hint{"Enter", "read selected"}, hint{"Esc/q", "close"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.confirmQuit:
 		return []footerGroup{group("Quit", bind("discard drafts", keys.Quit), hint{"any key", "cancel"}), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.lastError.open:
@@ -305,11 +307,8 @@ func (m model) contextFooterGroups() []footerGroup {
 		}
 		if m.checksKeyScope() {
 			read.hints = append(read.hints, bind("", keys.ChecksRefresh), bind("pages", keys.ChecksPrev, keys.ChecksNext))
-			if m.canCaptureChecks() {
-				read.hints = append(read.hints, bind("", keys.ChecksCapture))
-			}
-			if m.checks.capturing {
-				read.hints = append(read.hints, hint{"Esc", "cancel capture"})
+			if m.canReadChecksLogs() {
+				read.hints = append(read.hints, bind("", keys.ChecksLogs))
 			}
 		}
 		return []footerGroup{read, group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
@@ -547,11 +546,8 @@ func (m model) itemFooter() []footerGroup {
 	}
 	if m.checksKeyScope() {
 		read.hints = append(read.hints, bind("", keys.ChecksRefresh), bind("pages", keys.ChecksPrev, keys.ChecksNext))
-		if m.canCaptureChecks() {
-			read.hints = append(read.hints, bind("", keys.ChecksCapture))
-		}
-		if m.checks.capturing {
-			read.hints = append(read.hints, hint{"Esc", "cancel capture"})
+		if m.canReadChecksLogs() {
+			read.hints = append(read.hints, bind("", keys.ChecksLogs))
 		}
 	}
 	if m.detail.AnySectionFull() {

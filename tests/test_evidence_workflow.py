@@ -73,6 +73,71 @@ class EvidenceTests(Workspace):
         self.assertTrue(failed["log_capture_supported"])
         self.assertEqual(failed["failure_log"]["log_object"], combined_ref)
         self.assertEqual(len(self.calls()), before)
+        online_args = ("--expected-repo", "owner/repo", "--number", "1", "--mode", "refresh", "--acquire-failure-logs", "--request-budget", "80")
+        before_refresh = len(self.calls())
+        refreshed = self.json_cli("pr-checks", *online_args)
+        refreshed_log = next(row for row in refreshed["rows"] if row["source"] == "check-run")["failure_log"]
+        self.assertEqual(refreshed["failure_log_acquisition"]["reused"], 1)
+        self.assertEqual(refreshed_log["log_object"], combined_ref)
+        self.assertEqual(refreshed_log["capture_snapshot_id"], snapshot)
+        self.assertFalse(any(call[-1].endswith("/logs") for call in self.calls()[before_refresh:]))
+        refreshed_args = ("--expected-repo", "owner/repo", "--number", "1", "--snapshot", refreshed["snapshot_id"])
+        reused_read = self.json_cli("pr-check-log", "read", *refreshed_args, "--log-object", combined_ref["sha256"], "--log-bytes", str(combined_ref["bytes"]))
+        self.assertEqual((reused_read["selected_snapshot_id"], reused_read["capture_snapshot_id"]), (refreshed["snapshot_id"], snapshot))
+        reused_pointer = next(path for path in (self.root / "data/owner/repo/cache/ci-logs").glob("*.json") if json.loads(path.read_text())["scope"]["snapshot_id"] == refreshed["snapshot_id"])
+        reused_pointer_bytes = reused_pointer.read_bytes()
+        reused_pointer.write_text("corrupt")
+        before_invalid = len(self.calls())
+        invalid_current = self.json_cli("pr-checks", "--expected-repo", "owner/repo", "--number", "1", "--mode", "cache-preferred", "--acquire-failure-logs")
+        self.assertEqual(next(row for row in invalid_current["rows"] if row["source"] == "check-run")["failure_log"]["state"], "invalid")
+        self.assertEqual(len(self.calls()), before_invalid)
+        self.json_cli("pr-check-log", "read", *refreshed_args, "--log-object", combined_ref["sha256"], "--log-bytes", str(combined_ref["bytes"]))
+        reused_pointer.write_bytes(reused_pointer_bytes)
+        self.run_cli("pr-checks", *refreshed_args, "--acquire-failure-logs", ok=False)
+        self.run_cli("pr-checks", "--expected-repo", "owner/repo", "--number", "1", "--acquire-failure-logs", ok=False)
+
+        # A changed retained source requires a new capture instead of silently reusing the earlier bytes.
+        check["name"] = "renamed build"
+        changed_source = self.json_cli("pr-checks", *online_args)
+        changed_log = next(row for row in changed_source["rows"] if row["source"] == "check-run")["failure_log"]
+        self.assertEqual(changed_source["failure_log_acquisition"]["attempted"], 1)
+        self.assertNotEqual(changed_log["log_object"], combined_ref)
+        self.assertLessEqual(changed_source["requests"] + changed_source["reserved_requests"], 80)
+        self.assertEqual(changed_source["failure_log_acquisition"]["requests"], 8)
+        changed_args = ("--expected-repo", "owner/repo", "--number", "1", "--snapshot", changed_source["snapshot_id"])
+        self.run_cli("pr-check-log", "read", *changed_args, "--log-object", combined_ref["sha256"], "--log-bytes", str(combined_ref["bytes"]), ok=False)
+        check["name"] = "latest failed acquisition"
+        self.responses[discovery_resource] = dict(status=404, data=dict(message="not found"))
+        unavailable_latest = self.json_cli("pr-checks", *online_args)
+        unavailable_log = next(row for row in unavailable_latest["rows"] if row["source"] == "check-run")["failure_log"]
+        self.assertEqual(unavailable_log["state"], "missing")
+        self.assertNotIn("log_object", unavailable_log)
+        self.assertTrue(unavailable_latest["failure_log_acquisition"]["omissions"])
+        self.responses[discovery_resource] = dict(data=dict(total_count=1, workflow_runs=[run]))
+        check["name"] = "build"
+
+        many_checks = [dict(check, id=index, name=f"failed job {index}") for index in range(21, 25)]
+        many_jobs = [dict(job, id=index + 20, url=f"https://api.github.com/repos/owner/repo/actions/jobs/{index + 20}", check_run_url=f"https://api.github.com/repos/owner/repo/check-runs/{index}") for index in range(21, 25)]
+        self.responses["repos/owner/repo/check-suites/10/check-runs?filter=all&per_page=100&page=1"] = dict(data=dict(total_count=4, check_runs=many_checks))
+        self.responses[run_resource + "/jobs?per_page=100&page=1"] = dict(data=dict(total_count=4, jobs=many_jobs))
+        for one_job in many_jobs:
+            one_resource = "repos/owner/repo/actions/jobs/" + str(one_job["id"])
+            self.responses[one_resource] = dict(data=one_job)
+            self.responses[one_resource + "/logs"] = dict(text=log)
+
+        before_limited = len(self.calls())
+        low_budget = self.json_cli("pr-checks", *online_args[:-1], "20")
+        self.assertEqual(low_budget["failure_log_acquisition"]["attempted"], 0)
+        self.assertLessEqual(low_budget["requests"] + low_budget["reserved_requests"], 20)
+        self.assertFalse(any(call[-1].endswith("/logs") for call in self.calls()[before_limited:]))
+        bounded_page = self.json_cli("pr-checks", *online_args)
+        self.assertEqual(bounded_page["failure_log_acquisition"]["attempted"], 3)
+        self.assertEqual(sum(row.get("failure_log", {}).get("state") == "retained" for row in bounded_page["rows"]), 3)
+        self.assertLessEqual(bounded_page["requests"] + bounded_page["reserved_requests"], 80)
+        self.assertTrue(bounded_page["failure_log_acquisition"]["omissions"])
+        self.responses["repos/owner/repo/check-suites/10/check-runs?filter=all&per_page=100&page=1"] = dict(data=dict(total_count=1, check_runs=[check]))
+        self.responses[run_resource + "/jobs?per_page=100&page=1"] = dict(data=dict(total_count=1, jobs=[job]))
+
         limited = self.json_cli("pr-check-log", "capture", *args, "--check-id", "20", "--request-budget", "18")
         self.assertEqual((limited["status"], limited["reserved_requests"]), ("unavailable", 0))
         self.assertLessEqual(limited["requests"], 18)
@@ -198,6 +263,14 @@ class EvidenceTests(Workspace):
             failed = next(row for row in colored_view["rows"] if row["source"] == "check-run")
             self.assertIn("error: colored failure", failed["failure_log"]["windows"][0]["text"])
             self.assertNotIn("\x1b", failed["failure_log"]["windows"][0]["text"])
+            self.assertNotIn("[31m", failed["failure_log"]["windows"][0]["text"])
+
+        grouped_log = "2026-09-22T02:00:00Z ##[group]Install dependencies\nsetup\n##[endgroup]\n2026-09-22T02:00:01Z ##[group]Run tests\nerror: failed test\n##[endgroup]\n"
+        self.responses[job_resource + "/logs"] = dict(text=grouped_log)
+        grouped = self.json_cli("pr-check-log", "fetch", *capture_args)
+        grouped_read = self.json_cli("pr-check-log", "read", *args, "--log-object", grouped["log_object"]["sha256"], "--log-bytes", str(grouped["log_object"]["bytes"]))
+        self.assertEqual([window["section_title"] for window in grouped_read["windows"]], ["Install dependencies", "Run tests"])
+        self.assertEqual([window["start_line"] for window in grouped_read["windows"]], [1, 4])
 
         self.env.pop("FAKE_GH_ALLOW_ESCAPE_SEQUENCES")
         self.responses[job_resource + "/logs"] = dict(text="x" * 100000)

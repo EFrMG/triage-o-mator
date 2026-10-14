@@ -23,6 +23,8 @@ from _triage import REPO
 
 MAX_RETAINED = 65536
 REDIRECT_RESERVATION = 11
+ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b\r\n]*(?:\x07|\x1b\\))")
+GROUP = re.compile(r"##\[group\](.*)")
 ERROR = re.compile(rb"(?:##\[error\]|\berror\b|\bfailed\b|\bfailure\b|traceback|exception|fatal)", re.I)
 
 
@@ -52,8 +54,8 @@ def association_path(cache, scope):
     return cache.path("ci-logs", digest(canonical(scope)) + ".json")
 
 
-def publish_association(cache, packet, ref):
-    scope = association_scope(packet["repository"], packet["number"], packet["snapshot_id"], packet["source_repository"]["full_name"], packet["check_id"])
+def publish_association(cache, packet, ref, snapshot=None):
+    scope = association_scope(packet["repository"], packet["number"], snapshot or packet["snapshot_id"], packet["source_repository"]["full_name"], packet["check_id"])
     pointer = dict(schema_version=1, artifact="ci-failure-log-pointer", scope=scope, log_object=ref)
     payload = canonical(pointer) + "\n"
     if len(payload.encode("utf-8")) > 4096:
@@ -106,6 +108,41 @@ def associated(identity, number, snapshot, source_repo, check_id, host="github.c
         raise ValueError("CI log association changed during verification; read it again")
 
     return result
+
+
+def equivalent_source(old_evidence, old_entry, evidence, entry):
+    """Reuse binds the full retained check and suite projections, excluding observation timestamps."""
+    same_repository(old_evidence["repository"], evidence["repository"])
+    same_repository(old_entry["repository"], entry["repository"])
+    if old_evidence["identity"] != evidence["identity"] or old_entry["head_sha"] != entry["head_sha"] or old_entry["data"] != entry["data"]:
+        return False
+
+    def suite(parent, child):
+        return next(value["data"] for value in parent["data"]["checks"] if value["kind"] == "check_suite" and value["repository"] == child["repository"] and value["data"]["id"] == child["data"]["check_suite"]["id"])
+
+    return suite(old_evidence, old_entry) == suite(evidence, entry)
+
+
+def reuse(number, snapshot, previous, source_repo, check_id, host):
+    if previous is None or previous == snapshot:
+        return False
+
+    evidence, entry = selected(number, snapshot, check_id, source_repo, host)
+    old_evidence = read_evidence("pr", number, profile="pr-checks", snapshot_id=previous, host=host)
+    old_entries, _ = verify(old_evidence)
+    old_entry = next((value for value in old_entries if value["kind"] == "check_run" and value["data"]["id"] == check_id and value["repository"]["full_name"] == source_repo), None)
+    if old_entry is None:
+        return False
+
+    if not equivalent_source(old_evidence, old_entry, evidence, entry):
+        return False
+
+    result = associated(evidence["repository"], number, previous, source_repo, check_id, host)
+    if result is None or not result["windows"] or not result["packet"]["binding_revalidated"]:
+        return False
+
+    publish_association(EvidenceCache(evidence["repository"]), result["packet"], result["log_object"], snapshot=snapshot)
+    return True
 
 
 def api_url(host, resource):
@@ -476,7 +513,7 @@ def read(number, snapshot, object_sha, object_bytes, host="github.com", start_li
     packet = json.loads(cache.read_object(ref))
     required = ("schema_version", "artifact", "repository", "number", "snapshot_id", "source_repository", "head_sha", "check_id", "check_name", "run_id", "attempt", "job_id", "check_source", "run", "job", "membership", "membership_resource", "log_resource", "fetched_at", "download_partial", "binding_revalidated", "observed_bytes", "observed_lines", "observed_sha256", "selection_basis", "segments", "omissions", "request_budget", "max_log_bytes", "requests", "reserved_requests")
     fields(packet, required)
-    if type(packet["schema_version"]) is not int or packet["schema_version"] != 1 or packet["artifact"] != "ci-failure-log" or packet["number"] != number or packet["snapshot_id"] != snapshot:
+    if type(packet["schema_version"]) is not int or packet["schema_version"] != 1 or packet["artifact"] != "ci-failure-log" or packet["number"] != number:
         raise ValueError("CI log packet differs from the selected PR/snapshot")
     if any(type(packet[key]) is not int or packet[key] < 1 for key in ("number", "check_id", "run_id", "attempt", "job_id")) or type(packet["download_partial"]) is not bool or not isinstance(packet["segments"], list):
         raise ValueError("CI log packet has malformed identities or coverage")
@@ -488,7 +525,12 @@ def read(number, snapshot, object_sha, object_bytes, host="github.com", start_li
     if pins and any(value is not None and packet[key] != value for key, value in pins.items()):
         raise ValueError("CI log packet differs from the selected check/run/job pins")
 
-    evidence, entry = selected(number, snapshot, packet["check_id"], packet["source_repository"]["full_name"], host)
+    evidence, entry = selected(number, packet["snapshot_id"], packet["check_id"], packet["source_repository"]["full_name"], host)
+    if packet["snapshot_id"] != snapshot:
+        current_evidence, current_entry = selected(number, snapshot, packet["check_id"], packet["source_repository"]["full_name"], host)
+        if not packet["binding_revalidated"] or not equivalent_source(evidence, entry, current_evidence, current_entry):
+            raise ValueError("CI log reuse differs from its exact verified source evidence")
+
     same_repository(evidence["repository"], packet["repository"])
     same_repository(entry["repository"], packet["source_repository"])
     expected_source = dict(component="checks", object=evidence["components"]["checks"]["object"], index=entry["source_index"])
@@ -538,12 +580,20 @@ def read(number, snapshot, object_sha, object_bytes, host="github.com", start_li
             continue
 
         selected_lines = lines[first - segment["start_line"]:first - segment["start_line"] + remaining_lines]
-        text = "".join(char if char.isprintable() or char in "\n\t" else " " for char in b"".join(selected_lines).decode("utf-8", errors="replace"))
+        decoded = ANSI.sub("", b"".join(selected_lines).decode("utf-8", errors="replace"))
+        text = "".join(char if char.isprintable() or char in "\n\t" else " " for char in decoded)
+        title = None
+        for source_line in lines[:first - segment["start_line"] + 1]:
+            marker = GROUP.search(ANSI.sub("", source_line.decode("utf-8", errors="replace")))
+            if marker:
+                title = bounded(marker.group(1).strip())
+            elif b"##[endgroup]" in source_line:
+                title = None
         encoded = text.encode("utf-8")
         display_truncated = len(encoded) > remaining_bytes
         text = encoded[:remaining_bytes].decode("utf-8", errors="ignore")
         displayed_lines = len(text.splitlines(keepends=True))
-        rendered.append(dict(start_line=first, end_line=first + displayed_lines - 1, text=text, display_truncated=display_truncated))
+        rendered.append(dict(start_line=first, end_line=first + displayed_lines - 1, text=text, display_truncated=display_truncated, section_title=title))
         remaining_bytes -= len(text.encode("utf-8"))
         remaining_lines -= displayed_lines
         if first + displayed_lines <= segment["end_line"] and next_line is None:
@@ -551,6 +601,19 @@ def read(number, snapshot, object_sha, object_bytes, host="github.com", start_li
     if start_line is not None and not rendered:
         raise ValueError("requested source line is not retained; explicitly capture that window to acquire more context")
 
+    sections = []
+    for window in rendered:
+        current = None
+        for index, line in enumerate(window["text"].splitlines(keepends=True)):
+            marker = GROUP.search(line)
+            if current is None or marker:
+                current = dict(start_line=window["start_line"] + index, end_line=window["start_line"] + index, text="", display_truncated=window["display_truncated"], section_title=bounded(marker.group(1).strip()) if marker else window["section_title"])
+                sections.append(current)
+
+            current["text"] += line
+            current["end_line"] = window["start_line"] + index
+
+    rendered = sections
     continuation = dict(log_object=ref, number=number, snapshot_id=snapshot, start_line=next_line) if next_line is not None else None
-    return dict(log_object=ref, packet=presentation(packet), windows=rendered, continuation=continuation,
+    return dict(log_object=ref, selected_snapshot_id=snapshot, capture_snapshot_id=packet["snapshot_id"], packet=presentation(packet), windows=rendered, continuation=continuation,
                 display_problems=["display was bounded; retained source ranges remain available offline"] if continuation or any(window["display_truncated"] for window in rendered) else [])

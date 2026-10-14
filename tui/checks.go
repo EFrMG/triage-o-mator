@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -41,6 +40,7 @@ type checkLogWindow struct {
 	EndLine          int    `json:"end_line"`
 	Text             string `json:"text"`
 	DisplayTruncated bool   `json:"display_truncated"`
+	SectionTitle     string `json:"section_title"`
 }
 
 type checkLogObject struct {
@@ -51,6 +51,7 @@ type checkLogObject struct {
 
 type checkFailureLog struct {
 	State              string           `json:"state"`
+	CaptureSnapshot    string           `json:"capture_snapshot_id"`
 	Problem            string           `json:"problem"`
 	LogObject          *checkLogObject  `json:"log_object"`
 	WorkflowName       string           `json:"workflow_name"`
@@ -70,6 +71,14 @@ type checksRepository struct {
 	FullName string `json:"full_name"`
 }
 
+type checksLogAcquisition struct {
+	Requests         int      `json:"requests"`
+	ReservedRequests int      `json:"reserved_requests"`
+	Attempted        int      `json:"attempted"`
+	Reused           int      `json:"reused"`
+	Omissions        []string `json:"omissions"`
+}
+
 type checksPage struct {
 	RawCount         int `json:"raw_count"`
 	HistoryOmissions int `json:"historical_or_suite_omissions"`
@@ -79,22 +88,24 @@ type checksPage struct {
 		Pending int `json:"pending"`
 		Unknown int `json:"unknown"`
 	} `json:"result_counts"`
-	Repository          checksRepository   `json:"repository"`
-	AllowedRepositories []checksRepository `json:"allowed_repositories"`
-	ChecksHead          string             `json:"checks_head_sha"`
-	Kind                string             `json:"kind"`
-	Number              int                `json:"number"`
-	Mode                string             `json:"mode"`
-	Snapshot            string             `json:"snapshot_id"`
-	Head                string             `json:"observed_head_sha"`
-	ObservedAt          string             `json:"observed_at"`
-	Coverage            string             `json:"coverage"`
-	Freshness           string             `json:"freshness"`
-	FreshnessBasis      string             `json:"freshness_basis"`
-	Result              string             `json:"observed_result"`
-	Problems            []string           `json:"problems"`
-	Rows                []checkRow         `json:"rows"`
-	Requests            int                `json:"requests"`
+	Repository          checksRepository      `json:"repository"`
+	AllowedRepositories []checksRepository    `json:"allowed_repositories"`
+	ChecksHead          string                `json:"checks_head_sha"`
+	Kind                string                `json:"kind"`
+	Number              int                   `json:"number"`
+	Mode                string                `json:"mode"`
+	Snapshot            string                `json:"snapshot_id"`
+	Head                string                `json:"observed_head_sha"`
+	ObservedAt          string                `json:"observed_at"`
+	Coverage            string                `json:"coverage"`
+	Freshness           string                `json:"freshness"`
+	FreshnessBasis      string                `json:"freshness_basis"`
+	Result              string                `json:"observed_result"`
+	Problems            []string              `json:"problems"`
+	Rows                []checkRow            `json:"rows"`
+	Requests            int                   `json:"requests"`
+	ReservedRequests    int                   `json:"reserved_requests"`
+	LogAcquisition      *checksLogAcquisition `json:"failure_log_acquisition"`
 	Pagination          struct {
 		Total    int  `json:"total"`
 		Offset   int  `json:"offset"`
@@ -106,10 +117,8 @@ type checksPage struct {
 }
 
 type checksUI struct {
-	picker          *checksCapturePicker
-	capturing       bool
-	captureRow      *checkRow
-	captureOutcome  *checksCaptureOutcome
+	picker          *checksLogPicker
+	reader          *checksLogReader
 	loaded, busy    bool
 	snapshot        string
 	pendingSnapshot string
@@ -136,15 +145,15 @@ func (m model) checksSource() (string, bool) {
 	return "", m.detail.blockDirect || m.activeBatch != "" && !m.notificationPR.open
 }
 
-func checksReadCmd(root, repo string, item Key, mode, sourceSnapshot, snapshot string, fixed bool, offset int, generation, request uint64, process *readProcess, priority ...checkRow) tea.Cmd {
+func checksReadCmd(root, repo string, item Key, mode, sourceSnapshot, snapshot string, fixed bool, offset int, generation, request uint64, process *readProcess) tea.Cmd {
 	return func() tea.Msg {
 		msg := checksMsg{root: root, repo: repo, key: item, sourceSnapshot: sourceSnapshot, snapshot: snapshot, fixed: fixed, generation: generation, request: request}
-		args := []string{"--include-failure-logs", "--expected-repo", repo, "--number", strconv.Itoa(item.Number), "--mode", mode, "--host", evidenceHost, "--max-age", cacheMaxAgeArg, "--request-budget", "20", "--offset", strconv.Itoa(offset), "--limit", strconv.Itoa(checksPageSize)}
+		args := []string{"--include-failure-logs", "--expected-repo", repo, "--number", strconv.Itoa(item.Number), "--mode", mode, "--host", evidenceHost, "--max-age", cacheMaxAgeArg, "--request-budget", "80", "--offset", strconv.Itoa(offset), "--limit", strconv.Itoa(checksPageSize)}
+		if mode != "offline" && snapshot == "" {
+			args = append(args, "--acquire-failure-logs")
+		}
 		if snapshot != "" {
 			args = append(args, "--snapshot", snapshot)
-		}
-		if len(priority) == 1 {
-			args = append(args, "--failure-log-check-id", strconv.Itoa(priority[0].InternalID), "--failure-log-source-repo", priority[0].Repository)
 		}
 
 		out, err := runReadScript(process, root, "pr-checks", args...)
@@ -167,9 +176,26 @@ func validateChecksPage(page checksPage, repo string, number int, mode, snapshot
 	if page.Repository.Host != evidenceHost || page.Repository.FullName != repo || page.Kind != "pr" || page.Number != number || page.Mode != mode || snapshot != "" && page.Snapshot != snapshot {
 		return fmt.Errorf("checks response identity, mode or selected snapshot mismatch")
 	}
-	if page.Requests < 0 || page.Requests > 20 || mode == "offline" && page.Requests != 0 || len(page.Rows) > checksPageSize || p.Returned != len(page.Rows) || p.Offset != offset || p.Total < 0 || page.HistoryOmissions < 0 || page.RawCount != p.Total+page.HistoryOmissions || p.Before != offset || p.After < 0 || p.Total != p.Before+p.Returned+p.After || p.Next != nil && (*p.Next != offset+len(page.Rows) || p.After == 0 || len(page.Rows) == 0) {
+	if page.Requests < 0 || page.Requests > 80 || mode == "offline" && page.Requests != 0 || len(page.Rows) > checksPageSize || p.Returned != len(page.Rows) || p.Offset != offset || p.Total < 0 || page.HistoryOmissions < 0 || page.RawCount != p.Total+page.HistoryOmissions || p.Before != offset || p.After < 0 || p.Total != p.Before+p.Returned+p.After || p.Next != nil && (*p.Next != offset+len(page.Rows) || p.After == 0 || len(page.Rows) == 0) {
 		return fmt.Errorf("checks response budget or pagination mismatch")
 	}
+	if page.ReservedRequests < 0 || page.Requests+page.ReservedRequests > 80 {
+		return fmt.Errorf("checks response exceeds its shared request budget")
+	}
+	if acquisition := page.LogAcquisition; acquisition != nil {
+		metadataRequests := page.Requests - acquisition.Requests
+		if mode == "offline" || snapshot != "" || acquisition.Requests < 0 || metadataRequests < 0 || metadataRequests > 20 || acquisition.ReservedRequests != page.ReservedRequests || acquisition.ReservedRequests > 33 || acquisition.ReservedRequests%11 != 0 || acquisition.Attempted < 0 || acquisition.Attempted > 3 || acquisition.Reused < 0 || acquisition.Reused > 8 || acquisition.Attempted+acquisition.Reused > 8 || acquisition.ReservedRequests > acquisition.Attempted*11 || acquisition.Attempted == 0 && acquisition.Requests != 0 || len(acquisition.Omissions) > 6 {
+			return fmt.Errorf("checks failure log acquisition scope or budget mismatch")
+		}
+		for _, omission := range acquisition.Omissions {
+			if len(omission) > 4000 {
+				return fmt.Errorf("checks failure log acquisition notice exceeds its display budget")
+			}
+		}
+	} else if page.ReservedRequests != 0 || page.Requests > 20 {
+		return fmt.Errorf("checks metadata response exceeds its request budget")
+	}
+
 	if !slices.Contains([]string{"complete", "partial", "missing", "failed", "unavailable"}, page.Coverage) || !slices.Contains([]string{"within-window", "stale", "unknown"}, page.Freshness) || !slices.Contains([]string{"passed", "failed", "pending", "unknown", "empty"}, page.Result) {
 		return fmt.Errorf("checks response coverage, freshness or result is invalid")
 	}
@@ -250,15 +276,19 @@ func (m *model) stopChecks() {
 	m.checksLifecycle.stop()
 	m.checksRequest++
 	m.checks.busy = false
-	m.checks.picker, m.checks.captureRow, m.checks.captureOutcome = nil, nil, nil
-	m.checks.capturing = false
+	if m.checks.reader != nil {
+		if m.checks.reader.process != nil {
+			m.checks.reader.process.stop()
+		}
+	}
+	m.checks.picker, m.checks.reader = nil, nil
 }
 
 func (m *model) checksPageText(page checksPage) {
 	m.detail.setChecksPage(&page)
 }
 
-func (m *model) readChecks(mode string, offset int, priority ...checkRow) tea.Cmd {
+func (m *model) readChecks(mode string, offset int) tea.Cmd {
 	if m.detail.key.Kind != "pr" || m.detail.key.Number < 1 || m.detail.loading {
 		return nil
 	}
@@ -287,7 +317,7 @@ func (m *model) readChecks(mode string, offset int, priority ...checkRow) tea.Cm
 	m.checksLifecycle.current = &readProcess{}
 	m.checks.pendingSnapshot, m.checks.busy = snapshot, true
 	m.status = "Reading focused CI…"
-	return checksReadCmd(m.installRoot, m.repo, m.detail.key, mode, source, snapshot, fixed, offset, m.detail.generation, m.checksRequest, m.checksLifecycle.current, priority...)
+	return checksReadCmd(m.installRoot, m.repo, m.detail.key, mode, source, snapshot, fixed, offset, m.detail.generation, m.checksRequest, m.checksLifecycle.current)
 }
 
 // checksIfNeeded runs once after the selected PR's source resolves, independently of its active tab.
@@ -304,29 +334,6 @@ func (m *model) checksIfNeeded() tea.Cmd {
 		mode = "offline"
 	}
 	return m.readChecks(mode, 0)
-}
-
-// checksLiteral keeps captured output inside a fence even when the source contains Markdown fences.
-func checksLiteral(text string) string {
-	longest, run := 0, 0
-	for _, char := range text {
-		if char == '`' {
-			run++
-			longest = maxInt(longest, run)
-		} else {
-			run = 0
-		}
-	}
-	fence := strings.Repeat("`", maxInt(3, longest+1))
-	return fence + "\n" + text + "\n" + fence + "\n\n"
-}
-
-func checksTime(value string) string {
-	parsed, err := time.Parse(time.RFC3339Nano, value)
-	if err != nil {
-		return singleLine(value)
-	}
-	return parsed.UTC().Format("2006-01-02 15:04 UTC")
 }
 
 type checksSpan struct {
@@ -360,6 +367,11 @@ func checksBlocks(page checksPage) []checksBlock {
 	blocks = append(blocks, checksBlock{spans: []checksSpan{{text: revision, role: role}}})
 	for _, problem := range page.Problems {
 		blocks = append(blocks, checksBlock{spans: []checksSpan{{text: singleLine(problem)}}})
+	}
+	if acquisition := page.LogAcquisition; acquisition != nil {
+		for _, omission := range acquisition.Omissions {
+			blocks = append(blocks, checksBlock{spans: []checksSpan{{text: "Failure logs: " + singleLine(omission), role: currentTheme.Warning}}})
+		}
 	}
 	if page.Pagination.Total == 0 {
 		message := "No check rows are available in this observation. Coverage remains incomplete or unknown."
@@ -410,7 +422,7 @@ func checksBlocks(page checksPage) []checksBlock {
 		for _, problem := range row.Problems {
 			blocks = append(blocks, checksBlock{spans: []checksSpan{{text: singleLine(problem)}}})
 		}
-		blocks = append(blocks, checksBlock{markdown: checksFailureSource(row)})
+		blocks = append(blocks, checksBlock{markdown: checksFailureSummary(row)})
 	}
 	if len(compact) > 0 {
 		blocks = append(blocks, checksBlock{spans: compact})
@@ -478,15 +490,27 @@ func checksLogNotices(values ...[]string) []string {
 	return notices
 }
 
+func checksFailureSummary(row checkRow) string {
+	log := row.FailureLog
+	if log == nil || log.State != "retained" {
+		return checksFailureSource(row)
+	}
+	text := "Failure log retained · e opens the reader.\n\n"
+	if log.DownloadPartial {
+		text += "Partial retained log; complete job log coverage is unknown.\n"
+	}
+	return text
+}
+
 func checksFailureSource(row checkRow) string {
 	var b strings.Builder
 	log := row.FailureLog
 	if log == nil {
-		b.WriteString("No captured failure excerpt. Capture requires an explicit request.\n\n")
+		b.WriteString("No retained failure log. Open a current PR and refresh checks to download supported failure logs.\n\n")
 		return b.String()
 	}
 	if log.State != "retained" {
-		label := map[string]string{"missing": "No captured failure excerpt. Capture requires an explicit request", "unavailable": "Failure log unavailable", "invalid": "Captured failure excerpt could not be verified", "not-shown": "Failure excerpt omitted by this page's display budget"}[log.State]
+		label := map[string]string{"missing": "No retained failure log. Open a current PR and refresh checks to download supported failure logs", "unavailable": "Failure log unavailable", "invalid": "Captured failure excerpt could not be verified", "not-shown": "Failure excerpt omitted by this page's display budget"}[log.State]
 		fmt.Fprintf(&b, "%s.\n\n", label)
 		for _, problem := range checksLogNotices([]string{log.Problem}, log.Omissions, log.DisplayProblems) {
 			fmt.Fprintf(&b, "%s\n\n", problem)
@@ -496,37 +520,7 @@ func checksFailureSource(row checkRow) string {
 		}
 		return b.String()
 	}
-	for _, window := range log.Windows {
-		fmt.Fprintf(&b, "Captured failure excerpt · Source lines %d–%d\n\n", window.StartLine, window.EndLine)
-		b.WriteString(checksLiteral(window.Text))
-		if window.DisplayTruncated {
-			b.WriteString("This excerpt was truncated for display.\n\n")
-		}
-	}
-	if log.SelectionBasis != "" {
-		fmt.Fprintf(&b, "Selection: %s", singleLine(log.SelectionBasis))
-	}
-	if log.FetchedAt != "" {
-		if log.SelectionBasis != "" {
-			b.WriteString(" · ")
-		}
-		fmt.Fprintf(&b, "Captured %s", checksTime(log.FetchedAt))
-	}
-	if log.SelectionBasis != "" || log.FetchedAt != "" {
-		b.WriteString("\n\n")
-	}
-	if log.DownloadPartial {
-		b.WriteString("Partial failure excerpt; complete job log coverage is unknown.\n\n")
-	}
-	if !log.BindingRevalidated {
-		b.WriteString("Source binding could not be revalidated after capture.\n\n")
-	}
-	for _, problem := range checksLogNotices(log.Omissions, log.DisplayProblems) {
-		fmt.Fprintf(&b, "- %s\n", problem)
-	}
-	if len(log.Continuation) > 0 && string(log.Continuation) != "null" {
-		b.WriteString("\nMore retained context is available through the pinned offline log reader.\n")
-	}
+	b.WriteString(checksFailureSummary(row))
 	return b.String()
 }
 
@@ -537,7 +531,6 @@ func (m model) finishChecks(msg checksMsg) (tea.Model, tea.Cmd) {
 	}
 	m.checks.busy, m.checks.loaded = false, true
 	if msg.err != nil {
-		m.checks.captureOutcome = nil
 		m.checks.page = checksPage{}
 		m.detail.setChecksPage(nil)
 		m.status = "CI read unavailable. ! shows details; Ctrl-R retries focused CI."
@@ -548,9 +541,7 @@ func (m model) finishChecks(msg checksMsg) (tea.Model, tea.Cmd) {
 	if msg.data.Pagination.Total > 0 {
 		m.checksPageText(msg.data)
 		m.status = "Focused CI loaded."
-		m.finishCaptureOutcome(msg.data)
 	} else {
-		m.checks.captureOutcome = nil
 		m.detail.setChecksPage(nil)
 		m.status = "No CI check or status observations. Ctrl-R refreshes focused CI."
 		if msg.data.Coverage == "failed" || msg.data.Coverage == "unavailable" || len(msg.data.Problems) > 0 {
@@ -577,22 +568,6 @@ func (m model) checksKeyScope() bool {
 }
 
 func (m model) handleChecksKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
-	if m.prChecksKeyScope() && (m.checks.capturing || m.checks.captureOutcome != nil && m.checks.busy) {
-		if msg.String() == "esc" && m.checks.capturing {
-			older := checksDisplayedExcerpt(m.checks.page, m.checks.captureRow)
-			m.stopChecks()
-			m.status = "Failure log capture cancelled."
-			if older {
-				m.status += " Previous excerpt still displayed."
-			}
-			return m, nil, true
-		}
-		if key.Matches(msg, keys.ChecksRefresh) || key.Matches(msg, keys.ChecksFocusedRefresh) || key.Matches(msg, keys.ChecksCapture) || key.Matches(msg, keys.ChecksNext) || key.Matches(msg, keys.ChecksPrev) {
-			m.status = "Wait for the selected failure log capture or its offline reload to finish."
-			return m, nil, true
-		}
-	}
-
 	if m.prChecksKeyScope() && key.Matches(msg, keys.ChecksFocusedRefresh) {
 		return m, m.readChecks("refresh", 0), true
 	}
@@ -600,8 +575,8 @@ func (m model) handleChecksKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	switch {
-	case key.Matches(msg, keys.ChecksCapture):
-		next, cmd := m.openChecksCapture()
+	case key.Matches(msg, keys.ChecksLogs):
+		next, cmd := m.openChecksLogs()
 		return next, cmd, true
 	case key.Matches(msg, keys.ChecksRefresh):
 		cmd := m.readChecks("refresh", 0)

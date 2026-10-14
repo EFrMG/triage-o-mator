@@ -10,7 +10,7 @@ type keyMap struct {
 	Refresh              key.Binding
 	RefreshFull          key.Binding
 	ChecksRefresh        key.Binding
-	ChecksCapture        key.Binding
+	ChecksLogs           key.Binding
 	ChecksFocusedRefresh key.Binding
 	ChecksPrev           key.Binding
 	ChecksNext           key.Binding
@@ -90,7 +90,7 @@ type keyMap struct {
 var keys = keyMap{
 	Help:                 key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	Theme:                key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "themes")),
-	ChecksCapture:        key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "capture failure log")),
+	ChecksLogs:           key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "read failure logs")),
 	ChecksFocusedRefresh: key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("Ctrl-R", "refresh CI")),
 	ChecksRefresh:        key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh checks")),
 	ChecksPrev:           key.NewBinding(key.WithKeys("["), key.WithHelp("[", "previous checks")),

@@ -18,20 +18,22 @@ import (
 const checksPageSize = 20
 
 type checkRow struct {
-	Source      string           `json:"source"`
-	Repository  string           `json:"repository"`
-	App         string           `json:"app"`
-	Name        string           `json:"name"`
-	Status      string           `json:"status"`
-	Conclusion  string           `json:"conclusion"`
-	URL         string           `json:"url"`
-	StartedAt   string           `json:"started_at"`
-	CompletedAt string           `json:"completed_at"`
-	UpdatedAt   string           `json:"updated_at"`
-	HeadSHA     string           `json:"head_sha"`
-	Result      string           `json:"result"`
-	Problems    []string         `json:"problems"`
-	FailureLog  *checkFailureLog `json:"failure_log"`
+	InternalID       int              `json:"internal_id"`
+	CaptureSupported bool             `json:"log_capture_supported"`
+	Source           string           `json:"source"`
+	Repository       string           `json:"repository"`
+	App              string           `json:"app"`
+	Name             string           `json:"name"`
+	Status           string           `json:"status"`
+	Conclusion       string           `json:"conclusion"`
+	URL              string           `json:"url"`
+	StartedAt        string           `json:"started_at"`
+	CompletedAt      string           `json:"completed_at"`
+	UpdatedAt        string           `json:"updated_at"`
+	HeadSHA          string           `json:"head_sha"`
+	Result           string           `json:"result"`
+	Problems         []string         `json:"problems"`
+	FailureLog       *checkFailureLog `json:"failure_log"`
 }
 
 type checkLogWindow struct {
@@ -104,6 +106,10 @@ type checksPage struct {
 }
 
 type checksUI struct {
+	picker          *checksCapturePicker
+	capturing       bool
+	captureRow      *checkRow
+	captureOutcome  *checksCaptureOutcome
 	loaded, busy    bool
 	snapshot        string
 	pendingSnapshot string
@@ -130,12 +136,15 @@ func (m model) checksSource() (string, bool) {
 	return "", m.detail.blockDirect || m.activeBatch != "" && !m.notificationPR.open
 }
 
-func checksReadCmd(root, repo string, item Key, mode, sourceSnapshot, snapshot string, fixed bool, offset int, generation, request uint64, process *readProcess) tea.Cmd {
+func checksReadCmd(root, repo string, item Key, mode, sourceSnapshot, snapshot string, fixed bool, offset int, generation, request uint64, process *readProcess, priority ...checkRow) tea.Cmd {
 	return func() tea.Msg {
 		msg := checksMsg{root: root, repo: repo, key: item, sourceSnapshot: sourceSnapshot, snapshot: snapshot, fixed: fixed, generation: generation, request: request}
 		args := []string{"--include-failure-logs", "--expected-repo", repo, "--number", strconv.Itoa(item.Number), "--mode", mode, "--host", evidenceHost, "--max-age", cacheMaxAgeArg, "--request-budget", "20", "--offset", strconv.Itoa(offset), "--limit", strconv.Itoa(checksPageSize)}
 		if snapshot != "" {
 			args = append(args, "--snapshot", snapshot)
+		}
+		if len(priority) == 1 {
+			args = append(args, "--failure-log-check-id", strconv.Itoa(priority[0].InternalID), "--failure-log-source-repo", priority[0].Repository)
 		}
 
 		out, err := runReadScript(process, root, "pr-checks", args...)
@@ -177,6 +186,9 @@ func validateChecksPage(page checksPage, repo string, number int, mode, snapshot
 			return fmt.Errorf("checks row repository, revision or result mismatch")
 		}
 
+		if row.CaptureSupported && (row.InternalID < 1 || row.Source != "check-run" || row.Result != "failed" || row.Status != "completed" || row.HeadSHA == "") {
+			return fmt.Errorf("checks capture capability differs from the selected row")
+		}
 		if log := row.FailureLog; log != nil {
 			if row.Result != "failed" || !slices.Contains([]string{"retained", "missing", "unavailable", "invalid", "not-shown"}, log.State) {
 				return fmt.Errorf("checks failure log state mismatch")
@@ -238,13 +250,15 @@ func (m *model) stopChecks() {
 	m.checksLifecycle.stop()
 	m.checksRequest++
 	m.checks.busy = false
+	m.checks.picker, m.checks.captureRow, m.checks.captureOutcome = nil, nil, nil
+	m.checks.capturing = false
 }
 
 func (m *model) checksPageText(page checksPage) {
 	m.detail.setChecksPage(&page)
 }
 
-func (m *model) readChecks(mode string, offset int) tea.Cmd {
+func (m *model) readChecks(mode string, offset int, priority ...checkRow) tea.Cmd {
 	if m.detail.key.Kind != "pr" || m.detail.key.Number < 1 || m.detail.loading {
 		return nil
 	}
@@ -273,7 +287,7 @@ func (m *model) readChecks(mode string, offset int) tea.Cmd {
 	m.checksLifecycle.current = &readProcess{}
 	m.checks.pendingSnapshot, m.checks.busy = snapshot, true
 	m.status = "Reading focused CI…"
-	return checksReadCmd(m.installRoot, m.repo, m.detail.key, mode, source, snapshot, fixed, offset, m.detail.generation, m.checksRequest, m.checksLifecycle.current)
+	return checksReadCmd(m.installRoot, m.repo, m.detail.key, mode, source, snapshot, fixed, offset, m.detail.generation, m.checksRequest, m.checksLifecycle.current, priority...)
 }
 
 // checksIfNeeded runs once after the selected PR's source resolves, independently of its active tab.
@@ -515,6 +529,7 @@ func (m model) finishChecks(msg checksMsg) (tea.Model, tea.Cmd) {
 	}
 	m.checks.busy, m.checks.loaded = false, true
 	if msg.err != nil {
+		m.checks.captureOutcome = nil
 		m.checks.page = checksPage{}
 		m.detail.setChecksPage(nil)
 		m.status = "CI read unavailable. ! shows details; Ctrl-R retries focused CI."
@@ -525,7 +540,9 @@ func (m model) finishChecks(msg checksMsg) (tea.Model, tea.Cmd) {
 	if msg.data.Pagination.Total > 0 {
 		m.checksPageText(msg.data)
 		m.status = "Focused CI loaded."
+		m.finishCaptureOutcome(msg.data)
 	} else {
+		m.checks.captureOutcome = nil
 		m.detail.setChecksPage(nil)
 		m.status = "No CI check or status observations. Ctrl-R refreshes focused CI."
 		if msg.data.Coverage == "failed" || msg.data.Coverage == "unavailable" || len(msg.data.Problems) > 0 {
@@ -552,6 +569,18 @@ func (m model) checksKeyScope() bool {
 }
 
 func (m model) handleChecksKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
+	if m.prChecksKeyScope() && (m.checks.capturing || m.checks.captureOutcome != nil && m.checks.busy) {
+		if msg.String() == "esc" && m.checks.capturing {
+			m.stopChecks()
+			m.status = "Failure log capture cancelled; any displayed excerpt is from an earlier capture."
+			return m, nil, true
+		}
+		if key.Matches(msg, keys.ChecksRefresh) || key.Matches(msg, keys.ChecksFocusedRefresh) || key.Matches(msg, keys.ChecksCapture) || key.Matches(msg, keys.ChecksNext) || key.Matches(msg, keys.ChecksPrev) {
+			m.status = "Wait for the selected failure log capture or its offline reload to finish."
+			return m, nil, true
+		}
+	}
+
 	if m.prChecksKeyScope() && key.Matches(msg, keys.ChecksFocusedRefresh) {
 		return m, m.readChecks("refresh", 0), true
 	}
@@ -559,6 +588,9 @@ func (m model) handleChecksKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	switch {
+	case key.Matches(msg, keys.ChecksCapture):
+		next, cmd := m.openChecksCapture()
+		return next, cmd, true
 	case key.Matches(msg, keys.ChecksRefresh):
 		cmd := m.readChecks("refresh", 0)
 		return m, cmd, true

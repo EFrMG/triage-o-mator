@@ -836,6 +836,9 @@ func (m model) viewContent() string {
 	if m.settings.open && m.settings.defaults != nil {
 		body = m.settingsDefaultsOverlay(body)
 	}
+	if m.checks.picker != nil {
+		body = m.checksCaptureOverlay(body)
+	}
 	if m.comment.open {
 		body = m.commentOverlay(body)
 	}

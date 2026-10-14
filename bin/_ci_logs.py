@@ -112,7 +112,7 @@ def api_url(host, resource):
     return f"https://api.github.com/{resource}" if host == "github.com" else f"https://{host}/api/v3/{resource}"
 
 
-def locate(number, snapshot, check_id, source_repo, host="github.com", budget=20):
+def locate(number, snapshot, check_id, source_repo, host="github.com", budget=20, reader=None):
     if not 1 <= budget <= 100:
         raise ValueError("request budget must be between 1 and 100")
 
@@ -121,7 +121,7 @@ def locate(number, snapshot, check_id, source_repo, host="github.com", budget=20
     prefix = f"repos/{source_repo}"
     suite_id = entry["data"]["check_suite"]["id"]
     with locked(cache.path("acquisition")):
-        reader = GitHubReader(host, budget, Cooldown(cache))
+        reader = reader or GitHubReader(host, budget, Cooldown(cache))
         candidates = []
         resource = f"{prefix}/actions/runs?check_suite_id={suite_id}&head_sha={entry['head_sha']}"
         for runs in pages(reader, resource, "workflow_runs"):
@@ -158,6 +158,48 @@ def locate(number, snapshot, check_id, source_repo, host="github.com", budget=20
     return dict(repository=evidence["repository"], snapshot_id=snapshot, check_id=check_id, source_repository=entry["repository"],
                 head_sha=entry["head_sha"], run_id=run_id, attempt=attempt, job_id=job["id"], job_name=bounded(job.get("name")), check_name=bounded(entry["data"].get("name")),
                 workflow_name=bounded(run.get("name")), requests=reader.requests, fetch_command=command)
+
+
+def capture(number, snapshot, check_id, source_repo, host="github.com", budget=20, maximum=1048576, start_line=None):
+    if type(budget) is not int or not 1 <= budget <= 100 or type(maximum) is not int or not 1 <= maximum <= 4194304:
+        raise ValueError("select bounded request and log byte budgets")
+    if any(type(value) is not int or value < 1 for value in (number, check_id)) or start_line is not None and (type(start_line) is not int or start_line < 1):
+        raise ValueError("select positive PR, check and source line identities")
+
+    evidence, entry = selected(number, snapshot, check_id, source_repo, host)
+    result = dict(repository=evidence["repository"], number=number, snapshot_id=snapshot, source_repository=entry["repository"],
+                  head_sha=entry["head_sha"], check_id=check_id, check_name=bounded(entry["data"].get("name")), status="unavailable",
+                  capture_stage="locate", request_budget=budget, max_log_bytes=maximum, requests=0, reserved_requests=0, omissions=[])
+    if (entry["data"].get("app") or {}).get("slug") != "github-actions":
+        result["omissions"].append("Selected check provider is not verified as GitHub Actions; no log acquisition attempted")
+        return result
+
+    cache = EvidenceCache(evidence["repository"])
+    locator = GitHubReader(host, budget, Cooldown(cache))
+    try:
+        located = locate(number, snapshot, check_id, source_repo, host=host, budget=budget, reader=locator)
+    except (ReadFailure, ValueError, OSError, KeyError, TypeError) as error:
+        result.update(requests=locator.requests, omissions=[bounded(str(error), 512)])
+        return result
+
+    result.update(requests=locator.requests, capture_stage="fetch",
+                  **{key: located[key] for key in ("run_id", "attempt", "job_id", "workflow_name", "job_name")})
+    remaining = budget - locator.requests
+    if remaining < 1:
+        result["omissions"].append("Shared request budget exhausted during job location; no log capture attempted")
+        return result
+
+    reader = GitHubReader(host, remaining, Cooldown(cache))
+    try:
+        captured = fetch(number, snapshot, check_id, source_repo, located["run_id"], located["attempt"], located["job_id"],
+                         host=host, budget=remaining, maximum=maximum, start_line=start_line, reader=reader)
+    except (ReadFailure, ValueError, OSError, KeyError, TypeError) as error:
+        result.update(requests=locator.requests + reader.requests, reserved_requests=getattr(reader, "ci_log_reserved_requests", 0), omissions=[bounded(str(error), 512)])
+        return result
+
+    result.update(**{key: captured[key] for key in ("log_object", "status", "workflow_name", "job_name", "fetched_at", "download_partial", "binding_revalidated", "selection_basis", "omissions")},
+                  requests=locator.requests + captured["requests"], reserved_requests=captured["reserved_requests"])
+    return result
 
 
 def validate_metadata(run, job, source, entry, run_id, attempt, job_id):
@@ -298,7 +340,7 @@ def excerpts(data, start_line=None):
     return segments, basis, len(lines)
 
 
-def fetch(number, snapshot, check_id, source_repo, run_id, attempt, job_id, host="github.com", budget=20, maximum=1048576, start_line=None):
+def fetch(number, snapshot, check_id, source_repo, run_id, attempt, job_id, host="github.com", budget=20, maximum=1048576, start_line=None, reader=None):
     if not 1 <= budget <= 100 or not 1 <= maximum <= 4194304 or any(type(value) is not int or value < 1 for value in (number, check_id, run_id, attempt, job_id)) or start_line is not None and start_line < 1:
         raise ValueError("select positive CI identities and bounded request/log budgets")
 
@@ -310,7 +352,7 @@ def fetch(number, snapshot, check_id, source_repo, run_id, attempt, job_id, host
     job_resource = f"{prefix}/actions/jobs/{job_id}"
     resource = job_resource + "/logs"
     with locked(cache.path("acquisition")):
-        reader = GitHubReader(host, budget, Cooldown(cache))
+        reader = reader or GitHubReader(host, budget, Cooldown(cache))
         run, _ = reader.get(run_resource)
         job, _ = reader.get(job_resource)
         validate_metadata(run, job, source, entry, run_id, attempt, job_id)
@@ -329,6 +371,7 @@ def fetch(number, snapshot, check_id, source_repo, run_id, attempt, job_id, host
         data, partial = b"", True
         if reader.requests + REDIRECT_RESERVATION + 2 <= budget:
             reserved = REDIRECT_RESERVATION
+            reader.ci_log_reserved_requests = reserved
             try:
                 data, partial, error = bounded_download(reader, resource, maximum)
                 if error:

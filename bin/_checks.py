@@ -195,7 +195,7 @@ def row(entry, diagnostics=()):
     if times["started_at"] and times["completed_at"] and timestamp(times["started_at"]) > timestamp(times["completed_at"]):
         issues.append("run timing order is invalid")
 
-    if kind != "status" and data.get("status") == "completed" and times["completed_at"] is None:
+    if kind == "check_run" and data.get("status") == "completed" and times["completed_at"] is None:
         issues.append("completed_at is missing")
 
     app = object_field(data, "app")
@@ -206,7 +206,8 @@ def row(entry, diagnostics=()):
     return dict(source=kind.replace("_", "-"), repository=entry["repository"]["full_name"], app=bounded(app.get("name") or app.get("slug")),
                 name=bounded(name), status=bounded(data.get("state") if kind == "status" else data.get("status"), 64),
                 conclusion=bounded(data.get("conclusion"), 64), url=url, **times, head_sha=entry["head_sha"],
-                result=value, problems=issues, internal_id=data["id"], source_index=entry["source_index"])
+                result=value, problems=issues, internal_id=data["id"], source_index=entry["source_index"],
+                log_capture_supported=kind == "check_run" and value == "failed" and data.get("status") == "completed" and data.get("conclusion") in FAILURES and app.get("slug") == "github-actions")
 
 
 def latest(groups, time_key):
@@ -229,7 +230,7 @@ def latest(groups, time_key):
     return selected
 
 
-def summarize(entries):
+def summarize(entries, complete=True):
     runs, statuses, suites = {}, {}, []
     for entry in entries:
         data, source = entry["data"], entry["repository"]["full_name"]
@@ -263,20 +264,28 @@ def summarize(entries):
             chosen.extend(latest({"runs": group}, "started_at"))
 
     rows = [row(entry, diagnostics) for entry, diagnostics in chosen]
+    selected_rows = {value["source_index"]: value for value in rows}
     for entry in suites:
-        suite_runs = [run for run in entries if run["kind"] == "check_run" and run["repository"] == entry["repository"] and run["data"]["check_suite"]["id"] == entry["data"]["id"]]
-        if entry["data"].get("status") != "completed" or entry["data"].get("conclusion") != "success" or not suite_runs:
-            notes = ["suite observation is not an individual test"]
-            if not suite_runs:
-                notes.append("suite has no retained runs")
-            elif entry["data"].get("status") == "completed" and entry["data"].get("conclusion") != "success":
-                notes.append("suite conclusion requires interpretation; it is not an individual test result")
+        suite_runs = [selected_rows[run["source_index"]] for run, _ in chosen if run["kind"] == "check_run" and run["repository"] == entry["repository"] and run["data"]["check_suite"]["id"] == entry["data"]["id"]]
+        suite_value = row(entry)
+        known_children = complete and suite_runs and all(value["status"] == "completed" and value["result"] in ("passed", "failed") for value in suite_runs)
+        if known_children and suite_value["status"] == "completed":
+            if suite_value["result"] == "passed" and all(value["result"] == "passed" for value in suite_runs):
+                continue
+            if suite_value["result"] == "failed" and any(value["result"] == "failed" and value["conclusion"] == suite_value["conclusion"] for value in suite_runs):
+                continue
 
-            suite_row = row(entry, notes)
-            if suite_row["result"] not in ("pending", "unknown"):
-                suite_row["result"] = "unknown"
+        notes = ["suite observation is not an individual test"]
+        if not suite_runs:
+            notes.append("suite has no selected retained runs")
+        elif entry["data"].get("status") == "completed":
+            notes.append("suite conclusion is unresolved by the selected individual results or coverage")
 
-            rows.append(suite_row)
+        suite_row = row(entry, notes)
+        if suite_row["result"] not in ("pending", "unknown"):
+            suite_row["result"] = "unknown"
+
+        rows.append(suite_row)
 
     rows.sort(key=lambda value: (value["result"] != "failed", value["repository"], value["source"], value["app"] or "", value["name"], value["internal_id"]))
     results = {value["result"] for value in rows}
@@ -284,11 +293,12 @@ def summarize(entries):
     return rows, observed
 
 
-def failure_logs(rows, evidence, host):
+def failure_logs(rows, evidence, host, priority=None):
     from _ci_logs import associated
 
     attempted = 0
-    for value in rows:
+    lookup_rows = sorted(rows, key=lambda value: (value["repository"], value["internal_id"]) != priority) if priority is not None else rows
+    for value in lookup_rows:
         if value["result"] != "failed":
             continue
 
@@ -351,16 +361,23 @@ def failure_logs(rows, evidence, host):
             log.update(state="invalid", problem=bounded(str(error), 512))
 
 
-def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86400, budget=100, offset=0, limit=20, include_logs=False):
+def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86400, budget=100, offset=0, limit=20, include_logs=False, failure_log_check_id=None, failure_log_source_repo=None):
     window(offset, limit, 50)
     if offset and snapshot_id is None:
         raise ValueError("continuation requires an explicit --snapshot; select the first page's snapshot ID")
     if not 0 <= budget <= 500:
         raise ValueError("request budget must be between 0 and 500")
+    priority = None
+    if failure_log_check_id is not None or failure_log_source_repo is not None:
+        if type(failure_log_check_id) is not int or failure_log_check_id < 1 or not failure_log_source_repo or not include_logs or snapshot_id is None or mode != "offline":
+            raise ValueError("failure log priority requires both check/source pins, included logs and a fixed offline snapshot")
+
+        priority = (failure_log_source_repo, failure_log_check_id)
 
     evidence = read_evidence("pr", number, profile="pr-checks", mode=mode, host=host, max_age=max_age, budget=budget, snapshot_id=snapshot_id)
     entries, allowed = verify(evidence)
-    rows, observed = summarize(entries)
+    checks_descriptor = evidence["components"].get("checks")
+    rows, observed = summarize(entries, complete=checks_descriptor is not None and checks_descriptor["status"] == "complete")
     problems = [f"{name}: {problem}" for name, values in evidence["problems"].items() for problem in values]
     raw_summary = evidence["data"].get("summary")
     if raw_summary and not object_field(raw_summary, "head").get("repo"):
@@ -389,8 +406,10 @@ def read(number, mode="offline", host="github.com", snapshot_id=None, max_age=86
     raw_command = ["bin/cache", "--expected-repo", REPO, "--host", host, "chunk", "--snapshot", snapshot, "--kind", "pr", "--number", str(number), "--component", "checks"] if snapshot and descriptor and descriptor["object"] else None
     counts = {value: sum(row["result"] == value for row in rows) for value in ("passed", "failed", "pending", "unknown")}
     selected_rows = rows[offset:offset + limit]
+    if priority is not None and not any(value["source"] == "check-run" and value["result"] == "failed" and (value["repository"], value["internal_id"]) == priority for value in selected_rows):
+        raise ValueError("priority failure log check is not a failed check-run on the selected page")
     if include_logs:
-        failure_logs(selected_rows, evidence, host)
+        failure_logs(selected_rows, evidence, host, priority)
 
     return dict(repository=evidence["repository"], allowed_repositories=allowed, kind="pr", number=number, mode=mode, snapshot_id=snapshot,
                 observed_head_sha=(evidence["revision"] or {}).get("head_sha"), checks_head_sha=descriptor["revision"]["head_sha"] if descriptor else None,

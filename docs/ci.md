@@ -25,6 +25,16 @@ An assessment uses its main `--snapshot` for CI by default. Add `--checks-snapsh
 
 `bin/pr-check-log` supports GitHub Actions job logs for one explicitly selected failed check. It does not download every workflow log, follow third-party check URLs or alter CI metadata. GitHub's [job-log API](https://docs.github.com/en/rest/actions/workflow-jobs#download-job-logs-for-a-workflow-run) provides plain text through a temporary redirect; workflow attempts and job/check identities are verified before capturing a log.
 
+While reading Checks for a current PR, press **e** to capture a failed Actions job's context. A single supported failure starts the capture directly; several supported failures on the current page open a picker with check names and source repositories. Use the arrows or j/k, Enter to capture one, or Esc to cancel. Page through checks first to select a failure outside the current page. Fixed item packets remain offline in the TUI; open the current item to acquire new context.
+
+The TUI capture uses one 20-request budget for discovery, download reservations and revalidation, with a 256 KiB download cap. It then rereads the same checks snapshot offline to show the saved excerpt. Capture never refreshes the metadata snapshot, changes a decision or downloads every failed job. Missing, expired or unsupported logs retain an explicit gap. A failed discovery attempt does not claim that an earlier cached excerpt is a new capture.
+
+The owning CLI offers the same combined operation:
+
+```sh
+bin/pr-check-log capture --expected-repo OWNER/REPO --number N --snapshot CHECKS_HASH --check-id CHECK_ID --source-repo SOURCE/REPO --request-budget 20 --max-log-bytes 262144
+```
+
 Start with a failed check from a selected `bin/pr-checks` snapshot. Its `internal_id` and source repository identify the check for scripts; a check-run ID is not assumed to be a job ID. Locate its current linked Actions attempt without downloading logs:
 
 ```sh
@@ -53,4 +63,4 @@ The TUI Checks tab shows failures first, with saved failure excerpts inline. A c
 
 After publishing a log object, `fetch` atomically updates a bounded association for that exact parent checks snapshot, source repository and check. The association only selects an object: readers verify its checksum, parent evidence and source bindings before showing text. A newer partial, unavailable or corrupt capture never falls back to an older success. Earlier immutable references remain readable directly.
 
-Opening Checks reads saved excerpts offline through `bin/pr-checks --include-failure-logs`. Each page bounds the number of excerpts, displayed lines and bytes, and shows source line ranges, omitted context and capture problems. Metadata refresh acquires only check metadata; it never captures logs. A new checks snapshot needs its own explicit log capture. Use the exact-object reader above for more retained context. Follow [Inspect CI](../prompts/inspect-ci.md) to acquire relevant context and retain findings in item notes.
+Opening Checks reads saved excerpts offline through `bin/pr-checks --include-failure-logs`. Each page bounds the number of excerpts, displayed lines and bytes, and shows source line ranges, omitted context and capture problems. After a TUI capture, its selected check takes priority within the same excerpt limits. CLI readers can request that priority with `--failure-log-check-id CHECK_ID --failure-log-source-repo SOURCE/REPO`, using a fixed offline snapshot and a failed check on the selected page; displayed check order stays unchanged. Metadata refresh acquires only check metadata; it never captures logs. A new checks snapshot needs its own explicit log capture. Use the exact-object reader above for more retained context. Follow [Inspect CI](../prompts/inspect-ci.md) to acquire relevant context and retain findings in item notes.

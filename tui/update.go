@@ -39,6 +39,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case checksCaptureMsg:
+		return m.finishChecksCapture(msg)
 	case checksMsg:
 		return m.finishChecks(msg)
 	case commentEditorMsg:
@@ -456,6 +458,9 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	if m.checks.picker != nil {
+		return m.handleChecksCapturePicker(msg)
+	}
 	if m.comment.open {
 		return m.handleCommentKey(msg)
 	}

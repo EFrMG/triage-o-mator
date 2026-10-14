@@ -1360,6 +1360,153 @@ print(json.dumps(value))
 	if strings.Contains(rendered, strings.Repeat("a", 64)) {
 		t.Fatal("failure view exposed storage object identity")
 	}
+
+	// Explicit capture selects one verified Actions check and reloads only its pinned offline page.
+	capturePage := failure
+	capturePage.Rows = append([]checkRow{}, failure.Rows...)
+	capturePage.Rows[0].InternalID, capturePage.Rows[0].CaptureSupported = 42, true
+	capturePage.Rows[0].App = "github-actions"
+	receipt := checksCaptureResponse{Repository: failure.Repository, SourceRepository: checksRepository{Host: evidenceHost, FullName: "fork/repo"}, Number: 3, Snapshot: failure.Snapshot, CheckID: 42, Head: "old-head", Status: "retained", Stage: "fetch", LogObject: capturePage.Rows[0].FailureLog.LogObject, Requests: 8, ReservedRequests: 11, RequestBudget: checksCaptureBudget, MaxLogBytes: checksCaptureBytes}
+	writeReceipt := func(value checksCaptureResponse) {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(m.installRoot, "capture-fixture.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	captureScript := `#!/usr/bin/env python3
+import pathlib, json, sys
+root = pathlib.Path(__file__).parent.parent
+(root / "capture-args.json").write_text(json.dumps(sys.argv[1:]))
+print((root / "capture-fixture.json").read_text())
+`
+	if err := os.WriteFile(filepath.Join(m.installRoot, "bin", "pr-check-log"), []byte(captureScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeReceipt(receipt)
+	writePage(capturePage)
+	captureModel := baselineModel(t, m.installRoot)
+	captureModel.detail.SetItem(Item{Kind: "pr", Number: 3})
+	captureModel.detail.loading = false
+	captureModel.detail.Resize(80, 20)
+	captureModel.focus = FocusDetail
+	captureModel.form.FocusField(fieldContent)
+	captureModel.form.reason.SetValue("preserve the capture draft")
+	captureModel.checks = checksUI{loaded: true, snapshot: capturePage.Snapshot, page: capturePage}
+	captureModel.checksPageText(capturePage)
+	captureModel.detail.JumpSection(2)
+	if !strings.Contains(fmt.Sprint(captureModel.footerGroups()), "capture failure log") {
+		t.Fatal("Checks omitted the explicit capture shortcut")
+	}
+	nextCapture, captureCmd := captureModel.Update(tea.KeyPressMsg{Text: "e"})
+	captureModel = nextCapture.(model)
+	if captureCmd == nil || !captureModel.checks.capturing || captureModel.checks.picker != nil {
+		t.Fatal("one supported failure did not start one capture directly")
+	}
+	captureReply := captureCmd().(checksCaptureMsg)
+	if captureReply.err != nil {
+		t.Fatal(captureReply.err)
+	}
+	captureArgs, err := os.ReadFile(filepath.Join(m.installRoot, "capture-args.json"))
+	if err != nil || !strings.Contains(string(captureArgs), `"42"`) || !strings.Contains(string(captureArgs), `"262144"`) || !strings.Contains(string(captureArgs), `"checks-pin"`) || strings.Contains(string(captureArgs), "Linux tests") {
+		t.Fatal("capture command lost exact bounded pins or treated presentation text as command arguments")
+	}
+	staleCapture := captureReply
+	staleCapture.snapshot = "another-snapshot"
+	staleModel, staleCmd := captureModel.finishChecksCapture(staleCapture)
+	if staleCmd != nil || !staleModel.(model).checks.capturing {
+		t.Fatal("foreign capture snapshot changed the selected reader")
+	}
+	nextCapture, reloadCmd := captureModel.Update(captureReply)
+	captureModel = nextCapture.(model)
+	if reloadCmd == nil || captureModel.checks.capturing || captureModel.checks.pendingSnapshot != capturePage.Snapshot {
+		t.Fatal("capture did not reload its same checks snapshot")
+	}
+	reloaded := reloadCmd().(checksMsg)
+	if reloaded.err != nil || reloaded.data.Mode != "offline" || reloaded.data.Snapshot != capturePage.Snapshot || reloaded.data.Requests != 0 {
+		t.Fatal("capture reload acquired new evidence or changed its source")
+	}
+	priorityArgs, err := os.ReadFile(filepath.Join(m.installRoot, "checks-args.json"))
+	if err != nil || !strings.Contains(string(priorityArgs), `"--failure-log-check-id"`) || !strings.Contains(string(priorityArgs), `"--failure-log-source-repo"`) {
+		t.Fatal("capture reload did not prioritize the exact selected log within display bounds")
+	}
+	captureModel = baselineSend(captureModel, reloaded)
+	if !strings.Contains(captureModel.status, "captured and verified") || captureModel.form.Reason() != "preserve the capture draft" {
+		t.Fatal("verified capture lost the draft or outcome")
+	}
+	badReceipt := receipt
+	badReceipt.Requests = 21
+	if validateChecksCapture(badReceipt, captureModel.repo, captureModel.detail.key, capturePage.Snapshot, capturePage.Rows[0]) == nil {
+		t.Fatal("capture accepted an exceeded shared request budget")
+	}
+	badReceipt = receipt
+	badReceipt.SourceRepository.FullName = "other/repo"
+	if validateChecksCapture(badReceipt, captureModel.repo, captureModel.detail.key, capturePage.Snapshot, capturePage.Rows[0]) == nil {
+		t.Fatal("capture accepted a foreign source repository")
+	}
+	// A failed new attempt never relabels an older retained excerpt as new success.
+	unavailableReceipt := receipt
+	unavailableReceipt.Status, unavailableReceipt.LogObject = "unavailable", nil
+	unavailableReceipt.Omissions = []string{"The selected job could not be located"}
+	writeReceipt(unavailableReceipt)
+	nextCapture, captureCmd = captureModel.Update(tea.KeyPressMsg{Text: "e"})
+	captureModel = nextCapture.(model)
+	nextCapture, reloadCmd = captureModel.Update(captureCmd().(checksCaptureMsg))
+	captureModel = nextCapture.(model)
+	captureModel = baselineSend(captureModel, reloadCmd().(checksMsg))
+	if !strings.Contains(captureModel.status, "no verified excerpt") || !strings.Contains(captureModel.status, "older excerpt") || captureModel.lastError.what != "Failure log capture unavailable" {
+		t.Fatal("failed capture claimed an older excerpt as new success")
+	}
+	// Multiple supported failures require choosing one name; ordinary refresh cannot race that picker.
+	secondFailure := capturePage.Rows[0]
+	secondFailure.InternalID, secondFailure.Name = 43, "Another failed build"
+	captureModel.checks.page.Rows[1] = secondFailure
+	nextCapture, captureCmd = captureModel.Update(tea.KeyPressMsg{Text: "e"})
+	captureModel = nextCapture.(model)
+	if captureCmd != nil || captureModel.checks.picker == nil {
+		t.Fatal("multiple failed checks bypassed the selector")
+	}
+	pickerRequest := captureModel.checksRequest
+	captureModel = baselineSend(captureModel, tea.KeyPressMsg{Text: "r"})
+	if captureModel.checksRequest != pickerRequest || captureModel.checks.busy {
+		t.Fatal("metadata refresh raced the capture picker")
+	}
+	captureModel = baselineSend(captureModel, tea.KeyPressMsg{Text: "j"})
+	if captureModel.checks.picker.selected != 1 || !strings.Contains(ansi.Strip(captureModel.viewContent()), "Another failed build") {
+		t.Fatal("capture picker did not select by check name")
+	}
+	nextCapture, captureCmd = captureModel.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	captureModel = nextCapture.(model)
+	if captureCmd == nil || captureModel.checks.captureRow.InternalID != 43 {
+		t.Fatal("capture picker did not target exactly the selected check")
+	}
+	captureProcess, captureRequest := captureModel.checksLifecycle.current, captureModel.checksRequest
+	captureModel = baselineSend(captureModel, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if !captureProcess.cancelled || captureModel.checks.capturing || captureModel.checksRequest == captureRequest {
+		t.Fatal("capture cancellation left its reader running")
+	}
+	staleCapture.request, staleCapture.row = captureRequest, secondFailure
+	statusAfterCaptureCancel := captureModel.status
+	captureModel = baselineSend(captureModel, staleCapture)
+	if captureModel.status != statusAfterCaptureCancel {
+		t.Fatal("cancelled capture reply changed the current item")
+	}
+	captureModel.detail.enriched.Evidence = &batchEvidence{SnapshotID: capturePage.Snapshot}
+	nextCapture, captureCmd = captureModel.Update(tea.KeyPressMsg{Text: "e"})
+	captureModel = nextCapture.(model)
+	if captureCmd != nil || captureModel.checks.capturing || !strings.Contains(captureModel.status, "stays offline") || strings.Contains(fmt.Sprint(captureModel.footerGroups()), "capture failure log") {
+		t.Fatal("fixed packet offered online UI log capture")
+	}
+	captureModel.detail.enriched.Evidence = nil
+	captureModel.form.FocusField(fieldReason)
+	captureRequest = captureModel.checksRequest
+	captureModel = baselineSend(captureModel, tea.KeyPressMsg{Text: "e"})
+	if captureModel.checksRequest != captureRequest || !strings.HasSuffix(captureModel.form.Reason(), "e") {
+		t.Fatal("capture shortcut intercepted reason typing")
+	}
+	writePage(emptyPage)
 	log := failure.Rows[0].FailureLog
 	log.Windows[0].Text = strings.Repeat("x", 8193)
 	if err := validateChecksPage(failure, m.repo, 3, "offline", "", 0); err == nil {

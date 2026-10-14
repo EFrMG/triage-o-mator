@@ -24,12 +24,15 @@ def main():
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--include-failure-logs", action="store_true", help="include bounded cached failure excerpts offline; never acquire logs")
+    parser.add_argument("--failure-log-check-id", type=int, help="prioritize this failed check's cached excerpt within the unchanged lookup limit")
+    parser.add_argument("--failure-log-source-repo", help="exact source repository for the prioritized check; requires a fixed offline snapshot")
     args = parser.parse_args()
     if args.expected_repo != REPO:
         parser.error("selected repository changed")
 
     result = read(args.number, mode=args.mode, host=args.host, snapshot_id=args.snapshot, max_age=args.max_age,
-                  budget=args.request_budget, offset=args.offset, limit=args.limit, include_logs=args.include_failure_logs)
+                  budget=args.request_budget, offset=args.offset, limit=args.limit, include_logs=args.include_failure_logs,
+                  failure_log_check_id=args.failure_log_check_id, failure_log_source_repo=args.failure_log_source_repo)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

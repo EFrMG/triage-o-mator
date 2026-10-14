@@ -8,13 +8,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 from _acquire import ReadFailure
-from _ci_logs import fetch, locate, read
+from _ci_logs import capture, fetch, locate, read
 from _triage import REPO
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("locate", "fetch", "read"))
+    parser.add_argument("command", choices=("capture", "locate", "fetch", "read"))
     parser.add_argument("--expected-repo", required=True)
     parser.add_argument("--number", type=int, required=True)
     parser.add_argument("--snapshot", required=True)
@@ -34,7 +34,12 @@ def main():
     if args.expected_repo != REPO:
         parser.error("selected repository changed")
 
-    if args.command == "locate":
+    if args.command == "capture":
+        if args.check_id is None or any(value is not None for value in (args.run_id, args.attempt, args.job_id, args.log_object, args.log_bytes)):
+            parser.error("capture requires --check-id without a job, attempt or log reference")
+        result = capture(args.number, args.snapshot, args.check_id, args.source_repo or REPO, host=args.host, budget=args.request_budget,
+                         maximum=args.max_log_bytes, start_line=args.start_line)
+    elif args.command == "locate":
         if args.check_id is None or any(value is not None for value in (args.run_id, args.attempt, args.job_id, args.log_object, args.log_bytes, args.start_line)):
             parser.error("locate requires --check-id without a job, attempt or log selection")
         result = locate(args.number, args.snapshot, args.check_id, args.source_repo or REPO, host=args.host, budget=args.request_budget)

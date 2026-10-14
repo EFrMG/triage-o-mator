@@ -4,7 +4,7 @@ Technical details for cache acquisition, readers, coverage, and recovery. Start 
 
 ## Optional ranked retrieval with Reposition
 
-The optional Reposition bridge adds `search-index`, `query`, `retrieve` and `search-info`. See [supported versions and pinned installation](reposition.md) for the tested Reposition `0.2.0.dev1` build and version-1 cache contract. Existing literal search and readers remain usable without it. Reposition is separate from the unrelated PyPI package with that name.
+The optional Reposition bridge adds `search-index`, `query`, `retrieve` and `search-info`. See [supported versions and pinned installation](reposition.md) for the tested Reposition `0.2.0.dev2+triage.1` build and version-1 cache contract. Existing literal search and readers remain usable without it. Reposition is separate from the unrelated PyPI package with that name.
 
 ```sh
 bin/cache search-index --snapshot INVENTORY_SNAPSHOT --component summary
@@ -14,7 +14,7 @@ bin/cache retrieve --corpus CORPUS_ID --unit UNIT_ID --checkpoint INDEX_CHECKPOI
 bin/cache search-info --corpus CORPUS_ID
 ```
 
-`search-info` checks repository host/name/stable IDs and any supplied snapshot/corpus against the indexed view, including with `--db`. It reads metadata only and explicitly reports that source checkpoints and payloads were not verified. A stale index remains inspectable; foreign identities and conflicting selections fail. This is not a freshness claim.
+`search-info` checks repository host/name/stable IDs and any supplied snapshot/corpus against the indexed view, including with `--db`. It reports `indexed_snapshot_count` without listing snapshot IDs by default. Request up to 100 IDs with `--snapshot-ids-limit`; continue with `--snapshot-ids-offset` and the first page's `checksum` as `--checkpoint`. Changed metadata rejects continuation. It reads metadata only and explicitly reports that source checkpoints and payloads were not verified. A stale index remains inspectable; foreign identities and conflicting selections fail. This is not a freshness claim.
 
 Views bind exact snapshots or frozen corpus membership and stored progress bytes. Pending members stay missing; changed progress requires explicit `search-index --replace` and a fresh query. Query results rank original field/comment/file/hunk projections with SQLite FTS5, return diverse items by default and verify every quoted fragment against its selected immutable object. `retrieve` expands selected comments or diff regions without adopting another observation. All nine evidence components are supported. Filters include component, field, kind, state, label, author and observation range; repeated component/field flags select a union. Title/path weights are 3; other text is 1. Quoted phrases retain phrase matching, ordinary terms use any-term matching, and leading `#NUMBER` anchors prefer the summary. Scores are relative relevance, never duplicate verdicts.
 

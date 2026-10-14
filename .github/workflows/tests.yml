@@ -35,6 +35,6 @@ jobs:
         with:
           python-version: "3.11"
       - run: python3 tools/reposition_bundle.py rebuild
-      - run: cd vendor/reposition/0.2.0.dev1 && python3 -m pip install --no-index --no-deps --require-hashes -r requirements.txt
+      - run: cd vendor/reposition/0.2.0.dev2+triage.1 && python3 -m pip install --no-index --no-deps --require-hashes -r requirements.txt
       - run: python3 -m unittest discover -s tests -p test_reposition.py -v
       - run: python3 tools/reposition_compat.py

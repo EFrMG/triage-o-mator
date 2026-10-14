@@ -11,6 +11,9 @@ from pathlib import Path
 
 from support import ROOT, Workspace, summary
 
+sys.path.insert(0, str(ROOT / "bin"))
+from _reposition import BUNDLE, SUPPORTED_REPOSITION
+
 
 class RepositionTests(Workspace):
     def setUp(self):
@@ -118,12 +121,12 @@ else:
         shutil.rmtree(python.parent.parent)
         self.assertTrue(self.json_cli("reposition-env", "--retry", "ensure")["enabled"])
         self.assertEqual(self.json_cli("reposition-env", "status")["state"], "on")
-        source = self.root / "vendor/reposition/0.2.0.dev1/reposition-source.tar.gz"
+        source = self.root / BUNDLE.relative_to(ROOT) / "reposition-source.tar.gz"
         original_source = source.read_bytes()
         source.write_bytes(original_source + b"tampered")
         self.assertEqual(self.json_cli("reposition-env", "status")["state"], "unavailable")
         source.write_bytes(original_source)
-        wheel = next((self.root / "vendor/reposition").rglob("reposition-*.whl"))
+        wheel = next((self.root / BUNDLE.relative_to(ROOT)).glob("reposition-*.whl"))
         wheel.write_bytes(wheel.read_bytes() + b"tampered")
         self.assertEqual(self.json_cli("reposition-env", "status")["state"], "unavailable")
         self.assertEqual(self.json_cli("reposition-env", "--retry", "ensure")["state"], "off")
@@ -150,8 +153,15 @@ else:
         retrieved = json.loads(self.offline("retrieve", "--snapshot", self.snapshot, "--db", str(database), "--unit", fragment["unit_id"], "--checkpoint", query["checkpoint"]).stdout)
         self.assertTrue(retrieved["items"][0]["fragments"][0]["verified"])
         info = json.loads(self.offline("search-info", "--snapshot", self.snapshot, "--db", str(database)).stdout)
+        self.assertEqual(info["indexed_snapshot_count"], 1)
+        self.assertNotIn("indexed_snapshots", info)
+        self.assertNotIn("indexed_snapshots_next_offset", info)
         self.assertFalse(info["source_checkpoint_verified"])
         self.assertFalse(info["source_payloads_verified"])
+        page = json.loads(self.offline("search-info", "--snapshot", self.snapshot, "--db", str(database), "--snapshot-ids-limit", "1").stdout)
+        self.assertEqual(page["indexed_snapshots"], [self.snapshot])
+        self.assertEqual(page["checksum"], info["checksum"])
+        self.offline("search-info", "--db", str(database), "--checkpoint", "0" * 64, expected=2)
         self.offline("search-info", "--snapshot", "0" * 64, "--db", str(database), expected=2)
         self.offline("query", "--cache", str(cache), "--snapshot", self.snapshot, "--query", "Renderer", expected=2)
 
@@ -185,7 +195,7 @@ else:
         (shadow / "__init__.py").write_text('raise AssertionError("shadow package ran")\n')
         environment = dict(self.env, PYTHONPATH=str(shadow.parent))
         self.assertIn("usage:", self.offline("query", "--help", environment=environment).stdout)
-        (package / "__init__.py").write_text('__version__ = "0.2.0.dev1"\n')
+        (package / "__init__.py").write_text(f'__version__ = {SUPPORTED_REPOSITION!r}\n')
 
         self.assertIn("docs/reposition.md", self.offline("query", "--help").stdout)
         result = self.offline("search-info", "--corpus", "unused", expected=2)

@@ -17,10 +17,10 @@ COMMANDS = {
     "retrieve": "cache-retrieve",
     "search-info": "cache-info",
 }
-SUPPORTED_REPOSITION = "0.2.0.dev1"
-BUNDLE = CODE_ROOT / "vendor/reposition/0.2.0.dev1"
-APPROVED_MANIFEST_SHA256 = "8c7d8ed1fc06e03adc4c5ad02d9d4db300b17d6372410a1e51e9d997cc2778c2"
-WHEEL_NAME = "reposition-0.2.0.dev1-py3-none-any.whl"
+SUPPORTED_REPOSITION = "0.2.0.dev2+triage.1"
+BUNDLE = CODE_ROOT / "vendor/reposition" / SUPPORTED_REPOSITION
+APPROVED_MANIFEST_SHA256 = "7c0ec841c7e6b624c1c84621b4abc0ff7f220f65c83902861831b638064349ef"
+WHEEL_NAME = f"reposition-{SUPPORTED_REPOSITION}-py3-none-any.whl"
 PIP_NAME = "pip-25.3-py3-none-any.whl"
 DEFAULT_INDEX_BYTES = 512 * 1024 * 1024
 STATE_DIR = CODE_ROOT / ".reposition-state"
@@ -71,7 +71,7 @@ def require(condition):
 try:
     require(hashlib.sha256(wheel.read_bytes()).hexdigest() == expected)
     dist = importlib.metadata.distribution('reposition')
-    require(dist.version == '0.2.0.dev1')
+    require(dist.version == sys.argv[3])
     with zipfile.ZipFile(wheel) as archive:
         names = set(archive.namelist())
         for name in names:
@@ -97,7 +97,7 @@ PIP_RUN = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_mod
 
 def _installed_check(python, manifest):
     try:
-        check = subprocess.run([str(python), "-I", "-c", INSTALLED_CHECK, str(BUNDLE / WHEEL_NAME), manifest["files"][WHEEL_NAME]],
+        check = subprocess.run([str(python), "-I", "-c", INSTALLED_CHECK, str(BUNDLE / WHEEL_NAME), manifest["files"][WHEEL_NAME], SUPPORTED_REPOSITION],
                                capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return False

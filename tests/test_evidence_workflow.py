@@ -1,5 +1,6 @@
 """Evidence is acquired explicitly, then read from pinned local snapshots."""
 
+import base64
 import copy
 import hashlib
 import importlib.util
@@ -155,6 +156,50 @@ class EvidenceTests(Workspace):
         self.assertEqual(failed["failure_log"]["log_object"], truncated["log_object"])
         self.assertTrue(failed["failure_log"]["download_partial"])
         self.assertEqual(len(self.calls()), before)
+        fake_path = self.mock / "gh"
+        original_fake = fake_path.read_text()
+        interrupted_fake = original_fake.replace('print(response["text"] if "text" in response else json.dumps(response.get("data")))',
+                                                 'if endpoint.endswith("/logs"):\n    sys.stdout.write(response["text"])\n    sys.stderr.write("private transport diagnostic must not become evidence")\n    sys.exit(1)\nprint(response["text"] if "text" in response else json.dumps(response.get("data")))')
+        self.assertNotEqual(interrupted_fake, original_fake)
+        fake_path.write_text(interrupted_fake)
+        for observed in ("", "error: interrupted log\n"):
+            self.responses[job_resource + "/logs"] = dict(text=observed)
+            interrupted = self.json_cli("pr-check-log", "fetch", *capture_args)
+            self.assertEqual(interrupted["status"], "retained" if observed else "unavailable")
+            self.assertEqual(interrupted["observed_bytes"], len(observed))
+            self.assertTrue(interrupted["download_partial"])
+            self.assertTrue(interrupted["binding_revalidated"])
+            self.assertEqual(interrupted["omissions"], ["log download ended unsuccessfully"] +
+                             (["download is an observed prefix; complete job log coverage is unknown"] if observed else []))
+            interrupted_ref = interrupted["log_object"]
+            interrupted_packet = (self.root / "data/owner/repo/cache/objects" / (interrupted_ref["sha256"] + ".json")).read_text()
+            self.assertNotIn("private transport diagnostic", interrupted_packet)
+            before = len(self.calls())
+            interrupted_view = self.json_cli("pr-checks", *args, "--include-failure-logs")
+            failed = next(row for row in interrupted_view["rows"] if row["source"] == "check-run")
+            self.assertEqual(failed["failure_log"]["log_object"], interrupted_ref)
+            self.assertEqual(failed["failure_log"]["state"], interrupted["status"])
+            self.assertEqual(len(self.calls()), before)
+
+        fake_path.write_text(original_fake)
+        ansi_log = "\x1b[31merror: colored failure\x1b[0m\n"
+        self.responses[job_resource + "/logs"] = dict(text=ansi_log)
+        for raw_supported in ("1", "0"):
+            self.env["FAKE_GH_ALLOW_ESCAPE_SEQUENCES"] = raw_supported
+            before = len(self.calls())
+            colored = self.json_cli("pr-check-log", "fetch", *capture_args)
+            log_call = next(call for call in self.calls()[before:] if call[-1] == job_resource + "/logs")
+            self.assertEqual("--allow-escape-sequences" in log_call, raw_supported == "1")
+            self.assertFalse(colored["download_partial"])
+            colored_ref = colored["log_object"]
+            colored_packet = json.loads((self.root / "data/owner/repo/cache/objects" / (colored_ref["sha256"] + ".json")).read_text())
+            self.assertEqual(base64.b64decode(colored_packet["segments"][0]["content_base64"]), (ansi_log + "\n").encode("utf-8"))
+            colored_view = self.json_cli("pr-checks", *args, "--include-failure-logs")
+            failed = next(row for row in colored_view["rows"] if row["source"] == "check-run")
+            self.assertIn("error: colored failure", failed["failure_log"]["windows"][0]["text"])
+            self.assertNotIn("\x1b", failed["failure_log"]["windows"][0]["text"])
+
+        self.env.pop("FAKE_GH_ALLOW_ESCAPE_SEQUENCES")
         self.responses[job_resource + "/logs"] = dict(text="x" * 100000)
         long_line = self.json_cli("pr-check-log", "fetch", *capture_args, "--max-log-bytes", "60000")
         self.assertFalse(long_line["segments"][0]["last_line_complete"])

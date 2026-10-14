@@ -1339,12 +1339,12 @@ print(json.dumps(value))
 		t.Fatal(err)
 	}
 	rendered := renderChecks(failure)
-	for _, want := range []string{"Captured failure excerpt", "Selection: error-pattern context", "Linux tests", "Source lines 10–12", "Partial log capture", "Intervening lines omitted", "`````\n" + logText} {
+	for _, want := range []string{"Captured failure excerpt", "Selection: error-pattern context", "Linux tests", "Source lines 10–12", "Partial failure excerpt", "Intervening lines omitted", "`````\n" + logText} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("failure view omitted %q", want)
 		}
 	}
-	if strings.Contains(rendered, "Observed 2026-10-13") || strings.Contains(rendered, "CI observations alone") || strings.Index(rendered, "Selection:") < strings.Index(rendered, logText) || strings.Index(rendered, "Partial log capture") < strings.Index(rendered, logText) {
+	if strings.Contains(rendered, "Observed 2026-10-13") || strings.Contains(rendered, "CI observations alone") || strings.Index(rendered, "Selection:") < strings.Index(rendered, logText) || strings.Index(rendered, "Partial failure excerpt") < strings.Index(rendered, logText) {
 		t.Fatal("failure view put capture metadata before the compact excerpt")
 	}
 	view := renderChecksView(failure, 80)
@@ -1456,7 +1456,7 @@ print((root / "capture-fixture.json").read_text())
 	nextCapture, reloadCmd = captureModel.Update(captureCmd().(checksCaptureMsg))
 	captureModel = nextCapture.(model)
 	captureModel = baselineSend(captureModel, reloadCmd().(checksMsg))
-	if !strings.Contains(captureModel.status, "no verified excerpt") || !strings.Contains(captureModel.status, "older excerpt") || captureModel.lastError.what != "Failure log capture unavailable" {
+	if !strings.Contains(captureModel.status, "Failure log unavailable") || !strings.Contains(captureModel.status, "Previous excerpt still displayed") || captureModel.lastError.what != "Failure log capture unavailable" {
 		t.Fatal("failed capture claimed an older excerpt as new success")
 	}
 	// Multiple supported failures require choosing one name; ordinary refresh cannot race that picker.
@@ -1522,10 +1522,34 @@ print((root / "capture-fixture.json").read_text())
 	if !strings.Contains(renderChecks(failure), "could not be verified") {
 		t.Fatal("unverifiable failure excerpt was hidden")
 	}
-	failure.Rows[0].FailureLog = &checkFailureLog{State: "unavailable", Omissions: []string{"The job log expired (HTTP 404)"}, DisplayProblems: []string{"No source lines retained"}, DownloadPartial: true}
-	unavailable := renderChecks(failure)
-	if !strings.Contains(unavailable, "HTTP 404") || !strings.Contains(unavailable, "No source lines retained") || !strings.Contains(unavailable, "Partial log capture") {
-		t.Fatal("unavailable failure excerpt hid capture limitations")
+	failure.Rows[0].FailureLog = &checkFailureLog{State: "unavailable", Problem: "Selected capture retained no log bytes; inspect its omissions", Omissions: []string{"The job log expired (HTTP 404)", "download is an observed prefix; complete job log coverage is unknown"}, DisplayProblems: []string{"No source lines retained"}, DownloadPartial: true}
+	unavailable := checksFailureSource(failure.Rows[0])
+	if !strings.Contains(unavailable, "Failure log unavailable.") || !strings.Contains(unavailable, "HTTP 404") || strings.Contains(unavailable, "No source lines retained") || strings.Contains(unavailable, "partial") || strings.Contains(unavailable, "observed prefix") || strings.Contains(unavailable, "inspect its omissions") {
+		t.Fatal("unavailable failure excerpt did not show a clear download failure and cause")
+	}
+
+	legacy := &checkFailureLog{State: "unavailable", DownloadPartial: true, Problem: "Selected capture retained no log bytes; inspect its omissions", Omissions: []string{"log download ended unsuccessfully; retained bytes are only an observed prefix", "download is an observed prefix; complete job log coverage is unknown"}}
+	failure.Rows[0].FailureLog = legacy
+	legacyView := checksFailureSource(failure.Rows[0])
+	if strings.Count(legacyView, "log download ended unsuccessfully") != 1 || strings.Contains(legacyView, "prefix") || strings.Contains(legacyView, "coverage") || len(legacy.Omissions) != 2 || !strings.Contains(legacy.Omissions[0], "prefix") {
+		t.Fatal("legacy failed download boilerplate was repeated or source evidence was changed")
+	}
+	legacy.State, legacy.Windows, legacy.LogObject = "retained", []checkLogWindow{{StartLine: 10, EndLine: 12, Text: logText, DisplayTruncated: true}}, &checkLogObject{SHA256: strings.Repeat("a", 64), Bytes: 1000, Format: "json"}
+	legacy.Omissions = append(legacy.Omissions, "Intervening lines omitted")
+	legacyView = checksFailureSource(failure.Rows[0])
+	for _, want := range []string{"Partial failure excerpt", "Source binding could not be revalidated", "truncated for display", "Intervening lines omitted", "log download ended unsuccessfully"} {
+		if !strings.Contains(legacyView, want) {
+			t.Fatalf("partial retained excerpt hid %q", want)
+		}
+	}
+	if strings.Count(legacyView, "coverage is unknown") != 1 || strings.Contains(legacyView, "observed prefix") {
+		t.Fatal("retained partial excerpt repeated legacy coverage notices")
+	}
+
+	captureModel.checks.captureOutcome = &checksCaptureOutcome{response: unavailableReceipt, row: capturePage.Rows[0]}
+	captureModel.finishCaptureOutcome(checksPage{Rows: []checkRow{secondFailure}})
+	if strings.Contains(captureModel.status, "Previous excerpt") {
+		t.Fatal("failed capture claimed an excerpt displayed for a different check")
 	}
 	failure.Rows[0].FailureLog = &checkFailureLog{State: "missing"}
 	if !strings.Contains(renderChecks(failure), "No captured failure excerpt") {

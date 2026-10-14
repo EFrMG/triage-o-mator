@@ -15,6 +15,9 @@ import json, os, sys
 from pathlib import Path
 root = Path(os.environ["FAKE_GH_DIR"])
 args = sys.argv[1:]
+if args == ["api", "--help"]:
+    print("--allow-escape-sequences" if os.environ.get("FAKE_GH_ALLOW_ESCAPE_SEQUENCES", "1") == "1" else "API help")
+    sys.exit(0)
 with (root / "calls.jsonl").open("a") as out:
     out.write(json.dumps(args) + "\\n")
 if args[0] != "api":
@@ -38,6 +41,8 @@ if endpoint not in responses:
 response = responses[endpoint]
 print("HTTP/2.0 " + str(response.get("status", 200)))
 print()
+if endpoint.endswith("/logs") and "\\x1b" in response.get("text", "") and os.environ.get("FAKE_GH_ALLOW_ESCAPE_SEQUENCES", "1") == "1" and "--allow-escape-sequences" not in args:
+    sys.exit("the response contains terminal escape sequences")
 print(response["text"] if "text" in response else json.dumps(response.get("data")))
 '''
 

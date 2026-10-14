@@ -38,6 +38,7 @@ type checksCaptureResponse struct {
 
 type checksCaptureOutcome struct {
 	response checksCaptureResponse
+	row      checkRow
 	err      error
 }
 
@@ -202,11 +203,11 @@ func (m model) finishChecksCapture(msg checksCaptureMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	outcome := &checksCaptureOutcome{response: msg.data, err: msg.err}
+	outcome := &checksCaptureOutcome{response: msg.data, row: msg.row, err: msg.err}
 	if msg.err != nil {
 		m.recordError("Failure log capture unavailable", msg.err)
 	} else if msg.data.Status != "retained" {
-		m.recordError("Failure log capture unavailable", fmt.Errorf("this capture attempt retained no excerpt: %s", strings.Join(msg.data.Omissions, "; ")))
+		m.recordError("Failure log capture unavailable", fmt.Errorf("Failure log unavailable.\n%s", strings.Join(checksLogNotices(msg.data.Omissions), "\n")))
 	}
 
 	cmd := m.readChecks("offline", m.checks.page.Pagination.Offset, msg.row)
@@ -222,7 +223,10 @@ func (m *model) finishCaptureOutcome(page checksPage) {
 
 	m.checks.captureOutcome = nil
 	if outcome.err != nil || outcome.response.Status != "retained" {
-		m.status = "This capture attempt retained no verified excerpt. Any displayed older excerpt remains separate; ! shows details."
+		m.status = "Failure log unavailable. ! shows details."
+		if checksDisplayedExcerpt(page, &outcome.row) {
+			m.status += " Previous excerpt still displayed."
+		}
 		return
 	}
 
@@ -234,4 +238,18 @@ func (m *model) finishCaptureOutcome(page checksPage) {
 		}
 	}
 	m.status = "Capture completed, but its verified excerpt is unavailable in this page."
+}
+
+// checksDisplayedExcerpt only identifies retained text for the check selected by this attempt.
+func checksDisplayedExcerpt(page checksPage, selected *checkRow) bool {
+	if selected == nil {
+		return false
+	}
+
+	for _, row := range page.Rows {
+		if row.InternalID == selected.InternalID && row.Repository == selected.Repository && row.HeadSHA == selected.HeadSHA && row.FailureLog != nil && row.FailureLog.State == "retained" && len(row.FailureLog.Windows) > 0 {
+			return true
+		}
+	}
+	return false
 }

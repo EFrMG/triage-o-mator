@@ -51,6 +51,10 @@ The command bounds time, requests and captured log bytes. The default observed p
 
 The request budget reserves up to eleven HTTP request units for the initial log request and redirect chain, separately from known metadata requests. No signed download URLs or transport stderr are retained. The command uses the existing acquisition lock and persisted cooldowns; it never executes downloaded text.
 
+Recent GitHub CLI versions reject terminal escape sequences in raw responses, including colored Actions logs. Capture detects support for `gh api --allow-escape-sequences` using bounded local help and uses it only for the bounded raw download. The cache preserves source bytes; the offline reader neutralizes control characters before presenting excerpts. Older CLI versions keep their existing download behavior.
+
+For a hostname-filtering proxy, GitHub documents `*.blob.core.windows.net` for Actions logs and artifacts, alongside `results-receiver.actions.githubusercontent.com`. An anchored hostname regex for variable storage accounts is `^[a-z0-9]+\.blob\.core\.windows\.net$`; it allows Azure Blob account hosts generally, whose names do not establish GitHub ownership. An existing `githubusercontent.com` subdomain rule covers the results receiver. See [GitHub's network requirements](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#communication-requirements-for-github-hosted-runners).
+
 Keep the returned `log_object` reference for exact offline reading:
 
 ```sh
@@ -60,6 +64,8 @@ bin/pr-check-log read --expected-repo OWNER/REPO --number N --snapshot CHECKS_HA
 The reader verifies the immutable object and its selected parent evidence, and bounds the displayed context to the requested line count (at most 200) and 192 KiB of sanitized text. This byte allowance accommodates replacement characters from at most 64 KiB of retained raw bytes. Follow its continuation with the same object reference, PR and parent snapshot. Use `--start-line` to select a retained source range. A range outside the retained excerpts requires another explicit `fetch --start-line LINE`, optionally with a larger byte cap when necessary; it never triggers an offline download. New captures return new immutable references. Preserve the earlier reference rather than silently replacing its source.
 
 The TUI Checks tab shows failures first, with saved failure excerpts inline. A compact summary retains counts, coverage, freshness and whether the checks match the selected PR head. Failed, pending, passed and unknown counts use the theme's error, warning, success and muted colors. Neutral metadata values such as missing or unknown use muted text. Check, workflow and job names identify failures without exposing internal IDs. Observation timestamps remain available through the reader.
+
+When no excerpt is available, Checks shows that state and the capture problem without describing absent text as a partial excerpt. Retained partial text has one coverage notice, with distinct source-binding and display limitations kept visible. Error details keep the cause separate from coverage notices. A failed attempt mentions a previous excerpt only when that selected check's retained text is still displayed.
 
 After publishing a log object, `fetch` atomically updates a bounded association for that exact parent checks snapshot, source repository and check. The association only selects an object: readers verify its checksum, parent evidence and source bindings before showing text. A newer partial, unavailable or corrupt capture never falls back to an older success. Earlier immutable references remain readable directly.
 

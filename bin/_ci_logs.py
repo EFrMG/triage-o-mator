@@ -221,6 +221,37 @@ def validate_metadata(run, job, source, entry, run_id, attempt, job_id):
         raise ValueError("CI logs require a completed failed job")
 
 
+def raw_api_supported(env):
+    """Probe local CLI help without a GitHub request, bounding help output and runtime."""
+    deadline = time.monotonic() + 5
+    output = bytearray()
+    with subprocess.Popen(["gh", "api", "--help"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env) as process:
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(process.stdout, selectors.EVENT_READ)
+                while len(output) <= 65536:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not selector.select(remaining):
+                        return False
+
+                    block = os.read(process.stdout.fileno(), min(16384, 65537 - len(output)))
+                    if not block:
+                        try:
+                            process.wait(timeout=max(0.01, deadline - time.monotonic()))
+                        except subprocess.TimeoutExpired:
+                            return False
+
+                        return process.returncode == 0 and b"--allow-escape-sequences" in output
+
+                    output.extend(block)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+
+    return False
+
+
 def bounded_download(reader, resource, maximum):
     """Reserve the initial request and Go's maximum ten redirects; stdout and runtime are bounded."""
     if reader.stopped or reader.cooldown.blocked(now()):
@@ -230,7 +261,13 @@ def bounded_download(reader, resource, maximum):
 
     env = dict(os.environ)
     env.pop("GH_DEBUG", None)
+    env.pop("GH_FORCE_TTY", None)
+    env.update(GH_PAGER="cat", NO_COLOR="1", CLICOLOR_FORCE="0")
     command = ["gh", "api", "--hostname", reader.host, "--method", "GET", "--include", "--header", "Accept: application/vnd.github+json", "--header", "X-GitHub-Api-Version: 2022-11-28", resource]
+    if raw_api_supported(env):
+        # Modern gh refuses ANSI-bearing text before emitting any body; this pipe retains exact bounded bytes and read() neutralizes controls for presentation.
+        command.insert(-1, "--allow-escape-sequences")
+
     deadline = time.monotonic() + 45
     output = bytearray()
     header_end = None
@@ -243,7 +280,7 @@ def bounded_download(reader, resource, maximum):
                 while True:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
-                        error = "log download timed out; retained bytes are only an observed prefix"
+                        error = "log download timed out"
                         break
 
                     if not selector.select(remaining):
@@ -295,7 +332,7 @@ def bounded_download(reader, resource, maximum):
     if status != 200:
         raise ReadFailure(f"CI log download returned HTTP {status}", unavailable=status in (404, 410))
     if process.returncode and not truncated and error is None:
-        error = "log download ended unsuccessfully; retained bytes are only an observed prefix"
+        error = "log download ended unsuccessfully"
 
     return bytes(output[header_end:]), truncated or error is not None, error
 
@@ -398,7 +435,7 @@ def fetch(number, snapshot, check_id, source_repo, run_id, attempt, job_id, host
 
         segments, basis, observed_lines = excerpts(data, start_line)
         retained_bytes = sum(segment["end_byte"] - segment["start_byte"] for segment in segments)
-        if partial:
+        if partial and data:
             omissions.append("download is an observed prefix; complete job log coverage is unknown")
         if retained_bytes < len(data):
             omissions.append("only selected source windows are retained; intervening lines are omitted")

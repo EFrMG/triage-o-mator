@@ -460,6 +460,24 @@ func renderChecksView(page checksPage, width int) string {
 	return strings.Join(blocks, "\n\n")
 }
 
+// checksLogNotices collapses legacy coverage boilerplate for presentation only; cached evidence stays unchanged.
+func checksLogNotices(values ...[]string) []string {
+	var notices []string
+	for _, group := range values {
+		for _, value := range group {
+			value = singleLine(value)
+			if value == "download is an observed prefix; complete job log coverage is unknown" || value == "retained bytes are only an observed prefix" || value == "Selected capture retained no log bytes; inspect its omissions" || value == "No source lines retained" {
+				continue
+			}
+			value = strings.TrimSuffix(value, "; retained bytes are only an observed prefix")
+			if value != "" && !slices.Contains(notices, value) {
+				notices = append(notices, value)
+			}
+		}
+	}
+	return notices
+}
+
 func checksFailureSource(row checkRow) string {
 	var b strings.Builder
 	log := row.FailureLog
@@ -468,28 +486,18 @@ func checksFailureSource(row checkRow) string {
 		return b.String()
 	}
 	if log.State != "retained" {
-		label := map[string]string{"missing": "No captured failure excerpt. Capture requires an explicit request", "unavailable": "Failure excerpt unavailable", "invalid": "Captured failure excerpt could not be verified", "not-shown": "Failure excerpt omitted by this page's display budget"}[log.State]
+		label := map[string]string{"missing": "No captured failure excerpt. Capture requires an explicit request", "unavailable": "Failure log unavailable", "invalid": "Captured failure excerpt could not be verified", "not-shown": "Failure excerpt omitted by this page's display budget"}[log.State]
 		fmt.Fprintf(&b, "%s.\n\n", label)
-		if log.Problem != "" {
-			fmt.Fprintf(&b, "%s\n\n", singleLine(log.Problem))
-		}
-		if log.DownloadPartial {
-			b.WriteString("Partial log capture; complete job log coverage is unknown.\n\n")
+		for _, problem := range checksLogNotices([]string{log.Problem}, log.Omissions, log.DisplayProblems) {
+			fmt.Fprintf(&b, "%s\n\n", problem)
 		}
 		if log.LogObject != nil && !log.BindingRevalidated {
 			b.WriteString("Source binding could not be revalidated after capture.\n\n")
 		}
-		for _, problem := range append(append([]string{}, log.Omissions...), log.DisplayProblems...) {
-			fmt.Fprintf(&b, "- %s\n", singleLine(problem))
-		}
 		return b.String()
 	}
 	for _, window := range log.Windows {
-		fmt.Fprintf(&b, "Captured failure excerpt · Source lines %d–%d", window.StartLine, window.EndLine)
-		if log.DownloadPartial {
-			b.WriteString(" · partial capture")
-		}
-		b.WriteString("\n\n")
+		fmt.Fprintf(&b, "Captured failure excerpt · Source lines %d–%d\n\n", window.StartLine, window.EndLine)
 		b.WriteString(checksLiteral(window.Text))
 		if window.DisplayTruncated {
 			b.WriteString("This excerpt was truncated for display.\n\n")
@@ -508,13 +516,13 @@ func checksFailureSource(row checkRow) string {
 		b.WriteString("\n\n")
 	}
 	if log.DownloadPartial {
-		b.WriteString("Partial log capture; complete job log coverage is unknown.\n\n")
+		b.WriteString("Partial failure excerpt; complete job log coverage is unknown.\n\n")
 	}
 	if !log.BindingRevalidated {
 		b.WriteString("Source binding could not be revalidated after capture.\n\n")
 	}
-	for _, problem := range append(append([]string{}, log.Omissions...), log.DisplayProblems...) {
-		fmt.Fprintf(&b, "- %s\n", singleLine(problem))
+	for _, problem := range checksLogNotices(log.Omissions, log.DisplayProblems) {
+		fmt.Fprintf(&b, "- %s\n", problem)
 	}
 	if len(log.Continuation) > 0 && string(log.Continuation) != "null" {
 		b.WriteString("\nMore retained context is available through the pinned offline log reader.\n")
@@ -571,8 +579,12 @@ func (m model) checksKeyScope() bool {
 func (m model) handleChecksKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 	if m.prChecksKeyScope() && (m.checks.capturing || m.checks.captureOutcome != nil && m.checks.busy) {
 		if msg.String() == "esc" && m.checks.capturing {
+			older := checksDisplayedExcerpt(m.checks.page, m.checks.captureRow)
 			m.stopChecks()
-			m.status = "Failure log capture cancelled; any displayed excerpt is from an earlier capture."
+			m.status = "Failure log capture cancelled."
+			if older {
+				m.status += " Previous excerpt still displayed."
+			}
 			return m, nil, true
 		}
 		if key.Matches(msg, keys.ChecksRefresh) || key.Matches(msg, keys.ChecksFocusedRefresh) || key.Matches(msg, keys.ChecksCapture) || key.Matches(msg, keys.ChecksNext) || key.Matches(msg, keys.ChecksPrev) {

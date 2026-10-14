@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -15,6 +16,9 @@ import (
 )
 
 const checksPageSize = 20
+const checksMaxRows = 1000
+const checksMaxBytes = 8 * 1024 * 1024
+const checksLoadTimeout = 30 * time.Second
 
 type checkRow struct {
 	InternalID       int              `json:"internal_id"`
@@ -123,6 +127,8 @@ type checksUI struct {
 	snapshot        string
 	pendingSnapshot string
 	page            checksPage
+	bytes           int
+	deadline        time.Time
 }
 
 type checksMsg struct {
@@ -132,6 +138,7 @@ type checksMsg struct {
 	generation, request                  uint64
 	data                                 checksPage
 	err                                  error
+	offset, bytes                        int
 }
 
 func (d detailModel) checksActive() bool {
@@ -147,7 +154,7 @@ func (m model) checksSource() (string, bool) {
 
 func checksReadCmd(root, repo string, item Key, mode, sourceSnapshot, snapshot string, fixed bool, offset int, generation, request uint64, process *readProcess) tea.Cmd {
 	return func() tea.Msg {
-		msg := checksMsg{root: root, repo: repo, key: item, sourceSnapshot: sourceSnapshot, snapshot: snapshot, fixed: fixed, generation: generation, request: request}
+		msg := checksMsg{root: root, repo: repo, key: item, sourceSnapshot: sourceSnapshot, snapshot: snapshot, fixed: fixed, generation: generation, request: request, offset: offset}
 		args := []string{"--include-failure-logs", "--expected-repo", repo, "--number", strconv.Itoa(item.Number), "--mode", mode, "--host", evidenceHost, "--max-age", cacheMaxAgeArg, "--request-budget", "80", "--offset", strconv.Itoa(offset), "--limit", strconv.Itoa(checksPageSize)}
 		if mode != "offline" && snapshot == "" {
 			args = append(args, "--acquire-failure-logs")
@@ -157,6 +164,7 @@ func checksReadCmd(root, repo string, item Key, mode, sourceSnapshot, snapshot s
 		}
 
 		out, err := runReadScript(process, root, "pr-checks", args...)
+		msg.bytes = len(out)
 		if err == nil && len(out) > 524288 {
 			err = fmt.Errorf("checks response exceeds the display size limit")
 		}
@@ -311,6 +319,8 @@ func (m *model) readChecks(mode string, offset int) tea.Cmd {
 		return nil
 	}
 	m.stopChecks()
+	m.checks.bytes = 0
+	m.checks.deadline = time.Time{}
 	if m.checksLifecycle == nil {
 		m.checksLifecycle = &readLifecycle{}
 	}
@@ -345,28 +355,41 @@ type checksSpan struct {
 type checksBlock struct {
 	spans    []checksSpan
 	markdown string
+	centered bool
 }
 
 // checksBlocks keeps trusted presentation roles separate from source text and captured logs.
 func checksBlocks(page checksPage) []checksBlock {
 	counts := page.ResultCounts
-	blocks := []checksBlock{{spans: []checksSpan{
+	blocks := []checksBlock{{centered: true, spans: []checksSpan{
 		{text: strconv.Itoa(counts.Failed), role: currentTheme.Error}, {text: " failed · "},
 		{text: strconv.Itoa(counts.Pending), role: currentTheme.Warning}, {text: " pending · "},
 		{text: strconv.Itoa(counts.Passed), role: currentTheme.Success}, {text: " passed · "},
 		{text: strconv.Itoa(counts.Unknown), role: currentTheme.Muted}, {text: " unknown"},
-	}}, {spans: []checksSpan{{text: "Coverage: "}, {text: page.Coverage, role: currentTheme.Muted}, {text: " · Freshness: "}, {text: page.Freshness, role: currentTheme.Muted}}}}
-	revision := "Revision match unknown"
-	role := currentTheme.Muted
-	if page.Head != "" && page.ChecksHead != "" {
-		revision, role = "Checks match the selected PR head", ""
-		if page.Head != page.ChecksHead {
-			revision = "Checks differ from the selected PR head"
+	}}}
+	data, dataRole := "incomplete", currentTheme.Warning
+	if page.Coverage == "complete" {
+		data, dataRole = "complete", currentTheme.Success
+	} else if page.Coverage == "missing" || page.Coverage == "unavailable" {
+		data, dataRole = "missing", currentTheme.Muted
+	}
+	updated, updatedRole := "unknown", currentTheme.Muted
+	if observed, err := time.Parse(time.RFC3339, page.ObservedAt); err == nil {
+		age := time.Since(observed)
+		if age >= 0 && age <= 24*time.Hour {
+			updated, updatedRole = "recently", currentTheme.Success
+		} else {
+			updated, updatedRole = "stale", currentTheme.Warning
 		}
 	}
-	blocks = append(blocks, checksBlock{spans: []checksSpan{{text: revision, role: role}}})
+	blocks = append(blocks, checksBlock{spans: []checksSpan{{text: "Data: "}, {text: data, role: dataRole}, {text: " · Updated: "}, {text: updated, role: updatedRole}}})
+	if page.Head == "" || page.ChecksHead == "" {
+		blocks = append(blocks, checksBlock{spans: []checksSpan{{text: "PR commit match unknown", role: currentTheme.Muted}}})
+	} else if page.Head != page.ChecksHead {
+		blocks = append(blocks, checksBlock{spans: []checksSpan{{text: "Checks refer to a different PR commit", role: currentTheme.Warning}}})
+	}
 	for _, problem := range page.Problems {
-		blocks = append(blocks, checksBlock{spans: []checksSpan{{text: singleLine(problem)}}})
+		blocks = append(blocks, checksBlock{spans: []checksSpan{{text: singleLine(problem), role: currentTheme.Warning}}})
 	}
 	if acquisition := page.LogAcquisition; acquisition != nil {
 		for _, omission := range acquisition.Omissions {
@@ -390,7 +413,7 @@ func checksBlocks(page checksPage) []checksBlock {
 			if len(compact) > 0 {
 				compact = append(compact, checksSpan{text: "\n"})
 			}
-			compact = append(compact, checksSpan{text: name + " · "}, checksSpan{text: row.Result, role: currentTheme.Muted})
+			compact = append(compact, checksSpan{text: name + " · "}, checksSpan{text: row.Result, role: checksResultRole(row.Result)})
 			if row.Conclusion != "" {
 				compact = append(compact, checksSpan{text: " · "}, checksSpan{text: singleLine(row.Conclusion), role: currentTheme.Muted})
 			}
@@ -403,16 +426,16 @@ func checksBlocks(page checksPage) []checksBlock {
 			continue
 		}
 		blocks = append(blocks, checksBlock{spans: []checksSpan{{text: name, role: currentTheme.Accent, bold: true}}})
-		meta := []checksSpan{{text: "Failed", role: currentTheme.Muted}}
+		meta := []checksSpan{{text: "Failed", role: currentTheme.Error}}
 		if row.App != "" {
 			meta = append(meta, checksSpan{text: " · " + singleLine(row.App)})
 		}
 		if log := row.FailureLog; log != nil && log.State == "retained" {
 			if log.WorkflowName != "" {
-				meta = append(meta, checksSpan{text: " · " + singleLine(log.WorkflowName)})
+				meta = append(meta, checksSpan{text: "\nWorkflow: " + singleLine(log.WorkflowName)})
 			}
 			if log.JobName != "" {
-				meta = append(meta, checksSpan{text: " / " + singleLine(log.JobName)})
+				meta = append(meta, checksSpan{text: "\nJob: " + singleLine(log.JobName)})
 			}
 		}
 		if row.Repository != page.Repository.FullName {
@@ -420,18 +443,13 @@ func checksBlocks(page checksPage) []checksBlock {
 		}
 		blocks = append(blocks, checksBlock{spans: meta})
 		for _, problem := range row.Problems {
-			blocks = append(blocks, checksBlock{spans: []checksSpan{{text: singleLine(problem)}}})
+			blocks = append(blocks, checksBlock{spans: []checksSpan{{text: singleLine(problem), role: currentTheme.Warning}}})
 		}
 		blocks = append(blocks, checksBlock{markdown: checksFailureSummary(row)})
 	}
 	if len(compact) > 0 {
 		blocks = append(blocks, checksBlock{spans: compact})
 	}
-	footer := fmt.Sprintf("%d rows · %d omitted before · %d omitted after", page.Pagination.Total, page.Pagination.Before, page.Pagination.After)
-	if page.HistoryOmissions > 0 {
-		footer += fmt.Sprintf(" · %d historical or suite observations omitted", page.HistoryOmissions)
-	}
-	blocks = append(blocks, checksBlock{spans: []checksSpan{{text: footer, role: currentTheme.Muted}}})
 	return blocks
 }
 
@@ -467,7 +485,11 @@ func renderChecksView(page checksPage, width int) string {
 			}
 			text.WriteString(style.Render(sanitize(span.text)))
 		}
-		blocks = append(blocks, ansi.Wrap(text.String(), maxInt(width, 1), ""))
+		rendered := ansi.Wrap(text.String(), maxInt(width, 1), "")
+		if block.centered {
+			rendered = lipgloss.NewStyle().Width(maxInt(width, 1)).Align(lipgloss.Center).Render(rendered)
+		}
+		blocks = append(blocks, rendered)
 	}
 	return strings.Join(blocks, "\n\n")
 }
@@ -510,7 +532,7 @@ func checksFailureSource(row checkRow) string {
 		return b.String()
 	}
 	if log.State != "retained" {
-		label := map[string]string{"missing": "No retained failure log. Open a current PR and refresh checks to download supported failure logs", "unavailable": "Failure log unavailable", "invalid": "Captured failure excerpt could not be verified", "not-shown": "Failure excerpt omitted by this page's display budget"}[log.State]
+		label := map[string]string{"missing": "No retained failure log. Open a current PR and refresh checks to download supported failure logs", "unavailable": "Failure log unavailable", "invalid": "Captured failure excerpt could not be verified", "not-shown": "Failure excerpt omitted by the display limit"}[log.State]
 		fmt.Fprintf(&b, "%s.\n\n", label)
 		for _, problem := range checksLogNotices([]string{log.Problem}, log.Omissions, log.DisplayProblems) {
 			fmt.Fprintf(&b, "%s\n\n", problem)
@@ -531,15 +553,49 @@ func (m model) finishChecks(msg checksMsg) (tea.Model, tea.Cmd) {
 	}
 	m.checks.busy, m.checks.loaded = false, true
 	if msg.err != nil {
+		if msg.offset > 0 {
+			notice := "Some checks could not be loaded; the verified results remain visible."
+			if !m.checks.deadline.IsZero() && !time.Now().Before(m.checks.deadline) {
+				notice = "Some checks were not displayed: automatic offline loading reached its 30-second limit."
+				msg.err = fmt.Errorf("automatic offline loading reached its 30-second limit: %w", msg.err)
+			}
+
+			m.checks.page.Problems = append(m.checks.page.Problems, notice)
+			m.checksPageText(m.checks.page)
+			m.status = "CI continuation unavailable. ! shows details; Ctrl-R retries focused CI."
+			m.recordError("Checks continuation unavailable", msg.err)
+			return m, nil
+		}
 		m.checks.page = checksPage{}
 		m.detail.setChecksPage(nil)
 		m.status = "CI read unavailable. ! shows details; Ctrl-R retries focused CI."
 		m.recordError("Checks unavailable", msg.err)
 		return m, nil
 	}
-	m.checks.page, m.checks.snapshot = msg.data, msg.data.Snapshot
+	if msg.offset > 0 {
+		first := m.checks.page
+		if msg.data.Snapshot != first.Snapshot || msg.data.Head != first.Head || msg.data.ChecksHead != first.ChecksHead || msg.data.Pagination.Total != first.Pagination.Total || msg.data.ResultCounts != first.ResultCounts || msg.data.Coverage != first.Coverage || msg.data.ObservedAt != first.ObservedAt || msg.offset != len(first.Rows) {
+			msg.err = fmt.Errorf("checks continuation differs from the selected observation")
+			m.checks.busy = true
+			return m.finishChecks(msg)
+		}
+		if m.checks.bytes+msg.bytes > checksMaxBytes || len(first.Rows)+len(msg.data.Rows) > checksMaxRows {
+			first.Problems = append(first.Problems, "Some checks were not displayed: the list reached its 1,000-result or 8 MiB display limit.")
+			m.checks.page = first
+			m.checksPageText(first)
+			m.status = "CI display limit reached."
+			return m, nil
+		}
+		first.Rows = append(append([]checkRow{}, first.Rows...), msg.data.Rows...)
+		first.Pagination = msg.data.Pagination
+		m.checks.page = first
+	} else {
+		m.checks.page, m.checks.snapshot = msg.data, msg.data.Snapshot
+		m.checks.deadline = time.Now().Add(checksLoadTimeout)
+	}
+	m.checks.bytes += msg.bytes
 	if msg.data.Pagination.Total > 0 {
-		m.checksPageText(msg.data)
+		m.checksPageText(m.checks.page)
 		m.status = "Focused CI loaded."
 	} else {
 		m.detail.setChecksPage(nil)
@@ -547,6 +603,29 @@ func (m model) finishChecks(msg checksMsg) (tea.Model, tea.Cmd) {
 		if msg.data.Coverage == "failed" || msg.data.Coverage == "unavailable" || len(msg.data.Problems) > 0 {
 			m.status = "CI observations unavailable. ! shows details; Ctrl-R retries focused CI."
 			m.recordError("Checks unavailable", fmt.Errorf("%s: %s", msg.data.Coverage, strings.Join(msg.data.Problems, "; ")))
+		}
+	}
+	if next := m.checks.page.Pagination.Next; next != nil {
+		if len(m.checks.page.Rows) >= checksMaxRows || m.checks.bytes >= checksMaxBytes || !time.Now().Before(m.checks.deadline) {
+			m.checks.page.Problems = append(m.checks.page.Problems, "Some checks were not displayed: automatic offline loading reached its 1,000-result, 8 MiB or 30-second limit.")
+			m.checksPageText(m.checks.page)
+			m.status = "CI display limit reached."
+			return m, nil
+		}
+		m.checks.busy = true
+		m.checks.pendingSnapshot = m.checks.snapshot
+		if m.checksLifecycle == nil {
+			m.checksLifecycle = &readLifecycle{}
+		}
+		process := &readProcess{}
+		m.checksLifecycle.current = process
+		cmd := checksReadCmd(m.installRoot, m.repo, m.detail.key, "offline", source, m.checks.snapshot, fixed, *next, m.detail.generation, m.checksRequest, process)
+		deadline := m.checks.deadline
+		m.status = "Reading remaining CI results offline…"
+		return m, func() tea.Msg {
+			timer := time.AfterFunc(time.Until(deadline), process.stop)
+			defer timer.Stop()
+			return cmd()
 		}
 	}
 	return m, nil
@@ -581,18 +660,19 @@ func (m model) handleChecksKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
 	case key.Matches(msg, keys.ChecksRefresh):
 		cmd := m.readChecks("refresh", 0)
 		return m, cmd, true
-	case key.Matches(msg, keys.ChecksNext):
-		if !m.checks.busy && m.checks.page.Pagination.Next != nil {
-			cmd := m.readChecks("offline", *m.checks.page.Pagination.Next)
-			return m, cmd, true
-		}
-		return m, nil, true
-	case key.Matches(msg, keys.ChecksPrev):
-		if !m.checks.busy && m.checks.page.Pagination.Offset > 0 {
-			cmd := m.readChecks("offline", maxInt(m.checks.page.Pagination.Offset-checksPageSize, 0))
-			return m, cmd, true
-		}
-		return m, nil, true
 	}
 	return m, nil, false
+}
+
+func checksResultRole(result string) string {
+	switch result {
+	case "failed":
+		return currentTheme.Error
+	case "pending":
+		return currentTheme.Warning
+	case "passed":
+		return currentTheme.Success
+	default:
+		return currentTheme.Muted
+	}
 }

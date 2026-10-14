@@ -12,8 +12,6 @@ type keyMap struct {
 	ChecksRefresh        key.Binding
 	ChecksLogs           key.Binding
 	ChecksFocusedRefresh key.Binding
-	ChecksPrev           key.Binding
-	ChecksNext           key.Binding
 	Quit                 key.Binding
 	ForceQuit            key.Binding
 	Back                 key.Binding
@@ -93,8 +91,6 @@ var keys = keyMap{
 	ChecksLogs:           key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "read failure logs")),
 	ChecksFocusedRefresh: key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("Ctrl-R", "refresh CI")),
 	ChecksRefresh:        key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh checks")),
-	ChecksPrev:           key.NewBinding(key.WithKeys("["), key.WithHelp("[", "previous checks")),
-	ChecksNext:           key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next checks")),
 	Refresh:              key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "fetch")),
 	RefreshFull:          key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "full fetch")),
 	Quit:                 key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),

@@ -1242,7 +1242,9 @@ import json, pathlib, sys
 root = pathlib.Path(__file__).parent.parent
 args = sys.argv[1:]
 (root / "checks-args.json").write_text(json.dumps(args))
-value = json.loads((root / "checks-fixture.json").read_text())
+offset = int(args[args.index("--offset") + 1])
+fixture = root / ("checks-page-20.json" if offset else "checks-fixture.json")
+value = json.loads(fixture.read_text())
 value["mode"] = args[args.index("--mode") + 1]
 print(json.dumps(value))
 `
@@ -1256,6 +1258,15 @@ print(json.dumps(value))
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(m.installRoot, "checks-fixture.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writePageAt := func(name string, value checksPage) {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(m.installRoot, name), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1318,12 +1329,37 @@ print(json.dumps(value))
 	if err := validateChecksPage(forged, m.repo, 3, "offline", "", 0); err == nil {
 		t.Fatal("foreign checks reply accepted")
 	}
+	lastPage := page
+	lastPage.Rows = []checkRow{{Repository: "fork/repo", Source: "status", Name: "deploy", Result: "unknown", HeadSHA: "old-head"}}
+	lastPage.Pagination.Offset, lastPage.Pagination.Before, lastPage.Pagination.Returned, lastPage.Pagination.After, lastPage.Pagination.Next = 20, 20, 1, 0, nil
+	lastPage.ResultCounts.Passed, lastPage.ResultCounts.Unknown = 20, 1
+	writePageAt("checks-page-20.json", lastPage)
+	m.detail.JumpSection(2)
 	missing.data = page
-	m = baselineSend(m, missing)
+	next, continuationCmd := m.Update(missing)
+	m = next.(model)
+	if continuationCmd == nil || !m.checks.busy || m.checks.pendingSnapshot != "checks-pin" {
+		t.Fatal("Checks did not automatically read the next page from the selected snapshot")
+	}
+	m.detail.GotoBottom()
+	offsetBeforeAppend := m.detail.sections[m.detail.active].viewport.YOffset()
+	continuation := continuationCmd().(checksMsg)
+	if continuation.err != nil || continuation.offset != 20 || continuation.data.Snapshot != "checks-pin" || continuation.data.Mode != "offline" {
+		t.Fatalf("automatic offline continuation: offset=%d snapshot=%q mode=%q err=%v", continuation.offset, continuation.data.Snapshot, continuation.data.Mode, continuation.err)
+	}
+	m = baselineSend(m, continuation)
+	if len(m.checks.page.Rows) != 21 || m.checks.page.Rows[20].Name != "deploy" || m.checks.page.Pagination.Offset != 20 || m.checks.page.Pagination.Next != nil || m.checks.busy || m.detail.sections[m.detail.active].viewport.YOffset() != offsetBeforeAppend {
+		t.Fatal("automatic continuation did not append every result and finish the selected snapshot")
+	}
 	m.detail.JumpSection(2)
 	text := ansi.Strip(m.detail.View())
-	if !strings.Contains(text, "Checks differ from the selected PR head") || strings.Contains(renderChecks(page), "old-head") || strings.Contains(renderChecks(page), "https://github.com/") || !strings.Contains(renderChecks(page), "3 historical or suite") || !strings.Contains(renderChecks(page), "fork/repo") {
+	if !strings.Contains(text, "Checks refer to a different PR commit") || strings.Contains(renderChecks(page), "old-head") || strings.Contains(renderChecks(page), "https://github.com/") || !strings.Contains(renderChecks(page), "fork/repo") || strings.Contains(renderChecks(m.checks.page), "omitted before") {
 		t.Fatal("checks view hid revision/source/omission distinctions")
+	}
+	matched := page
+	matched.ChecksHead = matched.Head
+	if strings.Contains(renderChecks(matched), "PR commit match") || strings.Contains(renderChecks(matched), "different PR commit") || strings.Contains(renderChecks(matched), "match the selected PR head") {
+		t.Fatal("matching PR commit added an unnecessary success or unknown notice")
 	}
 	// The Checks page stays compact; the floating reader displays literal retained text.
 	failure := page
@@ -1331,7 +1367,7 @@ print(json.dumps(value))
 	failure.Rows[0].Result = "failed"
 	failure.Rows[0].Conclusion = "failure"
 	failure.Result = "failed"
-	failure.ObservedAt = "2026-10-13T09:36:12.123456+00:00"
+	failure.ObservedAt = time.Now().UTC().Format(time.RFC3339)
 	failure.ResultCounts.Passed, failure.ResultCounts.Failed = 19, 1
 	logText := "2026-10-13T09:36:12.123456Z ##[error] Compile failed\n````\n# Source output, not a heading\n"
 	failure.Rows[0].FailureLog = &checkFailureLog{State: "retained", LogObject: &checkLogObject{SHA256: strings.Repeat("a", 64), Bytes: 1000, Format: "json"}, WorkflowName: "Build", JobName: "Linux tests", SelectionBasis: "error-pattern context", DownloadPartial: true, Windows: []checkLogWindow{{StartLine: 10, EndLine: 12, Text: logText}}, Omissions: []string{"Intervening lines omitted"}}
@@ -1339,7 +1375,7 @@ print(json.dumps(value))
 		t.Fatal(err)
 	}
 	rendered := renderChecks(failure)
-	for _, want := range []string{"Failure log retained", "e opens the reader", "Linux tests", "Partial retained log"} {
+	for _, want := range []string{"Failure log retained", "e opens the reader", "Workflow: Build", "Job: Linux tests", "Partial retained log"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("failure view omitted %q", want)
 		}
@@ -1348,14 +1384,39 @@ print(json.dumps(value))
 		t.Fatal("Checks embedded the retained log instead of its reader hint")
 	}
 	view := renderChecksView(failure, 80)
-	for _, colored := range []struct{ text, role string }{{"1", currentTheme.Error}, {"0", currentTheme.Warning}, {"19", currentTheme.Success}, {"1", currentTheme.Muted}, {"unknown", currentTheme.Muted}, {"partial", currentTheme.Muted}, {"stale", currentTheme.Muted}} {
+	for _, colored := range []struct{ text, role string }{{"1", currentTheme.Error}, {"Failed", currentTheme.Error}, {"0", currentTheme.Warning}, {"19", currentTheme.Success}, {"1", currentTheme.Muted}, {"unknown", currentTheme.Muted}, {"incomplete", currentTheme.Warning}, {"recently", currentTheme.Success}} {
 		expected := lipgloss.NewStyle().Foreground(lipgloss.Color(colored.role)).Render(colored.text)
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Checks did not render %q with its semantic color", colored.text)
 		}
 	}
-	if strings.Contains(rendered, "\x1b") || strings.Contains(view, "Observed 2026-10-13") || strings.Contains(view, "CI observations alone") {
+	if !strings.Contains(view, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("Checks refer to a different PR commit")) || strings.Contains(rendered, "\x1b") || strings.Contains(view, "Observed 2026-10-13") || strings.Contains(view, "CI observations alone") || strings.Contains(rendered, "Checks match the selected PR head") || strings.Contains(rendered, "rows ·") || strings.Contains(rendered, "omitted before") {
 		t.Fatal("Checks styling leaked into source or restored removed header text")
+	}
+	summary := strings.Split(ansi.Strip(view), "\n")[0]
+	if !strings.HasPrefix(summary, " ") || ansi.StringWidth(summary) != 80 {
+		t.Fatal("Checks summary was not centered across the tab width")
+	}
+	narrowView := ansi.Strip(renderChecksView(failure, 24))
+	for _, line := range strings.Split(narrowView, "\n") {
+		if ansi.StringWidth(line) > 24 {
+			t.Fatal("Checks content exceeded a narrow tab width")
+		}
+	}
+
+	completeRecent := checksPage{Coverage: "complete", ObservedAt: time.Now().UTC().Format(time.RFC3339)}
+	completeView := renderChecksView(completeRecent, 80)
+	if !strings.Contains(completeView, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Success)).Render("complete")) || !strings.Contains(completeView, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Success)).Render("recently")) {
+		t.Fatal("complete recent Checks data was not marked green")
+	}
+	stale := checksPage{Coverage: "partial", ObservedAt: time.Now().Add(-25 * time.Hour).UTC().Format(time.RFC3339)}
+	staleView := renderChecksView(stale, 80)
+	if !strings.Contains(staleView, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("incomplete")) || !strings.Contains(staleView, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("stale")) {
+		t.Fatal("incomplete stale Checks data was not marked yellow")
+	}
+	missingView := renderChecksView(checksPage{Coverage: "missing"}, 80)
+	if !strings.Contains(missingView, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted)).Render("missing")) || !strings.Contains(missingView, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted)).Render("unknown")) {
+		t.Fatal("missing unknown Checks data was not marked gray")
 	}
 	if strings.Contains(rendered, strings.Repeat("a", 64)) {
 		t.Fatal("failure view exposed storage object identity")
@@ -1579,34 +1640,75 @@ print((root / "log-fixture.json").read_text())
 	if !strings.Contains(renderChecks(empty), "No checks or statuses were recorded") || strings.Contains(renderChecks(empty), "Coverage remains incomplete") {
 		t.Fatal("complete empty CI became missing evidence")
 	}
-	if !strings.Contains(fmt.Sprint(m.footerGroups()), "refresh checks") {
-		t.Fatal("Checks refresh key was missing from help")
+	if !strings.Contains(fmt.Sprint(m.footerGroups()), "refresh checks") || strings.Contains(fmt.Sprint(m.footerGroups()), "previous checks") {
+		t.Fatal("Checks help omitted refresh or retained manual paging")
 	}
-	next, pageCmd, handled := m.handleChecksKey(tea.KeyPressMsg{Text: "]"})
+	writePage(page)
+	next, pageCmd := m.Update(tea.KeyPressMsg{Text: "r"})
 	m = next.(model)
-	if !handled || pageCmd == nil || m.checks.pendingSnapshot != "checks-pin" {
-		t.Fatal("checks continuation did not retain selected snapshot")
+	if pageCmd == nil {
+		t.Fatal("Checks could not start a focused refresh")
 	}
+	firstRefresh := pageCmd().(checksMsg)
+	next, pageCmd = m.Update(firstRefresh)
+	m = next.(model)
+	if pageCmd == nil || !m.checks.busy || m.checks.pendingSnapshot != "checks-pin" {
+		t.Fatal("Checks refresh did not start its pinned automatic continuation")
+	}
+	lateContinuation := pageCmd().(checksMsg)
 	process, request = m.checksLifecycle.current, m.checksRequest
 	m = baselineSend(m, tea.KeyPressMsg{Text: "1"})
 	if process.cancelled || m.checksRequest != request || !m.checks.busy {
-		t.Fatal("tab navigation cancelled the opening CI reader")
+		t.Fatal("tab navigation cancelled the automatic CI continuation")
 	}
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	if !process.cancelled || m.checks.busy || m.focus == FocusDetail {
 		t.Fatal("leaving the item did not cancel its CI reader")
 	}
 	statusAfterBack := m.status
-	stale := missing
-	stale.request = request
-	m = baselineSend(m, stale)
+	m = baselineSend(m, lateContinuation)
 	if m.checks.busy || m.status != statusAfterBack {
-		t.Fatal("late checks page changed the reader after Back")
+		t.Fatal("late automatic continuation changed Checks after Back")
 	}
 	m.focus = FocusDetail
 
+	writePage(page)
+	refreshCmd := m.readChecks("refresh", 0)
+	firstRefresh = refreshCmd().(checksMsg)
+	next, pageCmd = m.Update(firstRefresh)
+	m = next.(model)
+	if pageCmd == nil {
+		t.Fatal("Checks refresh did not request its next page")
+	}
+	continuationFailure := pageCmd().(checksMsg)
+	continuationFailure.data.Snapshot = "changed-snapshot"
+	m = baselineSend(m, continuationFailure)
+	if len(m.checks.page.Rows) != 20 || !slices.Contains(m.checks.page.Problems, "Some checks could not be loaded; the verified results remain visible.") || !strings.Contains(m.status, "continuation unavailable") || m.lastError.what != "Checks continuation unavailable" {
+		t.Fatalf("changed snapshot continuation discarded verified rows or hid its notice: rows=%d busy=%v status=%q problem=%v error=%v", len(m.checks.page.Rows), m.checks.busy, m.status, m.checks.page.Problems, m.lastError)
+	}
+	m.lastError.open = false
+	refreshCmd = m.readChecks("refresh", 0)
+	firstRefresh = refreshCmd().(checksMsg)
+	next, pageCmd = m.Update(firstRefresh)
+	m = next.(model)
+	continuationFailure = pageCmd().(checksMsg)
+	continuationFailure.err = errors.New("fixture second page failed")
+	m = baselineSend(m, continuationFailure)
+	if len(m.checks.page.Rows) != 20 || !slices.Contains(m.checks.page.Problems, "Some checks could not be loaded; the verified results remain visible.") || !strings.Contains(m.status, "continuation unavailable") {
+		t.Fatalf("continuation error discarded verified rows: rows=%d status=%q problem=%v", len(m.checks.page.Rows), m.status, m.checks.page.Problems)
+	}
+
+	capModel := m
+	capModel.checks.page, capModel.checks.snapshot, capModel.checks.loaded = page, "checks-pin", true
+	capModel.checks.bytes, capModel.checks.busy, capModel.checks.pendingSnapshot = checksMaxBytes-1, true, "checks-pin"
+	capReply := checksMsg{root: capModel.installRoot, repo: capModel.repo, sourceSnapshot: "", snapshot: "checks-pin", key: capModel.detail.key, generation: capModel.detail.generation, request: capModel.checksRequest, offset: 20, bytes: 2, data: lastPage}
+	capModel = baselineSend(capModel, capReply)
+	if len(capModel.checks.page.Rows) != 20 || !strings.Contains(renderChecks(capModel.checks.page), "8 MiB display limit") || capModel.checks.busy {
+		t.Fatal("Checks display byte cap hid its visible limit or discarded earlier results")
+	}
+
 	m.detail.JumpSection(len(m.detail.sections) - 2)
-	next, refreshCmd := m.Update(tea.KeyPressMsg{Text: "r"})
+	next, refreshCmd = m.Update(tea.KeyPressMsg{Text: "r"})
 	m = next.(model)
 	if refreshCmd == nil || !m.checks.busy || m.refreshing || m.checks.pendingSnapshot != "" || m.checks.snapshot != "checks-pin" {
 		t.Fatal("contextual refresh lost request state or triggered backlog fetch")

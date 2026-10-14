@@ -89,7 +89,7 @@ func (m model) canReadChecksLogs() bool {
 
 func (m model) openChecksLogs() (tea.Model, tea.Cmd) {
 	if !m.canReadChecksLogs() {
-		m.status = "No failure logs are available on this Checks page."
+		m.status = "No failure logs are available for these checks."
 		return m, nil
 	}
 

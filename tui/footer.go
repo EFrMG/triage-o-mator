@@ -306,7 +306,7 @@ func (m model) contextFooterGroups() []footerGroup {
 			read.hints = append(read.hints, bind("", keys.ChecksFocusedRefresh))
 		}
 		if m.checksKeyScope() {
-			read.hints = append(read.hints, bind("", keys.ChecksRefresh), bind("pages", keys.ChecksPrev, keys.ChecksNext))
+			read.hints = append(read.hints, bind("", keys.ChecksRefresh))
 			if m.canReadChecksLogs() {
 				read.hints = append(read.hints, bind("", keys.ChecksLogs))
 			}
@@ -545,7 +545,7 @@ func (m model) itemFooter() []footerGroup {
 		read.hints = append(read.hints, bind("", keys.ChecksFocusedRefresh))
 	}
 	if m.checksKeyScope() {
-		read.hints = append(read.hints, bind("", keys.ChecksRefresh), bind("pages", keys.ChecksPrev, keys.ChecksNext))
+		read.hints = append(read.hints, bind("", keys.ChecksRefresh))
 		if m.canReadChecksLogs() {
 			read.hints = append(read.hints, bind("", keys.ChecksLogs))
 		}

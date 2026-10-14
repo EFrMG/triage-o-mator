@@ -275,8 +275,8 @@ func (m *model) resizeChecksLogReader() {
 	width := maxInt(m.commentWidth()-4, 1)
 	reader.viewport.SetWidth(width)
 	reader.viewport.SetHeight(maxInt(m.commentHeight()-4, 1))
-	content := reader.problem
-	if content == "" {
+	content := ansi.Wrap(reader.problem, width, "")
+	if reader.problem == "" {
 		var b strings.Builder
 		log := reader.page.Packet.checkFailureLog
 		if log.DownloadPartial {
@@ -300,14 +300,20 @@ func (m *model) resizeChecksLogReader() {
 			}
 			b.WriteString("\n")
 		}
+		content = ansi.Wrap(b.String(), width, "")
 		for _, notice := range checksLogNotices(log.Omissions, reader.page.DisplayProblems) {
-			b.WriteString(singleLine(notice))
-			b.WriteString("\n")
+			notice = singleLine(notice)
+			if notice == "only selected source windows are retained; intervening lines are omitted" {
+				notice = "Only" + strings.TrimPrefix(notice, "only")
+				notice = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted)).Width(width).Align(lipgloss.Center).Render(ansi.Wrap(notice, width, ""))
+			} else {
+				notice = ansi.Wrap(notice, width, "")
+			}
+			content += notice + "\n"
 		}
-		content = b.String()
 	}
 
-	reader.viewport.SetContent(ansi.Wrap(content, width, ""))
+	reader.viewport.SetContent(content)
 }
 
 func (m model) handleChecksLogReader(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

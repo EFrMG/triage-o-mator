@@ -58,6 +58,7 @@ type checksLogReader struct {
 	starts   []int
 	index    int
 	problem  string
+	footer   string
 }
 
 type checksLogMsg struct {
@@ -274,9 +275,9 @@ func (m *model) resizeChecksLogReader() {
 
 	width := maxInt(m.commentWidth()-4, 1)
 	reader.viewport.SetWidth(width)
-	reader.viewport.SetHeight(maxInt(m.commentHeight()-4, 1))
+	reader.footer = ""
 	content := ansi.Wrap(reader.problem, width, "")
-	if reader.problem == "" {
+	if !reader.busy && reader.problem == "" {
 		var b strings.Builder
 		log := reader.page.Packet.checkFailureLog
 		if log.DownloadPartial {
@@ -305,14 +306,20 @@ func (m *model) resizeChecksLogReader() {
 			notice = singleLine(notice)
 			if notice == "only selected source windows are retained; intervening lines are omitted" {
 				notice = "Only" + strings.TrimPrefix(notice, "only")
-				notice = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted)).Width(width).Align(lipgloss.Center).Render(ansi.Wrap(notice, width, ""))
-			} else {
-				notice = ansi.Wrap(notice, width, "")
+				if height := maxInt(m.commentHeight()-5, 0); height > 0 {
+					reader.footer = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted)).Width(width).Align(lipgloss.Center).Render(fitScreen(ansi.Wrap(notice, width, ""), width, height))
+				}
+				continue
 			}
-			content += notice + "\n"
+			content += ansi.Wrap(notice, width, "") + "\n"
 		}
 	}
 
+	footerHeight := 0
+	if reader.footer != "" {
+		footerHeight = lipgloss.Height(reader.footer)
+	}
+	reader.viewport.SetHeight(maxInt(m.commentHeight()-4-footerHeight, 1))
 	reader.viewport.SetContent(content)
 }
 
@@ -370,6 +377,8 @@ func (m model) checksLogsOverlay(background string) string {
 	content := reader.viewport.View()
 	if reader.busy {
 		content = "Reading retained log…"
+	} else if reader.footer != "" {
+		content += "\n" + reader.footer
 	}
 	header := composerHeader("Failure log", "", singleLine(reader.row.Name), false, width)
 	return m.composerOverlay(background, m.composerPanel(header, content))

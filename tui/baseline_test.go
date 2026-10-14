@@ -1396,6 +1396,7 @@ print(json.dumps(value))
 	readerReply.Packet.Number, readerReply.Packet.CheckID = 3, 42
 	readerReply.Packet.Head, readerReply.Packet.Snapshot = "old-head", readerPage.Snapshot
 	readerReply.Packet.checkFailureLog = *readerPage.Rows[0].FailureLog
+	readerReply.Packet.Omissions = []string{"only selected source windows are retained; intervening lines are omitted"}
 	readerReply.Continuation = &checksLogContinuation{LogObject: readerReply.LogObject, Number: 3, Snapshot: readerPage.Snapshot, StartLine: 30}
 	writeReaderPage := func(value checksLogPage) {
 		data, err := json.Marshal(value)
@@ -1456,6 +1457,9 @@ print((root / "log-fixture.json").read_text())
 	}
 	if strings.Contains(content, "2026-10-13T") || !strings.Contains(content, "Error:  Compile failed") {
 		t.Fatal("reader retained per-line timestamps or raw error markers")
+	}
+	if strings.Contains(content, "intervening lines are omitted") || !strings.Contains(ansi.Strip(readerModel.checks.reader.footer), "Only selected source windows") {
+		t.Fatal("reader did not keep its retained-window notice outside the scrollable log")
 	}
 	nextLogPage := readerReply
 	nextLogPage.Windows = []checkLogWindow{{StartLine: 30, EndLine: 109, Text: strings.Repeat("retained source line\n", 80)}}

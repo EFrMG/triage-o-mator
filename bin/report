@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))  # absolute, never resolve: see work_root() in bin/_install.py
 from _groups import list_groups
-from _triage import REPO, REPORTS_DIR, action_operation, decision_text, has_decision, here, load_ledger, load_taxonomy, merge_ready
+from _triage import REPO, REPORTS_DIR, READY_LABEL, action_operation, decision_text, has_decision, here, load_ledger, load_taxonomy, merge_ready
 
 
 ACT_LIMIT = 20
@@ -161,11 +161,18 @@ def render(ledger):
     merge_ready_items = [r for r in prs if merge_ready(r)]
     if merge_ready_items:
         lines.append(
-            f"## Merge-ready PR suggestions ({len(merge_ready_items)})"
+            f"## Merge-ready PRs ({len(merge_ready_items)})"
         )
         lines.append("")
         for r in sorted(merge_ready_items, key=lambda r: r["created_at"])[:30]:
-            lines.append(item_line(r, f" — {r['reason']}"))
+            sources = []
+            if READY_LABEL in (r.get("labels") or []):
+                sources.append("GitHub label: ready")
+            if READY_LABEL in (r.get("proposed_labels") or []):
+                sources.append("local proposal: ready")
+
+            reason = f" — {r['reason']}" if r.get("reason") else ""
+            lines.append(item_line(r, f" — {'; '.join(sources)}{reason}"))
 
         if len(merge_ready_items) > 30:
             lines.append(f"- ...and {len(merge_ready_items) - 30} more")

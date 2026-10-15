@@ -303,8 +303,8 @@ def score_assessment_current(rec):
 
 
 def merge_ready(rec):
-    """A PR proposed as `ready` is one whose code was read and found mergeable."""
-    return rec.get("kind") == "pr" and READY_LABEL in (rec.get("proposed_labels") or [])
+    """A PR marked `ready` on GitHub or in a saved local proposal belongs in the merge-ready reading queue. Item.MergeReady in tui/ledger.go mirrors this."""
+    return rec.get("kind") == "pr" and (READY_LABEL in (rec.get("proposed_labels") or []) or READY_LABEL in (rec.get("labels") or []))
 
 
 def decision_text(rec):

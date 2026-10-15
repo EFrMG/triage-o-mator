@@ -134,11 +134,11 @@ func (i Item) ByAgent() bool {
 
 func (i Item) PendingReview() bool { return i.ReviewRequest != nil }
 
-// readyLabel mirrors READY_LABEL in bin/_triage.py: on a PR the `ready` starter label means its code was read and nothing blocks merging.
+// readyLabel mirrors READY_LABEL in bin/_triage.py for GitHub labels and saved local proposals.
 const readyLabel = "ready"
 
 func (i Item) MergeReady() bool {
-	return i.Kind == "pr" && slices.Contains(i.ProposedLabels, readyLabel)
+	return i.Kind == "pr" && (slices.Contains(i.ProposedLabels, readyLabel) || slices.Contains(i.Labels, readyLabel))
 }
 
 // LoadLedger reads repo's ledger, data/<owner>/<repo>/ledger.jsonl.

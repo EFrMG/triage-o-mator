@@ -1062,9 +1062,37 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
             ledger_file.write(json.dumps(ready_pr) + "\n" + json.dumps(other_pr) + "\n")
 
         ready_report = self.run_cli("report", "--stdout").stdout
-        merge_section = ready_report.split("## Merge-ready PR suggestions (1)\n", 1)[1].split("\n## ", 1)[0]
+        merge_section = ready_report.split("## Merge-ready PRs (1)\n", 1)[1].split("\n## ", 1)[0]
         self.assertIn("Reviewed change", merge_section)
+        self.assertIn("local proposal: ready", merge_section)
         self.assertNotIn("Unreviewed change", merge_section)
+
+        for labels in (["ready"], []):
+            meta = json.loads((self.root / "data/owner/repo/raw/fetch_meta.json").read_text())
+            since = (datetime.strptime(meta["synced_through"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            endpoint = f"repos/owner/repo/issues?state=all&since={since}&per_page=100"
+            self.responses[endpoint] = dict(data=[dict(item(3, "Reviewed change", "pr"), labels=labels), dict(item(5, "GitHub-labeled change", "pr"), labels=labels)])
+            self.run_cli("fetch")
+            calls_before_sync = self.calls()
+            self.assertIn("Synced (incremental)", self.run_cli("sync").stdout)
+            self.assertEqual(self.calls(), calls_before_sync)
+            ledger = self.ledger()
+            self.assertEqual(ledger[("pr", 3)]["labels"], labels)
+            self.assertEqual(ledger[("pr", 3)]["proposed_labels"], ["ready"])
+            self.assertEqual(ledger[("pr", 3)]["reason"], "Code reviewed")
+            self.assertEqual(ledger[("pr", 5)]["labels"], labels)
+            self.assertEqual(ledger[("pr", 5)]["proposed_labels"], [])
+            self.assertIsNone(ledger[("pr", 5)]["review_request"])
+            self.assertEqual(ledger[("issue", 2)]["proposed_labels"], ["bug"])
+            count = 2 if labels else 1
+            merge_section = self.run_cli("report", "--stdout").stdout.split(f"## Merge-ready PRs ({count})\n", 1)[1].split("\n## ", 1)[0]
+            self.assertEqual("GitHub-labeled change" in merge_section, bool(labels))
+            self.assertEqual("GitHub label: ready" in merge_section, bool(labels))
+            self.assertIn("local proposal: ready", merge_section)
+            suggestions = self.json_cli("next", "--json")["suggestions"]
+            self.assertTrue(any(f"Code-review {count} PRs with no agent notes ({count} marked ready to merge)" == row["what"] for row in suggestions))
+            self.assertEqual(self.calls(), calls_before_sync)
+
         ledger_path.write_bytes(before_report)
         self.json_cli("review-request", "mark", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "2", "--by", "agent:triage", "--reason", "Check the reported behavior")
         self.assertEqual(self.ledger()[("issue", 2)]["review_request"]["reason"], "Check the reported behavior")

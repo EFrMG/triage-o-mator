@@ -120,8 +120,8 @@ def suggestions(ledger):
     if code_queue:
         marked = sum(1 for r in code_queue if merge_ready(r))
         sample = ", ".join(f"#{r['number']}" for r in sorted(code_queue, key=lambda r: not merge_ready(r))[:5])
-        add("agent", f"Code-review {len(code_queue)} triaged PRs with no agent notes ({marked} marked ready to merge)",
-            f"prompts/review-pr.md (e.g. {sample})", "their code evidence has not been reviewed")
+        add("agent", f"Code-review {len(code_queue)} PRs with no agent notes ({marked} marked ready to merge)",
+            f"prompts/review-pr.md (e.g. {sample})", "no agent code review is recorded in their notes")
 
     if open_items:
         add("agent", "Consider focused local verification for a selected issue or PR",

@@ -107,7 +107,7 @@ They are listed here in sidebar order.
 
    ![Pending review](captures/flow-2.webp)
 
-3. **Merge-Ready PRs.** Open PRs whose saved decision proposes the `ready` label. It is a reading queue: the tool does not approve or merge PRs.
+3. **Merge-Ready PRs.** Open PRs with the `ready` label on GitHub or in a saved local proposal. Refresh updates GitHub labels incrementally while preserving local proposals. It is a reading queue: the tool does not approve or merge PRs.
 
    ![Merge-Ready PRs](captures/flow-3.webp)
 

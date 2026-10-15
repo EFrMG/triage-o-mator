@@ -3579,9 +3579,26 @@ func TestSuggestedActionsAndExplicitPendingReviewHaveSeparateTabs(t *testing.T) 
 		t.Fatalf("Pending review did not follow the explicit flag independent of state or triage: %+v", listed)
 	}
 	ready := []Item{{Kind: "pr", Number: 1, State: "open", ProposedLabels: []string{"ready"}}, {Kind: "issue", Number: 2, State: "open", ProposedLabels: []string{"ready"}},
-		{Kind: "pr", Number: 4, State: "open", ProposedLabels: []string{"ready"}}, {Kind: "pr", Number: 5, State: "closed", ProposedLabels: []string{"ready"}}, {Kind: "pr", Number: 6, State: "open", Labels: []string{"ready"}}}
-	if listed := tabs[mergeReadyTab].Filter(ready, Taxonomy{}); len(listed) != 2 || listed[0].Number != 1 || listed[1].Number != 4 {
+		{Kind: "pr", Number: 4, State: "open", ProposedLabels: []string{"ready"}, Labels: []string{"ready"}}, {Kind: "pr", Number: 5, State: "closed", ProposedLabels: []string{"ready"}}, {Kind: "pr", Number: 6, State: "open", Labels: []string{"ready"}},
+		{Kind: "issue", Number: 7, State: "open", Labels: []string{"ready"}}, {Kind: "pr", Number: 8, State: "closed", Labels: []string{"ready"}}, {Kind: "pr", Number: 9, State: "open", Labels: []string{"not-ready"}}}
+	if listed := tabs[mergeReadyTab].Filter(ready, Taxonomy{}); len(listed) != 3 || listed[0].Number != 1 || listed[1].Number != 4 || listed[2].Number != 6 {
 		t.Fatalf("Merge-Ready PRs did not list the open ready PRs: %+v", listed)
+	}
+	if !ready[4].Untriaged() || ready[4].PendingReview() {
+		t.Fatal("a GitHub ready label became a local decision or Pending review request")
+	}
+
+	readyModel := baselineModel(t, baselineRoot(t))
+	readyModel.items = ready
+	readyModel.activateTab(mergeReadyTab)
+	if len(readyModel.list.Items()) != 3 {
+		t.Fatal("Merge-Ready PRs did not show the GitHub-labeled PR")
+	}
+	ready[2].Labels = nil
+	ready[4].Labels = nil
+	readyModel = baselineSend(readyModel, ledgerReloadedMsg{root: readyModel.installRoot, repo: readyModel.repo, items: ready})
+	if listed := readyModel.list.Items(); len(listed) != 2 || listed[0].(listItem).Number != 1 || listed[1].(listItem).Number != 4 {
+		t.Fatal("ledger refresh did not remove the GitHub-only ready PR or preserve local ready proposals")
 	}
 
 	m := baselineModel(t, baselineRoot(t))

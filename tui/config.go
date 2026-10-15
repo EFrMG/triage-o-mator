@@ -10,6 +10,15 @@ import (
 	"strings"
 )
 
+// uiGlyph applies the same font preference to every Nerd Font symbol in the app.
+func uiGlyph(nerd, unicode string) string {
+	if os.Getenv("TRIAGE_GLYPHS") == "unicode" {
+		return unicode
+	}
+
+	return nerd
+}
+
 // repoPattern is owner/repo as GitHub allows it, matching bin/_triage.py's REPO_RE; it is also what keeps data/<owner>/<repo>/ from resolving outside data/.
 var repoPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 

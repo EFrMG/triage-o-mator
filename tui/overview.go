@@ -46,6 +46,7 @@ func nextCmd(root, repo string) tea.Cmd {
 
 // progressBar draws n of total as a bar width cells wide, in the accent color.
 func progressBar(n, total, width int) string {
+	glyph := uiGlyph("\U000f0e5e", "━") // nf-md-rectangle occupies roughly half the design square's height.
 	filled := 0
 	if total > 0 {
 		filled = n * width / total
@@ -54,8 +55,8 @@ func progressBar(n, total, width int) string {
 		}
 	}
 
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Render(strings.Repeat("━", filled)) +
-		lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Border)).Render(strings.Repeat("─", width-filled))
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Render(strings.Repeat(glyph, filled)) +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Border)).Render(strings.Repeat(glyph, width-filled))
 }
 
 func (m model) overviewView() string {

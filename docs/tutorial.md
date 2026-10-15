@@ -11,6 +11,14 @@ cd /path/to/your/repository
 ./triage-o-mator/bin/triage-o-mator
 ```
 
+The app uses two Nerd Font glyphs: `󰹞` for progress bars and `󰯠` for Settings. If either glyph does not render in your terminal, launch the app with:
+
+```sh
+TRIAGE_GLYPHS=unicode ./triage-o-mator/bin/triage-o-mator
+```
+
+This uses `━` for progress bars and `⚙` for Settings instead.
+
 Confirmed item labels change GitHub immediately. Action and reason edits, review requests and group edits change your repository's ledger and groups. Practice label changes in a disposable repository; a local branch does not isolate GitHub writes.
 
 ## A focused review loop

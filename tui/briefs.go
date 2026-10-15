@@ -335,6 +335,21 @@ func (m *model) layoutBriefs() {
 	}
 }
 
+func (m model) briefTabs() string {
+	tabs := make([]string, len(briefSections))
+	for i, section := range briefSections {
+		label := fmt.Sprintf("%s (%d)", section.label, len(m.briefsRows(i)))
+		if i == m.briefs.section {
+			label = lipgloss.NewStyle().Foreground(focusedBorderColor).Bold(true).Render(label)
+		} else {
+			label = mutedText(label)
+		}
+		tabs[i] = label
+	}
+
+	return strings.Join(tabs, "  ")
+}
+
 func (m model) briefsView() string {
 	width, height := m.menuWidth(), m.mainHeight()
 	if m.briefs.reading {
@@ -368,29 +383,12 @@ func (m model) briefsView() string {
 		return m.withSidebar(body, true)
 	}
 
-	counts := [3]int{}
-	for _, row := range m.briefs.records {
-		for i, section := range briefSections {
-			if row.Section == section.key {
-				counts[i]++
-			}
-		}
-	}
-	tabs := make([]string, len(briefSections))
-	for i, section := range briefSections {
-		label := fmt.Sprintf("%s (%d)", section.label, counts[i])
-		if i == m.briefs.section {
-			label = lipgloss.NewStyle().Foreground(focusedBorderColor).Bold(true).Render(label)
-		} else {
-			label = mutedText(label)
-		}
-		tabs[i] = label
-	}
 	subtitle := "saved for " + m.repo
 	if len(m.briefs.ticked) > 0 {
 		subtitle += fmt.Sprintf(" · %d ticked", len(m.briefs.ticked))
 	}
-	body := inset(titleBar("Briefs", subtitle, width)) + "\n" + inset(strings.Join(tabs, "  ")) + "\n\n"
+	tabs := lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(m.briefTabs())
+	body := inset(titleBar("Briefs", subtitle, width)) + "\n\n" + inset(tabs) + "\n\n"
 	if m.briefs.problem != "" {
 		body += inset(m.briefs.problem)
 		return m.withSidebar(body, true)
@@ -418,7 +416,7 @@ func (m model) briefsView() string {
 		}
 		cards[i] = [2]string{title, row.Date + " · " + label}
 	}
-	body += cardList(cards, m.briefs.selected[m.briefs.section], m.cardWidth(), height-3)
+	body += cardList(cards, m.briefs.selected[m.briefs.section], m.cardWidth(), height-4)
 	return m.withSidebar(body, true)
 }
 
@@ -579,9 +577,10 @@ func (m model) clickBriefs(event tea.Mouse) (tea.Model, tea.Cmd) {
 	if m.briefs.busy || m.briefs.problem != "" {
 		return m, nil
 	}
-	if event.Y == 2 {
+	if event.Y == 3 {
 		// The section labels share one row. Exact hit testing uses the rendered widths rather than fixed columns.
-		x := event.X - m.mouseMainX() - 1
+		left := maxInt((m.menuWidth()-ansi.StringWidth(m.briefTabs()))/2, 0)
+		x := event.X - m.mouseMainX() - 2 - left
 		for i, section := range briefSections {
 			label := fmt.Sprintf("%s (%d)", section.label, len(m.briefsRows(i)))
 			width := ansi.StringWidth(label) + 2
@@ -593,7 +592,7 @@ func (m model) clickBriefs(event tea.Mouse) (tea.Model, tea.Cmd) {
 		}
 	}
 	rows := m.briefsRows(m.briefs.section)
-	index := mouseCardIndex(event.Y, 4, m.briefs.selected[m.briefs.section], len(rows), m.mainHeight()-3)
+	index := mouseCardIndex(event.Y, 5, m.briefs.selected[m.briefs.section], len(rows), m.mainHeight()-4)
 	if index < 0 {
 		return m, nil
 	}

@@ -560,7 +560,7 @@ func (m model) clickRepo(event tea.Mouse, _ bool) (tea.Model, tea.Cmd) {
 		m.repoInput.Focus()
 		return m, nil
 	}
-	index := mouseCardIndex(event.Y, 9, m.repoPick, len(m.repoRecent), m.mainHeight()-10)
+	index := mouseCardIndex(event.Y, 9, m.repoPick, len(m.repoRecent), m.mainHeight()-9-lipgloss.Height(m.repoPromptNote()))
 	if index < 0 {
 		return m, nil
 	}
@@ -646,7 +646,7 @@ func (m model) clickGroups(event tea.Mouse, repeat bool) (tea.Model, tea.Cmd) {
 		}
 		contextHeight := minInt(6, maxInt(m.mainHeight()/3, 2))
 		first := 4 + contextHeight
-		index := mouseCardIndex(event.Y, first, m.groups.member, len(g.Members), m.mainHeight()-(first-1))
+		index := mouseCardIndex(event.Y, first, m.groups.member, len(g.Members), m.mainHeight()-first-lipgloss.Height(groupMetadataFooter(*g, m.menuWidth())))
 		if index < 0 {
 			return m, nil
 		}

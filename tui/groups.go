@@ -646,7 +646,7 @@ func (m model) groupSummary(g Group) string {
 }
 
 func (m model) groupContextViewport(g Group, w, h int) viewport.Model {
-	context := []string{orPlaceholder(g.Description, "(no description)"), mutedText(fmt.Sprintf("created by %s · updated by %s, %s · revision %d", g.CreatedBy, g.UpdatedBy, shortDate(g.UpdatedAt), g.Revision))}
+	context := []string{orPlaceholder(g.Description, "(no description)")}
 	if m.groups.member < len(g.Members) {
 		member := g.Members[m.groups.member]
 		context = append(context, "", fmt.Sprintf("Notes on #%d: %s", member.Number, orPlaceholder(member.Notes, "(none)")), mutedText("added by "+member.AddedBy))
@@ -668,7 +668,12 @@ func (m *model) scrollGroupContext(lines int) {
 	m.groups.previewOffset = vp.YOffset()
 }
 
-// groupMembersView is a group's context (its description, who made it, the selected member's notes; Ctrl-D/U scroll it) above its members, drawn as the item lists' cards.
+func groupMetadataFooter(g Group, width int) string {
+	text := fmt.Sprintf("created by %s · updated by %s, %s · revision %d", g.CreatedBy, g.UpdatedBy, shortDate(g.UpdatedAt), g.Revision)
+	return inset(lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(mutedText(wrapText(text, width))))
+}
+
+// groupMembersView keeps the description and selected member's notes above the cards, with attribution fixed at the bottom of the pane.
 func (m model) groupMembersView(g Group, w, h int) string {
 	subtitle := g.Status + " · " + pluralize(len(g.Members), "member", "members")
 	if g.Assignee != "" {
@@ -705,12 +710,13 @@ func (m model) groupMembersView(g Group, w, h int) string {
 	}
 
 	top := inset(titleBar(g.Title, subtitle, w) + "\n\n" + vp.View())
+	footer := groupMetadataFooter(g, w)
 	list := inset(mutedText("No members yet."))
 	if len(g.Members) > 0 {
-		list = markedCardListWithMeta(cards, nil, meta, m.groups.member, m.cardWidth(), h-lipgloss.Height(top)-1)
+		list = markedCardListWithMeta(cards, nil, meta, m.groups.member, m.cardWidth(), h-lipgloss.Height(top)-lipgloss.Height(footer)-2)
 	}
 
-	return top + "\n\n" + list
+	return withPaneFooter(top+"\n\n"+list, footer, m.cardWidth(), h)
 }
 
 // groupEditorView is the add-members form; new and existing groups use the floating editor.

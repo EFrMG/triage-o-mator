@@ -185,6 +185,11 @@ func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
 	if !strings.Contains(menu, "Master (1)") || !strings.Contains(menu, "Items (1)") || !strings.Contains(menu, "Groups & batches (2)") {
 		t.Fatalf("Briefs menu omitted a section: %q", menu)
 	}
+	left := m.mouseMainX() + 2 + maxInt((m.menuWidth()-ansi.StringWidth(m.briefTabs()))/2, 0)
+	m = baselineSend(m, tea.MouseClickMsg{X: left + len("Master (1)  ") + 1, Y: 3, Button: tea.MouseLeft})
+	if m.briefs.section != 1 {
+		t.Fatal("the centered Briefs tabs did not retain their mouse targets")
+	}
 	m.briefs.section = 2
 	work := ansi.Strip(m.briefsView())
 	if !strings.Contains(work, "Related reports") || strings.Index(work, "Related reports") > strings.Index(work, "Recent batch") {
@@ -192,7 +197,9 @@ func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
 	}
 
 	m = baselineSend(m, mouseKey("2"))
-	next, cmd = m.Update(mouseKey("enter"))
+	click := tea.MouseClickMsg{X: m.mouseMainX() + 4, Y: 5, Button: tea.MouseLeft}
+	m = baselineSend(m, click)
+	next, cmd = m.Update(click)
 	m = next.(model)
 	if cmd == nil {
 		t.Fatal("Item brief did not request Markdown")
@@ -3411,14 +3418,23 @@ func TestGroupEditFloatingFieldsStayBoundedAndSave(t *testing.T) {
 		t.Fatal("n did not open the floating group creator")
 	}
 	m.groups.edit.title.SetValue("Follow-up")
+	m = baselineSend(m, mouseKey("enter"))
+	if m.groups.edit.field != 1 || !m.groups.edit.description.Focused() {
+		t.Fatal("Enter on the new group's title did not focus Description")
+	}
 	m.groups.edit.description.SetValue("Collect related reports")
-	next, cmd = m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	m = baselineSend(m, mouseKey("tab"))
+	if m.groups.edit.field != m.groupAssigneeField() {
+		t.Fatal("Tab from Description did not focus Assignee")
+	}
+	m.groups.edit.assignee.SetValue("maintainer")
+	next, cmd = m.Update(mouseKey("enter"))
 	m = next.(model)
 	if cmd == nil || !m.groups.busy {
 		t.Fatal("floating group creator did not call bin/group")
 	}
 	m = baselineSend(m, cmd().(groupsLoadedMsg))
-	if m.groups.editing != "" || len(m.groups.records) != 2 || m.selectedGroup().Title != "Follow-up" {
+	if m.groups.editing != "" || len(m.groups.records) != 2 || m.selectedGroup().Title != "Follow-up" || m.selectedGroup().Assignee != "maintainer" {
 		t.Fatal("floating group creator did not save and select the new group")
 	}
 }

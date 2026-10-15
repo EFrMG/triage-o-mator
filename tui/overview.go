@@ -54,8 +54,8 @@ func progressBar(n, total, width int) string {
 		}
 	}
 
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Render(strings.Repeat("█", filled)) +
-		lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Border)).Render(strings.Repeat("░", width-filled))
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Render(strings.Repeat("━", filled)) +
+		lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Border)).Render(strings.Repeat("─", width-filled))
 }
 
 func (m model) overviewView() string {
@@ -111,7 +111,7 @@ func (m model) overviewView() string {
 	}
 
 	// As many steps (two lines each) as fit above the closing note; only then "…and N more".
-	note := mutedText(wrapText("[agent] steps an agent can do for you (ask it in plain words, see AGENTS.md); [human] steps need you.", width))
+	note := mutedText(wrapText("[agent] steps an agent can do for you (ask it in plain words); [human] steps need you.", width))
 	room := m.mainHeight() - strings.Count(b.String(), "\n") - 1 - lipgloss.Height(note)
 	shown := len(m.nextSteps)
 	if 2*shown > room {

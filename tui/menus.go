@@ -228,6 +228,19 @@ func inset(s string) string {
 	return strings.Join(lines, "\n")
 }
 
+// withPaneFooter reserves the bottom rows for a note, with a blank line above it when space permits.
+func withPaneFooter(content, footer string, width, height int) string {
+	footer = fitScreen(footer, width, height)
+	footerHeight := lipgloss.Height(footer)
+	content = fitScreen(content, width, maxInt(height-footerHeight-1, 0))
+	if content == "" {
+		return lipgloss.PlaceVertical(height, lipgloss.Bottom, footer)
+	}
+
+	gap := maxInt(height-lipgloss.Height(content)-footerHeight, 0)
+	return content + strings.Repeat("\n", gap+1) + footer
+}
+
 // withSidebar lays content out in the main panel beside the sidebar (or alone on narrow terminals), as the list views do. The panel has no padding: indent text with inset, and give cards cardWidth.
 func (m model) withSidebar(content string, mainFocused bool) string {
 	sidebarBox := m.sidebarBox(!mainFocused)

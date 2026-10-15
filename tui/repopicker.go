@@ -221,12 +221,22 @@ func rowsIn(rows []string) int {
 	return total
 }
 
+func (m model) repoPromptNote() string {
+	text := "Each repo keeps its work in its install. Switch back to resume, or enter an install path to open it directly."
+	if m.noInstall() {
+		text = "This is a triage-o-mator checkout, not an install: the triage itself lives in the repositories you triage. Pick one of the installs above, or type the path of a repository: one that has an install opens it, and one that doesn't is offered a plan of what installing there would change, before anything is written. This repository's own path works too, and triages triage-o-mator's own backlog."
+	}
+
+	return inset(mutedText(wrapText(text, m.menuWidth())))
+}
+
 func (m model) repoPromptView() string {
 	if m.installing.path != "" {
 		return m.installPlanView()
 	}
 
 	w := m.menuWidth()
+	note := m.repoPromptNote()
 	accent := strongAccent()
 	if m.repoPick < 0 {
 		accent = focusedBorderColor
@@ -263,19 +273,13 @@ func (m model) repoPromptView() string {
 			cards[i] = [2]string{first, second}
 		}
 
-		rows = append(rows, inset(mutedText("Choose an install, or type an owner/repo to start it here.")), "")
-		rows = append(rows, cardList(cards, m.repoPick, m.cardWidth(), m.mainHeight()-len(rows)-4))
+		rows = append(rows, inset(mutedText("Choose an install or enter owner/repo.")), "")
+		rows = append(rows, cardList(cards, m.repoPick, m.cardWidth(), m.mainHeight()-rowsIn(rows)-lipgloss.Height(note)-1))
 	} else if m.noInstall() {
 		rows = append(rows, inset(mutedText("No installs recorded on this machine yet. Type the path of a repository to install into one.")))
 	} else {
 		rows = append(rows, inset(mutedText("Nothing matches.")))
 	}
 
-	if m.noInstall() {
-		return strings.Join(append(rows, "", inset(mutedText(wrapText("This is a triage-o-mator checkout, not an install: the triage itself lives in the repositories you triage. Pick one of the installs above, or type the path of a repository: one that has an install opens it, and one that doesn't is offered a plan of what installing there would change, before anything is written. This repository's own path works too, and triages triage-o-mator's own backlog.", w)))), "\n")
-	}
-
-	rows = append(rows, "", inset(mutedText(wrapText("Each repo keeps its own ledger, batches, groups and exports in its install's data/<owner>/<repo>/, so switching back finds everything as you left it. A repo in another install switches this session to that install; an absolute path opens one directly (bin/install-to creates them). A repo with no data yet starts with a full fetch.", w))))
-
-	return strings.Join(rows, "\n")
+	return withPaneFooter(strings.Join(rows, "\n"), note, m.cardWidth(), m.mainHeight())
 }

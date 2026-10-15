@@ -156,6 +156,15 @@ func (m model) handleGroupEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.focusGroupEditField(0)
 	case "ctrl+s":
 		return m.saveGroupEdit()
+	case "enter":
+		if !e.previewing {
+			if e.field == 0 || m.onGroupStatusField() {
+				return m, m.focusGroupEditField(1)
+			}
+			if e.field == m.groupAssigneeField() {
+				return m.saveGroupEdit()
+			}
+		}
 	}
 
 	if e.previewing {

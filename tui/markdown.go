@@ -211,7 +211,7 @@ func renderComments(comments, authors, dates []string, width int) string {
 
 		rule := strings.Repeat("─", maxInt(width-ansi.StringWidth(prefix)-ansi.StringWidth(suffix), 0))
 		separator := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Accent)).Render(ansi.Truncate(prefix+rule+suffix, width, ""))
-		parts[i] = separator + "\n" + renderMarkdown(c, width)
+		parts[i] = separator + "\n\n" + renderMarkdown(c, width)
 		if i < len(dates) {
 			if date, err := time.Parse(time.RFC3339, dates[i]); err == nil {
 				label := ansi.Truncate(date.UTC().Format("2006-01-02 15:04 UTC"), maxInt(width, 1), "")
@@ -220,7 +220,7 @@ func renderComments(comments, authors, dates []string, width int) string {
 		}
 	}
 
-	return strings.Join(parts, "\n\n")
+	return strings.Join(parts, "\n")
 }
 
 func mutedText(s string) string {

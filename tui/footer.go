@@ -212,7 +212,13 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.groups.editing == "new" {
 			title = "New group"
 		}
-		edit := group(title, hint{"Tab/Shift-Tab", "field"}, hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})
+		enter := "next field"
+		if m.groups.edit.field == 1 {
+			enter = "newline"
+		} else if m.groups.edit.field == m.groupAssigneeField() {
+			enter = "save"
+		}
+		edit := group(title, hint{"Tab/Shift-Tab", "field"}, hint{"Enter", enter}, hint{"Ctrl-P", "preview"}, hint{"Ctrl-S", "save"}, hint{"Esc", "discard"})
 		if m.onGroupStatusField() {
 			edit.hints = append(edit.hints, hint{"←/→", "change status"})
 		} else {

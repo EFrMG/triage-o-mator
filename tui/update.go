@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -12,6 +13,21 @@ import (
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	result := next.(model)
+	if _, clicked := msg.(tea.MouseClickMsg); clicked && m.form.focused == fieldLabels && m.form.pick.open && (result.focus != FocusDetail || result.detail.key != m.detail.key || !result.form.pick.open || result.form.focused != fieldLabels) && m.itemEditSeq == result.itemEditSeq && m.installRoot == result.installRoot && m.repo == result.repo {
+		// Moving to another pane or menu accepts the checked set; Esc/h within the picker still cancel it.
+		m.form.PickKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+		accepted, _ := m.confirmItemField(fieldLabels)
+		if queued := accepted.(model); len(queued.itemEdits) > len(m.itemEdits) {
+			if result.detail.key == m.detail.key {
+				result.form.pick.open = false
+				result.form.proposedLabels = slices.Clone(m.form.proposedLabels)
+				result.form.updateDirty()
+			}
+			updated, publish := result.enqueueItemEdit(queued.itemEdits[len(queued.itemEdits)-1])
+			result = updated.(model)
+			cmd = tea.Batch(cmd, publish)
+		}
+	}
 	previousSource, previousFixed := m.checksSource()
 	source, fixed := result.checksSource()
 	contextChanged := m.installRoot != result.installRoot || m.repo != result.repo || m.detail.key != result.detail.key || m.detail.generation != result.detail.generation || previousSource != source || previousFixed != fixed
@@ -39,6 +55,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case itemFormEditMsg:
+		return m.finishItemEdit(msg)
 	case checksLogMsg:
 		return m.finishChecksLog(msg)
 	case checksMsg:
@@ -684,6 +702,11 @@ func (m model) startRefreshItemsAtHost(full bool, host string, items ...Key) (te
 
 // requestQuit quits immediately if nothing would be lost, otherwise asks for a second explicit quit before discarding in-memory drafts.
 func (m model) requestQuit() (tea.Model, tea.Cmd) {
+	if len(m.itemEdits) > 0 {
+		m.status = "Wait for the confirmed item changes to finish before quitting."
+		return m, nil
+	}
+
 	m.stopChecks()
 	m.commitDraftIfDirty()
 	if len(m.drafts) == 0 {
@@ -1064,9 +1087,9 @@ func (m model) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleReasonKey handles keys while typing the reason: printable keys are text, so only field movement, save, and Esc act.
+// handleReasonKey handles keys while typing the reason: Enter retains the field; printable keys remain text.
 func (m model) handleReasonKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// Letter shortcuts are text here. Enter saves and approves the completed decision; Ctrl-S remains an optional save-for-review alias.
+	// Letter shortcuts are text here. Confirming this field does not publish a public comment or authorize a state change.
 	save := msg.String() == "ctrl+s" || key.Matches(msg, keys.Confirm)
 	if m.confirmSave && !save {
 		m.confirmSave = false
@@ -1087,9 +1110,11 @@ func (m model) handleReasonKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 	case key.Matches(msg, keys.Confirm):
-		return m.requestDecisionSave()
+		m.form.FocusField(fieldContent)
+		return m.confirmItemField(fieldReason)
 	case msg.String() == "ctrl+s":
-		return m.requestSave()
+		m.form.FocusField(fieldContent)
+		return m.confirmItemField(fieldReason)
 	}
 
 	before := m.form.reason.Value()
@@ -1108,7 +1133,12 @@ func (m model) handleReasonKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	onChoice := formFieldIsEnum(m.form.focused) && !m.detail.AnySectionFull()
 	if onChoice && m.form.pick.open {
+		field := m.form.focused
+		confirmed := key.Matches(msg, keys.Confirm) || key.Matches(msg, keys.OpenList) || field == fieldLabels && (key.Matches(msg, keys.FieldNext) || key.Matches(msg, keys.ChoiceNext))
 		m.form.PickKey(msg)
+		if confirmed {
+			return m.confirmItemField(field)
+		}
 
 		return m, nil
 	}
@@ -1116,22 +1146,33 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.FieldNext):
 		if !m.detail.AnySectionFull() {
+			field := m.form.focused
 			m.form.NextField()
+			if field == fieldAction && m.form.Action() != m.form.baseAction {
+				return m.confirmItemField(fieldAction)
+			}
 		}
 	case key.Matches(msg, keys.FieldPrev):
 		if !m.detail.AnySectionFull() {
 			m.form.PrevField()
 		}
 	case onChoice && key.Matches(msg, keys.ChoiceNext):
+		field := m.form.focused
 		m.form.NextField()
+		if field == fieldAction && m.form.Action() != m.form.baseAction {
+			return m.confirmItemField(fieldAction)
+		}
 	case onChoice && key.Matches(msg, keys.ChoicePrev):
 		m.form.PrevField()
 	case onChoice && key.Matches(msg, keys.OpenList):
 		m.form.OpenPick()
 	case onChoice && key.Matches(msg, keys.Confirm):
+		field := m.form.focused
 		m.form.NextField()
+		return m.confirmItemField(field)
 	case onChoice && m.form.focused == fieldAction && msg.String() == "backspace":
 		m.form.ClearAction()
+		return m.confirmItemField(fieldAction)
 	case onChoice && key.Matches(msg, keys.ValueNext):
 		if m.form.focused == fieldLabels {
 			m.form.OpenPick()
@@ -1199,6 +1240,11 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.HalfUp):
 		m.detail.HalfPageUp()
 	case key.Matches(msg, keys.Save):
+		if onChoice {
+			field := m.form.focused
+			m.form.NextField()
+			return m.confirmItemField(field)
+		}
 		return m.requestSave()
 	case key.Matches(msg, keys.ReviewClear):
 		if it, ok := m.findItem(m.detail.key); ok {
@@ -1260,6 +1306,11 @@ func (m model) requestSave() (tea.Model, tea.Cmd) {
 }
 
 func (m model) requestDecisionSave() (tea.Model, tea.Cmd) {
+	if len(m.itemEdits) > 0 {
+		m.status = "Confirmed fields are being applied; you can keep editing or navigating."
+		return m, nil
+	}
+
 	if bad := m.form.InvalidValues(); bad != "" {
 		m.fail("Can't save " + bad + ": not in config/taxonomy.json. Pick a value first.")
 
@@ -1301,6 +1352,11 @@ func (m model) requestDecisionSave() (tea.Model, tea.Cmd) {
 
 func (m model) saveDecisionCmd() tea.Cmd {
 	snapshot := m.form.Snapshot()
+	it, _ := m.findItem(m.detail.key)
+	selected, observed := m.form.ProposedLabels(), slices.Clone(it.Labels)
+	slices.Sort(selected)
+	slices.Sort(observed)
+	labelsEdited := !slices.Equal(selected, observed) || len(it.ProposedLabels) > 0
 	by := m.contributor
 	if m.form.proposed && snapshot.FieldsEqual(m.form.proposalSnapshot) {
 		by = m.form.proposalBy
@@ -1310,7 +1366,7 @@ func (m model) saveDecisionCmd() tea.Cmd {
 	}
 
 	p := proposal{ProposedLabels: m.form.ProposedLabels(), Action: m.form.Action(), Reason: m.form.Reason(), AgentNotes: m.form.proposalNotes,
-		fields: map[string]bool{"action": true, "reason": true, "proposed_labels": m.form.ReplaceProposedLabels(), "agent_notes": m.form.proposalEdit.has("agent_notes")},
+		fields: map[string]bool{"action": true, "reason": true, "proposed_labels": m.form.ReplaceProposedLabels() && labelsEdited, "agent_notes": m.form.proposalEdit.has("agent_notes")},
 	}
 	unchangedProposal := m.form.proposed && snapshot.FieldsEqual(m.form.proposalSnapshot)
 	if unchangedProposal {

@@ -91,6 +91,8 @@ The [tutorial](docs/tutorial.md) covers these menus and their keybindings in det
 
 A usual session goes from the overview to reading and deciding on items, then to grouping and comparing them, reviewing what agents proposed, and handing the result to maintainers.
 
+In an item's form, check the labels you want and finish the picker with Enter, l or Tab to publish that set to GitHub. Moving to another pane or menu with the mouse also applies the checked set; Esc cancels the picker. Confirm an Action with Enter or l to save guidance for an agent's next pass, and press Enter to retain a Reason. Each field applies independently, so you can keep navigating without a separate decision save. Comments, closures and reopenings use their composer, where Ctrl-S submits the visible text and target.
+
 ### Menus
 
 They are listed here in sidebar order.

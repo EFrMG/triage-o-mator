@@ -27,9 +27,12 @@ This records an attributed local decision. It does not authorize a GitHub write 
 --batch-id stamps a single-item decision with the batch it was made in (default "tui"), so decisions made while working through a batch in the TUI stay attributable to that batch. --only-untriaged skips decisions-file rows whose item already has proposed labels or an action, and edits already recorded from that batch, so applying an agent's proposals never overwrites a decision someone already saved.
 
 --expected-repo refuses the operation if the install's configured repository changed after the caller selected it.
+
+--expected-fields binds current values of the fields edited in single-item mode. The owning ledger transaction refuses an edit when one of those values changed, so independent TUI confirmations cannot overwrite newer guidance.
 """
 
 import argparse
+import json
 import sys
 from contextlib import nullcontext
 from pathlib import Path
@@ -88,6 +91,7 @@ def main():
         help="validate and print what would be applied, without writing the ledger",
     )
     ap.add_argument("--expected-repo", help="refuse to write if config/repo differs from this repository")
+    ap.add_argument("--expected-fields", help="single-item mode: JSON object binding the current values of fields being edited")
     args = ap.parse_args()
 
     if args.expected_repo is not None and args.expected_repo != REPO:
@@ -96,6 +100,16 @@ def main():
     single_edits = {field: getattr(args, field) for field in ("action", "reason", "agent_notes") if getattr(args, field) is not None}
     if args.proposed_labels is not None or args.replace_proposed_labels:
         single_edits["proposed_labels"] = args.proposed_labels or []
+
+    expected = None
+    if args.expected_fields is not None:
+        try:
+            expected = json.loads(args.expected_fields)
+        except json.JSONDecodeError:
+            ap.error("--expected-fields must be a JSON object")
+
+        if args.number is None or args.clear or args.decisions_path is not None or not isinstance(expected, dict) or not set(expected).issubset(single_edits):
+            ap.error("--expected-fields binds only edited fields in single-item mode")
 
     if args.clear and (args.decisions_path is not None or single_edits):
         sys.exit("error: --clear only takes --number/--kind or --key (plus --by, --dry-run)")
@@ -146,6 +160,11 @@ def main():
         ledger = load_ledger()
         by_key = {(r["kind"], r["number"]): r for r in ledger}
 
+        if expected is not None:
+            selected = by_key.get((args.kind, args.number))
+            if selected is None or any(selected.get(field, TRIAGE_DEFAULTS[field]) != value for field, value in expected.items()):
+                sys.exit("error: the selected form fields changed; reopen the item before confirming")
+
         ts = now_iso()
         applied, blank, kept, recorded, warnings, nothing = 0, [], [], [], [], []
 
@@ -182,7 +201,7 @@ def main():
 
                     continue
 
-                for field in DECISION_FIELDS + ("triaged_at", "triaged_by", "batch_id"):
+                for field in DECISION_FIELDS + ("labels_reviewed", "triaged_at", "triaged_by", "batch_id"):
                     rec[field] = TRIAGE_DEFAULTS[field]
 
                 applied += 1

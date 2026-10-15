@@ -450,7 +450,7 @@ func (m model) contextFooterGroups() []footerGroup {
 	case m.searching:
 		return []footerGroup{group("Search", hint{"type", "title words or #number"}, hint{"↑/↓", "move"}, bind("keep", keys.Enter), bind("clear", keys.Cancel)), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.typingReason():
-		return []footerGroup{group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("save & approve", keys.Confirm)), group("Navigation", bind("back", keys.Cancel), bind("exit", keys.ForceQuit))}
+		return []footerGroup{group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("keep reason", keys.Confirm)), group("Navigation", bind("back", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.groups.open:
 		return m.groupFooter()
 	case m.briefs.open:
@@ -532,7 +532,7 @@ func (m model) tabJumpHint() hint {
 }
 
 func (m model) itemFooter() []footerGroup {
-	item := group("Item", bind("", keys.Save), bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Close, keys.CloseEditor), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Yank))
+	item := group("Item", bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Close, keys.CloseEditor), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Yank))
 	if it, ok := m.findItem(m.detail.key); ok && it.PendingReview() {
 		item.hints = append(item.hints, bind("", keys.ReviewClear))
 	}
@@ -556,7 +556,7 @@ func (m model) itemFooter() []footerGroup {
 
 	if m.form.pick.open {
 		if m.form.focused == fieldLabels {
-			return []footerGroup{group("Labels", hint{"j/k", "select"}, hint{"Space", "toggle"}, hint{"Enter", "done"}, hint{"Esc", "cancel"}), group("Navigation", bind("", keys.Quit), bind("exit", keys.ForceQuit))}
+			return []footerGroup{group("Labels", hint{"j/k", "select"}, hint{"Space", "toggle"}, hint{"Enter/Tab", "apply"}, hint{"Esc", "cancel"}), group("Navigation", bind("", keys.Quit), bind("exit", keys.ForceQuit))}
 		}
 		return []footerGroup{group("List", bind("move", keys.ValueNext, keys.ValuePrev), bind("pick", keys.Confirm, keys.OpenList), bind("", keys.CloseList)), group("Navigation", bind("", keys.Quit), bind("exit", keys.ForceQuit))}
 	}

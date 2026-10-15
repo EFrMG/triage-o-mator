@@ -2034,6 +2034,31 @@ func TestBaselineSaveAndExplicitPendingReviewAreSeparate(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "config/taxonomy.json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	labelGH := `#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+root = Path.cwd()
+args = sys.argv[1:]
+method, endpoint = args[args.index("--method") + 1:args.index("--method") + 3]
+assert args[args.index("--hostname") + 1] == "github.com"
+path = root / "live-labels.json"
+labels = json.loads(path.read_text()) if path.exists() else []
+catalog = json.loads((root / "config/taxonomy.json").read_text())["label_catalog"]["labels"]
+if method == "GET" and endpoint.startswith("repos/owner/repo/labels/"):
+    print(json.dumps(next(row for row in catalog if row["name"] == endpoint.rsplit("/", 1)[1])))
+elif method == "GET" and endpoint == "repos/owner/repo/issues/1":
+    print(json.dumps(dict(number=1, html_url="https://github.com/owner/repo/issues/1", state="open", labels=labels)))
+elif method == "PUT" and endpoint == "repos/owner/repo/issues/1/labels":
+    names = json.load(sys.stdin)["labels"]
+    labels = [dict(id=row["id"], name=row["name"]) for row in catalog if row["name"] in names]
+    path.write_text(json.dumps(labels))
+    print(json.dumps(labels))
+else:
+    sys.exit("unexpected operation")
+`
+	if err := os.WriteFile(filepath.Join(root, "bin/gh"), []byte(labelGH), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	m = baselineModel(t, root)
 	m.activateTab(untriagedTab)
@@ -2046,26 +2071,113 @@ func TestBaselineSaveAndExplicitPendingReviewAreSeparate(t *testing.T) {
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeySpace})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeySpace})
-	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
 	if !slices.Equal(m.form.ProposedLabels(), []string{"bug", "needs-info"}) || m.form.focused != fieldAction {
 		t.Fatal("selected labels were not retained in the decision form")
 	}
-	m.form.CycleValue(1)
-	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if m.form.Action() != "" {
-		t.Fatal("Backspace did not leave action assessment pending")
+	if cmd == nil || m.pendingApply != 1 {
+		t.Fatal("finishing the label picker did not start publication")
 	}
+	m = baselineSend(m, mouseKey("l"))
+	m.form.pick.cursor = slices.Index(m.taxonomy.SelectableActions(), "close")
+	m = baselineSend(m, mouseKey("l"))
 	m.form.reason.SetValue("Confirmed bug")
-	_, cmd = m.requestSave()
-	if cmd == nil {
-		t.Fatal("label decision produced no save command")
+	m.form.dirty = true
+	m = baselineSend(m, mouseKey("enter"))
+	if len(m.itemEdits) != 3 || m.comment.open {
+		t.Fatal("action and reason confirmations did not queue independent data edits")
 	}
-	if result := cmd().(applyDoneMsg); result.err != nil {
-		t.Fatal(result.err)
+	m.goBack()
+	for len(m.itemEdits) > 0 {
+		result := cmd().(itemFormEditMsg)
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		next, cmd = m.Update(result)
+		m = next.(model)
 	}
 	row = baselineLedgerRow(t, root)
-	if row["action"] != "" || !slices.Equal(row["proposed_labels"].([]any), []any{"bug", "needs-info"}) || row["review_request"] != nil {
-		t.Fatalf("new label decision did not stay separate from the action and explicit review request: %v", row)
+	if row["action"] != "close" || row["reason"] != "Confirmed bug" || !slices.Equal(row["labels"].([]any), []any{"bug", "needs-info"}) || len(row["proposed_labels"].([]any)) != 0 || row["labels_reviewed"] != true || row["review_request"] != nil {
+		t.Fatalf("confirmed form edits were not applied independently: %v", row)
+	}
+	if m.focus != FocusList || m.pendingApply != 0 || len(m.drafts) != 0 {
+		t.Fatal("completed edits stole navigation or retained a saved draft")
+	}
+
+	m.openItem(m.items[0])
+	m.focus = FocusDetail
+	m.form.FocusField(fieldLabels)
+	m = baselineSend(m, mouseKey("l"))
+	m = baselineSend(m, mouseKey("space"))
+	next, cmd = m.Update(mouseKey("tab"))
+	m = next.(model)
+	if cmd == nil || m.form.focused != fieldAction {
+		t.Fatal("Tab did not accept the checked label set and advance")
+	}
+	edit := m.itemEdits[0]
+	stale := edit
+	stale.repo = "other/repo"
+	m = baselineSend(m, itemFormEditMsg{edit: stale})
+	if m.pendingApply != 1 {
+		t.Fatal("a foreign edit reply released the current write")
+	}
+	m = baselineSend(m, itemFormEditMsg{edit: edit, err: errors.New("connection lost")})
+	if len(m.drafts) != 1 || m.pendingApply != 0 || !m.form.dirty || !strings.Contains(m.status, "draft kept") {
+		t.Fatal("a failed label publication discarded the checked set or left its write running")
+	}
+
+	m = baselineModel(t, root)
+	m.openItem(m.items[0])
+	m.focus = FocusDetail
+	m.form.FocusField(fieldLabels)
+	m = baselineSend(m, mouseKey("l"))
+	m = baselineSend(m, mouseKey("space"))
+	next, cmd = m.Update(mouseKey("esc"))
+	m = next.(model)
+	if cmd != nil || len(m.itemEdits) != 0 || !slices.Equal(m.form.ProposedLabels(), []string{"bug", "needs-info"}) {
+		t.Fatal("canceling the picker published or retained its unchecked label")
+	}
+	m = baselineSend(m, mouseKey("l"))
+	m = baselineSend(m, mouseKey("space"))
+	next, cmd = m.Update(tea.MouseClickMsg{X: 1, Y: 6, Button: tea.MouseLeft})
+	m = next.(model)
+	if cmd == nil || len(m.itemEdits) != 1 || m.form.focused != fieldContent || !slices.Equal(m.itemEdits[0].snapshot.proposedLabels, []string{"needs-info"}) {
+		t.Fatal("moving out of the picker with the mouse did not apply the checked set")
+	}
+
+	m = baselineModel(t, root)
+	m.openItem(m.items[0])
+	m.focus = FocusDetail
+	m.form.FocusField(fieldAction)
+	m = baselineSend(m, mouseKey("l"))
+	m.form.pick.cursor = slices.Index(m.taxonomy.SelectableActions(), "comment")
+	next, cmd = m.Update(mouseKey("enter"))
+	m = next.(model)
+	m.form.reason.SetValue("A newer unconfirmed reason")
+	m.form.dirty = true
+	m = baselineSend(m, cmd().(itemFormEditMsg))
+	if m.form.Reason() != "A newer unconfirmed reason" || !m.form.dirty || m.form.focused != fieldReason || baselineLedgerRow(t, root)["reason"] != "Confirmed bug" {
+		t.Fatal("action completion overwrote or prematurely saved a newer reason")
+	}
+	m.form.FocusField(fieldAction)
+	next, cmd = m.confirmItemField(fieldAction)
+	m = next.(model)
+	path := filepath.Join(root, "data/owner/repo/ledger.jsonl")
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revised := strings.Replace(string(data), `"action": "comment"`, `"action": "none"`, 1)
+	if revised == string(data) {
+		t.Fatal("fixture did not change the saved action")
+	}
+	if err := os.WriteFile(path, []byte(revised), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := cmd().(itemFormEditMsg)
+	if result.err == nil || !strings.Contains(result.err.Error(), "selected form fields changed") || baselineLedgerRow(t, root)["action"] != "none" {
+		t.Fatal("a queued action edit overwrote newer local guidance")
 	}
 }
 

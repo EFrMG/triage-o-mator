@@ -509,6 +509,100 @@ class VerificationSettingsTests(Workspace):
 
 
 class LabelApplicationTests(Workspace):
+    def test_confirmed_label_selection_publishes_and_preserves_failed_drafts(self):
+        taxonomy_path = self.root / "config/taxonomy.json"
+        taxonomy = json.loads(taxonomy_path.read_text())
+        catalog = [dict(id=7, name="bug", color="ff0000", description="Defect"), dict(id=9, name="manual", color="ffffff", description="Maintainer label")]
+        taxonomy["label_catalog"] = dict(repository="owner/repo", status="observed", labels=catalog)
+        taxonomy_path.write_text(json.dumps(taxonomy))
+        (self.mock / "catalog.json").write_text(json.dumps(catalog))
+        ledger_path = self.root / "data/owner/repo/ledger.jsonl"
+        row = dict(item(1, "An item"), labels=["manual"], proposed_labels=["bug"], action="close", reason="Guidance for an agent", review_request=None)
+        ledger_path.write_text(json.dumps(row) + "\n")
+        live = dict(number=1, html_url="https://github.com/owner/repo/issues/1", state="open", labels=[dict(id=9, name="manual")])
+        (self.mock / "live.json").write_text(json.dumps(live))
+        (self.mock / "gh").write_text('''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+root = Path(os.environ["FAKE_GH_DIR"])
+args = sys.argv[1:]
+method, endpoint = args[args.index("--method") + 1:args.index("--method") + 3]
+assert args[args.index("--hostname") + 1] == "github.com"
+with (root / "calls.jsonl").open("a") as out:
+    out.write(json.dumps(args) + "\\n")
+live = json.loads((root / "live.json").read_text())
+catalog = json.loads((root / "catalog.json").read_text())
+if method == "GET" and endpoint.startswith("repos/owner/repo/labels/"):
+    label = next((label for label in catalog if label["name"] == endpoint.rsplit("/", 1)[1]), None)
+    if label is None:
+        sys.exit("label not found")
+    print(json.dumps(label))
+elif method == "GET" and endpoint == "repos/owner/repo/issues/1":
+    print(json.dumps(live))
+elif method == "PUT" and endpoint == "repos/owner/repo/issues/1/labels":
+    names = json.load(sys.stdin)["labels"]
+    live["labels"] = [dict(id=label["id"], name=label["name"]) for label in catalog if label["name"] in names]
+    (root / "live.json").write_text(json.dumps(live))
+    if (root / "uncertain").exists():
+        sys.exit("connection lost after applying labels")
+    print(json.dumps(live["labels"]))
+else:
+    sys.exit("unexpected operation")
+''')
+        args = ("edit", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--labels", '["bug"]', "--expected-labels", '["manual"]', "--expected-proposals", '["bug"]', "--by", "maintainer")
+        preview = self.json_cli("item-labels", *args)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.ledger()["issue", 1], row)
+        self.assertFalse((self.root / "data/owner/repo/local").exists())
+        publish = ("--publish", "--request-id", preview["plan"]["request_id"], "--approve", preview["approval"])
+        self.run_cli("item-labels", *args, *publish, "--labels", "[]", ok=False)
+        self.assertEqual(self.calls(), [])
+
+        live["labels"] = []
+        (self.mock / "live.json").write_text(json.dumps(live))
+        self.run_cli("item-labels", *args, *publish, ok=False)
+        self.assertFalse(any("PUT" in call for call in self.calls()))
+        live["labels"] = [dict(id=9, name="manual")]
+        (self.mock / "live.json").write_text(json.dumps(live))
+        (self.mock / "catalog.json").write_text(json.dumps([dict(catalog[0], id=70), catalog[1]]))
+        self.run_cli("item-labels", *args, *publish, ok=False)
+        self.assertFalse(any("PUT" in call for call in self.calls()))
+        (self.mock / "catalog.json").write_text(json.dumps(catalog))
+
+        # An exact maintainer selection is independent of the automatic labeling setting and of unrelated action guidance.
+        disabled = self.json_cli("item-labels", "disable", "--expected-repo", "owner/repo")
+        self.json_cli("item-labels", "disable", "--expected-repo", "owner/repo", "--apply", "--preview-sha256", disabled["preview_sha256"])
+        result = self.json_cli("item-labels", *args, *publish)
+        confirmed = self.ledger()["issue", 1]
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(confirmed["labels"], ["bug"])
+        self.assertEqual(confirmed["proposed_labels"], [])
+        self.assertTrue(confirmed["labels_reviewed"])
+        self.assertEqual((confirmed["action"], confirmed["reason"], confirmed["review_request"]), ("close", "Guidance for an agent", None))
+        calls = self.calls()
+        self.assertEqual(self.json_cli("item-labels", *args, *publish), result)
+        self.assertEqual(self.calls(), calls)
+
+        empty_args = ("edit", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--labels", "[]", "--expected-labels", '["bug"]')
+        empty = self.json_cli("item-labels", *empty_args)
+        empty_publish = ("--publish", "--request-id", empty["plan"]["request_id"], "--approve", empty["approval"])
+        self.json_cli("item-labels", *empty_args, *empty_publish)
+        self.assertEqual(self.ledger()["issue", 1]["labels"], [])
+        self.assertEqual(self.json_cli("item-labels", "status", "--expected-repo", "owner/repo")["paused_items"], ["issue:1"])
+        self.run_cli("apply", "--number", "1", "--kind", "issue", "--action", "")
+        self.assertIn("Triaged: 1/1", self.run_cli("stats").stdout)
+
+        uncertain_args = ("edit", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--labels", '["bug"]', "--expected-labels", "[]")
+        uncertain = self.json_cli("item-labels", *uncertain_args)
+        uncertain_publish = ("--publish", "--request-id", uncertain["plan"]["request_id"], "--approve", uncertain["approval"])
+        (self.mock / "uncertain").touch()
+        self.run_cli("item-labels", *uncertain_args, *uncertain_publish, ok=False)
+        calls = self.calls()
+        self.run_cli("item-labels", *uncertain_args, *uncertain_publish, ok=False)
+        self.assertEqual(self.calls(), calls)
+        self.assertEqual(self.ledger()["issue", 1]["labels"], [])
+        self.assertEqual(self.json_cli("item-labels", "status", "--expected-repo", "owner/repo")["pending_items"], ["issue:1"])
+
     def test_action_modes_are_explicit_per_repository_and_reset_after_guidance_changes(self):
         args = ("--expected-repo", "owner/repo")
         initial = self.json_cli("action-policy", "status", *args)

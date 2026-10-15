@@ -61,6 +61,7 @@ FIELDS = [
     "labels",
     "comments_count",
     "proposed_labels",
+    "labels_reviewed",
     "action",
     "reason",
     "triaged_at",
@@ -77,6 +78,7 @@ DECISION_FIELDS = ("proposed_labels", "action", "reason")
 
 TRIAGE_DEFAULTS = {
     "proposed_labels": [],
+    "labels_reviewed": False,
     "action": "",
     "reason": "",
     "triaged_at": "",
@@ -243,8 +245,8 @@ def parse_key(text):
 
 
 def has_decision(rec):
-    """Proposed labels or an action identify a saved local decision."""
-    return bool(rec.get("proposed_labels") or rec.get("action"))
+    """A confirmed label selection, proposed labels or an action identify a saved decision."""
+    return bool(rec.get("labels_reviewed") or rec.get("proposed_labels") or rec.get("action"))
 
 
 def proposal_fulfilled(row, record, batch_id):
@@ -311,7 +313,7 @@ def decision_text(rec):
     if not has_decision(rec):
         return "untriaged"
 
-    labels = rec.get("proposed_labels") or []
+    labels = rec.get("proposed_labels") or (rec.get("labels") if rec.get("labels_reviewed") else []) or []
     source = "labels: " + ", ".join(labels) if labels else "no labels"
 
     return source + " / " + (rec.get("action") or "action not assessed")

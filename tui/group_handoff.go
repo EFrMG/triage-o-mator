@@ -22,6 +22,8 @@ type groupHandoffItem struct {
 	Title             string         `json:"title"`
 	State             string         `json:"state"`
 	ProposedLabels    []string       `json:"proposed_labels"`
+	Labels            []string       `json:"labels"`
+	LabelsReviewed    bool           `json:"labels_reviewed"`
 	Action            string         `json:"action"`
 	Reason            string         `json:"reason"`
 	TriagedBy         string         `json:"triaged_by"`
@@ -178,8 +180,9 @@ func groupHandoffText(header string, msg groupHandoffMsg) string {
 		} else {
 			handoffValue(&b, "State", item.State)
 			var decision []string
-			if len(item.ProposedLabels) > 0 {
-				decision = append(decision, "labels "+strings.Join(item.ProposedLabels, ", "))
+			if len(item.ProposedLabels) > 0 || item.LabelsReviewed {
+				labels := Item{Labels: item.Labels, ProposedLabels: item.ProposedLabels, LabelsReviewed: item.LabelsReviewed}.DecisionLabel()
+				decision = append(decision, "labels "+labels)
 			}
 			if item.Action != "" {
 				decision = append(decision, "action "+item.Action)

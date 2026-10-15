@@ -11,7 +11,7 @@ cd /path/to/your/repository
 ./triage-o-mator/bin/triage-o-mator
 ```
 
-Decision saves, review requests and group edits change your repository's git-tracked ledger and groups for real. To practice, work on a throwaway branch (`git switch -c tutorial`) and drop it afterwards.
+Confirmed item labels change GitHub immediately. Action and reason edits, review requests and group edits change your repository's ledger and groups. Practice label changes in a disposable repository; a local branch does not isolate GitHub writes.
 
 ## A focused review loop
 
@@ -65,13 +65,14 @@ The optional **Settings → Automations → CI for readiness** requirement defau
 ## 5. Record a decision
 
 - In an untriaged item, `l` moves into the form: Labels, Action, and Reason.
-- The **Labels** field opens the repository's saved GitHub label catalog with `l` or `→`. Move with `j`/`k`, toggle any number of labels with `Space`, then press `Enter` to keep the selection or `Esc` to cancel. These are local proposals, separate from the item's current GitHub labels. Action cycles with `j`/`k`; reason is free text. Choose `comment`, `close`, or `reopen` for the GitHub operation, and use Reason to say what to ask or explain and why. Action can remain **not assessed** while labels are proposed; `Backspace` clears a selected Action. Choose `none` only after assessing actions and finding no conversation or state write to suggest.
+- The **Labels** field opens the repository's saved GitHub label catalog with `l` or `→`, showing current labels and any suggested additions together. Move with `j`/`k`, toggle labels with `Space`, then press `Enter`, `l` or `Tab` to publish the checked set. Clicking into another pane or menu also applies that set; `Esc` or `h` cancels the picker. Unticking a current label removes it from GitHub. A successful edit consumes the saved label suggestion; later refreshes follow GitHub's labels.
+- **Action** is guidance for an agent's later pass. Cycle with `j`/`k`, then confirm with Enter, or select from its list with Enter or `l`, to save the choice immediately. Moving to the next field after changing it also saves it. `Backspace` clears the guidance. Choose `none` only after assessing actions and finding no conversation or state write to suggest. Choosing `comment`, `close` or `reopen` here does not publish a comment or change GitHub state.
+- Press Enter in **Reason** to retain the text immediately, including an empty value when clearing it. Reason explains the action guidance for later readers and agents; it is not a public comment.
 - Saved values missing from the current taxonomy stay visible and require an explicit supported choice before saving.
 - `Tab`/`Shift-Tab` or `J`/`K` move between fields. On a choice, `l` opens all values; select with `Enter` or `l`, or close the list with `Esc` or `h`. Printable keys remain text while editing.
 - In most forms, `Ctrl-S` submits from any field; `Esc` cancels.
-- `s` saves through `bin/apply`, attributed to your `git config user.name`. An unchanged placeholder decision or an empty reason needs a second `s`. After saving, you return to the list on the next item.
-- While typing the reason, `Enter` saves. `s` is an ordinary letter there; `Ctrl-S` also saves while typing.
-- Unsaved edits are kept as drafts while you look at other items, marked `unsaved` in yellow in the lists; `q` warns before discarding them.
+- These field confirmations do not need a separate decision save. They are attributed to your configured contributor name, and completed writes leave your current navigation alone. Use the comment, close or reopen composer to publish conversation text and state changes; Ctrl-S submits its visible text and target.
+- Unconfirmed edits and failed writes stay as drafts while you look at other items. `q` waits for confirmed edits to finish and warns before discarding remaining drafts.
 
 ## 6. Let an agent prepare a batch
 

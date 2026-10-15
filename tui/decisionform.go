@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// formField indexes the Tab-cycle stops within the detail panel: the item content tabs (owned by detailModel) plus proposed labels, action and reason.
+// formField indexes the Tab-cycle stops within the detail panel: the item content tabs (owned by detailModel) plus labels, action and reason.
 // fieldContent is the default on selecting an item, so Enter / H / L / j / k / gg / G immediately act on the content sections rather than being swallowed by the label picker.
 type formField int
 
@@ -25,7 +25,7 @@ const (
 	fieldCount
 )
 
-// decisionForm edits proposed labels, action and reason for the selected item.
+// decisionForm edits the item's labels and the action/reason guidance for later agent passes.
 type decisionForm struct {
 	taxonomy Taxonomy
 	repo     string
@@ -35,6 +35,10 @@ type decisionForm struct {
 	// A negative index preserves a blank field in an existing decision or proposal.
 	actionIdx      int
 	proposedLabels []string
+	observedLabels []string
+	baseLabels     []string
+	baseAction     string
+	baseReason     string
 	// The reason editor grows up to reasonMaxLines visible rows; Enter saves rather than inserting a newline.
 	reason textarea.Model
 
@@ -103,7 +107,7 @@ func (f *decisionForm) SetWidth(width int) {
 	f.reason.SetHeight(minInt(maxInt(lines, 1), reasonMaxLines))
 }
 
-// decisionSnapshot is an in-memory, unsaved draft of a decision for one item: lets a reviewer jump between items without losing edits made before pressing ctrl+s. See model.drafts.
+// decisionSnapshot retains the form values and the baseline of its independently confirmed fields while a reviewer compares items. See model.drafts.
 type decisionSnapshot struct {
 	actionIdx       int
 	proposedLabels  []string
@@ -111,6 +115,10 @@ type decisionSnapshot struct {
 	badLabels       []string
 	badAction       string
 	proposalContext *proposalDraft
+	observedLabels  []string
+	baseLabels      []string
+	baseAction      string
+	baseReason      string
 }
 
 // proposalDraft keeps the source edit alongside a draft so reopening an item preserves omissions, explicit clears and attribution.
@@ -152,6 +160,10 @@ func (f decisionForm) Snapshot() decisionSnapshot {
 		badLabels:       slices.Clone(f.badLabels),
 		badAction:       f.badAction,
 		proposalContext: &proposalDraft{proposed: f.proposed, notes: f.proposalNotes, by: f.proposalBy, edit: f.proposalEdit, original: f.proposalSnapshot},
+		observedLabels:  slices.Clone(f.observedLabels),
+		baseLabels:      slices.Clone(f.baseLabels),
+		baseAction:      f.baseAction,
+		baseReason:      f.baseReason,
 	}
 }
 
@@ -161,6 +173,8 @@ func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 	f.proposedLabels = slices.Clone(s.proposedLabels)
 	f.reason.SetValue(s.reason)
 	f.badLabels, f.badAction = slices.Clone(s.badLabels), s.badAction
+	f.observedLabels = slices.Clone(s.observedLabels)
+	f.baseLabels, f.baseAction, f.baseReason = slices.Clone(s.baseLabels), s.baseAction, s.baseReason
 	if context := s.proposalContext; context != nil {
 		f.proposed = context.proposed
 		f.proposalNotes, f.proposalBy = context.notes, context.by
@@ -175,7 +189,7 @@ func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 // ApplyProposal seeds the form from a batch decisions file's proposal for an untriaged item. It counts as touched (someone chose these values) but not dirty: the proposal stays in the file, so leaving without saving loses nothing.
 func (f *decisionForm) ApplyProposal(p proposal) {
 	if p.has("proposed_labels") {
-		f.proposedLabels = slices.Clone(p.ProposedLabels)
+		f.proposedLabels = mergedLabels(f.observedLabels, p.ProposedLabels)
 		f.badLabels = f.unlistedLabels()
 	}
 	if p.has("action") {
@@ -195,6 +209,7 @@ func (f *decisionForm) ApplyProposal(p proposal) {
 	f.proposalBy = p.ProposedBy
 	f.proposalSnapshot = f.Snapshot()
 	f.proposalSnapshot.proposalContext = nil
+	f.baseLabels, f.baseAction, f.baseReason = slices.Clone(f.proposedLabels), f.Action(), f.Reason()
 }
 
 // MarkDuplicate prefills a matching GitHub label and a close operation, leaving the reason for the contributor to check.
@@ -236,7 +251,8 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 // LoadItem seeds the form from an existing ledger row (empty strings if untriaged).
 func (f *decisionForm) LoadItem(it Item) {
 	f.kind = it.Kind
-	f.proposedLabels = slices.Clone(it.ProposedLabels)
+	f.observedLabels = slices.Clone(it.Labels)
+	f.proposedLabels = mergedLabels(it.Labels, it.ProposedLabels)
 	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), it.Action)
 	hasDecision := !it.Untriaged() || it.Reason != ""
 	if it.Action == "" {
@@ -256,6 +272,22 @@ func (f *decisionForm) LoadItem(it Item) {
 	f.proposalSnapshot = decisionSnapshot{}
 	f.pick.open = false
 	f.reason.Blur()
+	f.baseLabels, f.baseAction, f.baseReason = slices.Clone(f.proposedLabels), f.Action(), f.Reason()
+}
+
+func mergedLabels(observed, suggested []string) []string {
+	labels := slices.Clone(observed)
+	for _, name := range suggested {
+		if !slices.Contains(labels, name) {
+			labels = append(labels, name)
+		}
+	}
+
+	return labels
+}
+
+func (f *decisionForm) updateDirty() {
+	f.dirty = !slices.Equal(f.proposedLabels, f.baseLabels) || f.Action() != f.baseAction || f.Reason() != f.baseReason
 }
 
 // unlisted returns value if it's set but not one of options, else "".
@@ -416,7 +448,7 @@ func (f *decisionForm) PickKey(msg tea.KeyPressMsg) {
 			name := f.pick.options[f.pick.cursor]
 			f.pick.checked[name] = !f.pick.checked[name]
 			return
-		case key.Matches(msg, keys.Confirm), key.Matches(msg, keys.OpenList):
+		case key.Matches(msg, keys.Confirm), key.Matches(msg, keys.OpenList), key.Matches(msg, keys.FieldNext), key.Matches(msg, keys.ChoiceNext):
 			var selected []string
 			for _, name := range f.pick.options {
 				if f.pick.checked[name] {
@@ -542,10 +574,10 @@ func (f decisionForm) View(width int) string {
 		state = "unsaved changes"
 		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
 	case f.proposed:
-		state = "proposed in the batch file, not saved yet"
+		state = "Confirm choices to apply this suggestion"
 		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
 	case !f.touched:
-		state = "untriaged: fields show defaults until you change them"
+		state = "Choose labels or an action"
 	}
 
 	if state != "" {

@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Preview and run bounded, repository-enabled GitHub item labeling from local proposals."""
+"""Preview and run bounded GitHub labeling passes, or publish one explicitly confirmed maintainer label selection with edit."""
 
 import argparse
 import json
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).absolute().parent))
-from _evidence import value_digest
+from _evidence import repository, value_digest
 from _storage import atomic_writer, locked
-from _triage import CONFIG_DIR, DATA_DIR, REPO, load_ledger, load_taxonomy, now_iso, observed_catalog, parse_key
+from _triage import CONFIG_DIR, DATA_DIR, LEDGER_PATH, REPO, load_ledger, load_taxonomy, now_iso, observed_catalog, parse_key, save_ledger
 
 
 POLICY_PATH = CONFIG_DIR / "label-application.json"
@@ -131,9 +132,10 @@ def reset_plan(saved, kind, number, transport):
 
 
 class Transport:
-    def __init__(self, budget):
+    def __init__(self, budget, host=None):
         self.budget = budget
         self.used = 0
+        self.host = host
 
     def api(self, method, endpoint, body=None):
         if self.used >= self.budget:
@@ -142,6 +144,8 @@ class Transport:
         self.used += 1
 
         command = ["gh", "api", "--method", method, endpoint]
+        if self.host:
+            command += ["--hostname", self.host]
         if body is not None:
             command += ["--input", "-"]
 
@@ -279,6 +283,123 @@ def record_outcome(row):
         os.fsync(out.fileno())
 
 
+def edit_names(value):
+    names = json.loads(value)
+    if not isinstance(names, list) or any(not isinstance(name, str) or not name for name in names) or len(set(names)) != len(names):
+        raise ValueError("label selections must be JSON arrays of distinct label names")
+
+    return sorted(names)
+
+
+def edit_plan(args):
+    identity = repository(REPO, host=args.host)
+    desired, expected = edit_names(args.labels), edit_names(args.expected_labels)
+    proposed = edit_names(args.expected_proposals)
+    catalog = observed_catalog(load_taxonomy())
+    if catalog is None:
+        raise ValueError("sync the repository label catalog before editing labels")
+
+    identities = {row["name"]: row for row in label_pairs(catalog["labels"])}
+    missing = (set(desired) | set(expected)) - identities.keys()
+    if missing:
+        raise ValueError(f"labels are absent from the catalog; sync Labels first: {sorted(missing)}")
+
+    request_id = args.request_id or uuid.uuid4().hex
+    if len(request_id) > 80 or not request_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for char in request_id):
+        raise ValueError("invalid label-edit request ID")
+
+    plan = dict(repository=identity, operation="edit-labels", kind=args.kind, number=args.number,
+                expected_state=args.expected_state, expected_labels=[identities[name] for name in expected],
+                labels=[identities[name] for name in desired], expected_proposals=proposed,
+                by=args.by, batch_id=args.batch_id, request_id=request_id)
+    return dict(plan=plan, approval=value_digest(plan))
+
+
+def publish_edit(args, preview):
+    plan, approval = preview["plan"], preview["approval"]
+    if not args.request_id or args.approve != approval:
+        raise ValueError("publication requires approval of the exact label selection and request ID")
+
+    key = f"{args.kind}:{args.number}"
+    receipt_path = DATA_DIR / "local" / "item-label-edits" / f"{args.request_id}.json"
+    with locked(PASS_LOCK):
+        receipt = read_json(receipt_path, {})
+        if receipt:
+            if receipt.get("approval") != approval:
+                raise ValueError("this label-edit request ID belongs to another selection")
+            if receipt.get("status") != "succeeded":
+                raise ValueError("this label edit has an uncertain outcome; inspect GitHub before another attempt")
+
+            return receipt
+
+        saved = state()
+        prior = saved["items"].get(key, {})
+        if prior.get("pending"):
+            raise ValueError("an earlier label write is uncertain; inspect GitHub and reset this item before editing")
+
+        row = next((row for row in load_ledger() if (row["kind"], row["number"]) == (args.kind, args.number)), None)
+        if row is None or sorted(row.get("proposed_labels") or []) != plan["expected_proposals"]:
+            raise ValueError("the local label suggestion changed; reopen the item before confirming")
+
+        transport = Transport(args.request_budget, args.host)
+        endpoint = f"repos/{REPO}/issues/{args.number}"
+
+        def read_item():
+            item = transport.api("GET", endpoint)
+            path = "pull" if args.kind == "pr" else "issues"
+            if not isinstance(item, dict) or item.get("number") != args.number or item.get("html_url") != f"https://{args.host}/{REPO}/{path}/{args.number}" or ("pull_request" in item) != (args.kind == "pr") or item.get("state") != args.expected_state:
+                raise ValueError("the GitHub item identity or state changed; refresh before editing labels")
+
+            return label_pairs(item.get("labels"))
+
+        before = read_item()
+        if before != plan["expected_labels"]:
+            raise ValueError("GitHub labels changed; refresh before confirming the selection")
+
+        bindings = label_pairs(list({label["name"]: label for label in [*plan["expected_labels"], *plan["labels"]]}.values()))
+        if transport.used + len(bindings) + 3 > transport.budget:
+            raise ValueError("request budget cannot cover label identity checks, publication and verification")
+
+        transport.validate_labels(bindings)
+        if read_item() != before:
+            raise ValueError("GitHub labels changed while checking the selection; refresh before confirming")
+
+        receipt = dict(approval=approval, plan=plan, status="attempting", at=now_iso())
+        save_json(receipt_path, receipt)
+        mark_checked(saved, key, {**prior, "last_labels": before, "pending": True})
+        record_outcome(dict(key=key, status="attempting", operation="edit-labels", request_id=args.request_id))
+
+        try:
+            if before != plan["labels"]:
+                transport.api("PUT", endpoint + "/labels", {"labels": [label["name"] for label in plan["labels"]]})
+
+            after = read_item()
+            if after != plan["labels"]:
+                raise ValueError("GitHub did not report the confirmed label selection")
+
+            with locked(LEDGER_PATH):
+                ledger = load_ledger()
+                row = next(row for row in ledger if (row["kind"], row["number"]) == (args.kind, args.number))
+                row["labels"] = [label["name"] for label in after]
+                if sorted(row.get("proposed_labels") or []) == plan["expected_proposals"]:
+                    row["proposed_labels"] = []
+
+                row.update(labels_reviewed=True, triaged_at=now_iso(), triaged_by=args.by, batch_id=args.batch_id)
+                save_ledger(ledger)
+
+            # A maintainer's confirmed set releases earlier automatic label ownership. Corrections to an already tracked set keep the agent pass paused; explicit maintainer edits remain available.
+            corrected = bool(prior.get("paused") or "last_labels" in prior and (prior["last_labels"] != before or before != after))
+            receipt.update(status="succeeded", labels=[label["name"] for label in after])
+            save_json(receipt_path, receipt)
+            mark_checked(saved, key, {"last_labels": after, "managed": [], "pending": False, "paused": corrected})
+            record_outcome(dict(key=key, status="written", operation="edit-labels", request_id=args.request_id, before=before, after=after))
+        except (OSError, ValueError, KeyError, StopIteration) as error:
+            record_outcome(dict(key=key, status="uncertain", operation="edit-labels", request_id=args.request_id, reason=str(error)))
+            raise ValueError(f"label edit may have been published; inspect GitHub before retrying: {error}") from error
+
+        return receipt
+
+
 def run_pass(parser, args):
     with locked(PASS_LOCK):
         saved = state()
@@ -395,7 +516,7 @@ def run_pass(parser, args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["status", "enable", "disable", "preview", "run", "reset-item"])
+    parser.add_argument("command", choices=["status", "enable", "disable", "preview", "run", "reset-item", "edit"])
     parser.add_argument("--expected-repo", required=True)
     parser.add_argument("--kind", choices=["issue", "pr"])
     parser.add_argument("--number", type=int)
@@ -404,6 +525,16 @@ def main():
     parser.add_argument("--request-budget", type=int, default=100)
     parser.add_argument("--apply", action="store_true", help="commit a previewed enable/disable change")
     parser.add_argument("--preview-sha256", help="exact preview hash required for a write")
+    parser.add_argument("--labels", help="edit: exact selected names as a JSON array")
+    parser.add_argument("--expected-labels", help="edit: displayed GitHub names as a JSON array")
+    parser.add_argument("--expected-proposals", default="[]", help="edit: displayed local suggestion as a JSON array")
+    parser.add_argument("--expected-state", choices=["open", "closed"], default="open")
+    parser.add_argument("--host", default="github.com")
+    parser.add_argument("--by", default="human")
+    parser.add_argument("--batch-id", default="tui")
+    parser.add_argument("--publish", action="store_true", help="edit: publish an explicitly approved selection")
+    parser.add_argument("--request-id")
+    parser.add_argument("--approve")
     args = parser.parse_args()
     if args.expected_repo != REPO:
         parser.error("configured repository changed; reopen Settings")
@@ -424,8 +555,17 @@ def main():
     if args.command == "reset-item" and (args.kind is None or args.number is None or args.number <= 0):
         parser.error("reset-item requires --kind and a positive --number")
 
-    if args.command != "reset-item" and (args.kind is not None or args.number is not None):
-        parser.error("--kind and --number are only for reset-item")
+    if args.command not in ("reset-item", "edit") and (args.kind is not None or args.number is not None):
+        parser.error("--kind and --number are only for reset-item and edit")
+
+    if args.command == "edit" and (args.kind is None or args.number is None or args.number <= 0 or args.labels is None or args.expected_labels is None or args.apply or args.preview_sha256):
+        parser.error("edit requires --kind, a positive --number, --labels and --expected-labels; use --publish with --request-id and --approve to write")
+
+    if args.command != "edit" and (args.publish or args.approve or args.request_id or args.labels is not None or args.expected_labels is not None):
+        parser.error("label selections and publication flags are only for edit")
+
+    if args.command == "edit" and not args.publish and args.approve:
+        parser.error("--approve requires --publish")
 
     if args.command == "status" and (args.apply or args.preview_sha256):
         parser.error("status never writes or accepts a preview hash")
@@ -434,7 +574,10 @@ def main():
         parser.error("--apply requires --preview-sha256, and a preview hash requires --apply")
 
     try:
-        if args.command == "status":
+        if args.command == "edit":
+            preview = edit_plan(args)
+            print(json.dumps(publish_edit(args, preview) if args.publish else preview, indent=2, ensure_ascii=False))
+        elif args.command == "status":
             print(json.dumps(status(), indent=2, ensure_ascii=False))
         elif args.command in ("enable", "disable"):
             plan = policy_plan(args.command == "enable")

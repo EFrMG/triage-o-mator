@@ -45,8 +45,10 @@ type model struct {
 	taxonomy                Taxonomy
 	contributor             string
 
-	// pendingApply counts concurrent decision writes and undo commands; batch applies use batches.busy.
+	// pendingApply counts confirmed form edits, concurrent decision writes and undo commands; batch applies use batches.busy.
 	pendingApply int
+	itemEdits    []itemFormEdit
+	itemEditSeq  uint64
 	// ledgerSeen is the ledgerStamp of the ledger last loaded, so a write from outside the TUI, such as an agent saving decisions or scores, is noticed and read.
 	ledgerSeen string
 
@@ -97,8 +99,7 @@ type model struct {
 	form                                     decisionForm
 	comment                                  commentComposer
 
-	// drafts holds unsaved decision edits per item, so switching between items to compare them before committing with ctrl+s doesn't lose work.
-	// Cleared for a key once bin/apply confirms that key was saved.
+	// drafts holds unconfirmed edits and pending confirmations per item, so comparing items doesn't lose work. A successful owning-script reply clears only the fields it confirmed.
 	drafts map[Key]decisionSnapshot
 
 	// editingRepo/repoInput back the "Switch Repo" sidebar action; repoAll are the repos every install on this machine has data for, repoRecent the ones the typed filter leaves, repoPick the highlighted one (-1: use the typed value), repoLastPick the one Tab returns to.

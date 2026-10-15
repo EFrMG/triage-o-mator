@@ -25,6 +25,7 @@ type Item struct {
 	UpdatedAt       string         `json:"updated_at"`
 	Labels          []string       `json:"labels"`
 	ProposedLabels  []string       `json:"proposed_labels"`
+	LabelsReviewed  bool           `json:"labels_reviewed"`
 	CommentsCount   int            `json:"comments_count"`
 	HeadSHA         string         `json:"head_sha"` // PRs only, when a refresh read it for a scored PR
 	ItemScore       *ItemScore     `json:"item_score"`
@@ -117,12 +118,15 @@ func (i Item) ScoreLabel() string {
 }
 
 func (i Item) Untriaged() bool {
-	return len(i.ProposedLabels) == 0 && i.Action == ""
+	return !i.LabelsReviewed && len(i.ProposedLabels) == 0 && i.Action == ""
 }
 
 func (i Item) DecisionLabel() string {
 	if len(i.ProposedLabels) > 0 {
 		return strings.Join(i.ProposedLabels, ", ")
+	}
+	if i.LabelsReviewed && len(i.Labels) > 0 {
+		return strings.Join(i.Labels, ", ")
 	}
 	return "no labels"
 }

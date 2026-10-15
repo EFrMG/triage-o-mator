@@ -247,9 +247,16 @@ type applyDoneMsg struct {
 }
 
 // applyDecisionCmd passes only the selected local edits to the owning script; batch proposals retain the untriaged guard.
-func applyDecisionCmd(installRoot, repo string, key Key, p proposal, by, batchID string, onlyUntriaged bool) tea.Cmd {
+func applyDecisionCmd(installRoot, repo string, key Key, p proposal, by, batchID string, onlyUntriaged bool, expected ...map[string]any) tea.Cmd {
 	return func() tea.Msg {
 		args := []string{"--expected-repo", repo, "--number", strconv.Itoa(key.Number), "--kind", key.Kind, "--by", by}
+		if len(expected) > 0 {
+			data, err := json.Marshal(expected[0])
+			if err != nil {
+				return applyDoneMsg{root: installRoot, repo: repo, key: key, err: err}
+			}
+			args = append(args, "--expected-fields", string(data))
+		}
 
 		if p.has("proposed_labels") {
 			args = append(args, "--replace-proposed-labels")

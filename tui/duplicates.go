@@ -172,12 +172,6 @@ func (m *model) closeDuplicates(toDetail bool) tea.Cmd {
 }
 
 func (m model) handleDupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	// Saving can warn here as it does in the item (untouched defaults, no reason); any other key takes the warning back.
-	if m.confirmSave && !key.Matches(msg, keys.Save) {
-		m.confirmSave = false
-		m.status = ""
-	}
-
 	if m.dups.confirm != "" && !key.Matches(msg, keys.Delete) {
 		m.dups.confirm = ""
 		m.status = ""
@@ -227,7 +221,7 @@ func (m model) handleDupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Enter reads whichever card is under the cursor, the compared item included, and Esc comes back here.
 		return m.openFromDuplicates(m.selectedDupKey())
 	case key.Matches(msg, keys.Save):
-		return m.saveFromDuplicates()
+		return m.saveDuplicateDecision()
 	case key.Matches(msg, keys.Open):
 		if it, ok := m.findItem(m.selectedDupKey()); ok {
 			m.status = "Opening " + it.URL + "…"
@@ -391,11 +385,7 @@ func (m model) openFromDuplicates(key Key) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// saveFromDuplicates saves the decision in the form without leaving the screen, as long as it belongs to an item on it: m prefills one here, and the comparison is where you are when it's ready to save.
-func (m model) saveFromDuplicates() (tea.Model, tea.Cmd) {
-	return m.saveDuplicateDecision()
-}
-
+// saveDuplicateDecision saves the form without leaving the comparison, as long as it belongs to an item on it.
 func (m model) saveDuplicateDecision() (tea.Model, tea.Cmd) {
 	if !m.onDupScreen(m.detail.key) {
 		m.status = "Nothing to save here. Select a candidate to mark or open an item to decide on it."

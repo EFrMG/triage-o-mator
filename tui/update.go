@@ -16,14 +16,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, clicked := msg.(tea.MouseClickMsg); clicked && m.form.focused == fieldLabels && m.form.pick.open && (result.focus != FocusDetail || result.detail.key != m.detail.key || !result.form.pick.open || result.form.focused != fieldLabels) && m.itemEditSeq == result.itemEditSeq && m.installRoot == result.installRoot && m.repo == result.repo {
 		// Moving to another pane or menu accepts the checked set; Esc/h within the picker still cancel it.
 		m.form.PickKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-		accepted, _ := m.confirmItemField(fieldLabels)
-		if queued := accepted.(model); len(queued.itemEdits) > len(m.itemEdits) {
+		edit, err := m.itemFieldEdit(fieldLabels)
+		if err != nil {
+			result.fail(err.Error())
+		} else {
 			if result.detail.key == m.detail.key {
 				result.form.pick.open = false
 				result.form.proposedLabels = slices.Clone(m.form.proposedLabels)
 				result.form.updateDirty()
 			}
-			updated, publish := result.enqueueItemEdit(queued.itemEdits[len(queued.itemEdits)-1])
+			updated, publish := result.enqueueItemEdit(edit)
 			result = updated.(model)
 			cmd = tea.Batch(cmd, publish)
 		}
@@ -438,10 +440,6 @@ func (m model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 		m.repoLastPick = 0
 		return m, cmd
 	case m.typingReason():
-		if m.confirmSave {
-			m.confirmSave = false
-			m.status = ""
-		}
 		before := m.form.reason.Value()
 		var cmd tea.Cmd
 		m.form.reason, cmd = m.form.reason.Update(msg)
@@ -553,11 +551,6 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	if m.dups.open {
 		return m.handleDupKey(msg)
-	}
-
-	if m.confirmSave && !key.Matches(msg, keys.Save) && !m.typingReason() {
-		m.confirmSave = false
-		m.status = ""
 	}
 
 	if m.batches.confirm != "" && !key.Matches(msg, keys.ApplyAll) {
@@ -1090,12 +1083,6 @@ func (m model) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // handleReasonKey handles keys while typing the reason: Enter retains the field; printable keys remain text.
 func (m model) handleReasonKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Letter shortcuts are text here. Confirming this field does not publish a public comment or authorize a state change.
-	save := msg.String() == "ctrl+s" || key.Matches(msg, keys.Confirm)
-	if m.confirmSave && !save {
-		m.confirmSave = false
-		m.status = ""
-	}
-
 	switch {
 	case key.Matches(msg, keys.Cancel):
 		m.goBack()
@@ -1109,10 +1096,7 @@ func (m model) handleReasonKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.form.PrevField()
 
 		return m, nil
-	case key.Matches(msg, keys.Confirm):
-		m.form.FocusField(fieldContent)
-		return m.confirmItemField(fieldReason)
-	case msg.String() == "ctrl+s":
+	case key.Matches(msg, keys.Confirm), msg.String() == "ctrl+s":
 		m.form.FocusField(fieldContent)
 		return m.confirmItemField(fieldReason)
 	}
@@ -1245,7 +1229,7 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.form.NextField()
 			return m.confirmItemField(field)
 		}
-		return m.requestSave()
+		return m.requestDecisionSave()
 	case key.Matches(msg, keys.ReviewClear):
 		if it, ok := m.findItem(m.detail.key); ok {
 			return m.requestReviewClear([]Item{it})
@@ -1300,11 +1284,7 @@ func formFieldIsEnum(f formField) bool {
 	return f == fieldLabels || f == fieldAction
 }
 
-// requestSave saves the decision, but first warns (and requires a repeated save action) when the fields are still the untouched defaults or the reason is empty, so a stray keypress can't record "bug / no-action-needed" with no justification.
-func (m model) requestSave() (tea.Model, tea.Cmd) {
-	return m.requestDecisionSave()
-}
-
+// requestDecisionSave retains a whole batch suggestion or duplicate decision; ordinary form fields confirm independently.
 func (m model) requestDecisionSave() (tea.Model, tea.Cmd) {
 	if len(m.itemEdits) > 0 {
 		m.status = "Confirmed fields are being applied; you can keep editing or navigating."
@@ -1321,30 +1301,6 @@ func (m model) requestDecisionSave() (tea.Model, tea.Cmd) {
 
 		return m, nil
 	}
-
-	var problems []string
-	if !m.form.touched {
-		problems = append(problems, "defaults unchanged")
-	}
-
-	if strings.TrimSpace(m.form.Reason()) == "" {
-		problems = append(problems, "no reason")
-	}
-
-	if len(problems) > 0 && !m.confirmSave {
-		m.confirmSave = true
-		msg := strings.Join(problems, ", ")
-		action := "s again to save anyway."
-		if m.typingReason() {
-			action = "Ctrl-S again to save anyway."
-		}
-
-		m.status = strings.ToUpper(msg[:1]) + msg[1:] + ": " + action
-
-		return m, nil
-	}
-
-	m.confirmSave = false
 
 	m.pendingApply++
 	return m, m.saveDecisionCmd()
@@ -1366,7 +1322,7 @@ func (m model) saveDecisionCmd() tea.Cmd {
 	}
 
 	p := proposal{ProposedLabels: m.form.ProposedLabels(), Action: m.form.Action(), Reason: m.form.Reason(), AgentNotes: m.form.proposalNotes,
-		fields: map[string]bool{"action": true, "reason": true, "proposed_labels": m.form.ReplaceProposedLabels() && labelsEdited, "agent_notes": m.form.proposalEdit.has("agent_notes")},
+		fields: map[string]bool{"action": true, "reason": true, "proposed_labels": m.form.labelOptions() != nil && labelsEdited, "agent_notes": m.form.proposalEdit.has("agent_notes")},
 	}
 	unchangedProposal := m.form.proposed && snapshot.FieldsEqual(m.form.proposalSnapshot)
 	if unchangedProposal {

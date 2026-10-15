@@ -118,8 +118,6 @@ type model struct {
 
 	// confirmQuit is set when quitting with unsaved drafts pending, so a second explicit quit is required rather than silently discarding them.
 	confirmQuit bool
-	// confirmSave arms a second save shortcut after untouched defaults or an empty reason.
-	confirmSave bool
 
 	focus Focus
 
@@ -409,7 +407,6 @@ func toListItems(items []Item) []list.Item {
 func (m *model) openItem(it Item) tea.Cmd {
 	m.stopChecks()
 	m.checks = checksUI{}
-	m.confirmSave = false
 	if p, ok := m.activeProposal(it.Key()); ok && it.Untriaged() && p.has("agent_notes") {
 		it.AgentNotes = p.AgentNotes
 	}

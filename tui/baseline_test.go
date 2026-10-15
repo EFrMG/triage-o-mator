@@ -1986,14 +1986,14 @@ func TestBaselineSaveAndExplicitPendingReviewAreSeparate(t *testing.T) {
 	m := baselineModel(t, root)
 	m.activateTab(untriagedTab)
 	m.selectCurrentListItem()
-	m.form.ApplyProposal(proposal{Action: "none", Reason: "Checked source", ProposedBy: "agent:triage", fields: map[string]bool{"action": true, "reason": true}})
+	m.form.ApplyProposal(proposal{Action: "none", Reason: "", ProposedBy: "agent:triage", fields: map[string]bool{"action": true, "reason": true}})
 	next, cmd := m.Update(tea.KeyPressMsg{Text: "s"})
 	if cmd == nil {
 		t.Fatal("save produced no script command")
 	}
 	_ = baselineSend(next.(model), cmd())
 	row := baselineLedgerRow(t, root)
-	if row["action"] != "none" || row["review_request"] != nil {
+	if row["action"] != "none" || row["reason"] != "" || row["review_request"] != nil {
 		t.Fatalf("saved decision entered Pending review: %v", row)
 	}
 	if _, err := runScript(root, "review-request", "mark", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--by", "agent:triage", "--reason", "Important design decision"); err != nil {
@@ -2131,12 +2131,14 @@ else:
 	m.openItem(m.items[0])
 	m.focus = FocusDetail
 	m.form.FocusField(fieldLabels)
-	m = baselineSend(m, mouseKey("l"))
-	m = baselineSend(m, mouseKey("space"))
-	next, cmd = m.Update(mouseKey("esc"))
-	m = next.(model)
-	if cmd != nil || len(m.itemEdits) != 0 || !slices.Equal(m.form.ProposedLabels(), []string{"bug", "needs-info"}) {
-		t.Fatal("canceling the picker published or retained its unchecked label")
+	for _, cancel := range []string{"esc", "h", "left"} {
+		m = baselineSend(m, mouseKey("l"))
+		m = baselineSend(m, mouseKey("space"))
+		next, cmd = m.Update(mouseKey(cancel))
+		m = next.(model)
+		if cmd != nil || len(m.itemEdits) != 0 || m.form.pick.open || !slices.Equal(m.form.ProposedLabels(), []string{"bug", "needs-info"}) {
+			t.Fatalf("%s did not cancel the changed picker without publication", cancel)
+		}
 	}
 	m = baselineSend(m, mouseKey("l"))
 	m = baselineSend(m, mouseKey("space"))
@@ -2195,7 +2197,7 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 	if m.form.Action() != "archive" {
 		t.Fatal("unlisted decision values changed on load")
 	}
-	if _, cmd := m.requestSave(); cmd != nil {
+	if _, cmd := m.requestDecisionSave(); cmd != nil {
 		t.Fatal("unlisted decision was accepted")
 	}
 	if got := baselineLedgerRow(t, root); got["action"] != "archive" {
@@ -2213,7 +2215,7 @@ func TestBaselineUnlistedLedgerDecisionRequiresExplicitCorrection(t *testing.T) 
 		t.Fatal("corrected draft retained an invalid flag")
 	}
 	m.form.reason.SetValue("Explicitly checked")
-	_, cmd := m.requestSave()
+	_, cmd := m.requestDecisionSave()
 	if cmd == nil {
 		t.Fatal("corrected draft did not save")
 	}
@@ -2256,7 +2258,7 @@ func TestBaselineLongReasonSurvivesLoadProposalDraftAndSave(t *testing.T) {
 	if m.form.Reason() != reason {
 		t.Fatal("proposal reason changed")
 	}
-	_, cmd := m.requestSave()
+	_, cmd := m.requestDecisionSave()
 	if cmd == nil {
 		t.Fatal("save produced no command")
 	}
@@ -2508,7 +2510,7 @@ func TestBaselineFixedBatchDoesNotMixLiveEvidence(t *testing.T) {
 	if text, _ := m.yankBatch(true); !strings.Contains(text, "Clear notes") {
 		t.Fatal("batch export lost explicit clear intent")
 	}
-	_, cmd := m.requestSave()
+	_, cmd := m.requestDecisionSave()
 	if cmd == nil {
 		t.Fatal("notes-only patch could not be accepted")
 	}

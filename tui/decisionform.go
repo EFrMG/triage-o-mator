@@ -29,7 +29,6 @@ const (
 type decisionForm struct {
 	taxonomy Taxonomy
 	repo     string
-	kind     string
 	focused  formField
 
 	// A negative index preserves a blank field in an existing decision or proposal.
@@ -44,7 +43,7 @@ type decisionForm struct {
 
 	dirty bool
 	saved bool // true right after a successful save, until the item changes again
-	// touched is false while labels/action are still the placeholder defaults LoadItem seeds for an untriaged item; saving untouched defaults needs a repeated save action.
+	// touched records whether an existing decision, suggestion or explicit confirmation has populated the form.
 	touched bool
 	// proposed is true while the fields show a batch proposal that hasn't been saved to the ledger yet.
 	proposed bool
@@ -56,7 +55,7 @@ type decisionForm struct {
 	// Unlisted values from the ledger or a proposal stay visible and block saving until the contributor picks supported values.
 	badAction string
 	badLabels []string
-	// pick is the list a choice field opens on Enter.
+	// pick is the list a choice field opens with l / →.
 	pick dropdown
 }
 
@@ -250,7 +249,6 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 
 // LoadItem seeds the form from an existing ledger row (empty strings if untriaged).
 func (f *decisionForm) LoadItem(it Item) {
-	f.kind = it.Kind
 	f.observedLabels = slices.Clone(it.Labels)
 	f.proposedLabels = mergedLabels(it.Labels, it.ProposedLabels)
 	f.actionIdx = indexOrZero(f.taxonomy.SelectableActions(), it.Action)
@@ -287,7 +285,19 @@ func mergedLabels(observed, suggested []string) []string {
 }
 
 func (f *decisionForm) updateDirty() {
-	f.dirty = !slices.Equal(f.proposedLabels, f.baseLabels) || f.Action() != f.baseAction || f.Reason() != f.baseReason
+	f.dirty = f.Snapshot().Dirty(f.taxonomy)
+}
+
+func (s decisionSnapshot) Dirty(taxonomy Taxonomy) bool {
+	action := s.badAction
+	if action == "" && s.actionIdx >= 0 {
+		options := taxonomy.SelectableActions()
+		if len(options) > 0 {
+			action = options[s.actionIdx%len(options)]
+		}
+	}
+
+	return !slices.Equal(s.proposedLabels, s.baseLabels) || action != s.baseAction || s.reason != s.baseReason
 }
 
 // unlisted returns value if it's set but not one of options, else "".
@@ -356,8 +366,6 @@ func (f decisionForm) unlistedLabels() []string {
 }
 
 func (f decisionForm) ProposedLabels() []string { return slices.Clone(f.proposedLabels) }
-
-func (f decisionForm) ReplaceProposedLabels() bool { return f.labelOptions() != nil }
 
 func (f decisionForm) Action() string {
 	if f.badAction != "" {

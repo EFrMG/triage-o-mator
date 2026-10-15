@@ -31,9 +31,19 @@ type itemFormEditMsg struct {
 }
 
 func (m model) confirmItemField(field formField) (tea.Model, tea.Cmd) {
+	edit, err := m.itemFieldEdit(field)
+	if err != nil {
+		m.fail(err.Error())
+		return m, nil
+	}
+
+	return m.enqueueItemEdit(edit)
+}
+
+func (m model) itemFieldEdit(field formField) (itemFormEdit, error) {
 	it, ok := m.findItem(m.detail.key)
 	if !ok {
-		return m, nil
+		return itemFormEdit{}, fmt.Errorf("item is no longer in the ledger; refresh before confirming")
 	}
 	edit := itemFormEdit{root: m.installRoot, repo: m.repo, key: it.Key(), field: field, snapshot: m.form.Snapshot(), by: m.contributor, batch: m.activeBatch}
 	if edit.batch == "" {
@@ -44,20 +54,17 @@ func (m model) confirmItemField(field formField) (tea.Model, tea.Cmd) {
 	switch field {
 	case fieldLabels:
 		if m.form.labelOptions() == nil || len(m.form.badLabels) > 0 {
-			m.fail("Sync Labels in Settings before confirming this selection.")
-			return m, nil
+			return edit, fmt.Errorf("sync Labels in Settings before confirming this selection")
 		}
 		target, err := validateCommentTarget(it, m.repo)
 		if err != nil {
-			m.failErr("Can't publish labels for this item", err)
-			return m, nil
+			return edit, fmt.Errorf("can't publish labels for this item: %w", err)
 		}
 		edit.host, edit.state = target.host, it.State
 		edit.before, edit.priorProposal = slices.Clone(m.form.observedLabels), slices.Clone(it.ProposedLabels)
 	case fieldAction:
 		if m.form.badAction != "" {
-			m.fail("Choose an action from Settings before confirming it.")
-			return m, nil
+			return edit, fmt.Errorf("choose an action from Settings before confirming it")
 		}
 		edit.proposal.Action, edit.proposal.fields["action"] = m.form.Action(), true
 		edit.expected["action"] = it.Action
@@ -65,14 +72,14 @@ func (m model) confirmItemField(field formField) (tea.Model, tea.Cmd) {
 		edit.proposal.Reason, edit.proposal.fields["reason"] = m.form.Reason(), true
 		edit.expected["reason"] = it.Reason
 	default:
-		return m, nil
+		return edit, fmt.Errorf("select a form field before confirming")
 	}
 	if m.form.proposed && m.form.proposalEdit.has("agent_notes") {
 		edit.proposal.AgentNotes, edit.proposal.fields["agent_notes"] = m.form.proposalNotes, true
 		edit.expected["agent_notes"] = it.AgentNotes
 	}
 
-	return m.enqueueItemEdit(edit)
+	return edit, nil
 }
 
 func (m model) enqueueItemEdit(edit itemFormEdit) (tea.Model, tea.Cmd) {
@@ -85,7 +92,7 @@ func (m model) enqueueItemEdit(edit itemFormEdit) (tea.Model, tea.Cmd) {
 				edit.expected[value.field] = value.text
 			}
 		}
-		if prior.key == edit.key && prior.field == fieldLabels && edit.field == fieldLabels {
+		if prior.field == fieldLabels && edit.field == fieldLabels {
 			edit.before, edit.priorProposal = slices.Clone(prior.snapshot.proposedLabels), nil
 		}
 	}
@@ -177,7 +184,7 @@ func (m model) finishItemEdit(msg itemFormEditMsg) (tea.Model, tea.Cmd) {
 	} else {
 		if draft, ok := m.drafts[edit.key]; ok {
 			updateDraftBaseline(&draft, edit)
-			if m.itemDraftDirty(draft) {
+			if draft.Dirty(m.taxonomy) {
 				m.drafts[edit.key] = draft
 			} else {
 				delete(m.drafts, edit.key)
@@ -220,16 +227,4 @@ func updateDraftBaseline(draft *decisionSnapshot, edit itemFormEdit) {
 	case fieldReason:
 		draft.baseReason = edit.proposal.Reason
 	}
-}
-
-func (m model) itemDraftDirty(draft decisionSnapshot) bool {
-	action := draft.badAction
-	if action == "" && draft.actionIdx >= 0 {
-		options := m.taxonomy.SelectableActions()
-		if len(options) > 0 {
-			action = options[draft.actionIdx%len(options)]
-		}
-	}
-
-	return !slices.Equal(draft.proposedLabels, draft.baseLabels) || action != draft.baseAction || draft.reason != draft.baseReason
 }

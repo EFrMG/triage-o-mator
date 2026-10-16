@@ -13,7 +13,8 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).absolute().parent))
 
 from _action_proposal_records import direct_execution_eligible, feedback as proposal_feedback, has_control_characters, load, proposal_path, receipt_path, valid_decision_hold
-from _evidence import canonical, digest, validate_payload
+from _assessment_evidence import verified_record
+from _evidence import canonical, digest
 from _item_context import ContextIndex, read as read_item_context
 from _groups import load_group
 from _storage import atomic_writer, locked
@@ -102,15 +103,7 @@ def row(value, state):
 
 
 def selected_evidence(cache, kind, number, snapshot_id):
-    manifest = cache.load_manifest(snapshot_id)
-    record = next((item for item in manifest["items"] if (item["identity"]["kind"], item["identity"]["number"]) == (kind, number)), None)
-    if record is None:
-        raise ValueError("selected evidence item is absent from its snapshot")
-
-    for name, component in record["components"].items():
-        if component["object"] is not None:
-            validate_payload(name, component, kind, cache.read_object(component["object"]))
-
+    record, manifest = verified_record(cache, kind, number, snapshot_id)
     return dict(kind=kind, number=number, snapshot_id=snapshot_id, repository=manifest["repository"],
                 identity=record["identity"], revision=record["revision"],
                 components={name: dict(status=component["status"], object=component["object"]) for name, component in record["components"].items()})

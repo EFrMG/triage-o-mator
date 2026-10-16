@@ -6,8 +6,8 @@ from _evidence import repository, validate_payload
 from _triage import REPO
 
 
-def selected_item(kind, number, snapshot_id, host="github.com"):
-    cache = EvidenceCache(repository(REPO, host=host))
+def verified_record(cache, kind, number, snapshot_id):
+    """Return one item's record and its snapshot manifest after verifying only that item's payloads; a corpus snapshot can hold thousands of other items."""
     manifest = cache.load_manifest(snapshot_id)
     record = next((item for item in manifest["items"] if (item["identity"]["kind"], item["identity"]["number"]) == (kind, number)), None)
     if record is None:
@@ -17,6 +17,11 @@ def selected_item(kind, number, snapshot_id, host="github.com"):
         if component["object"] is not None:
             validate_payload(name, component, kind, cache.read_object(component["object"]))
 
+    return record, manifest
+
+
+def selected_item(kind, number, snapshot_id, host="github.com"):
+    record, manifest = verified_record(EvidenceCache(repository(REPO, host=host)), kind, number, snapshot_id)
     return dict(snapshot_id=snapshot_id, repository=manifest["repository"], identity=record["identity"],
                 revision=record["revision"], coverage={name: component["status"] for name, component in record["components"].items()})
 

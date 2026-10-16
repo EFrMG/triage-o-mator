@@ -42,6 +42,7 @@ def select(keys):
     taxonomy = load_taxonomy()
     ledger = {(item["kind"], item["number"]): item for item in load_ledger()}
     proposals = {(row["kind"], row["number"]): row for row in script("action-proposals", "--expected-repo", REPO, "list")["rows"]}
+
     chosen = []
     for kind, number in keys:
         row = proposals.get((kind, number))
@@ -52,6 +53,7 @@ def select(keys):
         operation = row["operation"]
         if setting is None and row["action"] not in taxonomy.get("actions", []) and action_operation(taxonomy, row["action"]) == operation:
             setting = dict(operation=operation, mode="stage", configured=False, definition_sha256="")
+
         if setting is None or setting["operation"] != operation:
             raise ValueError(f"{kind} #{number} no longer has the selected action operation")
 
@@ -64,6 +66,7 @@ def select(keys):
         held = bool(policy["pending_review_hold"] and ledger.get((kind, number), {}).get("review_request"))
         eligible = direct_execution_eligible(row) and not held
         mode = "execute" if setting["mode"] == "execute" and setting["configured"] and eligible else "stage"
+
         chosen.append(dict(kind=kind, number=number, action=row["action"], operation=operation, mode=mode,
                            policy_mode=setting["mode"], eligible=eligible, target=row["target"], comment=row["comment"],
                            proposal_checkpoint=row["checkpoint"], definition_sha256=setting["definition_sha256"],
@@ -105,6 +108,7 @@ def main():
     parser.add_argument("--item", action="append", default=[], help="explicit KIND:NUMBER item key")
     parser.add_argument("--preview-sha256")
     args = parser.parse_args()
+
     if args.expected_repo != REPO:
         raise ValueError("configured repository changed; preview the action pass again")
     if args.command == "run" and not args.preview_sha256:

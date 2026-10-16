@@ -37,6 +37,8 @@ JQ_FILTER = (
 
 META_PATH = RAW_DIR / "fetch_meta.json"
 FULL_EVERY = timedelta(days=1)
+# A routine fetch reads at most this many scored PR heads, so a base-branch push that moves hundreds of PRs costs a bounded number of calls.
+MAX_HEAD_READS = 50
 # Re-ask for a few minutes before the last synced fetch started, so an update racing that fetch is never missed; sync is idempotent, so the overlap is harmless.
 SINCE_MARGIN = timedelta(minutes=5)
 ISO = "%Y-%m-%dT%H:%M:%SZ"
@@ -190,7 +192,7 @@ def fetch(args, host, cache=None):
 
         lines = [json.dumps(row, ensure_ascii=False) for row in by_key.values()]
 
-    pr_heads = scored_pr_heads(lines, host)
+    pr_heads = scored_pr_heads(lines, host, cache)
     out_path = RAW_DIR / "issues_and_prs.jsonl"
     payload = "\n".join(lines) + ("\n" if lines else "")
 
@@ -230,24 +232,40 @@ def fetch(args, host, cache=None):
     print(here("Next: bin/sync"), file=sys.stderr)
 
 
-def scored_pr_heads(lines, host):
-    """Read the head commit of each fetched open PR whose saved score binds one and whose update time moved, one GET each.
+def scored_pr_heads(lines, host, cache=None):
+    """Read the head commit of fetched open PRs whose saved score binds one and whose update time moved or whose head is unknown, one GET each.
 
-    The issue list has no head commit, and labels or a push to the base branch move a PR's update time without touching its code. bin/sync stores the result so a PR score goes stale only when the code changed. A failed read leaves that PR's head unknown.
+    The issue list has no head commit, and labels or a push to the base branch move a PR's update time without touching its code. bin/sync stores the result so a PR score goes stale only when the code changed. At most MAX_HEAD_READS PRs are read, most recently updated first; a skipped or failed read leaves that PR's head unknown, so a later fetch that lists it reads it again. With --cache-inventory the reads honor and record the persisted acquisition cooldown, and a throttled or forbidden read stops the rest.
     """
     scored = {row["number"]: row for row in load_ledger()
               if row.get("kind") == "pr" and ((row.get("item_score") or {}).get("revision") or {}).get("head_sha")}
-    moved = [row["number"] for row in map(json.loads, lines)
-             if row["kind"] == "pr" and row.get("state") == "open" and row["number"] in scored and row.get("updated_at") != scored[row["number"]].get("updated_at")]
-    if not moved:
+    rows = [row for row in map(json.loads, lines)
+            if row["kind"] == "pr" and row.get("state") == "open" and row["number"] in scored and
+            (row.get("updated_at") != scored[row["number"]].get("updated_at") or not scored[row["number"]].get("head_sha"))]
+    if not rows:
         return {}
 
+    rows.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
+    selected = [row["number"] for row in rows[:MAX_HEAD_READS]]
+    if len(rows) > len(selected):
+        print(f"Reading {len(selected)} of {len(rows)} moved scored PR heads; the rest stay unknown until a later fetch", file=sys.stderr)
+
+    cooldown = None
+    if cache:
+        from _jobs import Cooldown
+
+        cooldown = Cooldown(cache)
+
     heads = {}
-    reader = GitHubReader(host, budget=len(moved))
-    for number in moved:
+    reader = GitHubReader(host, budget=len(selected), cooldown=cooldown)
+    for number in selected:
         try:
             pull, _ = reader.get(f"repos/{REPO}/pulls/{number}")
         except (ReadFailure, ValueError, OSError):
+            if reader.stopped:
+                print(f"Stopped reading scored PR heads: {reader.stopped}", file=sys.stderr)
+                break
+
             continue
 
         head = (pull.get("head") or {}).get("sha") if isinstance(pull, dict) and pull.get("number") == number else None

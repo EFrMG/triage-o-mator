@@ -156,7 +156,7 @@ They are listed here in sidebar order.
 
 These work the same wherever an item or a list is in front of you.
 
-- **Read an item and save a decision.** An item shows its body, agent notes, comments and, for a PR, the diff. Set labels, suggest an action, and give a short reason. A label-first pass can leave Action blank.
+- **Read an item and save a decision.** An item shows its body, agent notes, comments and, for a PR, available CI checks and the diff. Confirm labels, suggest an action, and give a short reason. A label-first pass can leave Action blank.
 
   ![Read an item and save a decision](captures/flow-12.webp)
 

@@ -11,7 +11,7 @@ gh repo clone efrmg/triage-o-mator && cd triage-o-mator
 ./install.sh /absolute/path/to/your/repository
 ```
 
-`install.sh` is `mise install`, `make build`, and `bin/install-to` in one command. Once built, install into further repositories with `bin/install-to /path/to/another/repository` directly. You need [`gh`](https://cli.github.com/), authenticated (`gh auth status`), and `python3`.
+`install.sh` is `mise install`, `make build`, and `bin/install-to` in one command. Once built, install into further repositories with `bin/install-to /path/to/another/repository` directly. You need [`gh`](https://cli.github.com/), authenticated (`gh auth status`), [mise](https://mise.jdx.dev/) and `python3`.
 
 Then run it from the repository, which is where most people already are:
 
@@ -30,42 +30,48 @@ target-repo/
   .git/info/exclude            # solo mode only: one local line, no tracked file changed
   AGENTS.md                    # tracked mode: a short marked block pointing at triage-o-mator/AGENTS.md
   triage-o-mator/
-    bin -> ~/src/triage-o-mator/bin          symlink   ignored
-    themes -> ~/src/triage-o-mator/themes    symlink   ignored
-    AGENTS.md -> ~/src/triage-o-mator/…      symlink   ignored
-    prompts/auto-triage.md -> …              symlink   ignored (one per prompt)
-    config/repo                              generated tracked
-    config/taxonomy.json                     copy      tracked
-    config/theme.local                                 ignored
-    data/<owner>/<repo>/ledger.jsonl                   tracked
-    data/<owner>/<repo>/groups/, not-duplicates.jsonl  tracked
-    data/<owner>/<repo>/briefed-batches/               tracked batch screening checkpoints
-    data/<owner>/<repo>/master-briefs/                tracked master brief input records
-    data/<owner>/<repo>/action-proposals/            tracked proposals
-    data/<owner>/<repo>/action-assessments/          tracked selected action assessments
-    data/<owner>/<repo>/duplicate-assessments/       tracked pair comparisons
-    data/<owner>/<repo>/pr-assessments/              tracked PR reviews and closure assessments
-    data/<owner>/<repo>/group-assessments/           tracked group search outcomes
-    data/<owner>/<repo>/raw|batches|exports/           ignored
-    data/<owner>/<repo>/cache|local/                   ignored (includes the per-repo automatic download preference)
-    reports/<owner>/<repo>/<date>.md                   tracked report
-    reports/<owner>/<repo>/<date>-batch-<id>-brief.md  tracked batch brief
-    reports/<owner>/<repo>/<date>-<kind>-<N>-brief.md   tracked item brief
-    reports/<owner>/<repo>/<date>-master-brief.md      tracked master brief
-    .gitignore                               generated tracked
-    .triage-install.json                     generated ignored (machine-local: where the tool lives)
-
+    bin -> ~/src/triage-o-mator/bin                     symlink   ignored
+    docs -> ~/src/triage-o-mator/docs                   symlink   ignored
+    themes -> ~/src/triage-o-mator/themes               symlink   ignored
+    AGENTS.md -> ~/src/triage-o-mator/…                 symlink   ignored
+    CLAUDE.md                                           generated tracked (points at AGENTS.md)
+    prompts/auto-triage.md -> …                         symlink   ignored (one per prompt)
+    config/repo                                         generated tracked
+    config/taxonomy.json                                copy      tracked
+    config/label-application.json                                 tracked Labeling setting
+    config/action-automation.json                                 tracked action modes and Pending review hold
+    config/ci-readiness.json                                      tracked CI for readiness setting
+    config/local/                                                 ignored (agentic verification settings)
+    config/theme.local                                            ignored
+    data/<owner>/<repo>/ledger.jsonl                              tracked
+    data/<owner>/<repo>/groups/, not-duplicates.jsonl             tracked
+    data/<owner>/<repo>/briefed-batches/                          tracked batch screening checkpoints
+    data/<owner>/<repo>/master-briefs/                            tracked master brief input records
+    data/<owner>/<repo>/action-proposals/                         tracked proposals
+    data/<owner>/<repo>/action-assessments/                       tracked selected action assessments
+    data/<owner>/<repo>/duplicate-assessments/                    tracked pair comparisons
+    data/<owner>/<repo>/pr-assessments/                           tracked PR reviews and closure assessments
+    data/<owner>/<repo>/group-assessments/                        tracked group search outcomes
+    data/<owner>/<repo>/external-closures/                        tracked imported closure histories
+    data/<owner>/<repo>/raw|batches|exports/                      ignored
+    data/<owner>/<repo>/cache|reposition|local|writes/            ignored (evidence, search indexes, local state such as the automatic download preference, write receipts)
+    reports/<owner>/<repo>/<date>.md                              tracked report
+    reports/<owner>/<repo>/<date>-batch-<id>-brief.md             tracked batch brief
+    reports/<owner>/<repo>/<date>-<kind>-<N>-brief.md             tracked item brief
+    reports/<owner>/<repo>/<date>-master-brief.md                 tracked master brief
+    .gitignore                                          generated tracked
+    .triage-install.json                                generated ignored (machine-local: where the tool lives)
 ```
 
-The install carries `AGENTS.md` and `CLAUDE.md`, both leading to the same playbook. Decisions, groups, duplicate verdicts, batch briefing checkpoints, reports and taxonomy are committed. Symlinks, the install marker, working files and cache are ignored; preserve the cache separately when retained evidence depends on it.
+The install carries `AGENTS.md` and `CLAUDE.md`, both leading to the same playbook. Decisions, groups, duplicate verdicts, assessments, proposals, batch briefing checkpoints, reports, taxonomy and the repository's automation settings are committed. Symlinks, the install marker, working files and cache are ignored; preserve the cache separately when retained evidence depends on it.
 
 A tracked install creates the target repository's `AGENTS.md` when it is missing, even if that repository already has a `CLAUDE.md`; the existing `CLAUDE.md` stays untouched. Editing an existing `AGENTS.md` still asks for confirmation unless you pass `--yes`. Use `--no-agents-md` to skip the target file, or `--agents-md` to add it in solo mode.
 
-`config/repo` defaults to what the repository's `upstream` remote points at when it has one, falling back to `origin`. This makes a clone of your fork triage the original repository's backlog. Pass `--repo owner/repo` to triage something else from here. An existing install keeps its recorded repo; if it was created from a fork before upstream detection was added, re-run `bin/install-to /path/to/repository --repo owner/repo` once to correct it.
+`config/repo` defaults to what the repository's `upstream` remote points at when it has one, falling back to `origin`. This makes a clone of your fork triage the original repository's backlog. Pass `--repo owner/repo` to triage something else from here. An existing install keeps its recorded repo; re-run `bin/install-to /path/to/repository --repo owner/repo` to change it.
 
 Installation reads that repository's GitHub label definitions into `config/taxonomy.json` through a read-only GET. `label_catalog.observed_at` records the successful observation time. `--offline` skips the read; a new catalog stays `pending`, while an existing catalog keeps its dated observation. A failed GitHub read also leaves the install usable with a pending or previously observed catalog. Run `triage-o-mator/bin/label-catalog sync --expected-repo OWNER/REPO` for an explicit online refresh, or `show` to inspect the saved catalog offline. `sync --dry-run` previews the result without saving it. The sync retains local `guidance` by label ID, records prior names, and moves removed labels into `retired`; it never changes label definitions on GitHub or rewrites saved decisions.
 
-The TUI's **Settings** menu has separate **Labels**, **Actions** and **Automations** cards. Labels and Actions accept `n` to create an entry and `e` or Enter to edit the selected entry in a floating editor. Action editors add a GitHub operation field: use Tab to focus it and Left or Right to choose `comment`, `close`, `reopen`, or the explicit `none` choice. An action without a recognized operation is visible in Settings but cannot be selected for a new decision until mapped. `Ctrl-E` opens `$EDITOR` for the focused Title or Description field. **Actions** saves locally through `bin/taxonomy-settings`; choosing an action or reviewing a decision does not write to GitHub. **Labels** changes GitHub label definitions: `Ctrl-P` reads current GitHub values and previews them alongside the proposed values, then `Ctrl-S` confirms the change. From the editor, `Ctrl-S` opens that preview first, so a second `Ctrl-S` confirms it. A changed GitHub label invalidates the preview. New individual labels use a neutral `ededed` color. Press `r` in **Labels** to refresh the saved catalog. Press `i` to keep GitHub's current labels and add missing defaults; `Ctrl-S` confirms the exact additions. Press capital `I` to make GitHub match the saved local catalog, including custom labels; its preview lists creations, edits, and deletions before `Ctrl-S` confirms them. Deleting a label removes it from issues and PRs. A pending catalog still allows action editing and individual label creation, but cannot serve as the source for capital `I`.
+The TUI's **Settings** menu has separate **Labels**, **Actions** and **Automations** cards. Labels and Actions accept `n` to create an entry and `e` or `Enter` to edit the selected entry in a floating editor. Action editors add a GitHub operation field: use Tab to focus it and Left or Right to choose `comment`, `close`, `reopen`, or the explicit `none` choice. An action without a recognized operation is visible in Settings but cannot be selected for a new decision until mapped. `Ctrl-E` opens `$EDITOR` for the focused Title or Description field. **Actions** saves locally through `bin/taxonomy-settings`; choosing an action or reviewing a decision does not write to GitHub. **Labels** changes GitHub label definitions: `Ctrl-P` reads current GitHub values and previews them alongside the proposed values, then `Ctrl-S` confirms the change. From the editor, `Ctrl-S` opens that preview first, so a second `Ctrl-S` confirms it. A changed GitHub label invalidates the preview. New individual labels use a neutral `ededed` color. Press `r` in **Labels** to refresh the saved catalog. Press `i` to keep GitHub's current labels and add missing defaults; `Ctrl-S` confirms the exact additions. Press capital `I` to make GitHub match the saved local catalog, including custom labels; its preview lists creations, edits, and deletions before `Ctrl-S` confirms them. Deleting a label removes it from issues and PRs. A pending catalog still allows action editing and individual label creation, but cannot serve as the source for capital `I`.
 
 `bin/label-definitions --expected-repo OWNER/REPO --name NAME --description TEXT` previews a new label without writing it. To edit one, also pass its `--label-id`, `--expected-name`, and `--expected-description` from the saved list. The output contains a `preview_sha256`; repeating the exact command with `--apply --preview-sha256 HASH` rechecks GitHub and applies that preview. The Settings editor handles these steps interactively.
 
@@ -75,11 +81,11 @@ The TUI's **Settings** menu has separate **Labels**, **Actions** and **Automatio
 
 ### Automations and item labeling
 
-**Settings → Automations** has Labeling and Scoring cards. Labeling is ON by default for the selected repository; Enter or Space turns it OFF or back ON. Press `y` on Labeling to copy a pinned prompt for an agent to follow `prompts/label-items.md`. Press `y` on Scoring to copy a bounded, offline quality/readiness pass prompt; [Item Score](item-score.md) is saved locally and has no GitHub write mode. Opening either card never starts a pass.
+**Settings → Automations** has cards for Labeling, Scoring, Agentic verification, CI for readiness and Hold actions for Pending review, then one card per writing action type. Labeling is ON by default for the selected repository; `Enter` or `Space` turns it OFF or back ON. Press `y` on Labeling to copy a pinned prompt for an agent to follow `prompts/label-items.md`. Press `y` on Scoring to copy a bounded, offline quality/readiness pass prompt; [Item Score](item-score.md) is saved locally and has no GitHub write mode. Opening either card never starts a pass.
 
-**Agentic verification** defaults to OFF. Prepare the local environment, then use Enter or Space to allow an agent to choose relevant bounded reproduction, build and test checks during a requested triage or review task. Press `e` to edit environment guidance or `y` to copy the agent prompt. The [local verification guide](local-verification.md) explains the scope and how results identify the source actually tested. Opening or editing this card does not run checks.
+**Agentic verification** defaults to OFF. Prepare the local environment, then use `Enter` or `Space` to allow an agent to choose relevant bounded reproduction, build and test checks during a requested triage or review task. Press `e` to edit environment guidance or `y` to copy the agent prompt. The [local verification guide](local-verification.md) explains the scope and how results identify the source actually tested. Opening or editing this card does not run checks.
 
-**CI for readiness** also defaults to OFF. Enter or Space makes complete, fresh, nonempty passing CI observations for the reviewed PR head a requirement of a `ready` review assessment. The [CI guide](ci.md) explains the setting and explicit bounded failure-log excerpts. This policy does not approve or merge PRs, or capture logs in the background.
+**CI for readiness** also defaults to OFF. `Enter` or `Space` makes complete, fresh, nonempty passing CI observations for the reviewed PR head a requirement of a `ready` review assessment. The [CI guide](ci.md) explains the setting and explicit bounded failure-log excerpts. This policy does not approve or merge PRs, or capture logs in the background.
 
 `proposed_labels` in the ledger is a local decision, separate from the item's observed GitHub `labels`. The agent's labeling pass previews a dry-run list of current labels, proposals, exact additions and removals before running. The script checks the selected repository, current ledger proposals and live GitHub labels again before each write. The pass accepts attributed local proposals regardless of an explicit Pending review request and never clears that request.
 
@@ -87,7 +93,7 @@ The CLI exposes larger bounded passes: `bin/item-labels preview --expected-repo 
 
 Preview and execution bind the exact GitHub label ID and name for proposed labels and labels the pass manages, using budgeted live reads before each write. Description, color, sync time and unrelated catalog edits do not invalidate the operation. Renamed, deleted or replaced identities refuse the old operation; refresh Labels and preview again. If a managed label identity changed, inspect the item and use `reset-item` to discard the old ownership before resuming. The TUI shows label names, not IDs.
 
-Initial passes add missing proposed labels while preserving other labels. A later proposal change can remove only labels that this pass previously added. The per-item state and append-only outcomes are kept under ignored `data/<owner>/<repo>/local/`; a changed live label set pauses that item so a later pass does not override a human correction. An uncertain write stays pending. After inspecting an affected item, `bin/item-labels reset-item --expected-repo OWNER/REPO --kind issue|pr --number N` previews a new baseline; repeat it with `--apply --preview-sha256 HASH` to resume from the current live labels without claiming ownership of them. Turn Labeling OFF from its Automations card with Enter or Space. A human edit between the final GitHub read and write can still race that write because GitHub does not provide a shared transaction with this local ledger; inspect the recorded outcome and live labels if that happens.
+Initial passes add missing proposed labels while preserving other labels. A later proposal change can remove only labels that this pass previously added. The per-item state and append-only outcomes are kept under ignored `data/<owner>/<repo>/local/`; a changed live label set pauses that item so a later pass does not override a human correction. An uncertain write stays pending. After inspecting an affected item, `bin/item-labels reset-item --expected-repo OWNER/REPO --kind issue|pr --number N` previews a new baseline; repeat it with `--apply --preview-sha256 HASH` to resume from the current live labels without claiming ownership of them. Turn Labeling OFF from its Automations card with `Enter` or `Space`. A human edit between the final GitHub read and write can still race that write because GitHub does not provide a shared transaction with this local ledger; inspect the recorded outcome and live labels if that happens.
 
 ## Working from a fork
 

@@ -22,7 +22,7 @@ Tooling to work through a GitHub issue / PR backlog too large for one person to 
 
 The backlog gets a first pass of triage done in batches, by you or by an AI Agent. Triage decisions, Pending review requests and action proposals remain separate records.
 
-It reads issues and PRs via `gh` and writes triage decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI; publishing defaults to dry-run and never follows automatically from a triage decision.
+It reads issues and PRs via `gh` and writes triage decisions to a local ledger. You can also compose and explicitly approve a GitHub comment, closure or reopening through the TUI; a triage decision never publishes one by itself. Labels are the exception that writes sooner: a label set you confirm in an item's form goes to GitHub directly, and a bounded labeling pass, ON by default per repository, applies proposed labels when someone runs it.
 
 > Developed with the [omacom/omarchy](https://github.com/omacom/omarchy) backlog in mind, while supporting other GitHub repositories. Omarchy is a public proof-of-concept target, not an existing deployment.
 
@@ -67,7 +67,7 @@ An item enters the ledger the first time it is seen open; its row and decision h
 
 ## Install
 
-You need an authenticated [`gh`](https://cli.github.com/), [mise](https://mise.jdx.dev/) and [Python3](https://www.python.org/).
+You need an authenticated [`gh`](https://cli.github.com/), [mise](https://mise.jdx.dev/) and [`python3`](https://www.python.org/).
 
 ```sh
 gh repo clone efrmg/triage-o-mator && cd triage-o-mator
@@ -91,7 +91,7 @@ The [tutorial](docs/tutorial.md) covers these menus and their keybindings in det
 
 A usual session goes from the overview to reading and deciding on items, then to grouping and comparing them, reviewing what agents proposed, and handing the result to maintainers.
 
-In an item's form, check the labels you want and finish the picker with Enter, l or Tab to publish that set to GitHub. Moving to another pane or menu with the mouse also applies the checked set; Esc cancels the picker. Confirm an Action with Enter or l to save guidance for an agent's next pass, and press Enter to retain a Reason. Each field applies independently, so you can keep navigating without a separate decision save. Comments, closures and reopenings use their composer, where Ctrl-S submits the visible text and target.
+In an item's form, check the labels you want and finish the picker with `Enter`, `l` or `Tab` to publish that set to GitHub. Moving to another pane or menu with the mouse also applies the checked set; `Esc` cancels the picker. Confirm an Action with `Enter` or `l` to save guidance for an agent's next pass, and press `Enter` to retain a Reason. Each field applies independently, so you can keep navigating without a separate decision save. Comments, closures and reopenings use their composer, where `Ctrl-S` submits the visible text and target.
 
 ### Menus
 
@@ -141,6 +141,7 @@ They are listed here in sidebar order.
 
 10. **Settings.** **Labels** edits the repository's GitHub labels, each change previewed before it is written. **Actions** edits the local list of actions a decision can suggest, with guidance for each. **Automations** decides what a bounded pass may do without asking again:
     - Labeling is ON by default. Its pass applies proposed labels whatever the suggested action or Pending review state, and runs only when an agent or a person asks for it.
+    - Scoring copies a prompt for a bounded, local [Item Score](docs/item-score.md) pass; it has no GitHub write mode.
     - Agentic verification defaults OFF. ON permits relevant bounded local checks in your prepared environment during a requested triage or review task.
     - CI for readiness defaults OFF. ON requires fresh, complete, nonempty passing CI observations for a ready PR review assessment.
     - Each action type stages its proposals for approval in Notifications, unless you set it to execute directly.
@@ -264,7 +265,7 @@ The Markdown stays on disk, unchanged, and leaves the TUI menus. Pending review 
 
 #### Agentic verification
 
-Prepare the project's local environment, then enable **Settings → Automations → Agentic verification** for the selected repository. Enabling it permits the agent to choose and run bounded issue reproduction and PR solution checks during requested triage and review tasks. The agent chooses suitable project tools and commands; optional freeform guidance can describe the environment, constraints and useful named checks. Enter or Space toggles the setting, `e` edits guidance, and `y` copies a preparation prompt. The setting defaults to OFF and never starts checks in the background. An explicit local verification request also permits checks within its stated scope.
+Prepare the project's local environment, then enable **Settings → Automations → Agentic verification** for the selected repository. Enabling it permits the agent to choose and run bounded issue reproduction and PR solution checks during requested triage and review tasks. The agent chooses suitable project tools and commands; optional freeform guidance can describe the environment, constraints and useful named checks. `Enter` or `Space` toggles the setting, `e` edits guidance, and `y` copies a preparation prompt. The setting defaults to OFF and never starts checks in the background. An explicit local verification request also permits checks within its stated scope.
 
 The [local verification guide](docs/local-verification.md) explains environment preparation, permission limits and how findings retain the version actually tested. Missing setup keeps the source-based workflow available, including existing CI evidence.
 
@@ -284,6 +285,7 @@ The [local verification guide](docs/local-verification.md) explains environment 
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | “triage 25 issues”                                     | [Auto triage](prompts/auto-triage.md)                                                             | Attributed local batch decisions            |
 | “label the backlog”                                    | [Label items](prompts/label-items.md)                                                             | Bounded proposed-label pass                 |
+| “score these items” or “run a scoring pass”            | [Score selected items](prompts/score-items.md)                                                    | A bounded, source-bound quality score       |
 | “run an action pass”                                   | [Automated actions](prompts/automated-actions.md)                                                 | Staged proposals or recorded write outcomes |
 | “prepare offline analysis”                             | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps            |
 | “is #N a duplicate?”                                   | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal            |
@@ -291,13 +293,12 @@ The [local verification guide](docs/local-verification.md) explains environment 
 | “what failed in PR #N's CI?”                           | [Inspect CI](prompts/inspect-ci.md)                                                               | Selected CI outcomes and failure context    |
 | “reproduce issue #N locally” or “verify PR #N locally” | [Verify locally](prompts/verify-locally.md)                                                       | Attributed, scoped runtime observations     |
 | “recommend PR closures”                                | [Recommend PR closures](prompts/recommend-closure.md)                                             | Pending, unapproved PR closure proposals    |
+| “review an appeal”                                     | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment            |
 | “organize these items”                                 | [Organize groups](prompts/organize-groups.md)                                                     | Draft maintainer groups                     |
 | “assess this edited group”                             | [Organize groups](prompts/organize-groups.md#after-review-prepare-proposals-for-selected-members) | Scoped proposals or keep-open reasons       |
-| “review an appeal”                                     | [Review appeal](prompts/review-appeal.md)                                                         | An attributed local reassessment            |
 | “brief the maintainers” or “polish the report”         | [Maintainer brief](prompts/maintainer-brief.md)                                                   | A short overview or focused decision brief  |
 | “brief issue #N” or “brief PR #N”                      | [Item brief](prompts/item-brief.md)                                                               | A detailed case and recommendation          |
 | “polish these briefs” or “write a master brief”        | [Polish briefs](prompts/polish-briefs.md)                                                         | A short synthesis of selected briefs        |
-| “score these items” or “run a scoring pass”            | [Score selected items](prompts/score-items.md)                                                    | A bounded, source-bound quality score       |
 
 > [!IMPORTANT]
 > Agents save attributed local decisions. Pending review is an explicit request for attention. Bounded passes, enabled per repository, can separately apply labels or execute eligible actions.

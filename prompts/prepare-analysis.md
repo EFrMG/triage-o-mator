@@ -37,7 +37,7 @@ bin/cache search --corpus CORPUS_ID --component files --query 'changed/path' --l
 bin/cache search --corpus CORPUS_ID --component diff --query 'changed_symbol' --limit 20
 ```
 
-The saved component references point into `data/OWNER/REPO/cache/objects/`. A `.json` object can be filtered with Python or `jq` if installed; a `.diff` can be searched with `rg -n -F -C 4`. Select objects referenced by the chosen inventory or corpus so older observations and other downloads do not mix into the analysis. Keep broad results in local scratch files and bring only focused excerpts into context. Direct file reads are discovery; verify decisive selected components with the offline reader:
+The saved component references point into `data/<owner>/<repo>/cache/objects/`. A `.json` object can be filtered with Python or `jq` if installed; a `.diff` can be searched with `rg -n -F -C 4`. Select objects referenced by the chosen inventory or corpus so older observations and other downloads do not mix into the analysis. Keep broad results in local scratch files and bring only focused excerpts into context. Direct file reads are discovery; verify decisive selected components with the offline reader:
 
 ```sh
 bin/cache chunk --snapshot MEMBER_SNAPSHOT --kind KIND --number NUMBER --component comments --limit 10

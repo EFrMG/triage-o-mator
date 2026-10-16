@@ -1,6 +1,6 @@
 # Agentic local verification
 
-Prepare a suitable local project environment, then turn on **Settings → Automations → Agentic verification** for the repository being triaged. The agent can choose and run bounded issue reproduction and PR solution checks during requested triage and review tasks. Enter or Space toggles the setting; `e` edits optional environment guidance; `y` copies a preparation prompt. In the guidance composer, Ctrl-S opens Preview; another Ctrl-S confirms and saves. Ctrl-P returns to editing. Nothing runs in the background, and the settings script never executes checks.
+Prepare a suitable local project environment, then turn on **Settings → Automations → Agentic verification** for the repository being triaged. The agent can choose and run bounded issue reproduction and PR solution checks during requested triage and review tasks. `Enter` or `Space` toggles the setting; `e` edits optional environment guidance; `y` copies a preparation prompt. In the guidance composer, `Ctrl-S` opens Preview; another `Ctrl-S` confirms and saves. `Ctrl-P` returns to editing. Nothing runs in the background, and the settings script never executes checks.
 
 The setting defaults to OFF for each repository. OFF keeps the ordinary source-based workflow, including available CI and tester evidence. An explicit request to verify locally also authorizes bounded checks within that request's scope. Neither local setup nor local check completion is a gate for triage, source review or reading CI results.
 

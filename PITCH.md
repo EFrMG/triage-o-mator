@@ -42,7 +42,7 @@ A repository you don't control can carry the install locally instead using `--so
 ## Design principles
 
 1. **Separate reading from writing.** Backlog acquisition reads GitHub. Publishing a comment, closing or reopening an item needs explicit approval of the exact target, text and state change; triage decisions never trigger these writes. A separate bounded pass may apply proposed labels after previewing the exact additions and removals, unless it is turned off for the repository. The tool does not merge.
-2. **Proposals and reviews are separate states.** A decision is first _triaged_ (by an agent or a person) and then _reviewed_ (only by a person). Nothing crosses that line by itself.
+2. **Decisions, attention and approval are separate states.** A triage decision (by an agent or a person), an explicit Pending review request and approval of an exact GitHub write never imply one another. Nothing crosses those lines by itself.
 3. **One ledger per repo, tracked in git.** `triage-o-mator/data/<owner>/<repo>/ledger.jsonl`, one JSON line per item, inside the repository it describes, so every decision and every correction shows up as a normal diff.
 4. **Scripts underneath, a TUI on top.** Scripts own the ledger, groups, proposals, evidence and GitHub writes. The TUI calls those same scripts, which agents and people can also use directly.
 5. **Team-owned vocabulary.** Proposed labels come from the repository's own GitHub label catalog; actions come from a small, documented taxonomy that each team owns and edits. Neither human nor clanky model invents one on the fly.
@@ -53,8 +53,8 @@ A repository you don't control can carry the install locally instead using `--so
 
 _triage-o-mator_ is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) app over the ledger:
 
-- **Lists in the sidebar:** Untriaged—with kind and age-order controls—Merge-Ready PRs and All Items, then Batches, **Groups**, Possible Duplicates and Notifications. Review saved calls in All Items; prepare and review exact actions in Notifications.
-- **A full-screen reader** with Body, Agent notes, Comments and Diff tabs.
+- **Lists in the sidebar:** Untriaged—with kind and age-order controls—Pending review, Merge-Ready PRs and All Items, then Batches, Briefs, **Groups**, Possible Duplicates and Notifications. Review saved calls in All Items; prepare and review exact actions in Notifications.
+- **A full-screen reader** with Body, Agent notes, Comments, Checks and Diff tabs.
 - **A decision form** whose labels are picked from the repository's GitHub catalog and whose action cycles through the taxonomy's exact values; with a one-sentence reason for free text.
 - **Unsaved drafts per item** for the session, so you can compare several reports before deciding; switching repositories warns about those drafts.
 - A footer showing available controls, a breadcrumb showing location, full command output for failures, and bundled or custom themes.
@@ -67,7 +67,7 @@ The core loop is a **batch**: a manageable number of untriaged items (25 is a go
 
 - Create batches by size, kind, order and group.
 - Each batch shows its progress, and decisions saved inside it are hot-iron stamped with its ID.
-- When an **AI agent has filled one in**, its proposals show in the list and prefill the form. Review them one at a time, or apply the rest as unreviewed agent decisions. Applying never overwrites a decision someone else already saved.
+- When an **AI agent has filled one in**, its proposals show in the list and prefill the form. Review them one at a time, or apply the rest as attributed agent decisions. Applying never overwrites a decision someone else already saved.
 
 ### Duplicate detection that points you to the other item
 
@@ -97,7 +97,7 @@ Related issues and PRs often need to be read together: a bug report, its duplica
 ### Agents as collaborators, not authorities
 
 - **A core playbook ships with the install** becoming that install's `AGENTS.md` for the tool, and without disturbing yours. All Agents are supported.
-- **One playbook per task:** triage a batch, check duplicates, review a PR's code, organize groups, recommend a PR closure, review an appeal, make a report decision-ready, and brief the maintainers. Ask in plain words and the Agent will pick the right one for you.
+- **One playbook per task:** triage a batch, label or score items, check duplicates, review a PR's code, inspect its CI, verify locally, organize groups, recommend a PR closure, run an action pass, review an appeal, and brief the maintainers on a batch, an item or a set of briefs. Ask in plain words and the Agent will pick the right one for you.
 - **The code is right there.** Because the install sits inside the repository, an agent reviewing a PR reads the actual files to check broader context and whether a fix already landed.
 - **The TUI hands a screen to an agent.** Item context, ticked items, or a batch with its file paths can be copied as Markdown for a chat.
 
@@ -105,9 +105,9 @@ Related issues and PRs often need to be read together: a bug report, its duplica
 
 An agent can read a named PR, current human guidance, earlier objections and selected evidence, then explain why it should stay open or save a proposed closure with the exact comment. The proposal is a reviewable local record, not a GitHub action.
 
-**Notifications** puts that comment beside its target, guidance and evidence gaps. A person can edit it, reject it with an optional attributed reason, or approve the exact comment and close action. An edit needs fresh review; a rejection remains for the next agent pass, where reconsideration must explain what changed. Group readiness and a reviewed ledger decision do not grant publication approval.
+**Notifications** puts that comment beside its target, guidance and evidence gaps. A person can edit it, reject it with an optional attributed reason, or approve the exact comment and close action. An edit needs fresh review; a rejection remains for the next agent pass, where reconsideration must explain what changed. Group readiness and a saved ledger decision do not grant publication approval.
 
-People can also compose comments and explained closures or reopenings directly. `bin/comment-plus` defaults to a dry-run plan, checks the live target before publication, and saves separate comment and state-change outcomes so an uncertain result can be inspected before retrying. Nothing labels, approves or merges a PR.
+People can also compose comments and explained closures or reopenings directly. `bin/comment-plus` defaults to a dry-run plan, checks the live target before publication, and saves separate comment and state-change outcomes so an uncertain result can be inspected before retrying. Nothing approves or merges a PR.
 
 Tracked comments appear in Notifications. Closed-PR watches and external closure explanations can be captured explicitly for a later appeal review; their observations and attributed claims do not decide the appeal, acknowledge activity or authorize a write. The contributor can still bring new evidence to the original PR.
 
@@ -117,7 +117,7 @@ Tracked comments appear in Notifications. Closed-PR watches and external closure
 
 ### Reporting, and a report you can decide from
 
-`bin/report` writes a dated Markdown snapshot: ready groups first, then human-confirmed decisions by action, the review queue, merge-ready PRs, close candidates and the oldest untriaged. It's meant to be committed, so the repo keeps a history of its own backlog.
+`bin/report` writes a dated Markdown snapshot: ready groups first, then Pending review requests, suggested actions, proposed labels, merge-ready PRs, close suggestions and the oldest untriaged. It's meant to be committed, so the repo keeps a history of its own backlog.
 
 "But hey!," you may ask, "Shouldn't each item be re-checked against its current state and the code, then a recommendation with the case **for** and **against** it, and the diff hunk or comment that settles it be added on top?"
 

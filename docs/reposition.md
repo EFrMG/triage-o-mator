@@ -2,13 +2,13 @@
 
 The Reposition bridge adds `bin/cache search-index`, `query`, `retrieve` and `search-info`. Turning automatic download ON in the TUI's Local dataset menu prepares the pinned engine for the tool checkout. A setup failure records Reposition as OFF and leaves native acquisition and offline search available. Restarting or refreshing does not repeat a failed install; turning automatic download OFF and ON explicitly retries it. The environment is shared by installs linked to that code checkout.
 
-It searches explicit immutable snapshots or frozen corpora and resolves selected hits to verified source fragments. The default literal `bin/cache search` and existing readers remain usable without Reposition, although it is recommended to use it.
+It searches explicit immutable snapshots or frozen corpora and resolves selected hits to verified source fragments. The default literal `bin/cache search` and existing readers remain usable without Reposition, though ranked retrieval is the recommended way to explore a large cache.
 
 Snapshot indexing includes retained `checks` metadata and, by default, separately captured native CI failure logs as `ci_logs`. Use `--component ci_logs` to build or query only captured logs; an explicit ordinary component selection such as `--component summary` skips capture discovery. Indexing never acquires logs. The Checks tab continues to use the owning `pr-checks` and `pr-check-log` readers.
 
 A build freezes exact saved capture pointers and immutable packet references for the selected PR snapshots. Later capture publication, pointer replacement or deletion does not alter that view; explicitly rebuild with `search-index --replace` to adopt later captures. `--max-ci-logs` defaults to 1,000 (maximum 10,000) and bounds inspected PRs, eligible checks/pointers and captured packets. Coverage retains caps, missing associations, unsupported providers, partial captures, omissions and non-UTF-8 segments; these are separate from snapshot component completeness. Only strict UTF-8 segments are searchable. ANSI escapes are neutralized in search postings while excerpts retain original bytes and coordinates.
 
-Query and retrieval verify immutable packets and their selected/capture snapshot dependencies. Citations retain packet references, both snapshot IDs, segment-relative UTF-8 byte ranges, original job-log byte ranges and inclusive line ranges. Reads stay inside a retained segment and preserve gaps. Hashes establish retained content integrity, not current GitHub state or external provenance. Local verification notes remain a separate future feature.
+Query and retrieval verify immutable packets and their selected/capture snapshot dependencies. Citations retain packet references, both snapshot IDs, segment-relative UTF-8 byte ranges, original job-log byte ranges and inclusive line ranges. Reads stay inside a retained segment and preserve gaps. Hashes establish retained content integrity, not current GitHub state or external provenance. Local verification notes in the ledger are not indexed.
 
 ## Supported versions and installation
 

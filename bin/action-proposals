@@ -202,14 +202,11 @@ def inspect(repo, host, kind, number):
     if not isinstance(title, str) or not title.strip():
         raise ValueError("live item has no usable title")
 
-    result = dict(repository=repo, kind=kind, number=number, target=target, title=title, state=issue["state"],
-                  updated_at=issue["updated_at"], head_sha=head, requests=2 if kind == "pr" else 1)
-    if kind == "issue":
-        if type(issue.get("comments")) is not int or issue["comments"] < 0:
-            raise ValueError("live issue has no usable comment count")
-        result["comments"] = issue["comments"]
+    if type(issue.get("comments")) is not int or issue["comments"] < 0:
+        raise ValueError("live item has no usable comment count")
 
-    return result
+    return dict(repository=repo, kind=kind, number=number, target=target, title=title, state=issue["state"],
+                updated_at=issue["updated_at"], head_sha=head, comments=issue["comments"], requests=2 if kind == "pr" else 1)
 
 
 def valid_comment(text):
@@ -224,6 +221,9 @@ def propose(args, repo):
     taxonomy = load_taxonomy()
     operation = action_operation(taxonomy, args.action) if args.action else args.operation
     retired_action = args.action is not None and args.action not in taxonomy.get("actions", [])
+    # A PR closure answers the conversation as observed, so it binds the comment count like an issue action; other PR actions are guarded by the head commit only.
+    counted = args.kind == "issue" or operation == "close"
+
     if operation not in ("comment", "close", "reopen") or args.operation and args.operation != operation or retired_action and not args.replace_checkpoint:
         raise ValueError("selected action is not a configured writing type")
     if args.action is None and (args.kind != "pr" or operation != "close"):
@@ -232,8 +232,8 @@ def propose(args, repo):
         raise ValueError("invalid action target or observed update time")
     if args.kind == "pr" and not re.fullmatch(r"[0-9a-f]{40}", args.head_sha or "") or args.kind == "issue" and args.head_sha:
         raise ValueError("PR actions require a head SHA; issue actions cannot have one")
-    if args.kind == "issue" and (type(args.comments) is not int or args.comments < 0) or args.kind == "pr" and args.comments is not None:
-        raise ValueError("issue actions require the observed comment count; PR actions cannot have one")
+    if counted and (type(args.comments) is not int or args.comments < 0) or not counted and args.comments is not None:
+        raise ValueError("issue actions and PR closures require the observed comment count; other PR actions cannot have one")
     if operation == "close" and args.observed_state != "open" or operation == "reopen" and args.observed_state != "closed":
         raise ValueError("observed state does not permit the selected action")
     if not valid_short_text(args.title, 1000) or not valid_short_text(args.by, 200):
@@ -254,15 +254,18 @@ def propose(args, repo):
     reference = None
     if bool(args.reference_kind) != bool(args.reference_number) or args.reference_number is not None and args.reference_number < 1:
         raise ValueError("reference kind and positive number must be supplied together")
+
     if args.reference_kind:
         if args.kind != "pr" or operation != "close":
             raise ValueError("a reference belongs to a PR closure proposal")
+
         reference = dict(kind=args.reference_kind, number=args.reference_number)
 
     group_input = None
     if args.group_id is not None:
         if args.kind != "pr" or operation != "close":
             raise ValueError("a group handoff belongs to a PR closure proposal")
+
         group = load_group(args.group_id)
         if group["status"] == "archived" or not any(member["kind"] == "pr" and member["number"] == args.number for member in group["members"]):
             raise ValueError("selected PR is not in an active handoff group")
@@ -272,6 +275,7 @@ def propose(args, repo):
             parts = token.split(":", 2)
             if len(parts) != 3 or parts[0] not in ("pr", "issue") or not parts[1].isdigit() or int(parts[1]) < 1 or (parts[0], int(parts[1])) in declared:
                 raise ValueError("invalid or repeated --member-context; expected KIND:NUMBER:CHECKPOINT")
+
             declared[(parts[0], int(parts[1]))] = parts[2]
 
         members = {(member["kind"], member["number"]) for member in group["members"]}
@@ -305,7 +309,7 @@ def propose(args, repo):
                  status="pending", inputs=inputs)
     if args.kind == "pr":
         value["head_sha"] = args.head_sha
-    else:
+    if counted:
         value["comments"] = args.comments
     if reference is not None:
         value["reference"] = reference
@@ -315,11 +319,13 @@ def propose(args, repo):
     path = proposal_path(args.kind, args.number)
     if path.parent.is_symlink():
         raise ValueError("invalid action proposal directory")
+
     with locked(path):
         if path.exists():
             previous = load(path, repo)
             receipt = receipt_path(previous["request_id"])
             completed = previous["status"] == "executed"
+
             if args.replace_checkpoint != previous["checksum"] or previous["status"] not in ("pending", "rejected", "executed"):
                 raise ValueError("action proposal changed or has an unresolved write attempt; inspect it before replacing")
             if completed:
@@ -335,19 +341,23 @@ def propose(args, repo):
                         saved.get("comment") != previous["outcome"]["comment"] or
                         saved.get("state_change") != previous["outcome"]["state_change"]):
                     raise ValueError("completed action differs from its saved write receipt")
+
             elif receipt.exists() or receipt.is_symlink():
                 raise ValueError("action proposal has a write attempt; inspect it before replacing")
             if retired_action and previous.get("action") != args.action:
                 raise ValueError("a retired action can only edit its existing proposal")
+
             if completed:
                 if args.reconsideration_reason:
                     raise ValueError("reconsideration applies only to a rejected proposal")
             elif previous.get("decision_question"):
                 question = args.decision_question or previous["decision_question"]
                 value["decision_question"] = question
-                if question == previous["decision_question"]:
-                    if value["target"] == previous["target"] and value["operation"] == previous["operation"] and value["action"] == previous["action"] and "decision_resolution" in previous:
-                        value["decision_resolution"] = previous["decision_resolution"]
+                # An answer covers the exact comment it was given for; a changed comment asks the question again.
+                same = all(value[field] == previous[field] for field in ("target", "operation", "action", "comment"))
+                if question == previous["decision_question"] and same and "decision_resolution" in previous:
+                    value["decision_resolution"] = previous["decision_resolution"]
+
             if previous["status"] == "rejected":
                 if not args.reconsideration_reason or not args.reconsideration_reason.strip():
                     raise ValueError("reconsidering a rejected action requires an attributed explanation")
@@ -487,10 +497,10 @@ def call_comment(repo, value):
             "--number", str(value["number"]), "--body=" + value["comment"], "--request-id", value["request_id"]]
     if value["kind"] == "pr":
         base += ["--expected-head", value["head_sha"]]
-    elif "comments" not in value:
-        raise OutOfDate("this issue proposal was saved without its observed comment count; prepare it again")
-    else:
+    if "comments" in value:
         base += ["--expected-comments", str(value["comments"])]
+    elif value["kind"] == "issue" or value["operation"] == "close":
+        raise OutOfDate("this proposal was saved without its observed comment count; prepare it again")
     if value["operation"] in ("close", "reopen"):
         base.append("--" + value["operation"])
     else:
@@ -643,7 +653,7 @@ def main():
     add.add_argument("--observed-state", choices=("open", "closed"), required=True)
     add.add_argument("--updated-at", required=True)
     add.add_argument("--head-sha")
-    add.add_argument("--comments", type=int, help="for an issue: the comment count reported by inspect")
+    add.add_argument("--comments", type=int, help="for an issue or a PR closure: the comment count reported by inspect")
     add.add_argument("--comment-file", type=Path, required=True)
     add.add_argument("--by", required=True)
     add.add_argument("--context-checkpoint", required=True)

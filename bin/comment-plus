@@ -62,7 +62,7 @@ def main():
     parser.add_argument("--approve", help="SHA-256 from the reviewed dry-run plan")
     parser.add_argument("--expected-head", help="PR head SHA observed when the proposal was prepared")
     parser.add_argument("--expected-state", choices=("open", "closed"), help="item state observed when a comment-only proposal was prepared")
-    parser.add_argument("--expected-comments", type=int, help="issue comment count observed when the proposal was prepared")
+    parser.add_argument("--expected-comments", type=int, help="conversation comment count observed when the proposal was prepared")
     args = parser.parse_args()
 
     # Older argparse versions strip a literal '--' even from '--body=--', returning an empty list for this single-value option.
@@ -80,8 +80,8 @@ def main():
         raise ValueError("head revision checks require a pull request")
     if args.expected_head and not re.fullmatch(r"[0-9a-f]{40}", args.expected_head):
         raise ValueError("expected head must be a 40-character lowercase SHA")
-    if args.expected_comments is not None and (args.kind != "issue" or args.expected_comments < 0):
-        raise ValueError("comment count checks apply to issues and need a count of zero or more")
+    if args.expected_comments is not None and args.expected_comments < 0:
+        raise ValueError("comment count checks need a count of zero or more")
 
     text = args.body if args.body is not None else args.body_file.read_text(encoding="utf-8")
     if not text.strip() or len(text) > 65536 or any((ord(c) < 32 and c not in "\n\t") or 127 <= ord(c) <= 159 for c in text):
@@ -134,9 +134,9 @@ def main():
                 raise TargetChanged(f"item is no longer {required_state}; preview again after inspecting GitHub")
         if args.expected_state and item.get("state") != args.expected_state:
             raise TargetChanged(f"item is no longer {args.expected_state}; review it again")
-        # An issue's conversation is what a proposal answers, so a changed comment count stops it. GitHub's updated_at is not compared: labels, cross-references and base-branch pushes move it without touching what was reviewed.
+        # The conversation is what a proposal answers, so a changed comment count stops it. GitHub's updated_at is not compared: labels, cross-references and base-branch pushes move it without touching what was reviewed.
         if args.expected_comments is not None and item.get("comments") != args.expected_comments:
-            raise TargetChanged("issue comments changed since the approved proposal; review it again")
+            raise TargetChanged("comments changed since the approved proposal; review it again")
         if args.expected_head:
             pull = api(args.host, "GET", f"repos/{repo}/pulls/{args.number}")
             if not isinstance(pull, dict) or pull.get("html_url") != target or pull.get("number") != args.number or (pull.get("head") or {}).get("sha") != args.expected_head:

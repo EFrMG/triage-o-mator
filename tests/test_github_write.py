@@ -127,12 +127,12 @@ class WriteTests(Workspace):
                               "--updated-at", selected, "--comment-file", str(comment), "--by", "agent:helper", "--context-checkpoint", context["checkpoint"], "--evidence-gap", "Discussion not acquired")
         reviewed = self.json_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1")
         refused = self.run_cli("action-proposals", *args, "execute", "--kind", "issue", "--number", "1", "--publish", "--approve", reviewed["approval"], ok=False)
-        self.assertEqual(refused.stderr.strip(), "error: issue comments changed since the approved proposal; review it again")
+        self.assertEqual(refused.stderr.strip(), "error: comments changed since the approved proposal; review it again")
         self.assertNotIn("POST", [call["method"] for call in self.write_calls()])
 
         row = self.json_cli("action-proposals", *args, "list")["rows"][0]
         self.assertEqual((row["status"], row["active"], row["needs_attention"], row["checkpoint"]), ("pending", False, False, saved["checkpoint"]))
-        self.assertIn("issue comments changed", row["out_of_date"]["reason"])
+        self.assertIn("comments changed", row["out_of_date"]["reason"])
         self.run_cli("action-proposals", *args, "review", "--kind", "issue", "--number", "1", ok=False)
 
         # A later update time alone, as a label or a base-branch push causes, does not stop an approved write.
@@ -315,7 +315,7 @@ class ClosureWriteTests(Workspace):
         for number in (1, 2):
             target = f"https://github.com/owner/repo/pull/{number}"
             (self.mock / f"issues-{number}.json").write_text(json.dumps(dict(number=number, html_url=target, state="open",
-                                                                               updated_at="2026-09-29T00:00:00Z", pull_request={})))
+                                                                               updated_at="2026-09-29T00:00:00Z", comments=0, pull_request={})))
             (self.mock / f"pulls-{number}.json").write_text(json.dumps(dict(number=number, html_url=target, head=dict(sha="b" * 40))))
 
     def closure(self, *args, ok=True):
@@ -344,7 +344,7 @@ class ClosureWriteTests(Workspace):
         comment = self.root / f"comment-{number}.md"
         comment.write_text(f"PR #{number} is superseded.\n")
         gap = () if "--evidence" in extra else ("--evidence-gap", "No selected snapshot")
-        return self.closure("propose", "--number", str(number), "--title", f"PR {number}", "--head-sha", "b" * 40,
+        return self.closure("propose", "--number", str(number), "--title", f"PR {number}", "--head-sha", "b" * 40, "--comments", "0",
                                "--updated-at", "2026-09-29T00:00:00Z", "--comment-file", str(comment),
                                "--by", "agent:helper", "--context-checkpoint", context["checkpoint"],
                                *gap, *extra, ok=ok)
@@ -356,7 +356,7 @@ class ClosureWriteTests(Workspace):
         gap = () if "--evidence" in extra else ("--evidence-gap", "No selected snapshot")
         return self.json_cli("action-proposals", "--expected-repo", "owner/repo", "propose", "--kind", "pr", "--number", str(number),
                              "--operation", "close", "--title", f"PR {number}", "--observed-state", "open",
-                             "--head-sha", "b" * 40, "--updated-at", "2026-09-29T00:00:00Z", "--comment-file", str(comment),
+                             "--head-sha", "b" * 40, "--comments", "0", "--updated-at", "2026-09-29T00:00:00Z", "--comment-file", str(comment),
                              "--by", "agent:helper", "--context-checkpoint", context["checkpoint"], *gap, *extra, ok=ok)
 
     def write_calls(self):
@@ -429,6 +429,13 @@ class ClosureWriteTests(Workspace):
         self.json_cli("action-pass", "preview", "--expected-repo", "owner/repo", "--item", "pr:1", ok=False)
         self.closure("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], "--automation", ok=False)
         self.assertEqual(self.write_calls(), [])
+
+        # A new conversation comment without a push stops an approved closure before any write.
+        issue = json.loads((self.mock / "issues-1.json").read_text())
+        (self.mock / "issues-1.json").write_text(json.dumps(dict(issue, comments=1)))
+        self.closure("execute", "--number", "1", "--publish", "--approve", reviewed["approval"], ok=False)
+        self.assertEqual([call["method"] for call in self.write_calls()], ["GET"])
+        self.assertIn("comments changed", self.closure("list")["rows"][0]["out_of_date"]["reason"])
 
     def test_repository_policy_routes_bound_pr_closure_through_action_proposal(self):
         write_gh = (self.mock / "gh").read_text()
@@ -598,10 +605,14 @@ class ClosureWriteTests(Workspace):
         comment.write_text("Please add a focused test for the changed behavior.\n")
         edited = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "edit", "--kind", "pr", "--number", "1",
                                "--checkpoint", answered["checkpoint"], "--comment-file", str(comment), "--by", "maintainer")
-        self.assertEqual(edited["decision_resolution"]["reason"], "Send focused feedback now")
+        self.assertNotIn("decision_resolution", edited)
         self.run_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
                      "--publish", "--approve", reviewed["approval"], ok=False)
+        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1", ok=False)
         self.assertEqual(self.write_calls(), [])
+
+        self.json_cli("action-proposals", "--expected-repo", "owner/repo", "answer", "--kind", "pr", "--number", "1",
+                      "--checkpoint", edited["checkpoint"], "--by", "maintainer", "--answer", "Send the focused test request")
         fresh = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
         self.assertNotEqual(fresh["approval"], reviewed["approval"])
         result = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
@@ -747,7 +758,7 @@ class ClosureWriteTests(Workspace):
         first = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         write = ("--expected-repo", "owner/repo", "--host", first["host"], "--kind", "pr", "--number", "1",
                  "--body", first["comment"], "--close", "--request-id", first["request_id"],
-                 "--expected-head", first["head_sha"])
+                 "--expected-head", first["head_sha"], "--expected-comments", str(first["comments"]))
         plan = self.json_cli("comment-plus", *write)
         self.json_cli("comment-plus", *write, "--publish", "--approve", plan["approval"])
         self.assertEqual(self.closure("list")["rows"][0]["status"], "pending")
@@ -763,7 +774,7 @@ class ClosureWriteTests(Workspace):
         saved = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         base = ("--expected-repo", "owner/repo", "--host", "github.com", "--kind", "pr", "--number", "1",
                 "--body", proposal["comment"], "--close", "--request-id", saved["request_id"],
-                "--expected-head", saved["head_sha"])
+                "--expected-head", saved["head_sha"], "--expected-comments", str(saved["comments"]))
         plan = self.json_cli("comment-plus", *base)
         (self.mock / "fail-patch").touch()
         self.json_cli("comment-plus", *base, "--publish", "--approve", plan["approval"], ok=False)

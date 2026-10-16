@@ -232,7 +232,7 @@ class ProposalFeedbackTests(Workspace):
         context = self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", str(number))
 
         return self.closure("propose", "--kind", "pr", "--number", str(number), "--operation", "close", "--observed-state", "open", "--title", "An older fix",
-                               "--head-sha", "b" * 40, "--updated-at", "2026-09-29T00:00:00Z",
+                               "--head-sha", "b" * 40, "--comments", "0", "--updated-at", "2026-09-29T00:00:00Z",
                                "--comment-file", str(comment), "--by", "agent:helper",
                                "--context-checkpoint", context["checkpoint"], *extra, ok=ok)
 

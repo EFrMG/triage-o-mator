@@ -54,7 +54,7 @@ def valid_decision_hold(value):
 
     held = next((version for version in reversed(history) if isinstance(version, dict) and version.get("checksum") == answer.get("held_checkpoint")), None)
     return (held is not None and held.get("decision_question") == question and held.get("target") == value.get("target") and
-            held.get("action") == value.get("action") and held.get("operation") == value.get("operation") and attributed(answer))
+            held.get("action") == value.get("action") and held.get("operation") == value.get("operation") and held.get("comment") == value.get("comment") and attributed(answer))
 
 
 def valid_reconsideration(versions):

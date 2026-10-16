@@ -3,7 +3,6 @@
 import json
 import math
 import re
-import shlex
 from collections import Counter, defaultdict
 from itertools import combinations
 from datetime import datetime, timezone
@@ -186,29 +185,67 @@ def broad_path(path):
     return path.rsplit("/", 1)[-1] in BROAD_PATHS or any(part in ("vendor", "generated", "node_modules", "dist") for part in path.split("/"))
 
 
+GIT_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def git_path(text):
+    """Decode a path as git prints it: bare, or C-quoted with octal escapes for UTF-8 bytes. Return None for malformed quoting."""
+    if not text.startswith('"'):
+        return text
+    if len(text) < 2 or not text.endswith('"'):
+        return None
+
+    raw, body, index = bytearray(), text[1:-1], 0
+    while index < len(body):
+        if body[index] != "\\":
+            raw += body[index].encode("utf-8")
+            index += 1
+        elif body[index + 1:index + 2] in GIT_ESCAPES:
+            raw.append(GIT_ESCAPES[body[index + 1]])
+            index += 2
+        elif re.fullmatch(r"[0-3][0-7]{2}", body[index + 1:index + 4]):
+            raw.append(int(body[index + 1:index + 4], 8))
+            index += 4
+        else:
+            return None
+
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def diff_side(text, prefix):
+    """The path on a ---/+++ line without its side prefix, "" for /dev/null, or None when it is not recognized."""
+    if text == "/dev/null":
+        return ""
+
+    # Git ends an unquoted path containing a space with a tab, so the line stays unambiguous.
+    path = git_path(text if text.startswith('"') else text.removesuffix("\t"))
+    return path[len(prefix):] if path and path.startswith(prefix) and len(path) > len(prefix) else None
+
+
 def removed_lines(diff):
-    """Return original path, line number and text keys, changed-line counts by path, and whether all diff headers parsed."""
+    """Return original path, line number and text keys, changed-line counts by path, and whether every file's paths parsed."""
     removed, changed = set(), Counter()
     path, old_line, parsed = None, None, True
+    sides, hunks = None, False
     for line in diff.splitlines():
         if line.startswith("diff --git "):
-            try:
-                parts = shlex.split(line)
-            except ValueError:
-                parts = []
-
-            if len(parts) != 4 or parts[:2] != ["diff", "--git"] or not parts[2].startswith("a/") or not parts[3].startswith("b/"):
-                parsed = False
-                path = None
-            else:
-                path = parts[2][2:]
-
-            old_line = None
-        elif path is None:
+            # Paths come from the ---/+++ lines: this header cannot separate unquoted paths that contain spaces.
+            path, old_line, sides, hunks = None, None, {}, False
+        elif sides is None:
             continue
+        elif not hunks and line.startswith(("--- ", "+++ ")):
+            sides[line[0]] = diff_side(line[4:], "a/" if line[0] == "-" else "b/")
         elif line.startswith("@@"):
+            if not hunks:
+                hunks = True
+                original, new = sides.get("-"), sides.get("+")
+                path = None if original is None or new is None else original or new or None
+
             match = DIFF_HUNK.match(line)
-            if match is None:
+            if path is None or match is None:
                 parsed = False
                 old_line = None
             else:

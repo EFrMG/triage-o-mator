@@ -592,6 +592,11 @@ else:
         self.run_cli("apply", "--number", "1", "--kind", "issue", "--action", "")
         self.assertIn("Triaged: 1/1", self.run_cli("stats").stdout)
 
+        # An earlier agent pass owned a label that someone has since removed on GitHub; a failed confirmation must leave a state that status and reset-item still read.
+        state_path = self.root / "data/owner/repo/local/item-labels-state.json"
+        state = json.loads(state_path.read_text())
+        state["items"]["issue:1"].update(last_labels=[dict(id=7, name="bug")], managed=[dict(id=7, name="bug")])
+        state_path.write_text(json.dumps(state))
         uncertain_args = ("edit", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--labels", '["bug"]', "--expected-labels", "[]")
         uncertain = self.json_cli("item-labels", *uncertain_args)
         uncertain_publish = ("--publish", "--request-id", uncertain["plan"]["request_id"], "--approve", uncertain["approval"])

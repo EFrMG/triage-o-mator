@@ -366,7 +366,8 @@ def publish_edit(args, preview):
 
         receipt = dict(approval=approval, plan=plan, status="attempting", at=now_iso())
         save_json(receipt_path, receipt)
-        mark_checked(saved, key, {**prior, "last_labels": before, "pending": True})
+        # Ownership survives only for labels still on GitHub, so the pending record stays valid for status and reset-item if this write fails.
+        mark_checked(saved, key, {**prior, "last_labels": before, "managed": [label for label in prior.get("managed", []) if label in before], "pending": True})
         record_outcome(dict(key=key, status="attempting", operation="edit-labels", request_id=args.request_id))
 
         try:

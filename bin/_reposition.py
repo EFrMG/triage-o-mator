@@ -105,7 +105,7 @@ def _installed_check(python, manifest):
     return check.returncode == 0
 
 
-def environment_status():
+def environment_status(all_inputs=True):
     if DISABLED.is_symlink():
         return dict(enabled=False, state="off", scope="checkout", fallback=True, reason="Reposition state marker is a symlink")
 
@@ -122,8 +122,9 @@ def environment_status():
     if not python.is_file():
         return dict(enabled=False, state="off", scope="checkout", fallback=False, reason=None)
 
+    # Explicit status audits every bundle input; a query only runs the wheel, so it checks just the manifest and wheel.
     try:
-        manifest = _verified_bundle(all_inputs=True)
+        manifest = _verified_bundle(all_inputs=all_inputs)
     except (OSError, ValueError, KeyError, TypeError):
         return dict(enabled=False, state="unavailable", scope="checkout", fallback=False, reason=None)
 
@@ -303,17 +304,16 @@ def maybe_run(argv):
     if any(option.startswith("--") and len(option) > 2 and "--cache".startswith(option) for option in options):
         parser.error("the cache namespace is owned by this install; --cache cannot override it")
 
-    if not environment_status()["enabled"]:
-        if help_requested:
-            return None
-
-        sys.stderr.write(f"error: audited Reposition is unavailable for this checkout; run bin/reposition-env enable to install Reposition {SUPPORTED_REPOSITION} from the approved wheel. Native cache search remains available.\n")
-        return 2
-
-    # Installs link bin/ to this checkout. Keep the optional engine in one
-    # checkout-local environment without requiring shell activation.
+    # Installs link bin/ to this checkout. Keep the optional engine in one checkout-local environment without requiring shell activation. The process verifies that environment before it execs into it, so the exec'd run does not verify it again.
     python = VENV / "bin/python"
-    if python.is_file() and (Path(sys.prefix).resolve() != VENV.resolve() or not sys.flags.isolated):
+    if not python.is_file() or Path(sys.prefix).resolve() != VENV.resolve() or not sys.flags.isolated:
+        if not environment_status(all_inputs=False)["enabled"]:
+            if help_requested:
+                return None
+
+            sys.stderr.write(f"error: audited Reposition is unavailable for this checkout; run bin/reposition-env enable to install Reposition {SUPPORTED_REPOSITION} from the approved wheel. Native cache search remains available.\n")
+            return 2
+
         os.execv(str(python), [str(python), "-I", *sys.argv])
 
     try:

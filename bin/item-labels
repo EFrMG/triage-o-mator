@@ -124,7 +124,7 @@ def reset_plan(saved, kind, number, transport):
         raise ValueError(f"no saved item-label state for {key}")
 
     live_state, live_labels = transport.item(number)
-    plan = {"repository": REPO, "operation": "reset-item", "key": key, "before": prior,
+    plan = {"repository": REPO, "host": transport.host, "operation": "reset-item", "key": key, "before": prior,
             "current_state": live_state, "current_labels": live_labels,
             "after": {"last_labels": live_labels, "managed": [], "pending": False, "paused": False}}
     plan["preview_sha256"] = value_digest(plan)
@@ -132,7 +132,7 @@ def reset_plan(saved, kind, number, transport):
 
 
 class Transport:
-    def __init__(self, budget, host=None):
+    def __init__(self, budget, host):
         self.budget = budget
         self.used = 0
         self.host = host
@@ -143,9 +143,7 @@ class Transport:
 
         self.used += 1
 
-        command = ["gh", "api", "--method", method, endpoint]
-        if self.host:
-            command += ["--hostname", self.host]
+        command = ["gh", "api", "--hostname", self.host, "--method", method, endpoint]
         if body is not None:
             command += ["--input", "-"]
 
@@ -168,7 +166,8 @@ class Transport:
 
     def item(self, number):
         value = self.api("GET", f"repos/{REPO}/issues/{number}")
-        if not isinstance(value, dict) or value.get("number") != number or value.get("state") not in ("open", "closed") or not isinstance(value.get("labels"), list):
+        # The selected host answers for this item only when GitHub reports it at that host's repository URL.
+        if not isinstance(value, dict) or value.get("number") != number or not str(value.get("html_url", "")).startswith(f"https://{self.host}/{REPO}/") or value.get("state") not in ("open", "closed") or not isinstance(value.get("labels"), list):
             raise ValueError(f"invalid GitHub item #{number} response")
 
         return value["state"], label_pairs(value["labels"])
@@ -268,7 +267,7 @@ def build_plan(saved, limit, transport, selected_keys=()):
 
         rows.append(item)
 
-    plan = {"repository": REPO, "enabled": enabled(), "limit": limit, "request_budget": transport.budget, "requests": transport.used,
+    plan = {"repository": REPO, "host": transport.host, "enabled": enabled(), "limit": limit, "request_budget": transport.budget, "requests": transport.used,
             "selected_keys": list(selected_keys), "items": rows}
     plan["preview_sha256"] = value_digest(plan)
     return plan
@@ -404,7 +403,7 @@ def publish_edit(args, preview):
 def run_pass(parser, args):
     with locked(PASS_LOCK):
         saved = state()
-        transport = Transport(args.request_budget)
+        transport = Transport(args.request_budget, args.host)
         plan = build_plan(saved, args.limit, transport, args.keys)
         if plan["preview_sha256"] != args.preview_sha256:
             fail(parser, "the selected decisions or GitHub labels changed; preview the pass again")
@@ -601,18 +600,18 @@ def main():
             if args.apply or args.preview_sha256:
                 parser.error("preview never writes")
 
-            transport = Transport(args.request_budget)
+            transport = Transport(args.request_budget, args.host)
             print(json.dumps(build_plan(state(), args.limit, transport, args.keys), indent=2, ensure_ascii=False))
         elif args.command == "reset-item":
             if not args.apply:
-                print(json.dumps(reset_plan(state(), args.kind, args.number, Transport(args.request_budget)), indent=2, ensure_ascii=False))
+                print(json.dumps(reset_plan(state(), args.kind, args.number, Transport(args.request_budget, args.host)), indent=2, ensure_ascii=False))
             else:
                 if not args.preview_sha256:
                     parser.error("reset-item --apply requires --preview-sha256")
 
                 with locked(PASS_LOCK):
                     saved = state()
-                    plan = reset_plan(saved, args.kind, args.number, Transport(args.request_budget))
+                    plan = reset_plan(saved, args.kind, args.number, Transport(args.request_budget, args.host))
                     if plan["preview_sha256"] != args.preview_sha256:
                         fail(parser, "item-label state or GitHub labels changed; preview reset-item again")
 

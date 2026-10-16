@@ -607,6 +607,10 @@ else:
         self.assertEqual(self.calls(), calls)
         self.assertEqual(self.ledger()["issue", 1]["labels"], [])
         self.assertEqual(self.json_cli("item-labels", "status", "--expected-repo", "owner/repo")["pending_items"], ["issue:1"])
+        reset = self.json_cli("item-labels", "reset-item", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1")
+        self.assertEqual((reset["host"], reset["before"]["managed"]), ("github.com", []))
+        self.json_cli("item-labels", "reset-item", "--expected-repo", "owner/repo", "--kind", "issue", "--number", "1", "--apply", "--preview-sha256", reset["preview_sha256"])
+        self.assertEqual(self.json_cli("item-labels", "status", "--expected-repo", "owner/repo")["pending_items"], [])
 
     def test_action_modes_are_explicit_per_repository_and_reset_after_guidance_changes(self):
         args = ("--expected-repo", "owner/repo")
@@ -657,6 +661,7 @@ with (root / "calls.jsonl").open("a") as out:
     out.write(json.dumps(args) + "\\n")
 method = args[args.index("--method") + 1]
 endpoint = args[args.index("--method") + 2]
+assert args[args.index("--hostname") + 1] == "github.com"
 live = json.loads((root / "live.json").read_text())
 if endpoint.startswith("repos/owner/repo/labels/") and method == "GET":
     name = endpoint.rsplit("/", 1)[-1]
@@ -667,14 +672,14 @@ if endpoint.startswith("repos/owner/repo/labels/") and method == "GET":
     print(json.dumps(label))
     sys.exit(0)
 if endpoint == "repos/owner/repo/issues/1" and method == "GET":
-    print(json.dumps(live))
+    print(json.dumps(dict(live, html_url="https://github.com/owner/repo/issues/1")))
     sys.exit(0)
 if endpoint == "repos/owner/repo/issues/2" and method == "GET":
     if (root / "replace-before-second").exists() and live["labels"]:
         (root / "catalog.json").write_text(json.dumps([dict(id=70, name="bug")]))
         live["labels"] = [row for row in live["labels"] if row["id"] != 7]
         (root / "live.json").write_text(json.dumps(live))
-    print(json.dumps(dict(number=2, state="open", labels=[])))
+    print(json.dumps(dict(number=2, html_url="https://github.com/owner/repo/issues/2", state="open", labels=[])))
     sys.exit(0)
 if endpoint == "repos/owner/repo/issues/1/labels" and method == "POST":
     names = json.load(sys.stdin)["labels"]
@@ -721,6 +726,7 @@ print(json.dumps(live["labels"]))
 
         initial = self.json_cli("item-labels", "preview", "--expected-repo", "owner/repo", "--limit", "1")
         self.assertEqual(initial["items"][0]["number"], 2)
+        self.assertEqual(initial["host"], "github.com")
         first["labels"] = []
         ledger_path.write_text(json.dumps(first) + "\n")
 

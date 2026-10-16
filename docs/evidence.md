@@ -18,7 +18,7 @@ An update rechecks each batch's item revisions and counts and skips completed it
 
 The TUI can copy an agent prompt for the selected dataset. If clipboard access is unavailable, it saves a file and reports its path. Start that session with access to the same checkout; the prompt names the install directory, selected dataset, saved coverage counts and last stop reason, so you do not need to upload the data or paste command output. It asks the agent to assess the available data offline, starting with the full inventory and then reading selected detail. You can add a specific analysis question before sending it.
 
-If no dataset is loaded in the TUI, copying the prompt restores the remembered selection. From the install, `bin/cache handoff` reports that selection’s scope, gaps and offline commands without a GitHub request; `bin/cache handoff --corpus CORPUS_ID` inspects a specific download. To choose a saved dataset explicitly, use `bin/cache select CORPUS_ID`.
+If no dataset is loaded in the TUI, copying the prompt restores the remembered selection. From the install, `bin/cache handoff` reports that selection's scope, gaps and offline commands without a GitHub request; `bin/cache handoff --corpus CORPUS_ID` inspects a specific download. To choose a saved dataset explicitly, use `bin/cache select CORPUS_ID`.
 
 Inspect its member pages and search the complete inventory before relying on downloaded detail:
 

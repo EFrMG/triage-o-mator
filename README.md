@@ -338,6 +338,6 @@ See [AGENTS.md](AGENTS.md) for repository conventions.
 
 ## Not Built (yet)
 
-- **Other GitHub write actions**: the tool does not approve or merge PRs. See [comment publishing](docs/comment-plus.md) and [item labeling](docs/install.md#automations-and-item-labeling).
+- **Go server for live triage collaboration (top priority)**: the current team workflow shares decisions, review requests and groups through Git. A server would let multiple contributors see and update shared triage state live, with attributed changes and conflict handling. It would need to preserve the current separation between local triage, Pending review, evidence and approved GitHub writes.
+- **More GitHub write operations**: agents can recommend merges in local review notes, but the tool does not merge PRs or submit formal GitHub reviews. Future operations could include publishing an approved review (approve, request changes or comment), merging or enabling auto-merge for a PR, and assigning issues/PRs or setting milestones. These should remain separately configurable, preview exact targets and content, recheck live state before writing, and record outcomes for review. Merge operations deserve their own explicit approval because they change repository code. See [comment publishing](docs/comment-plus.md) and [item labeling](docs/install.md#automations-and-item-labeling).
 - **Automatic appeal monitoring**: closed-PR watches need explicit enrollment and polling after the ledger baseline; closed issues have no watch yet.
-- **Live shared use**: a team shares decisions, review requests and groups by committing them through Git. Installs do not sync with each other online, so nobody sees a colleague's work until it is pushed and pulled.

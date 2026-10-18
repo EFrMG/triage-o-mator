@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "verification-settings"), filepath.Join("..", "bin", "ci-policy"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "verification-settings"), filepath.Join("..", "bin", "ci-policy"), filepath.Join("..", "bin", "pr-size"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -430,6 +430,32 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 		t.Fatal("score title or label lost its bold style")
 	}
 
+	for _, size := range []struct{ label, color string }{
+		{"Size: S", "#90EE90"}, {"Size: M", "#FFD700"},
+		{"Size: L", "#FF0000"}, {"Size: XL", "#FF0000"},
+	} {
+		it.Labels = []string{"bug", size.label}
+		li := listItem{Item: it}
+		badge := lipgloss.NewStyle().Foreground(lipgloss.Color(size.color)).Bold(true).Render(size.label)
+		for _, selected := range []bool{false, true} {
+			card := markedCardWithRight(li.Title(), li.Description(), li.Mark(), itemIndicatorsMark(it), selected, 80)
+			line := strings.Split(card, "\n")[1]
+			if !strings.Contains(ansi.Strip(line), size.label+" · "+it.ScoreLabel()) || ansi.StringWidth(line) != 80 || !strings.Contains(line, badge) {
+				t.Fatalf("size badge lost position/color: %q", line)
+			}
+		}
+		m.items = []Item{it}
+		m.detail.SetItem(it)
+		heading := strings.Split(m.itemView(), "\n")[0]
+		if !strings.Contains(heading, badge) || !strings.Contains(ansi.Strip(heading), size.label+" · "+it.ScoreLabel()) {
+			t.Fatalf("item header lost size badge: %q", heading)
+		}
+	}
+	it.Labels = []string{"Size: small", "size: S"}
+	if itemIndicatorsMark(it) != itemScoreMark(it) {
+		t.Fatal("size matching accepted an unrelated label")
+	}
+
 	it.UpdatedAt = "2026-10-07T00:00:00Z"
 	if _, current := it.ScoreValue(); current || !strings.HasSuffix(itemScoreMark(it).text, "/5 (stale?)") {
 		t.Fatal("a later item revision kept displaying the old score as current")
@@ -764,7 +790,32 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	}
 
 	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = baselineSend(m, tea.MouseClickMsg{X: m.mouseMainX() + 4, Y: 3 + 3*cardHeight, Button: tea.MouseLeft})
+	if m.settings.menuSelected != 3 {
+		t.Fatal("mouse could not select Size of PRs")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if cmd == nil || m.settings.section != "pr-size" {
+		t.Fatal("Size of PRs did not open")
+	}
+	m = baselineSend(m, cmd().(prSizeMsg))
+	if m.settings.prSize.Enabled || m.settings.prSize.Revision == "" || !strings.Contains(ansi.Strip(m.settingsView()), "≤50 lines") {
+		t.Fatal("Size of PRs did not load its default OFF policy and thresholds")
+	}
+	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	m = baselineSend(m, cmd().(prSizeMsg))
+	if !m.settings.prSize.Enabled {
+		t.Fatal("Size of PRs did not persist ON")
+	}
+	staleSize := prSizeMsg{root: root, repo: "other/repo", request: m.settings.request}
+	m = baselineSend(m, staleSize)
+	if !m.settings.prSize.Enabled {
+		t.Fatal("foreign size policy reply changed Settings")
+	}
+	m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m.settings.menuSelected = 2
 	next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = next.(model)
 	if cmd == nil || m.settings.section != "automations" {
@@ -2849,6 +2900,31 @@ func TestBaselineDatasetMenuAndNotificationShortcut(t *testing.T) {
 	if m.corpus.open || !m.notifications.open {
 		t.Fatal("closing the dataset did not return to Notifications")
 	}
+	selectedID := strings.Repeat("a", 64)
+	payload := fmt.Sprintf(`{"corpus_id":%q,"repository":{"host":"github.com","full_name":"owner/repo"},"inventory_snapshot":%q,"members":1,"status":"finished"}`, selectedID, strings.Repeat("c", 64))
+	if err := os.WriteFile(filepath.Join(root, "bin", "cache"), []byte("#!/bin/sh\ncat <<'JSON'\n"+payload+"\nJSON\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writer := `#!/bin/sh
+printf '%s\n' "$@" > '` + filepath.Join(root, "size-arguments") + `'
+printf '%s\n' '{"enabled":true,"written":[{}],"skipped":[]}'
+`
+	if err := os.WriteFile(filepath.Join(root, "bin", "pr-size"), []byte(writer), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result := corpusCommand(root, "owner/repo", 0, corpusUI{id: selectedID}, "run", &readProcess{})().(corpusMsg)
+	arguments, err := os.ReadFile(filepath.Join(root, "size-arguments"))
+	if err != nil || result.err != nil || result.sizeError != nil || !strings.Contains(result.sizeSummary, "1 checked") || !strings.Contains(string(arguments), "--corpus\n"+selectedID) || !strings.Contains(string(arguments), "--apply") {
+		t.Fatalf("corpus refresh did not invoke its separate size writer: %+v %s %v", result, arguments, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "pr-size"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result = corpusCommand(root, "owner/repo", 0, corpusUI{id: selectedID}, "run", &readProcess{})().(corpusMsg)
+	if result.err != nil || result.sizeError == nil {
+		t.Fatal("size writer failure changed the successful corpus acquisition result")
+	}
+
 }
 
 func TestBaselineAutomaticRepositionSetupErrorKeepsNativeRestore(t *testing.T) {

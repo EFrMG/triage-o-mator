@@ -93,6 +93,8 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishAttention(msg)
 	case corpusMsg:
 		return m.finishCorpus(msg)
+	case prSizeMsg:
+		return m.finishPRSize(msg)
 	case settingsDoneMsg:
 		return m.finishSettings(msg)
 	case settingsPreviewMsg:

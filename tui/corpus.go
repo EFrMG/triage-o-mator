@@ -81,6 +81,8 @@ type corpusUI struct {
 type corpusMsg struct {
 	usage                         *datasetUsage
 	repositionError               error
+	sizeError                     error
+	sizeSummary                   string
 	root, action, id              string
 	epoch, operation, observation uint64
 	progress                      corpusProgress
@@ -186,6 +188,21 @@ func corpusCommand(root, repo string, epoch uint64, ui corpusUI, action string, 
 		}
 		if err == nil && action == "create" {
 			_, err = call("select", msg.id)
+		}
+		if err == nil && action == "run" {
+			var result string
+			result, msg.sizeError = runReadScript(process, root, "pr-size", "run", "--expected-repo", repo, "--corpus", msg.id, "--host", evidenceHost, "--request-budget", strconv.Itoa(12*msg.progress.Members+100), "--apply")
+			if msg.sizeError == nil {
+				var sizes struct {
+					Enabled bool              `json:"enabled"`
+					Written []json.RawMessage `json:"written"`
+					Skipped []json.RawMessage `json:"skipped"`
+				}
+				msg.sizeError = json.Unmarshal([]byte(result), &sizes)
+				if msg.sizeError == nil && sizes.Enabled {
+					msg.sizeSummary = fmt.Sprintf(" PR sizes: %d checked, %d skipped.", len(sizes.Written), len(sizes.Skipped))
+				}
+			}
 		}
 		msg.err = err
 		return msg
@@ -323,6 +340,10 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if msg.sizeError != nil {
+		m.recordError("PR sizing failed", msg.sizeError)
+		msg.sizeSummary = " PR sizing failed; inspect the error details or Size of PRs Settings."
+	}
 	if msg.usage != nil {
 		m.corpus.usage = msg.usage
 		m.corpus.repositionProblem = ""
@@ -408,7 +429,7 @@ func (m model) finishCorpus(msg corpusMsg) (tea.Model, tea.Cmd) {
 	if msg.action == "create" || msg.action == "run" {
 		m.corpus.inventoryNotice = ""
 	}
-	m.status = "Dataset: " + msg.progress.Status + "."
+	m.status = "Dataset: " + msg.progress.Status + "." + msg.sizeSummary
 	if msg.action == "run" && m.corpus.automatic && msg.progress.Status == "stopped" && msg.progress.LastRun != nil && autoResumeReason(msg.progress.LastRun.Reason) {
 		if autoAcquired(&msg.progress) <= m.corpus.autoBefore {
 			m.corpus.autoStalls++

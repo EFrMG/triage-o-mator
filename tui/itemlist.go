@@ -96,6 +96,28 @@ func itemScoreMark(item Item) cardMark {
 	return cardMark{text: item.ScoreLabel(), color: currentTheme.Muted}
 }
 
+// itemIndicatorsMark places an exact size label immediately before the score.
+func itemIndicatorsMark(item Item) cardMark {
+	mark := itemScoreMark(item)
+	for _, label := range []string{"Size: XL", "Size: L", "Size: M", "Size: S"} {
+		if !slices.Contains(item.Labels, label) {
+			continue
+		}
+
+		color := "#FF0000"
+		if label == "Size: S" {
+			color = "#90EE90"
+		} else if label == "Size: M" {
+			color = "#FFD700"
+		}
+		size := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true).Render(label)
+		mark.text = size + " · " + mark.text
+		break
+	}
+
+	return mark
+}
+
 func itemScoreColor(value int) string {
 	if value <= 2 {
 		return currentTheme.Error
@@ -145,7 +167,7 @@ func (cardDelegate) Render(w io.Writer, m list.Model, index int, item list.Item)
 	}
 
 	if li, ok := item.(listItem); ok {
-		fmt.Fprint(w, markedCardWithRightAndMeta(entry.Title(), entry.Description(), cardMark{}, itemScoreMark(li.Item), cardMeta{li.Tags(), li.CommentsLabel()}, index == m.Index(), m.Width()))
+		fmt.Fprint(w, markedCardWithRightAndMeta(entry.Title(), entry.Description(), cardMark{}, itemIndicatorsMark(li.Item), cardMeta{li.Tags(), li.CommentsLabel()}, index == m.Index(), m.Width()))
 		return
 	}
 

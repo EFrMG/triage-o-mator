@@ -391,7 +391,7 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 		}
 		row := (event.Y - 3) / cardHeight
 		if m.settings.section == "" {
-			if row >= 3 {
+			if row >= 4 {
 				return m, nil
 			}
 			m.settings.menuSelected = row

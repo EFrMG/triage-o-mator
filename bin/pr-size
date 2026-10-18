@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""Configure and run deterministic, corpus-backed PR size labeling."""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from urllib.parse import quote
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _acquire import summary_identity
+from _cache import EvidenceCache
+from _corpus import key, load_plan, load_state
+from _evidence import repository, same_item, same_repository, validate_payload
+from _pr_size import SIZE_LABELS, classify, set_enabled, status
+from _reader import problems
+from _storage import atomic_writer, locked
+from _triage import DATA_DIR, LEDGER_PATH, REPO, load_ledger, save_ledger, now_iso
+
+STATE = DATA_DIR / "local" / "pr-size-state.json"
+
+
+def saved_state():
+    value = json.loads(STATE.read_text()) if STATE.exists() else dict(repository=REPO, pending=[])
+    if value.get("repository") != REPO or not isinstance(value.get("pending"), list):
+        raise ValueError("invalid PR size write state")
+
+    return value
+
+
+def outcome(value):
+    path = DATA_DIR / "local" / "pr-size-outcomes.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as out:
+        out.write(json.dumps(dict(repository=REPO, at=now_iso(), **value)) + "\n")
+        out.flush()
+        os.fsync(out.fileno())
+
+
+def save_state(value):
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    with atomic_writer(STATE) as out:
+        out.write(json.dumps(value) + "\n")
+
+
+class Transport:
+    def __init__(self, budget, host):
+        self.budget, self.host, self.used = budget, host, 0
+
+    def api(self, method, endpoint, body=None):
+        if self.used >= self.budget:
+            raise ValueError("PR size request budget exhausted")
+
+        self.used += 1
+        command = ["gh", "api", "--hostname", self.host, "--method", method, endpoint]
+        if body is not None:
+            command += ["--input", "-"]
+
+        result = subprocess.run(command, input=json.dumps(body) if body is not None else None, capture_output=True, text=True, timeout=60)
+        if result.returncode:
+            raise ValueError(result.stderr.strip() or "GitHub size request failed")
+
+        return json.loads(result.stdout) if result.stdout.strip() else None
+
+
+def candidates(cache, corpus):
+    plan = load_plan(cache, corpus)
+    same_repository(cache.identity, plan["repository"])
+    progress = load_state(cache, corpus, plan)
+    selected, skipped, manifests = [], [], {}
+    for member in plan["members"]:
+        if member["kind"] != "pr":
+            continue
+
+        snapshot = progress["items"][key(member)]["snapshot_id"]
+        try:
+            if not snapshot:
+                raise ValueError("no acquired snapshot")
+
+            if snapshot not in manifests:
+                manifests[snapshot] = cache.load_manifest(snapshot)
+
+            manifest = manifests[snapshot]
+            same_repository(plan["repository"], manifest["repository"])
+            record = next(row for row in manifest["items"] if key(row["identity"]) == key(member))
+            same_item(member, record["identity"])
+            if any(problems(record, ["summary"], plan["max_age"]).values()):
+                raise ValueError("summary is incomplete, stale or has conflicting revisions")
+
+            component = record["components"]["summary"]
+            payload = cache.read_object(component["object"])
+            validate_payload("summary", component, "pr", payload)
+            summary = json.loads(payload)
+            identity, revision = summary_identity(summary, "pr", member["number"], manifest["repository"])
+            same_item(record["identity"], identity)
+            if revision != record["revision"]:
+                raise ValueError("summary revision differs from its record")
+
+            label = classify(summary.get("additions"), summary.get("deletions"), summary.get("changed_files"))
+            selected.append(dict(number=member["number"], snapshot=snapshot, summary=summary, label=label))
+        except (ValueError, OSError, KeyError, StopIteration) as error:
+            skipped.append(dict(number=member["number"], reason=str(error)))
+
+    return selected, skipped, plan["repository"]
+
+
+def run(args):
+    policy = status()
+    if args.apply and not policy["enabled"]:
+        return dict(enabled=False, written=[], skipped=[], requests=0)
+
+    cache = EvidenceCache(repository(REPO, host=args.host))
+    selected, skipped, pinned_repository = candidates(cache, args.corpus)
+    if not args.apply:
+        return dict(enabled=policy["enabled"], proposed=[{k: v for k, v in row.items() if k != "summary"} for row in selected], skipped=skipped, requests=0)
+
+    transport = Transport(args.request_budget, args.host)
+    written = []
+    names = {"Size: " + size for size in SIZE_LABELS}
+    with locked(DATA_DIR / "item-labels"):
+        saved = saved_state()
+        if saved["pending"]:
+            raise ValueError("uncertain PR size writes require inspection and pr-size reset before retrying: " + str(saved["pending"]))
+
+        def write(marker, method, endpoint, body=None):
+            if status()["revision"] != policy["revision"]:
+                raise ValueError("PR size setting changed; pass stopped")
+
+            if marker.startswith("pr:") and not current(transport.api("GET", endpoint_for_pr)):
+                raise ValueError("PR changed before size publication")
+
+            if transport.used >= transport.budget:
+                raise ValueError("PR size request budget exhausted before publication")
+
+            if marker not in saved["pending"]:
+                saved["pending"].append(marker)
+                save_state(saved)
+
+            outcome(dict(key=marker, status="attempting", method=method, endpoint=endpoint, body=body))
+            return transport.api(method, endpoint, body)
+
+        def done(marker):
+            saved["pending"].remove(marker)
+            save_state(saved)
+            outcome(dict(key=marker, status="verified"))
+
+        if selected and status()["revision"] != policy["revision"]:
+            raise ValueError("PR size setting changed; pass stopped")
+
+        if selected:
+            live_repo = transport.api("GET", f"repos/{REPO}")
+            same_repository(pinned_repository, repository(live_repo["full_name"], host=args.host, database_id=live_repo["id"], node_id=live_repo["node_id"]))
+            catalog = {}
+            page = 1
+            while True:
+                labels = transport.api("GET", f"repos/{REPO}/labels?per_page=100&page={page}")
+                if not isinstance(labels, list):
+                    raise ValueError("invalid GitHub label catalog")
+
+                catalog.update({row["name"]: row for row in labels})
+                if len(labels) < 100:
+                    break
+
+                page += 1
+
+            for size, color in SIZE_LABELS.items():
+                name = "Size: " + size
+                existing = catalog.get(name)
+                if existing and existing.get("color", "").lower() == color.lower():
+                    continue
+
+                endpoint = f"repos/{REPO}/labels"
+                if existing:
+                    endpoint += "/" + quote(name, safe="")
+
+                definition = dict(color=color, description="Deterministic PR size from changed lines and files")
+                definition["new_name" if existing else "name"] = name
+                result = write("definitions", "PATCH" if existing else "POST", endpoint, definition)
+                if not isinstance(result, dict) or result.get("name") != name or result.get("color", "").lower() != color.lower():
+                    raise ValueError("size label definition was not verified")
+
+                done("definitions")
+
+        with locked(LEDGER_PATH):
+            initial_labels = {item["number"]: item.get("labels") for item in load_ledger() if item["kind"] == "pr"}
+
+        observed_labels = {}
+        try:
+            for row in selected:
+                number, summary, label = row["number"], row["summary"], row["label"]
+                if transport.budget - transport.used < 12:
+                    skipped.append(dict(number=number, reason="request budget exhausted"))
+                    continue
+
+                endpoint = endpoint_for_pr = f"repos/{REPO}/pulls/{number}"
+                live = transport.api("GET", endpoint)
+
+                def current(value):
+                    return (isinstance(value, dict) and value.get("number") == number and value.get("id") == summary.get("id")
+                            and value.get("html_url") == f"https://{args.host}/{REPO}/pull/{number}" and value.get("state") == "open"
+                            and all(value.get(field) == summary.get(field) for field in ("additions", "deletions", "changed_files"))
+                            and value.get("head", {}).get("sha") == summary.get("head", {}).get("sha")
+                            and value.get("base", {}).get("sha") == summary.get("base", {}).get("sha"))
+
+                if not current(live):
+                    skipped.append(dict(number=number, reason="live PR differs from cached evidence"))
+                    continue
+
+                before = {entry["name"] for entry in live["labels"]}
+                marker = f"pr:{number}"
+                if before & names != {label}:
+                    labels_endpoint = f"repos/{REPO}/issues/{number}/labels"
+                    if label not in before:
+                        write(marker, "POST", labels_endpoint, dict(labels=[label]))
+
+                    for old in sorted((before & names) - {label}):
+                        write(marker, "DELETE", labels_endpoint + "/" + quote(old, safe=""))
+
+                    after = transport.api("GET", endpoint)
+                    if not current(after) or {entry["name"] for entry in after["labels"]} & names != {label}:
+                        raise ValueError("PR size publication could not be verified")
+
+                    done(marker)
+                else:
+                    after = live
+
+                observed_labels[number] = [entry["name"] for entry in after["labels"]]
+                written.append(dict(number=number, label=label, snapshot=row["snapshot"]))
+
+        finally:
+            if observed_labels:
+                with locked(LEDGER_PATH):
+                    rows = load_ledger()
+                    changed = False
+                    for item in rows:
+                        labels = observed_labels.get(item["number"]) if item["kind"] == "pr" else None
+                        if labels is not None and item.get("labels") == initial_labels.get(item["number"]) and item.get("labels") != labels:
+                            item["labels"] = labels
+                            changed = True
+
+                    if changed:
+                        save_ledger(rows)
+
+    return dict(enabled=True, written=written, skipped=skipped, requests=transport.used)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=("status", "set-enabled", "run", "reset"))
+    parser.add_argument("--expected-repo", required=True)
+    parser.add_argument("--enabled", choices=("on", "off"))
+    parser.add_argument("--expected-revision")
+    parser.add_argument("--corpus")
+    parser.add_argument("--host", default="github.com")
+    parser.add_argument("--request-budget", type=int, default=100)
+    parser.add_argument("--apply", action="store_true")
+    args = parser.parse_args()
+    if args.expected_repo != REPO:
+        raise ValueError("configured repository changed; reopen Settings")
+
+    if args.command == "status":
+        result = dict(status(), pending=saved_state()["pending"])
+    elif args.command == "set-enabled":
+        if args.enabled is None:
+            raise ValueError("--enabled is required")
+
+        result = dict(set_enabled(args.enabled == "on", args.expected_revision), pending=saved_state()["pending"])
+    elif args.command == "reset":
+        if not args.apply:
+            result = saved_state()
+        else:
+            with locked(DATA_DIR / "item-labels"):
+                result = dict(repository=REPO, pending=[])
+                save_state(result)
+    else:
+        if not args.corpus or args.request_budget < 1:
+            raise ValueError("run requires --corpus and a positive request budget")
+
+        result = run(args)
+        if args.apply:
+            outcome(dict(status="pass", **result))
+
+    print(json.dumps(result))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, TypeError, KeyError, subprocess.TimeoutExpired) as error:
+        sys.exit(f"error: {error}")

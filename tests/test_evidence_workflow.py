@@ -1127,6 +1127,96 @@ except ReadFailure as error:
         self.assertEqual(listing["items"][0]["identity"]["number"], 1)
         self.assertEqual(len(self.calls()), before)
 
+    def test_pr_size_uses_pinned_counts_and_separate_write_authorization(self):
+        snapshot = self.import_inventory()
+        self.run_cli("sync")
+        corpus = self.cache("corpus-create", "--snapshot", snapshot, "--scope", "open-prs", "--profile", "discussion")["corpus_id"]
+        self.cache("corpus-run", corpus, "--request-budget", "100")
+        args = ("--expected-repo", "owner/repo")
+        before = len(self.calls())
+        preview = self.json_cli("pr-size", "run", *args, "--corpus", corpus)
+        self.assertEqual(preview["proposed"][0]["label"], "Size: S")
+        self.assertEqual(self.json_cli("pr-size", "run", *args, "--corpus", corpus, "--apply")["enabled"], False)
+        self.assertEqual(len(self.calls()), before)
+        policy = self.json_cli("pr-size", "status", *args)
+        self.json_cli("pr-size", "set-enabled", *args, "--enabled", "on", "--expected-revision", policy["revision"])
+        self.run_cli("pr-size", "set-enabled", *args, "--enabled", "off", "--expected-revision", policy["revision"], ok=False)
+
+        # Exercise the boundaries independently of transport or agent suggestions.
+        script = self.root / "bin/size-boundaries"
+        script.write_text('''#!/usr/bin/env python3
+from _pr_size import classify
+for lines, files, expected in [(50,3,"S"),(51,3,"M"),(50,4,"M"),(250,10,"M"),(251,10,"L"),(250,11,"L"),(1000,25,"L"),(1001,25,"XL"),(1000,26,"XL")]:
+    assert classify(lines // 2, lines - lines // 2, files) == "Size: " + expected
+for values in [(True,0,0),(-1,0,0),(0,0,None)]:
+    try:
+        classify(*values)
+    except ValueError:
+        continue
+    raise AssertionError(values)
+''')
+        script.chmod(0o755)
+        self.run_cli("size-boundaries")
+
+        live = summary(labels=[dict(name="keep"), dict(name="Size: XL")])
+        (self.mock / "size-item.json").write_text(json.dumps(live))
+        (self.mock / "size-labels.json").write_text("[]")
+        (self.mock / "gh").write_text('''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+from urllib.parse import unquote
+root = Path(os.environ["FAKE_GH_DIR"])
+args = sys.argv[1:]
+method = args[args.index("--method") + 1]
+endpoint = args[args.index("--method") + 2]
+body = json.load(sys.stdin) if "--input" in args else None
+with (root / "size-calls.jsonl").open("a") as out:
+    out.write(json.dumps(dict(method=method, endpoint=endpoint, body=body)) + "\\n")
+item_path, labels_path = root / "size-item.json", root / "size-labels.json"
+item, labels = json.loads(item_path.read_text()), json.loads(labels_path.read_text())
+if method == "GET" and endpoint == "repos/owner/repo":
+    result = dict(full_name="owner/repo", id=42, node_id="R_repo")
+elif method == "GET" and endpoint == "repos/owner/repo/labels?per_page=100&page=1":
+    result = labels
+elif method == "POST" and endpoint == "repos/owner/repo/labels":
+    labels.append(body)
+    labels_path.write_text(json.dumps(labels))
+    result = body
+elif method == "GET" and endpoint == "repos/owner/repo/pulls/1":
+    result = item
+elif method == "POST" and endpoint == "repos/owner/repo/issues/1/labels":
+    if (root / "size-fail").exists():
+        sys.exit("connection lost")
+    item["labels"].extend(dict(name=name) for name in body["labels"])
+    item_path.write_text(json.dumps(item))
+    result = item["labels"]
+elif method == "DELETE" and endpoint.startswith("repos/owner/repo/issues/1/labels/"):
+    item["labels"] = [row for row in item["labels"] if row["name"] != unquote(endpoint.rsplit("/",1)[1])]
+    item_path.write_text(json.dumps(item))
+    result = item["labels"]
+else:
+    sys.exit("unexpected size request: " + method + " " + endpoint)
+print(json.dumps(result))
+''')
+        result = self.json_cli("pr-size", "run", *args, "--corpus", corpus, "--apply")
+        self.assertEqual(result["written"][0]["label"], "Size: S")
+        self.assertEqual(set(self.ledger()[("pr", 1)]["labels"]), {"keep", "Size: S"})
+        definitions = json.loads((self.mock / "size-labels.json").read_text())
+        self.assertEqual({row["name"]: row["color"] for row in definitions}, {"Size: S": "90EE90", "Size: M": "9ACD32", "Size: L": "FF4500", "Size: XL": "FF0000"})
+        live["head"]["sha"] = "c" * 40
+        (self.mock / "size-item.json").write_text(json.dumps(live))
+        stale = self.json_cli("pr-size", "run", *args, "--corpus", corpus, "--apply")
+        self.assertEqual(stale["written"], [])
+        self.assertIn("differs", stale["skipped"][0]["reason"])
+        live["head"]["sha"] = "b" * 40
+        (self.mock / "size-item.json").write_text(json.dumps(live))
+        (self.mock / "size-fail").touch()
+        self.run_cli("pr-size", "run", *args, "--corpus", corpus, "--apply", ok=False)
+        self.assertEqual(self.json_cli("pr-size", "status", *args)["pending"], ["pr:1"])
+        count = len((self.mock / "size-calls.jsonl").read_text().splitlines())
+        self.run_cli("pr-size", "run", *args, "--corpus", corpus, "--apply", ok=False)
+        self.assertEqual(len((self.mock / "size-calls.jsonl").read_text().splitlines()), count)
+
     def test_corrupt_selected_payload_is_never_read_as_evidence(self):
         result = self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "discussion")
         manifest = self.cache("show", result["snapshot_id"])

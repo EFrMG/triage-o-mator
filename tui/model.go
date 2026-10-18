@@ -697,7 +697,7 @@ func (m model) itemView() string {
 		}
 	} else if it, ok := m.findItem(m.detail.key); ok {
 		title += " · " + it.Title
-		scoreMark = itemScoreMark(it)
+		scoreMark = itemIndicatorsMark(it)
 		labels := "no labels"
 		if len(it.Labels) > 0 {
 			labels = strings.Join(it.Labels, ", ")

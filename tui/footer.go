@@ -270,6 +270,9 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.settings.section == "" {
 			return []footerGroup{group("Settings", hint{"j/k", "select"}, hint{"Enter", "open"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}
+		if m.settings.section == "pr-size" {
+			return []footerGroup{group("Size of PRs", hint{"Enter/Space", "toggle"}, hint{"r", "refresh"}), group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
+		}
 		if m.settings.section == "automations" {
 			card := m.automationCard()
 			if card.kind == "scoring" {

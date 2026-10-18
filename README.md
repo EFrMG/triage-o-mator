@@ -139,7 +139,7 @@ They are listed here in sidebar order.
 
    ![Notifications](captures/flow-9.webp)
 
-10. **Settings.** **Labels** edits the repository's GitHub labels, each change previewed before it is written. **Actions** edits the local list of actions a decision can suggest, with guidance for each. **Automations** decides what a bounded pass may do without asking again:
+10. **Settings.** **Size of PRs** optionally adds deterministic GitHub size labels after each corpus refresh, using cached additions, deletions and file counts. It defaults OFF; ON authorizes the size label definitions and updates. See [PR sizes](docs/pr-size.md). **Labels** edits the repository's GitHub labels, each change previewed before it is written. **Actions** edits the local list of actions a decision can suggest, with guidance for each. **Automations** decides what a bounded pass may do without asking again:
     - Labeling is ON by default. Its pass applies proposed labels whatever the suggested action or Pending review state, and runs only when an agent or a person asks for it.
     - Scoring copies a prompt for a bounded, local [Item Score](docs/item-score.md) pass; it has no GitHub write mode.
     - Agentic verification defaults OFF. ON permits relevant bounded local checks in your prepared environment during a requested triage or review task.
@@ -226,6 +226,7 @@ bin/briefs plan --all
 | Preview, initialize and reconcile GitHub labels | `bin/label-definitions`                                                                             |
 | Record no-fit assessments and apply labels      | `bin/label-assessment`, `bin/item-labels`                                                           |
 | Assess, propose and publish actions             | `bin/action-assessment`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus`              |
+| Label PR size deterministically                 | `bin/pr-size`                                                                                       |
 | Score and review selected issues and PRs        | `bin/item-score`, `bin/pr-assessment`                                                               |
 | See progress and handoffs                       | `bin/stats`, `bin/next`, `bin/report`, `bin/briefs`                                                 |
 

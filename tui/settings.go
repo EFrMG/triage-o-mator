@@ -45,6 +45,7 @@ type settingsUI struct {
 	editor           *settingsEditor
 	defaults         *settingsDefaults
 	automations      automationsUI
+	prSize           prSizePolicy
 }
 
 type settingsDefaults struct {
@@ -133,13 +134,13 @@ func (m *model) openSettings() {
 	}
 	m.taxonomy = taxonomy
 	m.form.SetTaxonomy(taxonomy)
-	m.settings = settingsUI{open: true}
+	m.settings = settingsUI{open: true, request: m.settings.request + 1}
 	m.status = ""
 }
 
 func (m *model) settingsMove(delta int) {
 	if m.settings.section == "" {
-		m.settings.menuSelected = (m.settings.menuSelected + delta%3 + 3) % 3
+		m.settings.menuSelected = (m.settings.menuSelected + delta%4 + 4) % 4
 		return
 	}
 	if m.settings.section == "automations" {
@@ -168,8 +169,12 @@ func (m model) settingsView() string {
 			{"Labels", "Create and edit GitHub label names and descriptions"},
 			{"Actions", "Create and edit local actions tied to GitHub operations"},
 			{"Automations", "Control which agent passes may run for this repository"},
+			{"Size of PRs", "Automatically label PR size from changed lines and files"},
 		}
 		return inset(titleBar("Settings", "", m.menuWidth())) + "\n\n" + cardList(cards, m.settings.menuSelected, w, h-2)
+	}
+	if m.settings.section == "pr-size" {
+		return m.prSizeView()
 	}
 	if m.settings.section == "automations" {
 		return m.automationsView()
@@ -317,6 +322,9 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
+	if m.settings.section == "pr-size" {
+		return m.handlePRSizeKey(msg)
+	}
 	if m.settings.section == "automations" {
 		return m.handleAutomationsKey(msg)
 	}
@@ -346,7 +354,7 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "G", "end":
 		if m.settings.section == "" {
-			m.settings.menuSelected = 2
+			m.settings.menuSelected = 3
 		} else {
 			m.settings.selected = maxInt(len(m.settingsRows())-1, 0)
 			m.settingsMove(0)
@@ -381,8 +389,13 @@ func (m model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter", "l", "right":
 		if m.settings.section == "" {
-			m.settings.section = []string{"label", "action", "automations"}[m.settings.menuSelected]
+			m.settings.section = []string{"label", "action", "automations", "pr-size"}[m.settings.menuSelected]
 			m.settings.selected, m.settings.offset = 0, 0
+			if m.settings.section == "pr-size" {
+				m.settings.busy = true
+				m.settings.request++
+				return m, prSizeCmd(m.installRoot, m.repo, m.settings.request, prSizePolicy{}, false)
+			}
 			if m.settings.section == "automations" {
 				m.settings.automations = automationsUI{}
 				m.settings.busy = true

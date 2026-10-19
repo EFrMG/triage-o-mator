@@ -113,7 +113,7 @@ They are listed here in sidebar order.
 
    ![Merge-Ready PRs](captures/flow-3.webp)
 
-4. **All Items.** Every item in the ledger, open or closed. **All Items** lets a person revise any call.
+4. **All Items.** Every item in the ledger, open or closed. Filter by issues or PRs, and reverse the age order (this also works in **Untriaged**).
 
    ![All Items](captures/flow-4.webp)
 

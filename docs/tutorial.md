@@ -49,7 +49,7 @@ Terminals smaller than 60×24 show a resize prompt.
 ## 3. Choose what to work on
 
 - The sidebar has lists for untriaged items, explicitly Pending review items, merge-ready PRs, and all items. Pending review can include closed items. Batches, groups, possible duplicates, Notifications, Settings, and repository switching follow them. Notifications also gathers suggested actions before an exact proposal exists.
-- Open **Untriaged**, then press `i` to cycle between issues, PRs, and both, or `O` to reverse the order between oldest and newest. The title and breadcrumb show both active choices.
+- Open **Untriaged** or **All Items**, then press `i` to cycle between issues, PRs, and both, or `O` to reverse the order between oldest and newest. Each list remembers its own choices; the title and breadcrumb show the active kind and order.
 - Open **Batches** instead when you want to work through a prepared selection. Use `j`/`k` and `Enter` to select an item in either list.
 - `/` searches an item list by title words or `#number`.
 - `Space` ticks an item and advances the cursor. An item action then applies to everything ticked, or to the item under the cursor when nothing is ticked. Bulk and destructive actions ask for the same key a second time, except dismissing one notification with `d`.

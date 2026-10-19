@@ -1013,10 +1013,10 @@ func (m model) handleSidebarKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m model) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
-	case m.activeTab == untriagedTab && m.activeBatch == "" && !m.activePairs && key.Matches(msg, keys.UntriagedKind):
-		m.cycleUntriagedKind()
-	case m.activeTab == untriagedTab && m.activeBatch == "" && !m.activePairs && key.Matches(msg, keys.UntriagedOrder):
-		m.toggleUntriagedOrder()
+	case m.hasListViewControls() && key.Matches(msg, keys.ListKind):
+		m.cycleListKind()
+	case m.hasListViewControls() && key.Matches(msg, keys.ListOrder):
+		m.toggleListOrder()
 	case key.Matches(msg, keys.Up):
 		m.list.CursorUp()
 	case key.Matches(msg, keys.Down):

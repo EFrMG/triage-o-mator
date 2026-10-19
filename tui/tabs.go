@@ -90,21 +90,27 @@ var tabs = []Tab{
 	}},
 }
 
-func (m *model) cycleUntriagedKind() {
-	m.untriagedKind = (m.untriagedKind + 1) % 3
-	m.updateUntriagedView()
+func (m model) hasListViewControls() bool {
+	return (m.activeTab == untriagedTab || m.activeTab == allItemsTab) && m.activeBatch == "" && !m.activePairs
 }
 
-func (m *model) toggleUntriagedOrder() {
-	m.untriagedNewest = !m.untriagedNewest
-	m.updateUntriagedView()
+func (m *model) cycleListKind() {
+	view := &m.listViews[m.activeTab]
+	view.kind = (view.kind + 1) % 3
+	m.updateListView()
 }
 
-func (m *model) updateUntriagedView() {
+func (m *model) toggleListOrder() {
+	view := &m.listViews[m.activeTab]
+	view.newest = !view.newest
+	m.updateListView()
+}
+
+func (m *model) updateListView() {
 	m.clearTicks()
 	m.recomputeSidebarCounts()
 	m.refreshActiveList()
-	m.status = "Showing " + m.tabName(untriagedTab) + "."
+	m.status = "Showing " + m.tabName(m.activeTab) + "."
 }
 
 // The non-tab sidebar rows follow the real tabs: Batches, Briefs, Groups, Possible Duplicates, Notifications, Settings, and Switch Repo.

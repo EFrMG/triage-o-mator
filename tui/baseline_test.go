@@ -1113,13 +1113,15 @@ func TestBaselineViewDeclaresTerminalState(t *testing.T) {
 }
 
 func TestBaselineFooterAcrossViews(t *testing.T) {
-	for _, view := range []string{"sidebar", "list", "item", "notifications"} {
+	for _, view := range []string{"sidebar", "list", "all items", "item", "notifications"} {
 		t.Run(view, func(t *testing.T) {
 			m := baselineModel(t, baselineRoot(t))
 			m.lastError = errorDetails{what: "Fixture error", text: "full details"}
 			switch view {
 			case "list":
 				m.activateTab(untriagedTab)
+			case "all items":
+				m.activateTab(allItemsTab)
 			case "item":
 				m.activateTab(untriagedTab)
 				m.selectCurrentListItem()
@@ -1137,7 +1139,7 @@ func TestBaselineFooterAcrossViews(t *testing.T) {
 				t.Fatal("footer omitted the error shortcut")
 			}
 
-			if view == "list" {
+			if view == "list" || view == "all items" {
 				m.width = 80
 				compact := ansi.Strip(m.footerView())
 				if strings.Contains(compact, "g/G") || strings.Contains(compact, "Menus:") || !strings.Contains(compact, "Nav:") {
@@ -1145,7 +1147,7 @@ func TestBaselineFooterAcrossViews(t *testing.T) {
 				}
 				m = baselineSend(m, tea.KeyPressMsg{Text: "?"})
 				expanded := ansi.Strip(m.footerView())
-				if !strings.Contains(expanded, "g/G ends") || !strings.Contains(expanded, "R full fetch") || !strings.Contains(expanded, "t themes") {
+				if !strings.Contains(expanded, "g/G ends") || !strings.Contains(expanded, "R full fetch") || !strings.Contains(expanded, "t themes") || !strings.Contains(expanded, "i cycle kind") || !strings.Contains(expanded, "O reverse order") {
 					t.Fatal("expanded help did not restore secondary shortcuts")
 				}
 			}
@@ -3779,6 +3781,82 @@ func TestSuggestedActionsAndExplicitPendingReviewHaveSeparateTabs(t *testing.T) 
 	if len(tabs) != 4 || tabs[0].Name != "Untriaged" || tabs[1].Name != "Pending review" || tabs[2].Name != "Merge-Ready PRs" || tabs[3].Name != "All Items" {
 		t.Fatal("the explicit Pending review tab is missing or an action tab returned")
 	}
+	for _, tab := range []int{untriagedTab, allItemsTab} {
+		t.Run(tabs[tab].Name+" kind and age order", func(t *testing.T) {
+			m := baselineModel(t, baselineRoot(t))
+			m.items = []Item{
+				{Kind: "issue", Number: 1, State: "open", Title: "fixture one", CreatedAt: "2026-01-01"},
+				{Kind: "pr", Number: 2, State: "open", Title: "fixture two", CreatedAt: "2026-01-02"},
+				{Kind: "issue", Number: 3, State: "closed", Title: "other three", CreatedAt: "2026-01-03"},
+				{Kind: "pr", Number: 4, State: "closed", Title: "fixture four", Action: "none", CreatedAt: "2026-01-04"},
+				{Kind: "issue", Number: 5, State: "open", Title: "fixture five", Action: "none", CreatedAt: "2026-01-05"},
+			}
+			m.recomputeSidebarCounts()
+			m.activateTab(tab)
+			assertList := func(want []int, caption string, count int) {
+				t.Helper()
+				var got []int
+				for _, entry := range m.list.Items() {
+					got = append(got, entry.(listItem).Number)
+				}
+				if !slices.Equal(got, want) || m.list.Title != fmt.Sprintf("%s · %s (%d)", tabs[tab].Name, caption, count) || m.sidebar.counts[tab] != count {
+					t.Fatalf("view lost kind, age order, caption or count: items %v, title %q, count %d", got, m.list.Title, m.sidebar.counts[tab])
+				}
+			}
+			both, issues, prs := []int{1, 2}, []int{1}, []int{2}
+			if tab == allItemsTab {
+				both, issues, prs = []int{1, 2, 3, 4, 5}, []int{1, 3, 5}, []int{2, 4}
+			}
+			assertList(both, "Both · Oldest", len(both))
+			m.ticked[Key{Kind: "issue", Number: 1}] = true
+			m = baselineSend(m, tea.KeyPressMsg{Text: "i"})
+			assertList(issues, "Issues · Oldest", len(issues))
+			if len(m.ticked) != 0 {
+				t.Fatal("kind change retained ticks from the previous selection")
+			}
+			selected := m.list.SelectedItem().(listItem).Key()
+			m = baselineSend(m, tea.KeyPressMsg{Text: "O"})
+			slices.Reverse(issues)
+			assertList(issues, "Issues · Newest", len(issues))
+			if m.list.SelectedItem().(listItem).Key() != selected {
+				t.Fatal("age order change moved the cursor away from the selected item")
+			}
+
+			otherTab := allItemsTab
+			if tab == allItemsTab {
+				otherTab = untriagedTab
+			}
+			m.activateTab(otherTab)
+			if m.tabName(otherTab) != tabs[otherTab].Name+" · Both · Oldest" {
+				t.Fatal("kind and age order leaked into another tab")
+			}
+			m.activateTab(tab)
+			assertList(issues, "Issues · Newest", len(issues))
+
+			m = baselineSend(m, tea.KeyPressMsg{Text: "/"})
+			m = baselineSend(m, tea.KeyPressMsg{Text: "fixture"})
+			m = baselineSend(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			m = baselineSend(m, tea.KeyPressMsg{Text: "i"})
+			slices.Reverse(prs)
+			assertList(prs, "PRs · Newest", len(prs))
+			m = baselineSend(m, ledgerReloadedMsg{root: m.installRoot, repo: m.repo, items: m.items})
+			assertList(prs, "PRs · Newest", len(prs))
+			m = baselineSend(m, tea.KeyPressMsg{Text: "i"})
+			m = baselineSend(m, tea.KeyPressMsg{Text: "O"})
+			if tab == allItemsTab {
+				both = []int{1, 2, 4, 5}
+			}
+			count := 2
+			if tab == allItemsTab {
+				count = 5
+			}
+			assertList(both, "Both · Oldest", count)
+			if m.searchQuery() != "fixture" {
+				t.Fatal("kind or age order change discarded the search")
+			}
+		})
+	}
+
 	flagged := []Item{{Kind: "issue", Number: 7, State: "closed", ReviewRequest: &ReviewRequest{By: "agent:triage", At: "2026-10-07T00:00:00Z", Reason: "Check impact"}},
 		{Kind: "issue", Number: 8, State: "open", Action: "close"}}
 	if listed := tabs[pendingReviewTab].Filter(flagged, Taxonomy{}); len(listed) != 1 || listed[0].Number != 7 {

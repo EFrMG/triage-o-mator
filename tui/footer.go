@@ -519,8 +519,8 @@ func (m model) contextFooterGroups() []footerGroup {
 	}
 
 	groups := []footerGroup{group("Select", bind("move", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("", keys.Search), bind("", keys.Tick), bind("", keys.Enter)), items}
-	if m.activeTab == untriagedTab && m.activeBatch == "" && !m.activePairs {
-		groups = append(groups, group("Untriaged", bind("cycle kind", keys.UntriagedKind), bind("reverse order", keys.UntriagedOrder)))
+	if m.hasListViewControls() {
+		groups = append(groups, group(tabs[m.activeTab].Name, bind("cycle kind", keys.ListKind), bind("reverse order", keys.ListOrder)))
 	}
 	if m.activeBatch != "" {
 		groups = append(groups, group("Batch", bind("apply proposals", keys.ApplyAll), bind("remove from batch", keys.Delete)))

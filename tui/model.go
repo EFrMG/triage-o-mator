@@ -20,13 +20,18 @@ const (
 	FocusDetail
 )
 
-type untriagedKind int
+type itemKind int
 
 const (
-	untriagedBoth untriagedKind = iota
-	untriagedIssue
-	untriagedPR
+	itemBoth itemKind = iota
+	itemIssue
+	itemPR
 )
+
+type itemListView struct {
+	kind   itemKind
+	newest bool
+}
 
 type model struct {
 	notificationPR          notificationPRUI
@@ -78,9 +83,8 @@ type model struct {
 	// activeTab is which tabs[] entry is actually loaded into list/detail, distinct from sidebar.selected, which is just the sidebar's cursor and can point past the end of tabs (at "Switch Repo") without the displayed list changing.
 	// Anything that re-reads "the current tab" (e.g. refreshActiveList after a background sync) must use this, not sidebar.selected, or it can index tabs[] out of range.
 	activeTab int
-	// untriagedKind and untriagedNewest are the two views of the single Untriaged tab. Both kinds and oldest-first are the defaults used for clearing the backlog.
-	untriagedKind   untriagedKind
-	untriagedNewest bool
+	// listViews keeps independent kind and age-order choices for Untriaged and All Items. Both kinds and oldest-first are the defaults.
+	listViews [allItemsTab + 1]itemListView
 	// activeBatch, when non-empty, is the data/<owner>/<repo>/batches/<id> whose items are loaded into list/detail instead of tabs[activeTab].
 	activeBatch string
 	// activePairs is set while the Possible Duplicates view is the displayed list; pairs holds bin/similar --pairs output (pairsLoaded once computed).
@@ -347,20 +351,20 @@ func (m *model) refreshActiveList() {
 }
 
 func (m model) tabItems(idx int) []Item {
-	if idx != untriagedTab {
-		return tabs[idx].Filter(m.items, m.taxonomy)
+	items := tabs[idx].Filter(m.items, m.taxonomy)
+	if idx != untriagedTab && idx != allItemsTab {
+		return items
 	}
 
-	items := m.items
-	switch m.untriagedKind {
-	case untriagedIssue:
+	view := m.listViews[idx]
+	switch view.kind {
+	case itemIssue:
 		items = filterKind(items, "issue")
-	case untriagedPR:
+	case itemPR:
 		items = filterKind(items, "pr")
 	}
 
-	items = untriagedOpen(items)
-	if m.untriagedNewest {
+	if view.newest {
 		return byCreatedAtDesc(items)
 	}
 
@@ -368,24 +372,25 @@ func (m model) tabItems(idx int) []Item {
 }
 
 func (m model) tabName(idx int) string {
-	if idx != untriagedTab {
+	if idx != untriagedTab && idx != allItemsTab {
 		return tabs[idx].Name
 	}
 
 	kind := "Both"
-	switch m.untriagedKind {
-	case untriagedIssue:
+	view := m.listViews[idx]
+	switch view.kind {
+	case itemIssue:
 		kind = "Issues"
-	case untriagedPR:
+	case itemPR:
 		kind = "PRs"
 	}
 
 	order := "Oldest"
-	if m.untriagedNewest {
+	if view.newest {
 		order = "Newest"
 	}
 
-	return fmt.Sprintf("Untriaged · %s · %s", kind, order)
+	return fmt.Sprintf("%s · %s · %s", tabs[idx].Name, kind, order)
 }
 
 func (m *model) recomputeSidebarCounts() {

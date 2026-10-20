@@ -1943,27 +1943,61 @@ func TestBaselinePossibleDuplicatesResolveWithoutReopening(t *testing.T) {
 		t.Fatal("the unresolved pairs did not appear")
 	}
 
-	m.dups = dupUI{fromList: true, returnToDups: true, source: Key{Kind: "issue", Number: 1}}
-	m.focus = FocusDetail
-	m.detail.key = Key{Kind: "issue", Number: 14}
-	m.leaveSavedItem()
-	if m.focus != FocusList || m.dups.open || m.dups.returnToDups {
-		t.Fatal("saving a comparison opened from the pair list did not return to that list")
+	m.similar[Key{Kind: "issue", Number: 1}] = []dupCandidate{pairs[0].Item}
+	m.openPair(m.list.SelectedItem().(pairListItem))
+	m.dups.selected = sourceRow
+	next, _ := m.openFromDuplicates(m.dups.source)
+	m = next.(model)
+	if m.form.suggested || m.form.Action() != "" {
+		t.Fatal("opening the suspected original filled its form")
 	}
-
-	updated := slices.Clone(m.items)
-	for i := range updated {
-		if updated[i].Number == 14 {
-			updated[i].ProposedLabels = []string{"duplicate"}
-			updated[i].Action = "close"
+	m.goBack()
+	m.dups.selected = 0
+	next, _ = m.openFromDuplicates(pairs[0].Item.Key())
+	m = next.(model)
+	if !m.form.suggested || m.form.dirty || m.form.Action() != "close" || m.form.Reason() != "Duplicate of #1 (issue)." {
+		t.Fatal("opening the candidate did not show a reviewable duplicate suggestion")
+	}
+	m.goBack()
+	if len(m.drafts) != 0 {
+		t.Fatal("viewing a suggested duplicate created an unsaved draft")
+	}
+	older := m
+	older.items = slices.Clone(m.items)
+	for i := range older.items {
+		if older.items[i].Number == 14 {
+			older.items[i].CreatedAt = "2025-01-01T00:00:00Z"
 		}
 	}
-	m = baselineSend(m, ledgerReloadedMsg{root: root, repo: m.repo, items: updated})
+	olderNext, _ := older.handleDupKey(tea.KeyPressMsg{Text: "m"})
+	older = olderNext.(model)
+	if older.pendingApply != 0 || !strings.Contains(older.status, "check which one should stay") {
+		t.Fatal("m saved an older candidate before the user could check the direction")
+	}
+	next, command := m.handleDupKey(tea.KeyPressMsg{Text: "m"})
+	m = next.(model)
+	if command == nil || m.pendingApply != 1 || !m.form.dirty {
+		t.Fatal("m did not initiate the candidate's duplicate save")
+	}
+	commands, ok := command().(tea.BatchMsg)
+	if !ok || len(commands) != 2 {
+		t.Fatal("m did not return the item read and decision writer")
+	}
+	result, ok := commands[1]().(applyDoneMsg)
+	if !ok || result.err != nil {
+		t.Fatalf("duplicate decision did not save: %v", result.err)
+	}
+	next, reload := m.Update(result)
+	m = next.(model)
+	if m.focus != FocusList || m.dups.open || reload == nil {
+		t.Fatal("saving a comparison opened from the pair list did not return to that list")
+	}
+	m = baselineSend(m, reload())
 	if len(m.list.Items()) != 1 || m.sidebar.pairCount != 1 || m.list.SelectedItem().(pairListItem).pair.Original.Number != 6 {
 		t.Fatal("the saved duplicate pair remained visible after the ledger reload")
 	}
 
-	next, command := m.handleListKey(tea.KeyPressMsg{Text: "d"})
+	next, command = m.handleListKey(tea.KeyPressMsg{Text: "d"})
 	m = next.(model)
 	if command != nil || m.listConfirm != "d" {
 		t.Fatal("the first d did not request confirmation")
@@ -1973,11 +2007,11 @@ func TestBaselinePossibleDuplicatesResolveWithoutReopening(t *testing.T) {
 	if command == nil || len(m.list.Items()) != 1 {
 		t.Fatal("the pair left the list before the verdict was saved")
 	}
-	result, ok := command().(notDuplicatesMsg)
-	if !ok || result.err != nil || result.resolved == nil {
-		t.Fatalf("the owning script did not return the saved pair: %+v", result.err)
+	ruleResult, ok := command().(notDuplicatesMsg)
+	if !ok || ruleResult.err != nil || ruleResult.resolved == nil {
+		t.Fatalf("the owning script did not return the saved pair: %+v", ruleResult.err)
 	}
-	m = baselineSend(m, result)
+	m = baselineSend(m, ruleResult)
 	if len(m.list.Items()) != 0 || m.sidebar.pairCount != 0 {
 		t.Fatal("the confirmed not-duplicate pair stayed visible")
 	}
@@ -1996,6 +2030,54 @@ func TestBaselinePossibleDuplicatesResolveWithoutReopening(t *testing.T) {
 	m = baselineSend(m, notDuplicatesMsg{repo: m.repo, pairs: map[dupPairKey]bool{key: true}, resolved: &key})
 	if m.dups.open || m.focus != FocusList || len(m.list.Items()) != 0 {
 		t.Fatal("a confirmed exclusion from comparison did not return to the empty pair list")
+	}
+}
+
+func TestBaselineSavingSuggestedDuplicateFormReturnsToPairs(t *testing.T) {
+	for _, choice := range []struct {
+		name  string
+		field formField
+		key   string
+	}{{"item content", fieldContent, "s"}, {"action field", fieldAction, "s"}, {"reason editor Enter", fieldReason, "enter"}, {"reason editor Ctrl+S", fieldReason, "ctrl+s"}} {
+		t.Run(choice.name, func(t *testing.T) {
+			root := baselineRoot(t)
+			if err := os.WriteFile(filepath.Join(root, "data", "owner", "repo", "ledger.jsonl"), []byte(baselineRow(1)+baselineRow(14)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			m := baselineModel(t, root)
+			candidate := dupCandidate{Kind: "issue", Number: 14, Title: "candidate"}
+			pair := dupPair{Score: 0.7, Original: dupCandidate{Kind: "issue", Number: 1, Title: "original"}, Item: candidate}
+			m.openPairs()
+			m = baselineSend(m, pairsLoadedMsg{repo: m.repo, pairs: []dupPair{pair}})
+			m.similar[Key{Kind: "issue", Number: 1}] = []dupCandidate{candidate}
+			m.openPair(m.list.SelectedItem().(pairListItem))
+			next, _ := m.openFromDuplicates(candidate.Key())
+			m = next.(model)
+			m.form.FocusField(choice.field)
+			if !m.form.suggested || !m.pairCandidateForm() {
+				t.Fatal("candidate form lost its suggested decision or pair-list origin")
+			}
+
+			next, command := m.handleKey(mouseKey(choice.key))
+			m = next.(model)
+			if command == nil || m.pendingApply != 1 || len(m.itemEdits) != 0 {
+				t.Fatal("save confirmed only one field instead of the suggested decision")
+			}
+			result, ok := command().(applyDoneMsg)
+			if !ok || result.err != nil {
+				t.Fatalf("suggested duplicate decision did not save: %v", result.err)
+			}
+			next, reload := m.Update(result)
+			m = next.(model)
+			if m.focus != FocusList || !m.activePairs || m.dups.returnToDups || reload == nil {
+				t.Fatal("successful form save did not return to Possible Duplicates")
+			}
+			m = baselineSend(m, reload())
+			if len(m.list.Items()) != 0 {
+				t.Fatal("saved duplicate pair remained visible")
+			}
+		})
 	}
 }
 

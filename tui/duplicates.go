@@ -16,7 +16,7 @@ import (
 
 // Duplicate candidates come from bin/similar, loaded once per item when it is opened and cached for the session.
 // The Duplicates screen compares one item, the top card, with its candidates: the top one is the original that stays, and m marks the selected candidate below as a duplicate of it. Both cards carry their dates, since the older item is usually the one to keep, and marking a candidate older than the original says so.
-// Like Groups, the screen never writes anything itself: marking a duplicate only prefills the candidate's decision form, and grouping goes through bin/group.
+// The screen delegates decisions and groups to their owning scripts; opening a candidate only shows a suggested form, while m saves an explicit duplicate choice.
 
 type dupCandidate struct {
 	Number int     `json:"number"`
@@ -303,7 +303,7 @@ func (m model) handleDupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// markCandidateDuplicate prefills the candidate's own decision as a duplicate of the item on the top card, and opens it so the reason can be checked. Nothing is written until s or S, here or on the item.
+// markCandidateDuplicate saves the selected candidate as a duplicate of the top card through the normal decision writer.
 func (m model) markCandidateDuplicate(c dupCandidate) (tea.Model, tea.Cmd) {
 	original, ok := m.findItem(m.dups.source)
 	if !ok {
@@ -324,13 +324,22 @@ func (m model) markCandidateDuplicate(c dupCandidate) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	m.status = fmt.Sprintf("Prefilled #%d as a duplicate of #%d. Check the reason before saving.", c.Number, original.Number)
 	// The older report is usually the one to keep, so say when this closes it in favour of a later one.
 	if it, found := m.findItem(c.Key()); found && it.CreatedAt != "" && original.CreatedAt != "" && it.CreatedAt < original.CreatedAt {
-		m.status = fmt.Sprintf("#%d (%s) is older than #%d (%s): check which one should stay. The decision is still unsaved.", c.Number, shortDate(it.CreatedAt), original.Number, shortDate(original.CreatedAt))
+		m.status = fmt.Sprintf("#%d (%s) is older than #%d (%s): check which one should stay before marking it.", c.Number, shortDate(it.CreatedAt), original.Number, shortDate(original.CreatedAt))
+
+		return m, cmd
 	}
 
-	return m, cmd
+	next, saveCmd := m.requestDecisionSave()
+	m = next.(model)
+	if saveCmd == nil {
+		return m, cmd
+	}
+
+	m.status = fmt.Sprintf("Saving #%d as a duplicate of #%d…", c.Number, original.Number)
+
+	return m, tea.Batch(cmd, saveCmd)
 }
 
 // swapDupOriginal turns the hovered candidate into the original on top, so the comparison runs the other way and m closes the item that was on top. The new original brings its own candidates (their similarity is always to the card above), with the old one selected among them.
@@ -381,8 +390,20 @@ func (m model) openFromDuplicates(key Key) (tea.Model, tea.Cmd) {
 	cmd := m.openItem(it)
 	m.focus = FocusDetail
 	m.dups.open, m.dups.returnToDups = false, true
+	if key != m.dups.source && it.State == "open" && it.Untriaged() && !m.form.touched && !m.form.dirty {
+		if original, found := m.findItem(m.dups.source); found {
+			if err := m.form.SuggestDuplicate(original.Number, original.Title); err != nil {
+				m.warn("Couldn't suggest a duplicate decision: " + err.Error())
+			}
+		}
+	}
 
 	return m, cmd
+}
+
+// pairCandidateForm identifies a candidate opened from Possible Duplicates, where saving the filled decision should return to that list.
+func (m model) pairCandidateForm() bool {
+	return m.focus == FocusDetail && m.dups.fromList && m.dups.returnToDups && m.detail.key != m.dups.source
 }
 
 // saveDuplicateDecision saves the form without leaving the comparison, as long as it belongs to an item on it.
@@ -692,12 +713,16 @@ func pairStatus(newer, original Item) string {
 	return fmt.Sprintf("#%d %s / #%d %s", newer.Number, status(newer), original.Number, status(original))
 }
 
-// pairHandled reports a pair that no longer needs a look: either item is closed, or already marked as a duplicate.
-func pairHandled(newer, original Item) bool {
+// pairHandled reports a pair that no longer needs a look: either item is closed, labeled duplicate, or has a saved close decision naming the other as its original.
+func (m model) pairHandled(newer, original Item) bool {
 	marked := func(item Item) bool {
-		return slices.Contains(item.ProposedLabels, "duplicate")
+		return slices.Contains(item.Labels, "duplicate") || slices.Contains(item.ProposedLabels, "duplicate")
 	}
-	return newer.State != "open" || original.State != "open" || marked(newer) || marked(original)
+	decision := func(item, other Item) bool {
+		return m.taxonomy.OperationFor(item.Action) == "close" && strings.HasPrefix(item.Reason, fmt.Sprintf("Duplicate of #%d (", other.Number))
+	}
+
+	return newer.State != "open" || original.State != "open" || marked(newer) || marked(original) || decision(newer, original) || decision(original, newer)
 }
 
 // pairItems keeps only unresolved pairs from the view's frozen candidate set; a confirmed local decision or exclusion removes a pair after the owning script reports success.
@@ -706,7 +731,7 @@ func (m model) pairItems() []list.Item {
 	for _, p := range m.pairs {
 		newer, ok1 := m.findItem(p.Item.Key())
 		original, ok2 := m.findItem(p.Original.Key())
-		if !ok1 || !ok2 || pairHandled(newer, original) || m.ruledOut(p.Item.Kind, p.Item.Number, p.Original.Number) {
+		if !ok1 || !ok2 || m.pairHandled(newer, original) || m.ruledOut(p.Item.Kind, p.Item.Number, p.Original.Number) {
 			continue
 		}
 
@@ -726,7 +751,7 @@ func (m model) requestRuleOutPair() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if pairHandled(hovered.newer, hovered.original) || m.ruledOut(hovered.newer.Kind, hovered.newer.Number, hovered.original.Number) {
+	if m.pairHandled(hovered.newer, hovered.original) || m.ruledOut(hovered.newer.Kind, hovered.newer.Number, hovered.original.Number) {
 		m.listConfirm = ""
 		m.status = fmt.Sprintf("#%d ↔ #%d is already decided.", hovered.original.Number, hovered.newer.Number)
 
@@ -798,7 +823,7 @@ func (m model) onPairsLoaded(msg pairsLoadedMsg) (tea.Model, tea.Cmd) {
 	for _, p := range msg.pairs {
 		newer, ok1 := m.findItem(p.Item.Key())
 		original, ok2 := m.findItem(p.Original.Key())
-		if ok1 && ok2 && !pairHandled(newer, original) && !m.ruledOut(p.Item.Kind, p.Item.Number, p.Original.Number) {
+		if ok1 && ok2 && !m.pairHandled(newer, original) && !m.ruledOut(p.Item.Kind, p.Item.Number, p.Original.Number) {
 			m.pairs = append(m.pairs, p)
 		}
 	}

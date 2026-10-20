@@ -349,6 +349,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.form.saved = true
 			m.form.dirty = false
 			m.form.proposed = false
+			m.form.suggested = false
 			m.leaveSavedItem()
 		}
 
@@ -1096,6 +1097,8 @@ func (m model) handleReasonKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.form.PrevField()
 
 		return m, nil
+	case m.pairCandidateForm() && (key.Matches(msg, keys.Confirm) || msg.String() == "ctrl+s"):
+		return m.requestDecisionSave()
 	case key.Matches(msg, keys.Confirm), msg.String() == "ctrl+s":
 		m.form.FocusField(fieldContent)
 		return m.confirmItemField(fieldReason)
@@ -1224,6 +1227,9 @@ func (m model) handleDetailKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.HalfUp):
 		m.detail.HalfPageUp()
 	case key.Matches(msg, keys.Save):
+		if m.pairCandidateForm() {
+			return m.requestDecisionSave()
+		}
 		if onChoice {
 			field := m.form.focused
 			m.form.NextField()

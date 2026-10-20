@@ -459,6 +459,9 @@ func (m model) contextFooterGroups() []footerGroup {
 	case m.searching:
 		return []footerGroup{group("Search", hint{"type", "title words or #number"}, hint{"↑/↓", "move"}, bind("keep", keys.Enter), bind("clear", keys.Cancel)), group("Navigation", bind("exit", keys.ForceQuit))}
 	case m.typingReason():
+		if m.pairCandidateForm() {
+			return []footerGroup{group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("save decision", keys.Confirm), hint{"Ctrl+S", "save decision"}), group("Navigation", bind("back", keys.Cancel), bind("exit", keys.ForceQuit))}
+		}
 		return []footerGroup{group("Edit", bind("fields", keys.FieldNext, keys.FieldPrev), bind("keep reason", keys.Confirm)), group("Navigation", bind("back", keys.Cancel), bind("exit", keys.ForceQuit))}
 	case m.groups.open:
 		return m.groupFooter()
@@ -479,7 +482,7 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{group("Briefs", hint{"H/L", "section"}, hint{"j/k", "select"}, hint{"Enter", "read"}, hint{"Space", "tick"}, hint{"d", "mark read"}, hint{"r", "reload"}), group("Navigation", hint{"Esc/h", "back"}, hint{"q", "quit"})}
 	case m.dups.open:
 		return []footerGroup{
-			group("Duplicate", bind("mark as duplicate", keys.MarkDup), bind("", keys.SwapDup), bind("", keys.Tick), bind("group ticked", keys.Group)),
+			group("Duplicate", bind("save as duplicate", keys.MarkDup), bind("", keys.SwapDup), bind("", keys.Tick), bind("group ticked", keys.Group)),
 			group("Item", bind("read", keys.Enter), bind("", keys.Save), bind("", keys.Open), bind("", keys.Reopen, keys.ReopenEditor)),
 			group("Select", bind("move", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom)),
 			group("Menus", bind("", keys.Theme)),
@@ -542,6 +545,9 @@ func (m model) tabJumpHint() hint {
 
 func (m model) itemFooter() []footerGroup {
 	item := group("Item", bind("", keys.Undo), bind("", keys.MarkDup), bind("", keys.Track), bind("", keys.QuickGroup), bind("", keys.Open), bind("", keys.Comment, keys.CommentEditor), bind("", keys.Close, keys.CloseEditor), bind("", keys.Reopen, keys.ReopenEditor), bind("", keys.Yank))
+	if m.pairCandidateForm() {
+		item.hints = append([]hint{bind("save decision", keys.Save)}, item.hints...)
+	}
 	if it, ok := m.findItem(m.detail.key); ok && it.PendingReview() {
 		item.hints = append(item.hints, bind("", keys.ReviewClear))
 	}

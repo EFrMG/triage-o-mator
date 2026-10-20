@@ -41,8 +41,9 @@ type decisionForm struct {
 	// The reason editor grows up to reasonMaxLines visible rows; Enter saves rather than inserting a newline.
 	reason textarea.Model
 
-	dirty bool
-	saved bool // true right after a successful save, until the item changes again
+	dirty     bool
+	saved     bool // true right after a successful save, until the item changes again
+	suggested bool // a duplicate comparison filled this form for review without creating a draft
 	// touched records whether an existing decision, suggestion or explicit confirmation has populated the form.
 	touched bool
 	// proposed is true while the fields show a batch proposal that hasn't been saved to the ledger yet.
@@ -182,6 +183,7 @@ func (f *decisionForm) ApplyDraft(s decisionSnapshot) {
 
 	f.dirty = true
 	f.saved = false
+	f.suggested = false
 	f.touched = true
 }
 
@@ -242,7 +244,21 @@ func (f *decisionForm) MarkDuplicate(number int, title string) error {
 	f.reason.SetValue(fmt.Sprintf("Duplicate of #%d (%s).", number, title))
 	f.reason.CursorEnd()
 	f.dirty, f.saved, f.touched, f.proposed = true, false, true, false
+	f.suggested = false
 	f.FocusField(fieldReason)
+
+	return nil
+}
+
+// SuggestDuplicate fills an untriaged candidate for review without treating the suggestion as an unsaved human edit.
+func (f *decisionForm) SuggestDuplicate(number int, title string) error {
+	if err := f.MarkDuplicate(number, title); err != nil {
+		return err
+	}
+
+	f.dirty = false
+	f.suggested = true
+	f.FocusField(fieldContent)
 
 	return nil
 }
@@ -262,6 +278,7 @@ func (f *decisionForm) LoadItem(it Item) {
 	f.focused = fieldContent
 	f.dirty = false
 	f.saved = false
+	f.suggested = false
 	f.touched = hasDecision
 	f.proposed = false
 	f.proposalNotes = ""
@@ -583,6 +600,9 @@ func (f decisionForm) View(width int) string {
 		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
 	case f.proposed:
 		state = "Confirm choices to apply this suggestion"
+		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
+	case f.suggested:
+		state = "Suggested duplicate decision; review before saving"
 		stateStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning))
 	case !f.touched:
 		state = "Choose labels or an action"

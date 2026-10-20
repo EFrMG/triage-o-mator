@@ -100,13 +100,21 @@ func (s proposalReviewStyles) writeSavedState(b *strings.Builder, status, operat
 func (s proposalReviewStyles) writeEvidence(b *strings.Builder, inputs proposalInputs, width int) {
 	fmt.Fprintf(b, "\n%s\n", inset(s.section.Render("Selected evidence")))
 	for _, line := range proposalEvidenceLines(inputs) {
+		if line.item == "Gap" {
+			fmt.Fprintf(b, "%s\n", inset(ansi.Wrap(sanitize("Declared gap: "+line.missing), width, "")))
+			continue
+		}
+
 		value := sanitize(line.item)
 		if line.complete {
-			value += " " + s.success.Render("Complete")
+			value += " " + s.success.Render("Components complete")
 		} else if line.missing != "" {
 			value += " " + s.danger.Render("Not found:") + " " + sanitize(line.missing)
 		}
 		fmt.Fprintf(b, "%s\n", inset(ansi.Wrap(value, width, "")))
+	}
+	if len(inputs.Evidence) > 0 && len(inputs.EvidenceGaps) == 0 {
+		fmt.Fprintf(b, "%s\n", inset(s.muted.Render("No declared gaps")))
 	}
 }
 
@@ -153,13 +161,20 @@ func (s proposalReviewStyles) writeProposal(b *strings.Builder, row actionPropos
 
 	fmt.Fprintf(b, "%s\n", inset(wrapText("Target: "+sanitize(row.Target), width)))
 	if row.DecisionQuestion != "" {
-		fmt.Fprintf(b, "%s\n", inset(wrapText("Question for this action: "+sanitize(row.DecisionQuestion), width)))
+		fmt.Fprintf(b, "\n%s\n", inset(s.section.Render("Decision question")))
+		fmt.Fprintf(b, "%s\n", inset(wrapText(sanitize(row.DecisionQuestion), width)))
+		if row.Status == "pending" && row.DecisionResolution == nil {
+			fmt.Fprintf(b, "%s\n", inset(s.action.Render("Press a to answer before reviewing this action.")))
+		}
 	}
 	if row.DecisionResolution != nil {
 		resolution := row.DecisionResolution
 		fmt.Fprintf(b, "\n%s\n", inset(s.section.Render("Human decision resolution")))
 		fmt.Fprintf(b, "%s\n", inset(wrapText("By: "+sanitize(resolution.By)+" · At: "+sanitize(resolution.At), width)))
 		fmt.Fprintf(b, "%s\n", inset(wrapText(sanitize(resolution.Reason), width)))
+	}
+	if row.Status == "pending" && row.Active && (row.DecisionQuestion == "" || row.DecisionResolution != nil) && context != nil && context.Current && state.problem == "" && !state.busy && !state.approved {
+		fmt.Fprintf(b, "%s\n", inset(s.action.Render("Press a to review the exact action.")))
 	}
 	if row.Reference != nil {
 		fmt.Fprintf(b, "%s\n", inset(s.muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))

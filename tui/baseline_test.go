@@ -4214,11 +4214,23 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	m = baselineSend(m, current)
 	m = baselineSend(m, tea.WindowSizeMsg{Width: 120, Height: 100})
 	view := ansi.Strip(m.actionReviewView())
-	for _, expected := range []string{"Check compatibility", "Keep the old API", "Earlier objection · By: maintainer", "PR #3 Fixture PR", "PR #3 Complete", "Issue #4 Not found: comments", "Gap Not found: Gap one", "Gap Not found: Gap five", "Exact closure comment"} {
+	for _, expected := range []string{"Check compatibility", "Keep the old API", "Earlier objection · By: maintainer", "PR #3 Fixture PR", "PR #3 Components complete", "Issue #4 Not found: comments", "Declared gap: Gap one", "Declared gap: Gap five", "Press a to review the exact action.", "Exact closure comment"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("proposal reader omitted %q: %s", expected, view)
 		}
 	}
+	m.notifications.actionReview.row.DecisionQuestion = "Should this change replace the existing storage model?"
+	questionView := ansi.Strip(m.actionReviewView())
+	if !strings.Contains(questionView, "Decision question") || !strings.Contains(questionView, "Press a to answer before reviewing this action.") || strings.Contains(questionView, "Press a to review the exact action.") {
+		t.Fatal("an unresolved decision question did not replace the exact-review prompt")
+	}
+	m.notifications.actionReview.row.DecisionQuestion = ""
+	m.notifications.actionReview.row.Inputs.EvidenceGaps = nil
+	clearView := ansi.Strip(m.actionReviewView())
+	if !strings.Contains(clearView, "No declared gaps") || strings.Contains(clearView, "Declared gap:") {
+		t.Fatal("a proposal without declared gaps did not say so explicitly")
+	}
+	m.notifications.actionReview.row = row
 	if strings.Contains(view, "snapshot-1") || strings.Contains(view, "summary: complete") {
 		t.Fatal("proposal reader displayed technical evidence identifiers or component states")
 	}

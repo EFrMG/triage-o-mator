@@ -65,6 +65,23 @@ class EvidenceTests(Workspace):
         self.assertEqual((combined["status"], combined["capture_stage"]), ("retained", "fetch"))
         self.assertEqual((combined["requests"], combined["reserved_requests"], combined["request_budget"]), (8, 11, 20))
         self.assertLessEqual(combined["requests"] + combined["reserved_requests"], combined["request_budget"])
+
+        for record_kind in ("raw job", "attempt membership"):
+            for value in (3, "2", True, 2.0, None):
+                self.responses[job_resource] = dict(data=copy.deepcopy(job))
+                self.responses[run_resource + "/jobs?per_page=100&page=1"] = dict(data=dict(total_count=1, jobs=[copy.deepcopy(job)]))
+                if record_kind == "raw job":
+                    self.responses[job_resource]["data"]["run_attempt"] = value
+                else:
+                    self.responses[run_resource + "/jobs?per_page=100&page=1"]["data"]["jobs"][0]["run_attempt"] = value
+
+                with self.subTest(record_kind=record_kind, run_attempt=value):
+                    unavailable = self.json_cli("pr-check-log", "capture", *args, "--check-id", "20")
+                    self.assertEqual(unavailable["status"], "unavailable")
+                    self.assertIn("run attempt", " ".join(unavailable["omissions"]))
+
+        self.responses[job_resource] = dict(data=job)
+        self.responses[run_resource + "/jobs?per_page=100&page=1"] = dict(data=dict(total_count=1, jobs=[job]))
         combined_ref = combined["log_object"]
         combined_packet = json.loads((self.root / "data/owner/repo/cache/objects" / (combined_ref["sha256"] + ".json")).read_text())
         self.assertEqual(combined_packet["request_budget"], 17)
@@ -194,7 +211,9 @@ class EvidenceTests(Workspace):
         self.assertEqual(failed["failure_log"]["log_object"], ref)
         self.assertEqual(sum(len(window["text"].splitlines()) for window in failed["failure_log"]["windows"]), 20)
         self.assertLessEqual(sum(len(window["text"].encode("utf-8")) for window in failed["failure_log"]["windows"]), 8192)
-        pointer_path = next((self.root / "data/owner/repo/cache/ci-logs").glob("*.json"))
+        pointer_path = next(path for path in (self.root / "data/owner/repo/cache/ci-logs").glob("*.json")
+                            if (scope := json.loads(path.read_text())["scope"])["snapshot_id"] == snapshot
+                            and scope["source_repository"] == "owner/repo" and scope["check_id"] == 20)
         saved_pointer = pointer_path.read_bytes()
         pointer_path.write_text("corrupt")
         invalid_display = self.json_cli("pr-checks", *args, "--include-failure-logs")
@@ -362,6 +381,20 @@ class EvidenceTests(Workspace):
             failed = next(row for row in expired_view["rows"] if row["source"] == "check-run")
             self.assertEqual(failed["failure_log"]["state"], "unavailable")
             self.assertEqual(failed["failure_log"]["log_object"], expired["log_object"])
+
+        self.responses[job_resource + "/logs"] = dict(text=log)
+        for record_kind in ("raw job", "attempt membership"):
+            self.responses[job_resource] = dict(data=dict(job))
+            self.responses[run_resource + "/jobs?per_page=100&page=1"] = dict(data=dict(total_count=1, jobs=[dict(job)]))
+            if record_kind == "raw job":
+                self.responses[job_resource]["data"]["run_attempt"] = 2
+            else:
+                self.responses[run_resource + "/jobs?per_page=100&page=1"]["data"]["jobs"][0]["run_attempt"] = 2
+
+            with self.subTest(record_kind=record_kind, run_attempt=2):
+                accepted = self.json_cli("pr-check-log", "fetch", *capture_args)
+                self.assertEqual(accepted["status"], "retained")
+
         self.responses[job_resource + "/logs"] = dict(status=403, text="private error body must not become log evidence")
         denied = self.json_cli("pr-check-log", "fetch", *capture_args)
         self.assertEqual(denied["status"], "unavailable")

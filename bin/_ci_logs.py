@@ -254,6 +254,8 @@ def validate_metadata(run, job, source, entry, run_id, attempt, job_id):
 
     if any(type(job.get(key)) is not int for key in ("id", "run_id")) or job.get("id") != job_id or job.get("run_id") != run_id or job.get("head_sha") != entry["head_sha"] or job.get("url") != api_url(host, f"{prefix}/actions/jobs/{job_id}") or job.get("check_run_url") != api_url(host, f"{prefix}/check-runs/{entry['data']['id']}"):
         raise ValueError("CI job differs from the selected check, run or head")
+    if "run_attempt" in job and (type(job["run_attempt"]) is not int or job["run_attempt"] != attempt):
+        raise ValueError("CI job run attempt differs from the selected run attempt")
     if job.get("status") != "completed" or job.get("conclusion") not in FAILURES:
         raise ValueError("CI logs require a completed failed job")
 

@@ -120,12 +120,14 @@ func (s proposalReviewStyles) writeEvidence(b *strings.Builder, inputs proposalI
 
 // proposalReviewState is what a reader knows beyond the saved proposal: its checked local context, any live problem, and where the proposal sits in a batch.
 type proposalReviewState struct {
-	context  *actionProposalContext
-	busy     bool
-	problem  string
-	approved bool
-	paging   bool
-	position string
+	context   *actionProposalContext
+	notes     map[proposalNoteKey]string
+	notesBusy bool
+	busy      bool
+	problem   string
+	approved  bool
+	paging    bool
+	position  string
 }
 
 // writeProposal renders one saved proposal the same way in the single action reader and in batch closure review: heading, state, target, comment, human context, evidence and outcome.
@@ -181,18 +183,27 @@ func (s proposalReviewStyles) writeProposal(b *strings.Builder, row actionPropos
 	}
 	s.writeComment(b, row.Comment, row.Status, width)
 
-	fmt.Fprintf(b, "\n%s\n", inset(s.section.Render("Human context")))
+	fmt.Fprintf(b, "\n%s\n", inset(s.section.Render("Local guidance")))
 	if context == nil {
 		fmt.Fprintf(b, "%s\n", inset(s.muted.Render("Local guidance has not been checked.")))
 	} else {
+		if state.notesBusy {
+			fmt.Fprintf(b, "%s\n", inset(s.muted.Render("Reading full local notes…")))
+		}
 		if !context.Current && row.Status == "pending" {
 			detail := strings.TrimSuffix(context.Reason, "; prepare a fresh proposal and review")
 			fmt.Fprintf(b, "%s\n", inset(s.action.Render(wrapText("Why: "+sanitize(detail), width))))
 		}
-		for _, block := range context.guidanceBlocks() {
-			fmt.Fprintf(b, "\n%s\n", inset(s.muted.Bold(true).Render(sanitize(block.title))))
+		for _, block := range context.guidanceBlocks(state.notes) {
+			if block.title != "" {
+				fmt.Fprintf(b, "\n%s\n", inset(s.muted.Bold(true).Render(sanitize(block.title))))
+			}
 			for _, line := range block.lines {
-				fmt.Fprintf(b, "%s\n", inset(wrapText(sanitize(line), width)))
+				value := sanitize(line.value)
+				if line.label != "" {
+					value = s.muted.Bold(true).Render(sanitize(line.label)+":") + " " + value
+				}
+				fmt.Fprintf(b, "%s\n", inset(ansi.Wrap(value, width, "")))
 			}
 		}
 		if context.LatestRejection != nil && row.Status != "rejected" {

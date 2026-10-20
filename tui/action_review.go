@@ -23,12 +23,14 @@ type actionProposalContext struct {
 }
 
 type actionReviewUI struct {
-	row      actionProposalRow
-	context  *actionProposalContext
-	approval string
-	busy     bool
-	problem  string
-	scroll   int
+	row       actionProposalRow
+	context   *actionProposalContext
+	approval  string
+	busy      bool
+	problem   string
+	scroll    int
+	notes     map[proposalNoteKey]string
+	notesBusy bool
 }
 
 type actionReviewMsg struct {
@@ -114,10 +116,6 @@ func (m model) openActionReview(choice notificationChoice) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 	m.notifications.actionReview = &actionReviewUI{row: row, busy: true}
-	m.notifications.notesOpen = false
-	m.notifications.notesBusy = false
-	m.notifications.notesText = ""
-	m.notifications.notesError = ""
 	m.notifications.notesRequest++
 	return m, actionReviewContextCmd(m.installRoot, m.repo, m.notificationsGeneration, row, 0, "")
 }
@@ -151,6 +149,14 @@ func (m model) finishActionReview(msg actionReviewMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		current.context = &msg.context
+		current.notes = nil
+		current.notesBusy = false
+		m.notifications.notesRequest++
+		if notes := proposalNotes(&msg.context); len(notes) > 0 {
+			current.notesBusy = true
+			return m, proposalNotesCmd(m.installRoot, m.repo, current.row.Kind, m.notificationsGeneration, m.notifications.notesRequest,
+				current.row.Number, current.row.Checkpoint, msg.context.ItemContext.Checkpoint, notes)
+		}
 	} else if msg.phase == "review" {
 		if current.context == nil || !current.context.Current || msg.row.Checkpoint != current.row.Checkpoint || msg.row.Target != current.row.Target ||
 			msg.row.Comment != current.row.Comment || msg.row.Action != current.row.Action || msg.row.Operation != current.row.Operation ||
@@ -182,26 +188,6 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	row := review.row
 	if review.busy && msg.String() != "?" {
-		return m, nil
-	}
-	if m.notifications.notesOpen && msg.String() != "q" {
-		switch msg.String() {
-		case "m", "esc", "x", "h", "left":
-			m.notifications.notesOpen = false
-			m.notifications.notesRequest++
-		case "j", "down":
-			m.notifications.notesScroll++
-		case "k", "up":
-			m.notifications.notesScroll--
-		case "ctrl+d":
-			m.notifications.notesScroll += maxInt(m.commentHeight()/2, 1)
-		case "ctrl+u":
-			m.notifications.notesScroll -= maxInt(m.commentHeight()/2, 1)
-		}
-		if m.notifications.notesOpen {
-			vp := m.proposalNotesViewport()
-			m.notifications.notesScroll = vp.YOffset()
-		}
 		return m, nil
 	}
 	switch msg.String() {
@@ -244,8 +230,6 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		text, what := m.yankActionProposal(row)
 		m.status = "Taking " + what + "…"
 		return m, yankCmd(m.installRoot, m.repo, what, text)
-	case "m":
-		return m.toggleActionNotes(row)
 	case "w":
 		if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok && choice.tracked >= 0 {
 			m.status = fmt.Sprintf("Already tracking %s #%d comments.", strings.ToUpper(row.Kind), row.Number)
@@ -260,6 +244,10 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.openNotificationSource(choice, "action")
 		}
 	case "a":
+		if review.notesBusy {
+			m.status = "Reading full local notes before exact review…"
+			return m, nil
+		}
 		if row.Status == "executed" {
 			m.status = "This action already ran."
 			return m, nil
@@ -333,7 +321,7 @@ func (m model) actionReviewViewport() viewport.Model {
 		title = "Rejected action proposal"
 	}
 	fmt.Fprintf(&b, "%s\n\n", inset(titleBar(title, "", m.menuWidth())))
-	styles.writeProposal(&b, row, proposalReviewState{context: review.context, busy: review.busy, problem: review.problem, approved: review.approval != "", paging: true}, width)
+	styles.writeProposal(&b, row, proposalReviewState{context: review.context, notes: review.notes, notesBusy: review.notesBusy, busy: review.busy, problem: review.problem, approved: review.approval != "", paging: true}, width)
 	vp := viewport.New(viewport.WithWidth(m.cardWidth()), viewport.WithHeight(maxInt(m.mainHeight()-1, 1)))
 	vp.SetContent(b.String())
 	vp.SetYOffset(review.scroll)

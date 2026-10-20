@@ -327,9 +327,6 @@ func (m model) contextFooterGroups() []footerGroup {
 		return []footerGroup{group("Explanations", hint{"j/k/Tab", "select"}, hint{"Enter/l/→", "open PR or page"}), group("Navigation", hint{"Ctrl-D/U", "scroll"}, hint{"Esc/h", "back"})}
 	case m.notifications.open:
 		if m.notifications.actionReview != nil {
-			if m.notifications.notesOpen {
-				return []footerGroup{group("Local notes", hint{"j/k Ctrl-D/U", "scroll"}, hint{"m or Esc", "close"}), group("Navigation", hint{"q", "quit"})}
-			}
 			if m.notifications.actionReview.busy {
 				return []footerGroup{group("Action proposal", hint{"", "checking exact action…"})}
 			}
@@ -339,10 +336,10 @@ func (m model) contextFooterGroups() []footerGroup {
 				name = "Action outcome"
 			}
 			action := group(name, hint{"j/k Ctrl-D/U", "scroll"}, hint{"Enter", "view item"}, hint{"y", "copy for agent"}, hint{"w", "track comments"})
+			if m.notifications.actionReview.notesBusy {
+				action.hints = append(action.hints, hint{"", "reading full local notes…"})
+			}
 			if context := m.notifications.actionReview.context; context != nil {
-				if hasExpandableProposalNotes(context) {
-					action.hints = append(action.hints, hint{"m", "full notes"})
-				}
 				if context.ItemContext.Pagination.Offset > 0 || context.ItemContext.Pagination.Next != nil {
 					action.hints = append(action.hints, hint{"[/]", "context pages"})
 				}
@@ -355,7 +352,7 @@ func (m model) contextFooterGroups() []footerGroup {
 			} else {
 				action.hints = append(action.hints, hint{"d", "dismiss"})
 			}
-			if row.Active && m.notifications.actionReview.context != nil && m.notifications.actionReview.context.Current {
+			if row.Active && m.notifications.actionReview.context != nil && m.notifications.actionReview.context.Current && !m.notifications.actionReview.notesBusy {
 				if row.DecisionQuestion != "" && row.DecisionResolution == nil {
 					return []footerGroup{action, group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 				}

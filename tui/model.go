@@ -824,9 +824,6 @@ func (m model) viewContent() string {
 	}
 
 	body := m.bodyView()
-	if m.notifications.open && m.notifications.actionReview != nil && m.notifications.notesOpen {
-		body = m.proposalNotesOverlay(body)
-	}
 	if m.groups.open && m.groups.editing == "notes" {
 		body = m.groupNoteOverlay(body)
 	}

@@ -28,11 +28,6 @@ type notificationsUI struct {
 	reviewKey        string
 	reviewNumbers    []int
 	reviewScroll     int
-	notesOpen        bool
-	notesBusy        bool
-	notesText        string
-	notesError       string
-	notesScroll      int
 	notesRequest     uint64
 	state            notificationState
 	selected         int
@@ -676,7 +671,7 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	if m.notifications.actionReview != nil {
 		return m.handleActionReviewKey(msg)
 	}
-	if msg.String() == "f" && !m.notifications.notesOpen {
+	if msg.String() == "f" {
 		if m.notifications.reviewBusy && m.notifications.review != nil && m.notifications.review.Approval != "" {
 			return m, nil
 		}

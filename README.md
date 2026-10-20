@@ -135,7 +135,7 @@ They are listed here in sidebar order.
 
    ![Possible Duplicates](captures/flow-8.webp)
 
-9. **Notifications.** Review proposals and follow new comments. A PR closure proposal shows its explanatory comment, the relevant human guidance, earlier objections and the gaps in its selected evidence (if any). Approve it, edit it, or reject it with an optional reason. An edit needs a fresh review; a rejection stays in shared history for the next agent pass. The same menu tracks issue and PR comments, and separates items needing attention from past activity. Viewing or dismissing a row confirms no appeal and clears no Pending review request.
+9. **Notifications.** Review proposals and their outcomes. A PR closure proposal shows its explanatory comment, saved local triage and group guidance, earlier objections and the gaps in its selected evidence (if any). Approve it, edit it, or reject it with an optional reason. An edit needs a fresh review; a rejection stays in shared history for the next agent pass. The same menu can also track issue and PR comments, and separates items needing attention from past activity. Viewing or dismissing a row confirms no appeal and clears no Pending review request.
 
    ![Notifications](captures/flow-9.webp)
 

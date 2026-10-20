@@ -4166,7 +4166,7 @@ row = dict(kind="pr", operation="close", number=3, title="Fixture PR", target="h
 if "context" in args:
     stale = pathlib.Path("stale-context").exists()
     omitted = 30 if pathlib.Path("long-context").exists() else 0
-    item = dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-2" if stale else "ctx-1", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(action=dict(preview="keep-open", omitted_bytes=0), maintainer_notes=dict(preview="Check compatibility", omitted_bytes=omitted))), dict(kind="group", id="group:g1", fields=dict(title=dict(preview="Compatibility review", omitted_bytes=0), status=dict(preview="draft", omitted_bytes=0), description=dict(preview="Compare alternatives", omitted_bytes=0))), dict(kind="member", id="member:g1:pr:3", selected=True, fields=dict(notes=dict(preview="Keep the old API", omitted_bytes=0)))])
+    item = dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-2" if stale else "ctx-1", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(action=dict(preview="keep-open", omitted_bytes=0), triaged_by=dict(preview="agent:Maya Ortiz", omitted_bytes=0), maintainer_notes=dict(preview="Check compatibility", omitted_bytes=omitted))), dict(kind="group", id="group:g1", fields=dict(title=dict(preview="Compatibility review", omitted_bytes=0), status=dict(preview="draft", omitted_bytes=0), description=dict(preview="Compare alternatives", omitted_bytes=0))), dict(kind="member", id="member:g1:pr:3", selected=True, fields=dict(notes=dict(preview="Keep the old API", omitted_bytes=0)))])
     print(json.dumps(dict(repository="owner/repo", kind="pr", number=3, proposal_checkpoint="proposal-1", current=not stale, reason="local context changed" if stale else None, item_context=item, latest_rejection=dict(by="maintainer", at="2026-09-29T00:00:00Z", reason="Earlier objection", proposal_checkpoint="older"), requests=0)))
 elif "review" in args:
     print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="fresh-approval")))
@@ -4178,7 +4178,7 @@ else:
 	}
 	sourceScript := `#!/usr/bin/env python3
 import json
-text = "Check compatibility across all supported versions"
+text = "Check compatibility across all supported versions\n\n- Keep the old API"
 print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-1", row="ledger", field="maintainer_notes", text=text, bytes=dict(offset=0, returned=len(text.encode())), continuation=None, requests=0)))
 `
 	if err := os.WriteFile(filepath.Join(root, "bin", "item-context"), []byte(sourceScript), 0o755); err != nil {
@@ -4214,9 +4214,19 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	m = baselineSend(m, current)
 	m = baselineSend(m, tea.WindowSizeMsg{Width: 120, Height: 100})
 	view := ansi.Strip(m.actionReviewView())
-	for _, expected := range []string{"Check compatibility", "Keep the old API", "Earlier objection · By: maintainer", "PR #3 Fixture PR", "PR #3 Components complete", "Issue #4 Not found: comments", "Declared gap: Gap one", "Declared gap: Gap five", "Press a to review the exact action.", "Exact closure comment"} {
+	for _, expected := range []string{"Local guidance", "Suggested action: keep-open", "Proposed by: agent:Maya Ortiz", "Check compatibility", "Group · Compatibility review", "Keep the old API", "Earlier objection · By: maintainer", "PR #3 Fixture PR", "PR #3 Components complete", "Issue #4 Not found: comments", "Declared gap: Gap one", "Declared gap: Gap five", "Press a to review the exact action.", "Exact closure comment"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("proposal reader omitted %q: %s", expected, view)
+		}
+	}
+	if strings.Contains(view, "Saved triage decision") {
+		t.Fatal("local guidance repeated its section heading for the item fields")
+	}
+	styledView := m.actionReviewView()
+	labelStyle := newProposalReviewStyles().muted.Bold(true)
+	for _, label := range []string{"Suggested action:", "Proposed by:", "Maintainer note:", "Status:", "Guidance:"} {
+		if !strings.Contains(styledView, labelStyle.Render(label)) {
+			t.Fatalf("proposal reader did not emphasize %q in gray", label)
 		}
 	}
 	m.notifications.actionReview.row.DecisionQuestion = "Should this change replace the existing storage model?"
@@ -4255,7 +4265,7 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 		t.Fatal("y did not offer the proposal handoff from the reader")
 	}
 	last := -1
-	for _, section := range []string{"Proposed action", "Comment to publish", "Human context", "Selected evidence"} {
+	for _, section := range []string{"Proposed action", "Comment to publish", "Local guidance", "Selected evidence"} {
 		at := strings.Index(view, section)
 		if at <= last {
 			t.Fatalf("proposal sections out of order near %q", section)
@@ -4292,29 +4302,33 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	if publish != nil {
 		t.Fatal("exact review without a checked context offered publication")
 	}
-	next, shortNotesCmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "m"})
-	if shortNotesCmd != nil || next.(model).notifications.notesOpen {
-		t.Fatal("short local notes opened a duplicate reader")
+	if m.notifications.actionReview.notesBusy {
+		t.Fatal("complete local notes launched an unnecessary source read")
 	}
 	if err := os.WriteFile(filepath.Join(root, "long-context"), []byte("yes"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	next, cmd = m.openActionReview(choice)
-	m = baselineSend(next.(model), cmd().(actionReviewMsg))
-	underlying := m.actionReviewView()
-	next, notesCmd := m.handleNotificationsKey(tea.KeyPressMsg{Text: "m"})
+	next, notesCmd := next.(model).Update(cmd().(actionReviewMsg))
 	m = next.(model)
-	if notesCmd == nil || !m.notifications.notesOpen {
-		t.Fatal("longer local guidance was not available from the proposal")
+	if notesCmd == nil || !m.notifications.actionReview.notesBusy {
+		t.Fatal("longer local guidance did not start its bounded source read")
 	}
-	m = baselineSend(m, notesCmd().(proposalNotesMsg))
-	notesView := ansi.Strip(m.proposalNotesViewport().View())
-	if !strings.Contains(notesView, "across all supported versions") || !strings.Contains(notesView, "Group guidance") || !strings.Contains(notesView, "Member note") || m.actionReviewView() != underlying {
-		t.Fatal("floating notes failed to show full text without reflowing the proposal")
+	noteReply := notesCmd().(proposalNotesMsg)
+	stale := m
+	next, _ = stale.openActionReview(choice)
+	stale = baselineSend(next.(model), noteReply)
+	if !stale.notifications.actionReview.busy || stale.notifications.actionReview.notes != nil {
+		t.Fatal("a delayed note reply changed a reopened proposal")
 	}
-	m = baselineSend(m, tea.KeyPressMsg{Text: "m"})
-	if m.notifications.notesOpen {
-		t.Fatal("m did not close the floating notes window")
+	m = baselineSend(m, noteReply)
+	fullView := ansi.Strip(m.actionReviewView())
+	if m.notifications.actionReview.notesBusy || m.notifications.actionReview.notes[proposalNoteKey{row: "ledger", field: "maintainer_notes"}] != "Check compatibility across all supported versions\n\n- Keep the old API" ||
+		!strings.Contains(fullView, "Check compatibility across all supported") ||
+		!strings.Contains(fullView, "- Keep the old API") ||
+		!strings.Contains(fullView, "Group · Compatibility review") || !strings.Contains(fullView, "Member note") ||
+		strings.Contains(fullView, "more bytes") {
+		t.Fatal("the proposal reader did not show full local notes inline")
 	}
 
 	if err := os.WriteFile(filepath.Join(root, "stale-context"), []byte("yes"), 0o644); err != nil {

@@ -77,40 +77,42 @@ func contextField(fields map[string]json.RawMessage, name string) string {
 
 type guidanceBlock struct {
 	title string
-	lines []string
+	lines []guidanceLine
 }
 
-func contextExcerpt(value string) string {
-	value = strings.Join(strings.Fields(value), " ")
-	runes := []rune(value)
-	if len(runes) > 180 {
-		return string(runes[:180]) + "…"
+type guidanceLine struct {
+	label, value string
+}
+
+func contextNoteField(rowID string, fields map[string]json.RawMessage, field string, notes map[proposalNoteKey]string) string {
+	if value, ok := notes[proposalNoteKey{row: rowID, field: field}]; ok {
+		return value
 	}
-	return value
+	return contextField(fields, field)
 }
 
-func (c actionProposalContext) guidanceBlocks() []guidanceBlock {
+func (c actionProposalContext) guidanceBlocks(notes map[proposalNoteKey]string) []guidanceBlock {
 	var blocks []guidanceBlock
 	lastGroup := -1
 	for _, row := range c.ItemContext.Rows {
 		switch row.Kind {
 		case "ledger":
-			block := guidanceBlock{title: "Local decision"}
+			block := guidanceBlock{}
 			if len(row.Fields) == 0 {
-				block.lines = append(block.lines, "No local ledger row for this item")
+				block.lines = append(block.lines, guidanceLine{value: "No local ledger row for this item"})
 			} else {
 				call := contextField(row.Fields, "action")
 				if call == "" {
-					block.lines = append(block.lines, "No local triage decision yet")
+					block.lines = append(block.lines, guidanceLine{value: "No local triage decision yet"})
 				} else {
-					block.lines = append(block.lines, "Call: "+call)
+					block.lines = append(block.lines, guidanceLine{label: "Suggested action", value: call})
 					if by := contextField(row.Fields, "triaged_by"); by != "" {
-						block.lines = append(block.lines, "Proposed by "+by)
+						block.lines = append(block.lines, guidanceLine{label: "Proposed by", value: by})
 					}
 				}
 				for _, field := range []struct{ key, label string }{{"reason", "Reason"}, {"maintainer_notes", "Maintainer note"}, {"agent_notes", "Agent note"}, {"pending_review_reason", "Pending review reason"}} {
-					if value := contextField(row.Fields, field.key); value != "" {
-						block.lines = append(block.lines, field.label+": "+contextExcerpt(value))
+					if value := contextNoteField(row.ID, row.Fields, field.key, notes); value != "" {
+						block.lines = append(block.lines, guidanceLine{label: field.label, value: value})
 					}
 				}
 			}
@@ -121,28 +123,28 @@ func (c actionProposalContext) guidanceBlocks() []guidanceBlock {
 			if by := contextField(row.Fields, "updated_by"); by != "" {
 				status += " · edited by " + by
 			}
-			block.lines = append(block.lines, status)
-			if value := contextField(row.Fields, "description"); value != "" {
-				block.lines = append(block.lines, "Guidance: "+contextExcerpt(value))
+			block.lines = append(block.lines, guidanceLine{label: "Status", value: status})
+			if value := contextNoteField(row.ID, row.Fields, "description", notes); value != "" {
+				block.lines = append(block.lines, guidanceLine{label: "Guidance", value: value})
 			}
 			blocks = append(blocks, block)
 			lastGroup = len(blocks) - 1
 		case "member":
 			if row.Selected {
-				if value := contextField(row.Fields, "notes"); value != "" {
+				if value := contextNoteField(row.ID, row.Fields, "notes", notes); value != "" {
 					by := contextField(row.Fields, "updated_by")
 					if by == "" {
 						by = contextField(row.Fields, "added_by")
 					}
-					line := "Member note"
+					label := "Member note"
 					if by != "" {
-						line += " (" + by + ")"
+						label += " (" + by + ")"
 					}
-					line += ": " + contextExcerpt(value)
+					line := guidanceLine{label: label, value: value}
 					if lastGroup >= 0 {
 						blocks[lastGroup].lines = append(blocks[lastGroup].lines, line)
 					} else {
-						blocks = append(blocks, guidanceBlock{title: "Member guidance", lines: []string{line}})
+						blocks = append(blocks, guidanceBlock{title: "Member guidance", lines: []guidanceLine{line}})
 					}
 				}
 			}

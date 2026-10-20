@@ -61,11 +61,9 @@ type keyMap struct {
 	YankAll        key.Binding
 
 	// Batches and groups.
-	New    key.Binding
-	Edit   key.Binding
-	Delete key.Binding
-	// DeleteAll (D) is the bigger d: in Possible Duplicates it clears every handled pair, where d clears the hovered one.
-	DeleteAll  key.Binding
+	New        key.Binding
+	Edit       key.Binding
+	Delete     key.Binding
 	ApplyAll   key.Binding
 	Export     key.Binding
 	ExportFull key.Binding
@@ -142,7 +140,6 @@ var keys = keyMap{
 	New:        key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
 	Edit:       key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 	Delete:     key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
-	DeleteAll:  key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "clear handled")),
 	ApplyAll:   key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "apply proposals")),
 	Export:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "export")),
 	ExportFull: key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "full export")),

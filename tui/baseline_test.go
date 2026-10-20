@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "verification-settings"), filepath.Join("..", "bin", "ci-policy"), filepath.Join("..", "bin", "pr-size"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "verification-settings"), filepath.Join("..", "bin", "ci-policy"), filepath.Join("..", "bin", "pr-size"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"), filepath.Join("..", "bin", "not-duplicate"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -1920,6 +1920,83 @@ func TestBaselineItemTabsLeadIntoForm(t *testing.T) {
 		t.Fatal("duplicate reason could not be edited immediately")
 	}
 
+}
+
+func TestBaselinePossibleDuplicatesResolveWithoutReopening(t *testing.T) {
+	root := baselineRoot(t)
+	var rows strings.Builder
+	for _, number := range []int{1, 6, 7, 14} {
+		rows.WriteString(baselineRow(number))
+	}
+	if err := os.WriteFile(filepath.Join(root, "data", "owner", "repo", "ledger.jsonl"), []byte(rows.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := baselineModel(t, root)
+	pairs := []dupPair{
+		{Score: 0.7, Original: dupCandidate{Kind: "issue", Number: 1, Title: "original"}, Item: dupCandidate{Kind: "issue", Number: 14, Title: "duplicate"}},
+		{Score: 0.6, Original: dupCandidate{Kind: "issue", Number: 6, Title: "lookalike"}, Item: dupCandidate{Kind: "issue", Number: 7, Title: "different request"}},
+	}
+	m.openPairs()
+	m = baselineSend(m, pairsLoadedMsg{repo: m.repo, pairs: pairs})
+	if len(m.list.Items()) != 2 || m.sidebar.pairCount != 2 {
+		t.Fatal("the unresolved pairs did not appear")
+	}
+
+	m.dups = dupUI{fromList: true, returnToDups: true, source: Key{Kind: "issue", Number: 1}}
+	m.focus = FocusDetail
+	m.detail.key = Key{Kind: "issue", Number: 14}
+	m.leaveSavedItem()
+	if m.focus != FocusList || m.dups.open || m.dups.returnToDups {
+		t.Fatal("saving a comparison opened from the pair list did not return to that list")
+	}
+
+	updated := slices.Clone(m.items)
+	for i := range updated {
+		if updated[i].Number == 14 {
+			updated[i].ProposedLabels = []string{"duplicate"}
+			updated[i].Action = "close"
+		}
+	}
+	m = baselineSend(m, ledgerReloadedMsg{root: root, repo: m.repo, items: updated})
+	if len(m.list.Items()) != 1 || m.sidebar.pairCount != 1 || m.list.SelectedItem().(pairListItem).pair.Original.Number != 6 {
+		t.Fatal("the saved duplicate pair remained visible after the ledger reload")
+	}
+
+	next, command := m.handleListKey(tea.KeyPressMsg{Text: "d"})
+	m = next.(model)
+	if command != nil || m.listConfirm != "d" {
+		t.Fatal("the first d did not request confirmation")
+	}
+	next, command = m.handleListKey(tea.KeyPressMsg{Text: "d"})
+	m = next.(model)
+	if command == nil || len(m.list.Items()) != 1 {
+		t.Fatal("the pair left the list before the verdict was saved")
+	}
+	result, ok := command().(notDuplicatesMsg)
+	if !ok || result.err != nil || result.resolved == nil {
+		t.Fatalf("the owning script did not return the saved pair: %+v", result.err)
+	}
+	m = baselineSend(m, result)
+	if len(m.list.Items()) != 0 || m.sidebar.pairCount != 0 {
+		t.Fatal("the confirmed not-duplicate pair stayed visible")
+	}
+	m = baselineSend(m, pairsLoadedMsg{repo: m.repo, pairs: pairs})
+	if len(m.list.Items()) != 0 {
+		t.Fatal("a later pair discovery reply restored a resolved pair")
+	}
+
+	m.pairs = pairs[1:]
+	m.notDuplicates = nil
+	m.refreshActiveList()
+	m.dups = dupUI{open: true, fromList: true, source: Key{Kind: "issue", Number: 6}}
+	m.similar[m.dups.source] = []dupCandidate{{Kind: "issue", Number: 7, Title: "different request"}}
+	m.focus = FocusDetail
+	key := newDupPairKey("issue", 6, 7)
+	m = baselineSend(m, notDuplicatesMsg{repo: m.repo, pairs: map[dupPairKey]bool{key: true}, resolved: &key})
+	if m.dups.open || m.focus != FocusList || len(m.list.Items()) != 0 {
+		t.Fatal("a confirmed exclusion from comparison did not return to the empty pair list")
+	}
 }
 
 func TestBaselineNotificationItemCommentActions(t *testing.T) {

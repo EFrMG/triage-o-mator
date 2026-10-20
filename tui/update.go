@@ -1044,8 +1044,6 @@ func (m model) handleListKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case m.activePairs && key.Matches(msg, keys.Delete):
 		return m.requestRuleOutPair()
-	case m.activePairs && key.Matches(msg, keys.DeleteAll):
-		return m.requestClearHandledPairs()
 	case m.activePairs && key.Matches(msg, keys.MarkDup):
 		// A hovered pair: m opens its comparison, where m marks, as it does on an item.
 		if pair, ok := m.list.SelectedItem().(pairListItem); ok {
@@ -1337,6 +1335,13 @@ func (m model) saveDecisionCmd() tea.Cmd {
 
 // leaveSavedItem goes back from the item just saved to where it was opened from; in a list, the cursor moves on to the next item. The ledger reload that follows keeps the cursor on that item (setListEntries), even if the saved one leaves the list.
 func (m *model) leaveSavedItem() {
+	if m.dups.fromList && (m.dups.open || m.dups.returnToDups) {
+		m.dups.open, m.dups.returnToDups = false, false
+		m.focus = FocusList
+		m.showList()
+		return
+	}
+
 	// Saved from a screen standing on top of the item (the comparison, a group): stay on it.
 	if m.dups.open || m.groups.open {
 		return

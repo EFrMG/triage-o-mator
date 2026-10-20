@@ -314,7 +314,7 @@ func (m *model) activateTab(idx int) {
 
 func (m *model) refreshActiveList() {
 	if m.pairsLoaded {
-		// Pairs are recomputed only when the view opens; as the ledger changes, resolved or closed pairs stay listed but marked handled, and leave the count.
+		// Pair discovery stays frozen until the view opens again, while confirmed resolutions leave the visible list immediately.
 		m.sidebar.pairCount = m.openPairCount()
 	}
 

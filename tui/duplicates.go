@@ -544,9 +544,10 @@ func dupTriage(it Item) string {
 
 // notDuplicatesMsg carries the pairs ruled out with bin/not-duplicate, so both the pairs list and a comparison can say which comparisons are settled.
 type notDuplicatesMsg struct {
-	repo  string
-	pairs map[dupPairKey]bool
-	err   error
+	repo     string
+	pairs    map[dupPairKey]bool
+	resolved *dupPairKey
+	err      error
 }
 
 // dupPairKey identifies a pair by kind and its two numbers, smaller first, as bin/not-duplicate stores them.
@@ -600,6 +601,12 @@ func (m model) onNotDuplicates(msg notDuplicatesMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.notDuplicates = msg.pairs
+	m.refreshActiveList()
+	if msg.resolved != nil && m.dups.open && m.dups.fromList {
+		if candidate := m.selectedDup(); candidate != nil && newDupPairKey(candidate.Kind, candidate.Number, m.dups.source.Number) == *msg.resolved {
+			m.closeDuplicates(false)
+		}
+	}
 
 	return m, nil
 }
@@ -616,7 +623,10 @@ func ruleOutCmd(root, repo string, kind string, a, b int, by string) tea.Cmd {
 			return notDuplicatesMsg{repo: repo, err: err}
 		}
 
-		return notDuplicatesCmd(root, repo)()
+		msg := notDuplicatesCmd(root, repo)().(notDuplicatesMsg)
+		resolved := newDupPairKey(kind, a, b)
+		msg.resolved = &resolved
+		return msg
 	}
 }
 
@@ -652,20 +662,13 @@ func pairsCmd(root, repo string) tea.Cmd {
 	}
 }
 
-// pairListItem shows a pair in the main list, the older item first since that is the one a comparison opens on. handled is set once either item is marked a duplicate or closed: the pair stays listed, marked, until the view is opened again.
+// pairListItem shows an unresolved pair in the main list, the older item first since that is the one a comparison opens on.
 type pairListItem struct {
 	pair            dupPair
 	newer, original Item
-	handled         bool
 }
 
-func (p pairListItem) Mark() cardMark {
-	if p.handled {
-		return cardMark{"handled", currentTheme.Success}
-	}
-
-	return cardMark{}
-}
+func (p pairListItem) Mark() cardMark { return cardMark{} }
 
 func (p pairListItem) Title() string {
 	return fmt.Sprintf("%.0f%% · %s #%d ↔ #%d · %s", p.pair.Score*100, p.original.Kind, p.original.Number, p.newer.Number, p.original.Title)
@@ -697,33 +700,24 @@ func pairHandled(newer, original Item) bool {
 	return newer.State != "open" || original.State != "open" || marked(newer) || marked(original)
 }
 
-// pairItems lists the pairs found when the view opened (onPairsLoaded keeps only those needing a look then), marking the ones handled since, so nothing vanishes from under the cursor mid-sitting.
+// pairItems keeps only unresolved pairs from the view's frozen candidate set; a confirmed local decision or exclusion removes a pair after the owning script reports success.
 func (m model) pairItems() []list.Item {
 	var out []list.Item
 	for _, p := range m.pairs {
 		newer, ok1 := m.findItem(p.Item.Key())
 		original, ok2 := m.findItem(p.Original.Key())
-		if !ok1 || !ok2 {
+		if !ok1 || !ok2 || pairHandled(newer, original) || m.ruledOut(p.Item.Kind, p.Item.Number, p.Original.Number) {
 			continue
 		}
 
-		out = append(out, pairListItem{pair: p, newer: newer, original: original, handled: pairHandled(newer, original)})
+		out = append(out, pairListItem{pair: p, newer: newer, original: original})
 	}
 
 	return out
 }
 
 // openPairCount is how many listed pairs still need a look, for the sidebar and the list title.
-func (m model) openPairCount() int {
-	n := 0
-	for _, entry := range m.pairItems() {
-		if !entry.(pairListItem).handled {
-			n++
-		}
-	}
-
-	return n
-}
+func (m model) openPairCount() int { return len(m.pairItems()) }
 
 // requestRuleOutPair records the hovered pair as checked and not duplicates, on a second d: bin/not-duplicate keeps that verdict in the repo's data, so the pair stays off the list in later sessions too, for everyone who pulls it.
 func (m model) requestRuleOutPair() (tea.Model, tea.Cmd) {
@@ -732,9 +726,9 @@ func (m model) requestRuleOutPair() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if hovered.handled {
+	if pairHandled(hovered.newer, hovered.original) || m.ruledOut(hovered.newer.Kind, hovered.newer.Number, hovered.original.Number) {
 		m.listConfirm = ""
-		m.status = fmt.Sprintf("#%d ↔ #%d is already decided. Handled pairs can be cleared from this list.", hovered.original.Number, hovered.newer.Number)
+		m.status = fmt.Sprintf("#%d ↔ #%d is already decided.", hovered.original.Number, hovered.newer.Number)
 
 		return m, nil
 	}
@@ -749,7 +743,7 @@ func (m model) requestRuleOutPair() (tea.Model, tea.Cmd) {
 	m.listConfirm = ""
 	m.status = fmt.Sprintf("#%d and #%d aren't duplicates: recorded.", hovered.original.Number, hovered.newer.Number)
 
-	return m, tea.Batch(ruleOutCmd(m.installRoot, m.repo, hovered.newer.Kind, hovered.newer.Number, hovered.original.Number, m.contributor), pairsCmd(m.installRoot, m.repo))
+	return m, ruleOutCmd(m.installRoot, m.repo, hovered.newer.Kind, hovered.newer.Number, hovered.original.Number, m.contributor)
 }
 
 // requestRuleOutCandidate does the same from a comparison, for the hovered candidate against the item on top.
@@ -772,46 +766,6 @@ func (m model) requestRuleOutCandidate(c dupCandidate) (tea.Model, tea.Cmd) {
 	m.status = fmt.Sprintf("#%d and #%d aren't duplicates: recorded.", m.dups.source.Number, c.Number)
 
 	return m, ruleOutCmd(m.installRoot, m.repo, c.Kind, c.Number, m.dups.source.Number, m.contributor)
-}
-
-// requestClearHandledPairs drops every pair already resolved, on a second D: they stay out until the view is opened again, which recomputes them anyway.
-func (m model) requestClearHandledPairs() (tea.Model, tea.Cmd) {
-	var handled int
-	for _, entry := range m.pairItems() {
-		if entry.(pairListItem).handled {
-			handled++
-		}
-	}
-
-	if handled == 0 {
-		m.listConfirm = ""
-		m.status = "Nothing to clear: a pair counts as handled once either side is marked a duplicate or closed."
-
-		return m, nil
-	}
-
-	if m.listConfirm != "D" {
-		m.listConfirm = "D"
-		m.status = fmt.Sprintf("Clear %s from the list? Nothing in the ledger changes. Press D again.", pluralize(handled, "handled pair", "handled pairs"))
-
-		return m, nil
-	}
-
-	m.listConfirm = ""
-	var kept []dupPair
-	for _, p := range m.pairs {
-		newer, ok1 := m.findItem(p.Item.Key())
-		original, ok2 := m.findItem(p.Original.Key())
-		if ok1 && ok2 && !pairHandled(newer, original) {
-			kept = append(kept, p)
-		}
-	}
-
-	m.pairs = kept
-	m.refreshActiveList()
-	m.status = fmt.Sprintf("Cleared %s.", pluralize(handled, "handled pair", "handled pairs"))
-
-	return m, nil
 }
 
 // openPairs shows the Possible Duplicates view, recomputing pairs each time so new and renamed items are included.
@@ -844,7 +798,7 @@ func (m model) onPairsLoaded(msg pairsLoadedMsg) (tea.Model, tea.Cmd) {
 	for _, p := range msg.pairs {
 		newer, ok1 := m.findItem(p.Item.Key())
 		original, ok2 := m.findItem(p.Original.Key())
-		if ok1 && ok2 && !pairHandled(newer, original) {
+		if ok1 && ok2 && !pairHandled(newer, original) && !m.ruledOut(p.Item.Kind, p.Item.Number, p.Original.Number) {
 			m.pairs = append(m.pairs, p)
 		}
 	}

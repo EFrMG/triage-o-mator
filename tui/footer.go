@@ -499,7 +499,7 @@ func (m model) contextFooterGroups() []footerGroup {
 	case m.focus == FocusDetail:
 		return m.itemFooter()
 	case m.activePairs && m.focus == FocusList:
-		return []footerGroup{group("Pairs", bind("compare", keys.Enter, keys.MarkDup), bind("clear", keys.Delete), bind("", keys.DeleteAll)), group("Select", bind("move", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("", keys.Search)), m.menusGroup(), m.navigationGroup()}
+		return []footerGroup{group("Pairs", bind("compare", keys.Enter, keys.MarkDup), bind("rule out", keys.Delete)), group("Select", bind("move", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("", keys.Search)), m.menusGroup(), m.navigationGroup()}
 	}
 
 	if m.focus != FocusList {

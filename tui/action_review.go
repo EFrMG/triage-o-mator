@@ -165,7 +165,9 @@ func (m model) finishActionReview(msg actionReviewMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		current.approval = msg.approval
-		m.status = "Review the exact target, operation and comment; press a again to publish."
+		current.busy = true
+		m.status = "Exact action checked; publishing…"
+		return m, actionReviewCmd(m.installRoot, m.repo, m.notificationsGeneration, current.row, "execute", msg.approval)
 	} else {
 		target, err := validateCommentTarget(Item{Kind: current.row.Kind, Number: current.row.Number, URL: current.row.Target}, m.repo)
 		if err != nil {
@@ -173,10 +175,12 @@ func (m model) finishActionReview(msg actionReviewMsg) (tea.Model, tea.Cmd) {
 			return m.openNotifications()
 		}
 		key := Key{Kind: current.row.Kind, Number: current.row.Number}
-		m.status = "Approved action completed. Refreshing item…"
 		next, notificationCmd := m.openNotifications()
 		updated, syncCmd := next.(model).startRefreshItemsAtHost(false, target.host, key)
-		return updated, tea.Batch(notificationCmd, syncCmd)
+		ready := updated.(model)
+		ready.notifications.selectItem = key
+		ready.status = fmt.Sprintf("Published action on %s #%d; refreshing Notifications and item…", current.row.Kind, current.row.Number)
+		return ready, tea.Batch(notificationCmd, syncCmd)
 	}
 	return m, nil
 }
@@ -252,13 +256,6 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.status = "This action already ran."
 			return m, nil
 		}
-		if row.Status == "pending" && row.DecisionQuestion != "" && row.DecisionResolution == nil {
-			if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok {
-				return m.openAnswerComposer(choice)
-			}
-			m.warn("This action question is no longer available; refresh Notifications.")
-			return m, nil
-		}
 		if row.OutOfDate != nil {
 			m.warn("The item changed on GitHub after this proposal was prepared; press y to copy it for an agent to prepare a fresh one.")
 			return m, nil
@@ -268,10 +265,7 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		review.busy = true
-		if review.approval == "" {
-			return m, actionReviewCmd(m.installRoot, m.repo, m.notificationsGeneration, row, "review", "")
-		}
-		return m, actionReviewCmd(m.installRoot, m.repo, m.notificationsGeneration, row, "execute", review.approval)
+		return m, actionReviewCmd(m.installRoot, m.repo, m.notificationsGeneration, row, "review", "")
 	case "e":
 		if choice, ok := m.notifications.actionProposalChoice(Key{Kind: row.Kind, Number: row.Number}); ok {
 			return m.openProposalEdit(choice)
@@ -281,6 +275,9 @@ func (m model) handleActionReviewKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if row.Status == "pending" {
 				if msg.String() == "D" {
 					return m.openExternalRejectionComposer(choice)
+				}
+				if row.DecisionResolution != nil {
+					return m.rejectAnsweredProposal(choice)
 				}
 				return m.openRejectionComposer(choice)
 			}

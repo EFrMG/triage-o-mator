@@ -57,11 +57,10 @@ def select(keys):
         if setting is None or setting["operation"] != operation:
             raise ValueError(f"{kind} #{number} no longer has the selected action operation")
 
-        if not row.get("decision_question"):
-            reviewed = script("action-proposals", "--expected-repo", REPO, "review", "--kind", kind, "--number", str(number))
-            exact = reviewed["plan"]["proposals"][0]
-            if exact["checkpoint"] != row["checkpoint"] or exact["comment"] != row["comment"]:
-                raise ValueError(f"{kind} #{number} changed during action preview")
+        reviewed = script("action-proposals", "--expected-repo", REPO, "review", "--kind", kind, "--number", str(number))
+        exact = reviewed["plan"]["proposals"][0]
+        if exact["checkpoint"] != row["checkpoint"] or exact["comment"] != row["comment"]:
+            raise ValueError(f"{kind} #{number} changed during action preview")
 
         held = bool(policy["pending_review_hold"] and ledger.get((kind, number), {}).get("review_request"))
         eligible = direct_execution_eligible(row) and not held

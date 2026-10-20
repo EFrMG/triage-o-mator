@@ -4214,7 +4214,7 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	m = baselineSend(m, current)
 	m = baselineSend(m, tea.WindowSizeMsg{Width: 120, Height: 100})
 	view := ansi.Strip(m.actionReviewView())
-	for _, expected := range []string{"Local guidance", "Suggested action: keep-open", "Proposed by: agent:Maya Ortiz", "Check compatibility", "Group · Compatibility review", "Keep the old API", "Earlier objection · By: maintainer", "PR #3 Fixture PR", "PR #3 Components complete", "Issue #4 Not found: comments", "Declared gap: Gap one", "Declared gap: Gap five", "Press a to review the exact action.", "Exact closure comment"} {
+	for _, expected := range []string{"Local guidance", "Suggested action: keep-open", "Proposed by: agent:Maya Ortiz", "Check compatibility", "Group · Compatibility review", "Keep the old API", "Earlier objection · By: maintainer", "PR #3 Fixture PR", "PR #3 Components complete", "Issue #4 Not found: comments", "Declared gap: Gap one", "Declared gap: Gap five", "Press a to approve this action; current state is checked before publishing.", "Exact closure comment"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("proposal reader omitted %q: %s", expected, view)
 		}
@@ -4231,8 +4231,8 @@ print(json.dumps(dict(repository="owner/repo", item=dict(kind="pr", number=3), c
 	}
 	m.notifications.actionReview.row.DecisionQuestion = "Should this change replace the existing storage model?"
 	questionView := ansi.Strip(m.actionReviewView())
-	if !strings.Contains(questionView, "Decision question") || !strings.Contains(questionView, "Press a to answer before reviewing this action.") || strings.Contains(questionView, "Press a to review the exact action.") {
-		t.Fatal("an unresolved decision question did not replace the exact-review prompt")
+	if !strings.Contains(questionView, "Decision question") || !strings.Contains(questionView, "Should this change replace the existing storage model?") || !strings.Contains(questionView, "Press a to approve this action") {
+		t.Fatal("a decision question was not visible beside human approval")
 	}
 	m.notifications.actionReview.row.DecisionQuestion = ""
 	m.notifications.actionReview.row.Inputs.EvidenceGaps = nil
@@ -4359,20 +4359,20 @@ func TestStagedActionReviewChecksContextBeforeExactApproval(t *testing.T) {
 	script := `#!/usr/bin/env python3
 import json, pathlib, sys
 args = sys.argv[1:]
-answer = pathlib.Path("answered-action").read_text() if pathlib.Path("answered-action").exists() else None
-row = dict(kind="issue", number=1, title="Needs reproduction", target="https://github.com/owner/repo/issues/1", action="comment", operation="comment", comment="Could you share steps to reproduce?", updated_at="2026-10-04T01:00:00Z", checkpoint="action-2" if answer else "action-1", status="pending", active=True, decision_question="Should this request be sent?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Discussion not acquired"]))
-if answer:
-    row["decision_resolution"] = dict(by="maintainer", at="2026-10-04T02:00:00Z", reason=answer, held_checkpoint="action-1")
+row = dict(kind="issue", number=1, title="Needs reproduction", target="https://github.com/owner/repo/issues/1", action="comment", operation="comment", comment="Could you share steps to reproduce?", updated_at="2026-10-04T01:00:00Z", checkpoint="action-1", status="pending", active=True, decision_question="Should this request be sent?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Discussion not acquired"]))
 if "context" in args:
     stale = pathlib.Path("stale-action").exists()
     context = dict(repository="owner/repo", item=dict(kind="issue", number=1), checkpoint="ctx-a", requests=0, pagination=dict(offset=0, next_offset=None), rows=[dict(kind="ledger", id="ledger", fields=dict(action="comment", reason="Missing reproduction"))])
     print(json.dumps(dict(repository="owner/repo", kind="issue", number=1, proposal_checkpoint=row["checkpoint"], current=not stale, reason="local guidance changed" if stale else None, item_context=context, requests=0)))
-elif "answer" in args:
-    answer = args[args.index("--answer") + 1]
-    pathlib.Path("answered-action").write_text(answer)
-    row["checkpoint"] = "action-2"
-    row["decision_resolution"] = dict(by=args[args.index("--by") + 1], at="2026-10-04T02:00:00Z", reason=answer, held_checkpoint="action-1")
+elif "reject" in args:
+    reason = args[args.index("--reason") + 1]
+    pathlib.Path("rejected-with").write_text(reason)
+    row["status"] = "rejected"
+    row["checkpoint"] = "action-3"
+    row["rejection"] = dict(by=args[args.index("--by") + 1], at="2026-10-04T03:00:00Z", reason=reason, proposal_checkpoint="action-1")
     print(json.dumps(row))
+elif "dismiss" in args:
+    print("{}")
 elif "review" in args:
     print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="exact-approval")))
 elif "execute" in args:
@@ -4406,11 +4406,9 @@ else:
 	}
 	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
 	m = next.(model)
-	if cmd == nil || !m.comment.open || m.notifications.actionReview.approval != "" {
-		t.Fatal("questioned action entered approval before an answer")
+	if cmd != nil || m.comment.open || m.notifications.actionReview.approval != "" {
+		t.Fatal("stale questioned action entered approval")
 	}
-	next, _ = m.handleCommentKey(tea.KeyPressMsg{Text: "esc"})
-	m = next.(model)
 	if err := os.Remove(filepath.Join(root, "stale-action")); err != nil {
 		t.Fatal(err)
 	}
@@ -4423,84 +4421,74 @@ else:
 	if !strings.Contains(styledReview, newProposalReviewStyles().section.Render("Proposed action")) || !strings.Contains(styledReview, newProposalReviewStyles().section.Render("Comment to publish")) {
 		t.Fatal("issue action did not use the shared proposal review styling")
 	}
-	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "r"})
-	m = next.(model)
-	if cmd != nil || m.comment.open {
-		t.Fatal("r still opened the action answer composer")
+	rejectModel := m
+	rejectNext, rejectCmd := rejectModel.handleNotificationsKey(tea.KeyPressMsg{Text: "d"})
+	rejectModel = rejectNext.(model)
+	if rejectCmd == nil || !rejectModel.comment.open || rejectModel.comment.busy || rejectModel.comment.text.Value() != "" {
+		t.Fatal("d did not open a rejection reason for the questioned proposal")
+	}
+	rejectModel.comment.text.SetValue("Keep Markdown as the source of truth")
+	rejectNext, rejectCmd = rejectModel.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	rejectModel = rejectNext.(model)
+	rejected := rejectCmd().(notificationRejectionDoneMsg)
+	if rejected.err != nil || !rejected.rejected || rejected.completed != rejected.total {
+		t.Fatalf("questioned proposal was not rejected and dismissed: %+v", rejected)
+	}
+	if reason, err := os.ReadFile(filepath.Join(root, "rejected-with")); err != nil || string(reason) != "Keep Markdown as the source of truth" {
+		t.Fatal("rejection did not save the person's reason")
+	}
+	rejectNext, _ = rejectModel.Update(rejected)
+	rejectModel = rejectNext.(model)
+	if rejectModel.comment.open || rejectModel.notifications.actionReview != nil || !rejectModel.notifications.open {
+		t.Fatal("rejected proposal did not return to Notifications")
 	}
 	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
 	m = next.(model)
-	if cmd == nil || !m.comment.open || m.comment.answerCheckpoint != "action-1" {
-		t.Fatal("a did not open the attributed answer composer")
+	if _, err := os.Stat(filepath.Join(root, "published-action")); !os.IsNotExist(err) {
+		t.Fatal("action published before exact review completed")
 	}
-	m.height = 30
-	m.layoutComment()
-	panel := ansi.Strip(m.commentView())
-	if lipgloss.Height(panel) > m.commentHeight() || !strings.Contains(strings.Split(panel, "\n")[lipgloss.Height(panel)-1], "╯") {
-		t.Fatal("action answer editor overflowed or lost its bottom border")
+	reviewResult := cmd().(actionReviewMsg)
+	changed := m
+	changedReview := *m.notifications.actionReview
+	changed.notifications.actionReview = &changedReview
+	changedResult := reviewResult
+	changedResult.row.Comment = "A different comment"
+	changedNext, changedCmd := changed.Update(changedResult)
+	changed = changedNext.(model)
+	if changedCmd != nil || changed.notifications.actionReview.problem == "" {
+		t.Fatal("a changed exact review proceeded to publication")
 	}
-	m.comment.answerQuestion = strings.Repeat("Long question text ", 100)
-	m.layoutComment()
-	if lipgloss.Height(m.commentView()) > m.commentHeight() {
-		t.Fatal("long action question overflowed the answer editor")
-	}
-	m.comment.text.SetValue("Send a focused request")
-	next, cmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	next, publishCmd := m.Update(reviewResult)
 	m = next.(model)
-	if cmd == nil || !m.comment.busy {
-		t.Fatal("answer composer did not save through the owning script")
-	}
-	answerMsg := cmd().(proposalAnswerDoneMsg)
-	if answerMsg.err != nil || !answerMsg.saved || answerMsg.row.DecisionResolution == nil || answerMsg.row.DecisionResolution.By != "maintainer" {
-		t.Fatalf("answer was not saved and attributed: %+v", answerMsg)
-	}
-	updated, _ := m.finishProposalAnswer(answerMsg)
-	m = updated.(model)
-	m.notifications.actions = actionProposalList{Rows: []actionProposalRow{answerMsg.row}}
-	choice = m.notifications.choices()[0]
-	next, cmd = m.openActionReview(choice)
-	m = baselineSend(next.(model), cmd().(actionReviewMsg))
-	if view := ansi.Strip(m.actionReviewView()); !strings.Contains(view, "Could you share steps to reproduce?") || !strings.Contains(view, "Send a focused request") {
-		t.Fatal("exact comment and attributed answer were absent from the approval review")
-	}
-	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	m = baselineSend(next.(model), cmd().(actionReviewMsg))
-	if m.notifications.actionReview.approval != "exact-approval" {
-		t.Fatal("exact action review did not retain its approval")
+	if publishCmd == nil || !m.notifications.actionReview.busy || m.notifications.actionReview.approval != "exact-approval" {
+		t.Fatal("one approval press did not start the exact checked write")
 	}
 	if _, err := os.Stat(filepath.Join(root, "published-action")); !os.IsNotExist(err) {
-		t.Fatal("first approval press published the action")
+		t.Fatal("action published before the owning write completed")
 	}
-	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	if cmd == nil || !next.(model).notifications.actionReview.busy {
-		t.Fatal("second approval press did not start the selected write")
-	}
-	if result := cmd().(actionReviewMsg); result.err != nil {
+	result := publishCmd().(actionReviewMsg)
+	if result.err != nil {
 		t.Fatal(result.err)
+	}
+	next, reload := m.Update(result)
+	m = next.(model)
+	if m.notifications.actionReview != nil || !m.notifications.open || m.notifications.selectItem != (Key{Kind: "issue", Number: 1}) || !strings.Contains(m.status, "Published action on issue #1") || reload == nil {
+		t.Fatal("published action did not return to Notifications with confirmation")
 	}
 	if _, err := os.Stat(filepath.Join(root, "published-action")); err != nil {
 		t.Fatal("approved action was not sent to its owning script")
 	}
 }
 
-func TestQuestionedClosureAnswerRequiresExactReviewBeforePublish(t *testing.T) {
+func TestQuestionedClosureCanPublishAfterExactReview(t *testing.T) {
 	root := baselineRoot(t)
 	script := `#!/usr/bin/env python3
 import json, pathlib, sys
 args = sys.argv[1:]
-answer = pathlib.Path("closure-answer").read_text() if pathlib.Path("closure-answer").exists() else None
-row = dict(kind="pr", number=3, operation="close", title="Older change", target="https://github.com/owner/repo/pull/3", comment="This PR is superseded by #4.", head_sha="b" * 40, updated_at="2026-10-04T01:00:00Z", checkpoint="closure-2" if answer else "closure-1", status="pending", active=True, decision_question="Does #4 replace this PR?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Comparison pending"]))
-if answer:
-    row["decision_resolution"] = dict(by="maintainer", at="2026-10-04T02:00:00Z", reason=answer, held_checkpoint="closure-1")
+row = dict(kind="pr", number=3, operation="close", title="Older change", target="https://github.com/owner/repo/pull/3", comment="This PR is superseded by #4.", head_sha="b" * 40, updated_at="2026-10-04T01:00:00Z", checkpoint="closure-1", status="pending", active=True, decision_question="Does #4 replace this PR?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Comparison pending"]))
 if "context" in args:
     context = dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-a", requests=0, pagination=dict(offset=0, next_offset=None), rows=[])
     print(json.dumps(dict(repository="owner/repo", kind="pr", number=3, proposal_checkpoint=row["checkpoint"], current=True, reason=None, item_context=context, requests=0)))
-elif "answer" in args:
-    text = args[args.index("--answer") + 1]
-    pathlib.Path("closure-answer").write_text(text)
-    row["checkpoint"] = "closure-2"
-    row["decision_resolution"] = dict(by=args[args.index("--by") + 1], at="2026-10-04T02:00:00Z", reason=text, held_checkpoint="closure-1")
-    print(json.dumps(row))
 elif "review" in args:
     print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="exact-closure-approval")))
 elif "execute" in args:
@@ -4525,46 +4513,27 @@ else:
 	if m.notifications.actionReview == nil || m.notifications.actionReview.context == nil {
 		t.Fatal("PR closure did not open the shared action reader")
 	}
-	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	m = next.(model)
-	if cmd == nil || !m.comment.open || m.comment.answerCheckpoint != "closure-1" {
-		t.Fatal("a did not open the PR closure answer composer")
-	}
-	m.comment.text.SetValue("Yes, #4 retains the behavior")
-	next, cmd = m.handleCommentKey(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-	m = next.(model)
-	answerMsg := cmd().(proposalAnswerDoneMsg)
-	if answerMsg.err != nil || !answerMsg.saved {
-		t.Fatalf("PR closure answer was not saved on the unified proposal path: %+v", answerMsg)
-	}
-	updated, _ := m.finishProposalAnswer(answerMsg)
-	m = updated.(model)
-	row.Checkpoint = "closure-2"
-	row.DecisionResolution = &actionDecisionResolution{By: "maintainer", At: "2026-10-04T02:00:00Z", Reason: "Yes, #4 retains the behavior", HeldCheckpoint: "closure-1"}
-	m.notifications.actions = actionProposalList{Rows: []actionProposalRow{row}}
-	choice, ok = m.notifications.actionProposalChoice(Key{Kind: "pr", Number: 3})
-	if !ok {
-		t.Fatal("answered PR closure was missing from unified proposals")
-	}
-	next, cmd = m.openActionReview(choice)
-	m = baselineSend(next.(model), cmd().(actionReviewMsg))
-	if view := ansi.Strip(m.actionReviewView()); !strings.Contains(view, row.Target) || !strings.Contains(view, row.Comment) || !strings.Contains(view, row.DecisionResolution.Reason) {
-		t.Fatal("PR closure review omitted exact target, public comment or answer")
+	if view := ansi.Strip(m.actionReviewView()); !strings.Contains(view, row.Target) || !strings.Contains(view, row.Comment) || !strings.Contains(view, row.DecisionQuestion) {
+		t.Fatal("PR closure review omitted exact target, public comment or question")
 	}
 	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	m = baselineSend(next.(model), cmd().(actionReviewMsg))
-	if m.notifications.actionReview == nil || m.notifications.actionReview.approval != "exact-closure-approval" {
-		t.Fatal("answered closure did not enter exact approval review")
-	}
+	m = next.(model)
 	if _, err := os.Stat(filepath.Join(root, "published-closure")); !os.IsNotExist(err) {
-		t.Fatal("first approval press published the closure")
+		t.Fatal("closure published before exact review completed")
 	}
-	_, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	if cmd == nil {
-		t.Fatal("second approval press did not start the closure write")
+	next, publishCmd := m.Update(cmd().(actionReviewMsg))
+	m = next.(model)
+	if publishCmd == nil || m.notifications.actionReview == nil || m.notifications.actionReview.approval != "exact-closure-approval" {
+		t.Fatal("one approval press did not start the checked closure write")
 	}
-	if result := cmd().(actionReviewMsg); result.err != nil {
+	result := publishCmd().(actionReviewMsg)
+	if result.err != nil {
 		t.Fatal(result.err)
+	}
+	next, reload := m.Update(result)
+	m = next.(model)
+	if m.notifications.actionReview != nil || !m.notifications.open || m.notifications.selectItem != (Key{Kind: "pr", Number: 3}) || !strings.Contains(m.status, "Published action on pr #3") || reload == nil {
+		t.Fatal("published closure did not return to Notifications with confirmation")
 	}
 	if _, err := os.Stat(filepath.Join(root, "published-closure")); err != nil {
 		t.Fatal("approved closure was not sent to its owning script")

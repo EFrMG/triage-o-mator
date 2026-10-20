@@ -849,6 +849,9 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			if msg.String() == "D" {
 				return m.openExternalRejectionComposer(choice)
 			}
+			if m.notifications.actions.Rows[choice.actionProposal].DecisionResolution != nil {
+				return m.rejectAnsweredProposal(choice)
+			}
 			return m.openRejectionComposer(choice)
 		}
 		if msg.String() == "D" {

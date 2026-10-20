@@ -151,12 +151,6 @@ func (m model) contextFooterGroups() []footerGroup {
 		if m.comment.busy {
 			return []footerGroup{group("Comment", hint{"", "working…"})}
 		}
-		if m.comment.answerCheckpoint != "" {
-			if m.comment.previewing {
-				return []footerGroup{group("Action answer", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save answer"}, hint{"Esc", "cancel"})}
-			}
-			return []footerGroup{group("Action answer", hint{"Ctrl-P", "preview"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save answer"}, hint{"Esc", "cancel"})}
-		}
 		if m.comment.proposalEditCheckpoint != "" {
 			if m.comment.previewing {
 				return []footerGroup{group("Proposal edit", hint{"↑/↓", "scroll"}, hint{"Ctrl-P", "edit"}, bind("", keys.ComposerEditor), hint{"Ctrl-S", "save edit"}, hint{"Esc", "discard"})}
@@ -345,22 +339,17 @@ func (m model) contextFooterGroups() []footerGroup {
 				}
 			}
 			if row.Status == "pending" {
-				action.hints = append(action.hints, hint{"e", "edit"}, hint{"d", "reject"})
-				if row.DecisionQuestion != "" && row.DecisionResolution == nil {
-					action.hints = append(action.hints, hint{"a", "answer question"})
+				action.hints = append(action.hints, hint{"e", "edit"})
+				if row.DecisionResolution != nil {
+					action.hints = append(action.hints, hint{"d", "reject with answer"}, hint{"D", "edit rejection reason"})
+				} else {
+					action.hints = append(action.hints, hint{"d", "reject"})
 				}
 			} else {
 				action.hints = append(action.hints, hint{"d", "dismiss"})
 			}
 			if row.Active && m.notifications.actionReview.context != nil && m.notifications.actionReview.context.Current && !m.notifications.actionReview.notesBusy {
-				if row.DecisionQuestion != "" && row.DecisionResolution == nil {
-					return []footerGroup{action, group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
-				}
-				label := "review exact action"
-				if m.notifications.actionReview.approval != "" {
-					label = "approve and publish"
-				}
-				action.hints = append(action.hints, hint{"a", label})
+				action.hints = append(action.hints, hint{"a", "approve and publish"})
 			}
 			return []footerGroup{action, group("Navigation", hint{"Esc", "back"}, hint{"q", "quit"})}
 		}
@@ -411,6 +400,9 @@ func (m model) contextFooterGroups() []footerGroup {
 			choice := choices[m.notifications.selected]
 			if choice.kind == "item" && choice.actionProposal >= 0 && m.notifications.actions.Rows[choice.actionProposal].Status == "pending" {
 				dismiss = "reject & dismiss"
+				if m.notifications.actions.Rows[choice.actionProposal].DecisionResolution != nil {
+					dismiss = "reject with answer"
+				}
 				notifications.hints = append(notifications.hints, bind("", keys.RejectEditor))
 			}
 		}

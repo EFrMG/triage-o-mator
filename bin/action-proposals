@@ -346,7 +346,7 @@ def propose(args, repo):
             elif previous.get("decision_question"):
                 question = args.decision_question or previous["decision_question"]
                 value["decision_question"] = question
-                # An answer covers the exact comment it was given for; a changed comment asks the question again.
+                # A legacy answer remains attached only while its exact question, target, operation and comment remain unchanged.
                 same = all(value[field] == previous[field] for field in ("target", "operation", "action", "comment"))
                 if question == previous["decision_question"] and same and "decision_resolution" in previous:
                     value["decision_resolution"] = previous["decision_resolution"]
@@ -453,8 +453,6 @@ def choose(repo, kind=None, number=None, items=(), all_pending=False, operation=
 def review(repo, kind=None, number=None, items=(), all_pending=False, operation=None, check=True):
     values, state = choose(repo, kind, number, items, all_pending, operation)
     for value in values:
-        if value.get("decision_question") and not value.get("decision_resolution"):
-            raise ValueError("answer the staged action question before exact approval")
         if check:
             check_current(value)
 
@@ -654,7 +652,7 @@ def main():
     add.add_argument("--evidence-gap", action="append", default=[])
     add.add_argument("--replace-checkpoint")
     add.add_argument("--reconsideration-reason")
-    add.add_argument("--decision-question", help="hold this proposal until a person resolves a specific decision")
+    add.add_argument("--decision-question", help="show a decision for human review and keep direct automation staged")
     add.add_argument("--reference-kind", choices=("issue", "pr"))
     add.add_argument("--reference-number", type=int)
     add.add_argument("--group-id")
@@ -665,7 +663,7 @@ def main():
     edit_text.add_argument("--checkpoint", required=True)
     edit_text.add_argument("--comment-file", type=Path, required=True)
     edit_text.add_argument("--by", required=True)
-    answer_question = commands.add_parser("answer", help="attribute an answer to one exact staged action question")
+    answer_question = commands.add_parser("answer", help="legacy: attach an attributed answer to one staged question")
     answer_question.add_argument("--kind", choices=("issue", "pr"), required=True)
     answer_question.add_argument("--number", type=int, required=True)
     answer_question.add_argument("--checkpoint", required=True)

@@ -165,9 +165,6 @@ func (s proposalReviewStyles) writeProposal(b *strings.Builder, row actionPropos
 	if row.DecisionQuestion != "" {
 		fmt.Fprintf(b, "\n%s\n", inset(s.section.Render("Decision question")))
 		fmt.Fprintf(b, "%s\n", inset(wrapText(sanitize(row.DecisionQuestion), width)))
-		if row.Status == "pending" && row.DecisionResolution == nil {
-			fmt.Fprintf(b, "%s\n", inset(s.action.Render("Press a to answer before reviewing this action.")))
-		}
 	}
 	if row.DecisionResolution != nil {
 		resolution := row.DecisionResolution
@@ -175,8 +172,8 @@ func (s proposalReviewStyles) writeProposal(b *strings.Builder, row actionPropos
 		fmt.Fprintf(b, "%s\n", inset(wrapText("By: "+sanitize(resolution.By)+" · At: "+sanitize(resolution.At), width)))
 		fmt.Fprintf(b, "%s\n", inset(wrapText(sanitize(resolution.Reason), width)))
 	}
-	if row.Status == "pending" && row.Active && (row.DecisionQuestion == "" || row.DecisionResolution != nil) && context != nil && context.Current && state.problem == "" && !state.busy && !state.approved {
-		fmt.Fprintf(b, "%s\n", inset(s.action.Render("Press a to review the exact action.")))
+	if row.Status == "pending" && row.Active && context != nil && context.Current && state.problem == "" && !state.busy && !state.approved {
+		fmt.Fprintf(b, "%s\n", inset(s.action.Render("Press a to approve this action; current state is checked before publishing.")))
 	}
 	if row.Reference != nil {
 		fmt.Fprintf(b, "%s\n", inset(s.muted.Render(fmt.Sprintf("Reference: %s #%d", row.Reference.Kind, row.Reference.Number))))
@@ -227,9 +224,6 @@ func (s proposalReviewStyles) writeProposal(b *strings.Builder, row actionPropos
 	}
 	if state.problem != "" {
 		fmt.Fprintf(b, "\n%s\n", inset(s.danger.Render(wrapText("Action unavailable: "+sanitize(state.problem), width))))
-	}
-	if state.approved {
-		fmt.Fprintf(b, "\n%s\n", inset(s.action.Render("Exact review is ready. Press a again to publish.")))
 	}
 	if row.Outcome != nil {
 		fmt.Fprintf(b, "\n%s\n", inset(s.section.Render(proposalOutcomeSection(row.Status))))

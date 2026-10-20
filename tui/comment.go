@@ -22,9 +22,6 @@ type commentComposer struct {
 	open, busy, previewing, close, reopen bool
 	rejectionCheckpoint                   string
 	rejectionChoice                       notificationChoice
-	answerCheckpoint                      string
-	answerChoice                          notificationChoice
-	answerQuestion                        string
 	proposalEditCheckpoint                string
 	editOriginalComment                   string
 	key                                   Key
@@ -169,7 +166,24 @@ func (m model) openRejectionComposer(choice notificationChoice) (tea.Model, tea.
 	m.comment.rejectionChoice = choice
 	m.comment.text.Placeholder = "Optional reason for rejecting this proposal"
 	m.comment.text.CharLimit = 10000
+	if row.DecisionResolution != nil {
+		m.comment.text.SetValue(row.DecisionResolution.Reason)
+		m.comment.text.Placeholder = "Saved answer to the decision question; edit if needed"
+	}
 	return m, cmd
+}
+
+// rejectAnsweredProposal treats d as an explicit rejection using the answer already saved on this exact proposal.
+func (m model) rejectAnsweredProposal(choice notificationChoice) (tea.Model, tea.Cmd) {
+	next, _ := m.openRejectionComposer(choice)
+	m = next.(model)
+	if !m.comment.open || m.comment.rejectionCheckpoint == "" {
+		return m, nil
+	}
+
+	m.comment.busy = true
+	m.status = "Rejecting proposal with its saved answer…"
+	return m, m.rejectNotificationCmd()
 }
 
 func (m model) openExternalRejectionComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
@@ -180,34 +194,6 @@ func (m model) openExternalRejectionComposer(choice notificationChoice) (tea.Mod
 	}
 
 	return m.startCommentEditor()
-}
-
-func (m model) openAnswerComposer(choice notificationChoice) (tea.Model, tea.Cmd) {
-	if choice.kind != "item" || choice.actionProposal < 0 || strings.TrimSpace(m.contributor) == "" {
-		m.warn("Select one questioned proposal and set a contributor name before answering.")
-		return m, nil
-	}
-
-	row := m.notifications.actions.Rows[choice.actionProposal]
-	status, target, checkpoint, question, answer := row.Status, row.Target, row.Checkpoint, row.DecisionQuestion, ""
-	if row.DecisionResolution != nil {
-		answer = row.DecisionResolution.Reason
-	}
-	if status != "pending" || checkpoint == "" || question == "" {
-		m.warn("This proposal has no pending question to answer.")
-		return m, nil
-	}
-
-	next, cmd := m.openCommentComposer(commentTarget{key: choice.key, url: target}, false, false, nil)
-	m = next.(model)
-	m.comment.answerCheckpoint = checkpoint
-	m.comment.answerChoice = choice
-	m.comment.answerQuestion = question
-	m.comment.text.Placeholder = "Local answer for the exact action; this text is not published"
-	m.comment.text.CharLimit = 10000
-	m.comment.text.SetValue(answer)
-	m.layoutComment()
-	return m, cmd
 }
 
 func (m model) openProposalEdit(choice notificationChoice) (tea.Model, tea.Cmd) {
@@ -323,15 +309,6 @@ func (m model) handleCommentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "ctrl+s":
-		if c.answerCheckpoint != "" {
-			if strings.TrimSpace(c.text.Value()) == "" {
-				m.warn("Write an attributed answer before saving it.")
-				return m, nil
-			}
-			c.busy = true
-			m.status = "Saving answer to the staged action question…"
-			return m, m.answerProposalCmd()
-		}
 		if c.proposalEditCheckpoint != "" {
 			if c.text.Value() == c.editOriginalComment {
 				c.open = false
@@ -616,9 +593,6 @@ func (m model) stopReopening(target commentTarget, err error, uncertain bool) (t
 
 func (m model) commentHeader(width int) string {
 	heading, preview := "Compose comment", "Preview Markdown"
-	if m.comment.answerCheckpoint != "" {
-		heading, preview = "Answer action question", "Review local answer"
-	}
 	if m.comment.proposalEditCheckpoint != "" {
 		heading, preview = "Edit closure proposal", "Review proposal edit"
 	}
@@ -664,21 +638,7 @@ func (m model) commentView() string {
 			content += "\n" + line
 		}
 	}
-	if m.comment.answerCheckpoint != "" {
-		content = m.answerQuestionView() + "\n\n" + content
-	}
-
 	return m.composerPanel(m.commentHeader(m.commentWidth()-4), content)
-}
-
-func (m model) answerQuestionView() string {
-	lines := strings.Split(wrapText("Question: "+m.comment.answerQuestion, maxInt(m.commentWidth()-4, 1)), "\n")
-	limit := maxInt(m.commentHeight()-9, 1)
-	if len(lines) > limit {
-		lines = lines[:limit]
-		lines[limit-1] = "…"
-	}
-	return strings.Join(lines, "\n")
 }
 
 func (m model) commentWidth() int {
@@ -735,9 +695,6 @@ func (m *model) layoutComment() {
 	c := &m.comment
 	width := maxInt(m.commentWidth()-4, 1)
 	height := maxInt(m.commentHeight()-4, 3)
-	if c.answerCheckpoint != "" {
-		height -= lipgloss.Height(m.answerQuestionView()) + 2
-	}
 	if c.referenceActive && !c.previewing {
 		height = maxInt(height-6, 3)
 	}

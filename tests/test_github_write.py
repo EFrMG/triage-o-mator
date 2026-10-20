@@ -501,7 +501,7 @@ class ClosureWriteTests(Workspace):
         record = json.loads((self.root / "data/owner/repo/action-proposals/pr-1.json").read_text())
         self.assertEqual(record["outcome"]["authorization"]["source"], "repository-policy")
 
-    def test_questioned_pr_closure_stays_staged_until_human_answers_exact_action(self):
+    def test_questioned_pr_closure_stays_staged_until_human_approves_exact_action(self):
         write_gh = (self.mock / "gh").read_text()
         (self.mock / "gh").write_text(FAKE_GH)
         self.seed_pr()
@@ -523,21 +523,16 @@ class ClosureWriteTests(Workspace):
         preview = self.json_cli("action-pass", "preview", *selected)
         self.assertEqual(preview["plan"]["items"][0]["mode"], "stage")
         self.assertEqual(self.json_cli("action-pass", "run", *selected, "--preview-sha256", preview["preview_sha256"])["results"][0]["status"], "staged")
-        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1", ok=False)
-        self.assertEqual(self.write_calls(), [])
-
-        answered = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "answer", "--kind", "pr", "--number", "1",
-                                  "--checkpoint", held["checkpoint"], "--by", "maintainer", "--answer", "Yes, #2 covers the same behavior")
-        self.assertEqual(answered["decision_question"], "Does #2 fully replace this PR?")
-        self.assertEqual(answered["decision_resolution"]["by"], "maintainer")
-        self.assertIsNone(self.ledger()[("pr", 1)].get("review_request"))
-        self.assertEqual(self.json_cli("action-pass", "preview", *selected)["plan"]["items"][0]["mode"], "stage")
         reviewed = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
         exact = reviewed["plan"]["proposals"][0]
         self.assertEqual(reviewed["plan"]["operation"], "conversation-or-state-action")
         self.assertEqual(exact["target"], "https://github.com/owner/repo/pull/1")
-        self.assertEqual(exact["comment"], answered["comment"])
-        self.assertEqual(exact["decision_resolution"]["reason"], "Yes, #2 covers the same behavior")
+        self.assertEqual(exact["comment"], held["comment"])
+        self.assertEqual(exact["decision_question"], "Does #2 fully replace this PR?")
+        self.assertNotIn("decision_resolution", exact)
+        self.assertIsNone(self.ledger()[("pr", 1)].get("review_request"))
+        self.assertEqual(self.json_cli("action-pass", "preview", *selected)["plan"]["items"][0]["mode"], "stage")
+        self.assertEqual(self.write_calls(), [])
         self.run_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
                      "--publish", "--approve", reviewed["approval"], "--automation", ok=False)
         self.assertEqual(self.write_calls(), [])
@@ -581,42 +576,37 @@ class ClosureWriteTests(Workspace):
         self.assertEqual(held_preview["plan"]["items"][0]["mode"], "stage")
         self.assertEqual(held_preview["plan"]["items"][0]["decision_question"], "Should this feedback be sent now?")
         self.assertEqual(self.json_cli("action-pass", "run", *selection, "--preview-sha256", held_preview["preview_sha256"])["results"][0]["status"], "staged")
-        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1", ok=False)
-        self.assertEqual(self.write_calls(), [])
-
-        answered = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "answer", "--kind", "pr", "--number", "1",
-                                 "--checkpoint", held["checkpoint"], "--by", "maintainer", "--answer", "Send focused feedback now")
-        self.assertEqual(answered["decision_resolution"]["by"], "maintainer")
-        self.assertEqual(answered["decision_question"], "Should this feedback be sent now?")
-        self.assertIsNone(self.ledger()[("pr", 1)].get("review_request"))
-        preview = self.json_cli("action-pass", "preview", *selection)
-        self.assertEqual(preview["plan"]["items"][0]["mode"], "stage")
-        self.assertEqual(self.json_cli("action-pass", "run", *selection, "--preview-sha256", preview["preview_sha256"])["results"][0]["status"], "staged")
         reviewed = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
         exact = reviewed["plan"]["proposals"][0]
         self.assertEqual(exact["target"], "https://github.com/owner/repo/pull/1")
         self.assertEqual(exact["operation"], "comment")
         self.assertEqual(exact["comment"], comment.read_text())
-        self.assertEqual(exact["decision_resolution"]["reason"], "Send focused feedback now")
+        self.assertEqual(exact["decision_question"], "Should this feedback be sent now?")
+        self.assertNotIn("decision_resolution", exact)
+        self.assertIsNone(self.ledger()[("pr", 1)].get("review_request"))
+        self.assertEqual(self.write_calls(), [])
         self.run_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
                      "--publish", "--approve", reviewed["approval"], "--automation", ok=False)
         self.assertEqual(self.write_calls(), [])
 
         comment.write_text("Please add a focused test for the changed behavior.\n")
         edited = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "edit", "--kind", "pr", "--number", "1",
-                               "--checkpoint", answered["checkpoint"], "--comment-file", str(comment), "--by", "maintainer")
+                               "--checkpoint", held["checkpoint"], "--comment-file", str(comment), "--by", "maintainer")
         self.assertNotIn("decision_resolution", edited)
         self.run_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
                      "--publish", "--approve", reviewed["approval"], ok=False)
-        self.run_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1", ok=False)
         self.assertEqual(self.write_calls(), [])
 
-        self.json_cli("action-proposals", "--expected-repo", "owner/repo", "answer", "--kind", "pr", "--number", "1",
-                      "--checkpoint", edited["checkpoint"], "--by", "maintainer", "--answer", "Send the focused test request")
         fresh = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
         self.assertNotEqual(fresh["approval"], reviewed["approval"])
+        self.assertNotIn("decision_resolution", fresh["plan"]["proposals"][0])
+        legacy = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "answer", "--kind", "pr", "--number", "1",
+                               "--checkpoint", edited["checkpoint"], "--by", "maintainer", "--answer", "Send the focused test request")
+        self.assertEqual(legacy["decision_resolution"]["reason"], "Send the focused test request")
+        legacy_review = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "review", "--kind", "pr", "--number", "1")
+        self.assertNotEqual(legacy_review["approval"], fresh["approval"])
         result = self.json_cli("action-proposals", "--expected-repo", "owner/repo", "execute", "--kind", "pr", "--number", "1",
-                               "--publish", "--approve", fresh["approval"])["results"][0]
+                               "--publish", "--approve", legacy_review["approval"])["results"][0]
         self.assertEqual(result["status"], "executed")
         self.assertEqual([call["method"] for call in self.write_calls()], ["GET", "GET", "POST"])
         self.assertFalse(self.json_cli("action-proposals", "--expected-repo", "owner/repo", "list")["rows"][0]["needs_attention"])

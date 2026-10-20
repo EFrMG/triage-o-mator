@@ -236,14 +236,21 @@ func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
 	m = baselineSend(m, mouseKey("down"))
 	next, _ = m.Update(mouseKey("enter"))
 	m = next.(model)
-	if m.briefs.open || !m.briefs.returnToBrief || m.focus != FocusDetail || m.detail.key != (Key{Kind: "issue", Number: 1}) {
+	if m.briefs.open || !m.briefs.returnToBriefItems || m.focus != FocusDetail || m.detail.key != (Key{Kind: "issue", Number: 1}) {
 		t.Fatal("Brief card did not open its local item")
 	}
 	m = baselineSend(m, mouseKey("esc"))
-	if !m.briefs.open || m.briefs.cards || m.briefs.viewport.YOffset() != offset {
-		t.Fatal("Returning to the brief lost its scroll position")
+	if !m.briefs.open || !m.briefs.cards || m.briefs.cardSelected != 1 || m.briefs.viewport.YOffset() != offset {
+		t.Fatal("Returning from a brief item lost the linked item list or selection")
 	}
 	m = baselineSend(m, mouseKey("esc"))
+	if !m.briefs.open || m.briefs.cards || m.briefs.viewport.YOffset() != offset {
+		t.Fatal("Returning from linked items lost the brief or its scroll position")
+	}
+	m = baselineSend(m, mouseKey("esc"))
+	if !m.briefs.open || m.briefs.reading {
+		t.Fatal("Returning from the brief did not show the Briefs menu")
+	}
 	m = baselineSend(m, mouseKey("space"))
 	m = baselineSend(m, mouseKey("1"))
 	m = baselineSend(m, mouseKey("space"))

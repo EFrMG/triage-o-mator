@@ -72,23 +72,23 @@ type briefsMsg struct {
 }
 
 type briefsUI struct {
-	open, busy, reading  bool
-	cards, returnToBrief bool
-	originFocus          Focus
-	section              int
-	selected             [3]int
-	cardSelected         int
-	records              []briefRecord
-	ticked               map[string]bool
-	document             *briefReadReply
-	items                []Key
-	markIDs              []string
-	requestedID          string
-	viewport             viewport.Model
-	renderedID           string
-	renderedWidth        int
-	renderedTheme        string
-	problem              string
+	open, busy, reading       bool
+	cards, returnToBriefItems bool
+	originFocus               Focus
+	section                   int
+	selected                  [3]int
+	cardSelected              int
+	records                   []briefRecord
+	ticked                    map[string]bool
+	document                  *briefReadReply
+	items                     []Key
+	markIDs                   []string
+	requestedID               string
+	viewport                  viewport.Model
+	renderedID                string
+	renderedWidth             int
+	renderedTheme             string
+	problem                   string
 }
 
 func briefMarkCommand(root, repo string, generation uint64, ids []string, apply bool, token string) tea.Cmd {
@@ -489,7 +489,7 @@ func (m model) handleBriefsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				cmd := m.openItem(it)
 				m.focus = FocusDetail
 				m.briefs.open = false
-				m.briefs.returnToBrief = true
+				m.briefs.returnToBriefItems = true
 				m.layout()
 				return m, cmd
 			}

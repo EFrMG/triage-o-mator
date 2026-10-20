@@ -1346,7 +1346,7 @@ func (m *model) leaveSavedItem() {
 		return
 	}
 
-	fromList := !m.dups.returnToDups && !m.groups.returnToGroup && !m.briefs.returnToBrief && m.listReady
+	fromList := !m.dups.returnToDups && !m.groups.returnToGroup && !m.briefs.returnToBriefItems && m.listReady
 	m.goBack()
 	if !fromList {
 		return
@@ -1362,10 +1362,9 @@ func (m *model) goBack() {
 	case FocusDetail:
 		m.stopChecks()
 		m.commitDraftIfDirty()
-		if m.briefs.returnToBrief {
+		if m.briefs.returnToBriefItems {
 			m.briefs.open = true
-			m.briefs.cards = false
-			m.briefs.returnToBrief = false
+			m.briefs.returnToBriefItems = false
 			return
 		}
 		if m.dups.returnToDups {

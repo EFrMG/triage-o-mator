@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/favicon-no-bg.png" alt="triage-o-mator favicon" width="120">
+<img src="docs/assets/favicon-no-bg.png" alt="triage-o-mator favicon" width="120">
 
 # triage-o-mator
 
@@ -9,7 +9,7 @@ Isn't it fun to contribute on GitHub?!
 [![Version](https://img.shields.io/github/v/tag/EFrMG/triage-o-mator?sort=semver)](https://github.com/EFrMG/triage-o-mator/tags)
 [![License](https://img.shields.io/github/license/EFrMG/triage-o-mator)](LICENSE)
 
-<img src="assets/social-media-card-no-bg.png" alt="triage-o-mator social card" width="980">
+<img src="docs/assets/social-media-card-no-bg.png" alt="triage-o-mator social card" width="980">
 
 </div>
 <br>
@@ -99,45 +99,45 @@ They are listed here in sidebar order.
 
 0. **Overview.** Get oriented: it shows the current repository, triage and review progress, and suggestions for what's up next. Refresh the issues and PRs that changed.
 
-   ![Overview](captures/flow-0.webp)
+   ![Overview](docs/captures/flow-0.webp)
 
 1. **Untriaged.** Open items that have no decision yet. Filter by issues or PRs, reverse the age order, search, or tick several items for one action.
 
-   ![Untriaged](captures/flow-1.webp)
+   ![Untriaged](docs/captures/flow-1.webp)
 
 2. **Pending review.** Items flagged for human attention. **Pending review** is a separate flag. An agent or a person sets it, with a short reason, when an item needs human attention, such as a consequential project decision or a public security disclosure. Saving a decision does not set it, and clearing it changes neither the decision nor any GitHub approval.
 
-   ![Pending review](captures/flow-2.webp)
+   ![Pending review](docs/captures/flow-2.webp)
 
 3. **Merge-Ready PRs.** Open PRs with the `ready` label on GitHub or in a saved local proposal. Refresh updates GitHub labels incrementally while preserving local proposals. It is a reading queue: the tool does not approve or merge PRs.
 
-   ![Merge-Ready PRs](captures/flow-3.webp)
+   ![Merge-Ready PRs](docs/captures/flow-3.webp)
 
 4. **All Items.** Every item in the ledger, open or closed. Filter by issues or PRs, and reverse the age order (this also works in **Untriaged**).
 
-   ![All Items](captures/flow-4.webp)
+   ![All Items](docs/captures/flow-4.webp)
 
 5. **Batches.** An agent can prepare a whole batch from copied context: check its suggestions in **Batches**, then save them one by one or apply the rest as local decisions. A batch can be exported as a decision packet.
 
-   ![Batches](captures/flow-5.webp)
+   ![Batches](docs/captures/flow-5.webp)
 
 6. **Briefs.** An agent can screen successive batches into short briefs, write a [detailed item brief](prompts/item-brief.md), and [polish selected briefs](prompts/polish-briefs.md) into one master brief. Read them all under **Briefs**. A brief may justify a Pending review request, and screening alone flags nothing and approves nothing.
 
-   ![Briefs](captures/flow-6.webp)
+   ![Briefs](docs/captures/flow-6.webp)
 
-   ![Agent wrote a maintainer brief](captures/agent-writing-maintainer-brief.png)
+   ![Agent wrote a maintainer brief](docs/captures/agent-writing-maintainer-brief.png)
 
 7. **Groups.** Create a **Group** of tangentially related items (or have an Agent do it); add more into it at any time. Edit its description and individual member notes to keep the team well aligned. Agents can prepare recommendations for each `y`anked group. Marking a checked group `ready` hands it to maintainers (without approving GitHub actions). A group can be exported as a decision packet too.
 
-   ![Groups](captures/flow-7.webp)
+   ![Groups](docs/captures/flow-7.webp)
 
 8. **Possible Duplicates.** It offers lookalike pairs and a way of marking true duplicates. Compare both sides, then record the duplicate or rule the pair out so it is not offered again.
 
-   ![Possible Duplicates](captures/flow-8.webp)
+   ![Possible Duplicates](docs/captures/flow-8.webp)
 
 9. **Notifications.** Review proposals and their outcomes. A PR closure proposal shows its explanatory comment, saved local triage and group guidance, earlier objections and the gaps in its selected evidence (if any). Approve it, edit it, or reject it with an optional reason. An edit needs a fresh review; a rejection stays in shared history for the next agent pass. The same menu can also track issue and PR comments, and separates items needing attention from past activity. Viewing or dismissing a row confirms no appeal and clears no Pending review request.
 
-   ![Notifications](captures/flow-9.webp)
+   ![Notifications](docs/captures/flow-9.webp)
 
 10. **Settings.** **Size of PRs** optionally adds deterministic GitHub size labels after each corpus refresh, using cached additions, deletions and file counts. It defaults OFF; ON authorizes the size label definitions and updates. See [PR sizes](docs/pr-size.md). **Labels** edits the repository's GitHub labels, each change previewed before it is written. **Actions** edits the local list of actions a decision can suggest, with guidance for each. **Automations** decides what a bounded pass may do without asking again:
     - Labeling is ON by default. Its pass applies proposed labels whatever the suggested action or Pending review state, and runs only when an agent or a person asks for it.
@@ -147,11 +147,11 @@ They are listed here in sidebar order.
     - Each action type stages its proposals for approval in Notifications, unless you set it to execute directly.
     - A hold, OFF by default, keeps Pending review items staged even then.
 
-    ![Settings](captures/flow-10.webp)
+    ![Settings](docs/captures/flow-10.webp)
 
 11. **Switch Repo.** Each repository has its own taxonomy, ledger, batches, groups, exports and reports. The TUI asks about unsaved drafts before switching, and ignores replies that arrive late from the previous repository.
 
-    ![Switch Repo](captures/flow-11.webp)
+    ![Switch Repo](docs/captures/flow-11.webp)
 
 ### On any screen
 
@@ -159,19 +159,19 @@ These work the same wherever an item or a list is in front of you.
 
 - **Read an item and save a decision.** An item shows its body, agent notes, comments and, for a PR, available CI checks and the diff. Confirm labels, suggest an action, and give a short reason. A label-first pass can leave Action blank.
 
-  ![Read an item and save a decision](captures/flow-12.webp)
+  ![Read an item and save a decision](docs/captures/flow-12.webp)
 
 - **Copy context for an Agent.** Most screens can copy a short handoff for an Agent: `y` for the item or the ticked ones, `Y` for the whole list, batch or group.
 
-  ![Copy context for an Agent](captures/flow-13.webp)
+  ![Copy context for an Agent](docs/captures/flow-13.webp)
 
 - **Build the local dataset.** Press `f`, then turn automatic download **ON**. It freezes the list of open items and downloads their descriptions, discussions, PR files, diffs and closing links, now and again after each startup or backlog refresh. An agent can then search the saved evidence, and earlier saved observations, instead of fetching from GitHub item by item, which is slower and fills its context with data it does not need. Missing, partial or old evidence stays registered.
 
-  ![Build the local dataset](captures/flow-14.webp)
+  ![Build the local dataset](docs/captures/flow-14.webp)
 
 - **Publish a GitHub action.** Compose a comment, or close or reopen an item with a comment that explains why. A bulk action shows every target before publishing, and an uncertain result stops the remaining ones for inspection.
 
-  ![Publish a GitHub action](captures/flow-15.webp)
+  ![Publish a GitHub action](docs/captures/flow-15.webp)
 
 - **Report to maintainers.** `bin/report` gathers ready groups, Pending review requests and suggested actions into a dated Markdown report.
 
@@ -326,7 +326,7 @@ During testing, Claude flagged some of the fetched data as a **potential injecti
 
 The capture shows it reading a batch, tripping an internal flag, reasoning about it (who knows how) and then writing the review anyway. So even when the fail-safe activates, the agent may keep going.
 
-![Claude's flagged batch](captures/Claude--flagged-batch.png)
+![Claude's flagged batch](docs/captures/Claude--flagged-batch.png)
 
 I have a solid way to reduce risks using a VM on [my blog post](https://francisco.is-a.dev/en/blog/arch-vm).
 

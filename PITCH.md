@@ -7,17 +7,17 @@
 
 This is how a less technical README I dislike reading would read, which given that I make myself no favors by excluding such I had to write.
 
-![Selecting and reading backlog items](captures/flow-1.webp)
+![Selecting and reading backlog items](docs/captures/flow-1.webp)
 
-![Saving and reviewing triage decisions](captures/flow-12.webp)
+![Saving and reviewing triage decisions](docs/captures/flow-12.webp)
 
-![Downloading a local evidence dataset](captures/flow-14.webp)
+![Downloading a local evidence dataset](docs/captures/flow-14.webp)
 
-![Reviewing notifications and follow-up activity](captures/flow-9.webp)
+![Reviewing notifications and follow-up activity](docs/captures/flow-9.webp)
 
-![Approving a GitHub comment or state change](captures/flow-15.webp)
+![Approving a GitHub comment or state change](docs/captures/flow-15.webp)
 
-![agent-writing-maintainer-brief](captures/agent-writing-maintainer-brief.png)
+![agent-writing-maintainer-brief](docs/captures/agent-writing-maintainer-brief.png)
 
 ## The problem
 

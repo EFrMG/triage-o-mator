@@ -475,6 +475,21 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 			t.Fatalf("size label appeared again in item metadata: %q", m.itemView())
 		}
 	}
+	unscored := Item{Kind: "pr", Number: 19, Title: "Unscored PR", Labels: []string{"Size: S"}}
+	if mark := itemIndicatorsMark(unscored); mark.text != "Size: S · Score —" || !strings.Contains(mark.rendered, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted)).Bold(true).Render("Score —")) {
+		t.Fatalf("size marker dropped the unscored label: %+v", mark)
+	}
+	for _, selected := range []bool{false, true} {
+		card := markedCardWithRight("pr #19 · Unscored PR", "PR", cardMark{}, itemIndicatorsMark(unscored), selected, 80)
+		if !strings.Contains(ansi.Strip(strings.Split(card, "\n")[1]), "Size: S · Score —") {
+			t.Fatalf("size marker hid the unscored card label: %q", card)
+		}
+	}
+	m.items = []Item{unscored}
+	m.detail.SetItem(unscored)
+	if heading := strings.Split(m.itemView(), "\n")[0]; !strings.Contains(ansi.Strip(heading), "Size: S · Score —") {
+		t.Fatalf("size marker hid the unscored item label: %q", heading)
+	}
 	it.Labels = []string{"Size: small", "size: S"}
 	if itemIndicatorsMark(it) != itemScoreMark(it) {
 		t.Fatal("size matching accepted an unrelated label")

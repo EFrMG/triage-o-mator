@@ -105,7 +105,8 @@ func itemScoreMark(item Item) cardMark {
 		return cardMark{text: label, color: itemScoreColor(value), rendered: rendered}
 	}
 
-	return cardMark{text: item.ScoreLabel(), color: currentTheme.Muted}
+	label := item.ScoreLabel()
+	return cardMark{text: label, color: currentTheme.Muted, rendered: lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Muted)).Bold(true).Render(label)}
 }
 
 // itemIndicatorsMark places an exact size label immediately before the score.

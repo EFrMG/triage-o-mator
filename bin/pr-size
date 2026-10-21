@@ -14,10 +14,11 @@ from _acquire import summary_identity
 from _cache import EvidenceCache
 from _corpus import key, load_plan, load_state
 from _evidence import repository, same_item, same_repository, validate_payload
+from _install import normalize_github_labels, reconcile_label_catalog
 from _pr_size import SIZE_LABELS, classify, set_enabled, status
 from _reader import problems
 from _storage import atomic_writer, locked
-from _triage import DATA_DIR, LEDGER_PATH, REPO, load_ledger, save_ledger, now_iso
+from _triage import DATA_DIR, LEDGER_PATH, REPO, TAXONOMY_PATH, load_ledger, load_taxonomy, observed_catalog, save_ledger, save_taxonomy, now_iso
 
 STATE = DATA_DIR / "local" / "pr-size-state.json"
 
@@ -152,19 +153,20 @@ def run(args):
         if selected:
             live_repo = transport.api("GET", f"repos/{REPO}")
             same_repository(pinned_repository, repository(live_repo["full_name"], host=args.host, database_id=live_repo["id"], node_id=live_repo["node_id"]))
-            catalog = {}
+            catalog = []
             page = 1
             while True:
                 labels = transport.api("GET", f"repos/{REPO}/labels?per_page=100&page={page}")
                 if not isinstance(labels, list):
                     raise ValueError("invalid GitHub label catalog")
 
-                catalog.update({row["name"]: row for row in labels})
+                catalog.extend(labels)
                 if len(labels) < 100:
                     break
 
                 page += 1
 
+            catalog = {row["name"]: row for row in normalize_github_labels(catalog)}
             for size, color in SIZE_LABELS.items():
                 name = "Size: " + size
                 existing = catalog.get(name)
@@ -181,7 +183,17 @@ def run(args):
                 if not isinstance(result, dict) or result.get("name") != name or result.get("color", "").lower() != color.lower():
                     raise ValueError("size label definition was not verified")
 
+                normalize_github_labels([result])
+                catalog[name] = result
                 done("definitions")
+
+            observed = normalize_github_labels(list(catalog.values()))
+            with locked(TAXONOMY_PATH):
+                taxonomy = load_taxonomy()
+                saved_catalog = observed_catalog(taxonomy)
+                if saved_catalog is None or [{key: row.get(key) for key in ("id", "name", "color", "description")} for row in saved_catalog["labels"]] != observed:
+                    reconcile_label_catalog(taxonomy, REPO, observed, now_iso())
+                    save_taxonomy(taxonomy)
 
         with locked(LEDGER_PATH):
             initial_labels = {item["number"]: item.get("labels") for item in load_ledger() if item["kind"] == "pr"}

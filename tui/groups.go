@@ -605,12 +605,12 @@ func (m model) groupsView() string {
 func groupStatusMark(status string) cardMark {
 	switch status {
 	case "ready":
-		return cardMark{status, currentTheme.Success}
+		return cardMark{text: status, color: currentTheme.Success}
 	case "archived":
-		return cardMark{status, currentTheme.Muted}
+		return cardMark{text: status, color: currentTheme.Muted}
 	}
 
-	return cardMark{status, currentTheme.Foreground}
+	return cardMark{text: status, color: currentTheme.Foreground}
 }
 
 // groupSummary is a group card's second line: how far its members have come, who it's assigned to, and whether the items Groups was opened for are already in it.

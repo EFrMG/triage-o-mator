@@ -64,8 +64,26 @@ const cardHeight = 4
 
 // cardMark is a short tag in its own color at the start of a card's second line, e.g. who made an item's decision.
 type cardMark struct {
-	text  string
-	color string
+	text     string
+	color    string
+	rendered string
+}
+
+func (mark cardMark) render(background color.Color) string {
+	if mark.rendered != "" {
+		if background != nil {
+			return lipgloss.NewStyle().Background(background).Render(mark.rendered)
+		}
+
+		return mark.rendered
+	}
+
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(mark.color)).Bold(true)
+	if background != nil {
+		style = style.Background(background)
+	}
+
+	return style.Render(mark.text)
 }
 
 // markedCard draws one entry across the full width of its pane, flush with the pane's borders: first line bold (accent when selected), second muted, with mark leading that second line. The selected one is filled with the selection background across all four rows, framed by low-contrast accent lines drawn at the outer edge of its top and bottom rows (▔ and ▁), so the fill reaches them without the half-row gap a mid-row ─ would leave.
@@ -132,11 +150,7 @@ func markedCardWithRightAndMeta(first, second string, mark, right cardMark, meta
 		first = ansi.Truncate(first, firstWidth, "…")
 	}
 	if showRight {
-		badge := lipgloss.NewStyle().Foreground(lipgloss.Color(right.color)).Bold(true)
-		if selectedBackground != nil {
-			badge = badge.Background(selectedBackground)
-		}
-		first += strings.Repeat(" ", maxInt(inner-ansi.StringWidth(first)-rightWidth, 1)) + badge.Render(right.text)
+		first += strings.Repeat(" ", maxInt(inner-ansi.StringWidth(first)-rightWidth, 1)) + right.render(selectedBackground)
 		if selectedBackground != nil {
 			first = continueStyleAfterReset(first, focusedBorderColor, selectedBackground)
 		}

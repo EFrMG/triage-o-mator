@@ -74,7 +74,9 @@ func (m model) prSizeView() string {
 		{"L", "≤1,000 lines and ≤25 files", "#FF4500"},
 		{"XL", "Above either L limit", "#FF0000"},
 	} {
-		view += inset(lipgloss.NewStyle().Foreground(lipgloss.Color(size.color)).Bold(true).Render("Size: "+size.name)+"  "+size.limit) + "\n\n"
+		prefix := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(true).Render("Size: ")
+		letter := lipgloss.NewStyle().Foreground(lipgloss.Color(size.color)).Bold(true).Render(size.name)
+		view += inset(prefix+letter+"  "+size.limit) + "\n\n"
 	}
 	if len(m.settings.prSize.Pending) > 0 {
 		view += inset("An earlier size write is uncertain. Inspect GitHub, then use bin/pr-size reset --apply --expected-repo " + m.repo + ".")

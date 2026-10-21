@@ -313,6 +313,9 @@ func TestBriefsMenuGroupsAndRendersMarkdownWithStaleReplyGuard(t *testing.T) {
 }
 
 func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
+	previousTheme := currentTheme
+	currentTheme = Theme{Background: "#1e1e2e", Foreground: "#cdd6f4", Muted: "#a6adc8", Border: "#585b70", Accent: "#cba6f7", Selection: "#313244", Success: "#a6e3a1", Warning: "#f9e2af", Error: "#f38ba8", Info: "#89b4fa"}
+	t.Cleanup(func() { currentTheme = previousTheme })
 	m := baselineModel(t, baselineRoot(t))
 	m.ledgerSeen = ledgerStamp(m.installRoot, m.repo)
 	if _, cmd := m.onStatusTick(); m.ledgerSeen == "" || cmd == nil {
@@ -343,11 +346,12 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 		m.items[0] = it
 		m.detail.SetItem(it)
 
-		styled := lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true).Render(fmt.Sprintf("Score %d/5", value))
+		styled := lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true).Render(fmt.Sprintf("%d/5", value))
+		neutral := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(true).Render("Score ")
 		li := listItem{Item: it}
 		card := markedCardWithRight(li.Title(), li.Description(), li.Mark(), itemScoreMark(it), false, 68)
 		cardLines := strings.Split(card, "\n")
-		if !strings.Contains(cardLines[1], styled) || !strings.HasSuffix(strings.TrimSpace(ansi.Strip(cardLines[1])), it.ScoreLabel()) ||
+		if !strings.Contains(cardLines[1], neutral+styled) || !strings.HasSuffix(strings.TrimSpace(ansi.Strip(cardLines[1])), it.ScoreLabel()) ||
 			ansi.StringWidth(cardLines[1]) != 68 || strings.Contains(cardLines[2], it.ScoreLabel()) {
 			t.Fatalf("score %d was not right-aligned on the card title: %q", value, card)
 		}
@@ -358,7 +362,7 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 			t.Fatal("item list delegate dropped the title-row score")
 		}
 		viewLines := strings.Split(m.itemView(), "\n")
-		if !strings.HasSuffix(strings.TrimSpace(ansi.Strip(viewLines[0])), it.ScoreLabel()) || ansi.StringWidth(viewLines[0]) != m.detailInnerWidth() ||
+		if !strings.Contains(viewLines[0], neutral+styled) || !strings.HasSuffix(strings.TrimSpace(ansi.Strip(viewLines[0])), it.ScoreLabel()) || ansi.StringWidth(viewLines[0]) != m.detailInnerWidth() ||
 			strings.Contains(viewLines[1], it.ScoreLabel()) || strings.Contains(m.itemFooter()[0].hints[0].desc, "Score") {
 			t.Fatalf("score %d was not right-aligned on the item title, or was repeated in the footer", value)
 		}
@@ -386,6 +390,9 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 		pull.HeadSHA = strings.Repeat("c", 40)
 		if pull.ScoreLabel() != fmt.Sprintf("Score %d/5 (stale?)", value) || itemScoreMark(pull).color != itemScoreColor(value) {
 			t.Fatalf("a new head commit did not mark the PR score stale: %q", pull.ScoreLabel())
+		}
+		if !strings.Contains(itemScoreMark(pull).rendered, styled+lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(true).Render(" (stale?)")) {
+			t.Fatalf("stale score colored its suffix or lost the colored fraction: %q", itemScoreMark(pull).rendered)
 		}
 		form := m.formPanel(60)
 		plain := ansi.Strip(form)
@@ -443,7 +450,14 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 	} {
 		it.Labels = []string{"bug", size.label}
 		li := listItem{Item: it}
-		badge := lipgloss.NewStyle().Foreground(lipgloss.Color(size.color)).Bold(true).Render(size.label)
+		if li.Tags() != "bug" {
+			t.Fatalf("size label appeared again in card tags: %q", li.Tags())
+		}
+		badge := lipgloss.NewStyle().Foreground(lipgloss.Color(size.color)).Bold(true).Render(strings.TrimPrefix(size.label, "Size: "))
+		prefix := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(true).Render("Size: ")
+		if !strings.Contains(itemIndicatorsMark(it).rendered, prefix+badge) {
+			t.Fatalf("size prefix or value has the wrong color: %q", itemIndicatorsMark(it).rendered)
+		}
 		for _, selected := range []bool{false, true} {
 			card := markedCardWithRight(li.Title(), li.Description(), li.Mark(), itemIndicatorsMark(it), selected, 80)
 			line := strings.Split(card, "\n")[1]
@@ -457,10 +471,16 @@ func TestItemScoreAppearsOnCardsAndItemWithRevisionGuard(t *testing.T) {
 		if !strings.Contains(heading, badge) || !strings.Contains(ansi.Strip(heading), size.label+" · "+it.ScoreLabel()) {
 			t.Fatalf("item header lost size badge: %q", heading)
 		}
+		if strings.Contains(ansi.Strip(strings.Split(m.itemView(), "\n")[1]), size.label) {
+			t.Fatalf("size label appeared again in item metadata: %q", m.itemView())
+		}
 	}
 	it.Labels = []string{"Size: small", "size: S"}
 	if itemIndicatorsMark(it) != itemScoreMark(it) {
 		t.Fatal("size matching accepted an unrelated label")
+	}
+	if tags := (listItem{Item: Item{ProposedLabels: []string{"Size: S"}}}).Tags(); tags != "Size: S" {
+		t.Fatalf("unpublished size proposal disappeared from card tags: %q", tags)
 	}
 
 	it.UpdatedAt = "2026-10-07T00:00:00Z"
@@ -4146,8 +4166,8 @@ func TestSuggestedActionsAndExplicitPendingReviewHaveSeparateTabs(t *testing.T) 
 	for _, choice := range actionCards.choices() {
 		renderNotificationChoice(actionCards, choice, func(_, _ string, mark cardMark) { actionMarks = append(actionMarks, mark) })
 	}
-	if len(actionMarks) != 3 || actionMarks[0] != (cardMark{"Reopen", currentTheme.Success}) ||
-		actionMarks[1] != (cardMark{"Comment", currentTheme.Info}) || actionMarks[2] != (cardMark{"Close", currentTheme.Error}) {
+	if len(actionMarks) != 3 || actionMarks[0] != (cardMark{text: "Reopen", color: currentTheme.Success}) ||
+		actionMarks[1] != (cardMark{text: "Comment", color: currentTheme.Info}) || actionMarks[2] != (cardMark{text: "Close", color: currentTheme.Error}) {
 		t.Fatalf("past action cards did not show the operation in its color: %+v", actionMarks)
 	}
 	empty := baselineModel(t, baselineRoot(t))

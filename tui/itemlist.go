@@ -68,6 +68,9 @@ func (li listItem) Tags() string {
 
 	var tags []string
 	for _, label := range labels {
+		if isSizeLabel(label) && slices.Contains(li.Labels, label) {
+			continue
+		}
 		if label = singleLine(label); label != "" {
 			tags = append(tags, label)
 		}
@@ -90,7 +93,16 @@ func (li listItem) CommentsLabel() string {
 func itemScoreMark(item Item) cardMark {
 	// A stale score keeps its number's color; only its "(stale?)" suffix says it may be out of date.
 	if value, ok := item.savedScore(); ok {
-		return cardMark{text: item.ScoreLabel(), color: itemScoreColor(value)}
+		label := item.ScoreLabel()
+		fraction := fmt.Sprintf("%d/5", value)
+		normal := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(true)
+		colored := lipgloss.NewStyle().Foreground(lipgloss.Color(itemScoreColor(value))).Bold(true)
+		rendered := normal.Render("Score ") + colored.Render(fraction)
+		if suffix := strings.TrimPrefix(label, "Score "+fraction); suffix != "" {
+			rendered += normal.Render(suffix)
+		}
+
+		return cardMark{text: label, color: itemScoreColor(value), rendered: rendered}
 	}
 
 	return cardMark{text: item.ScoreLabel(), color: currentTheme.Muted}
@@ -110,12 +122,23 @@ func itemIndicatorsMark(item Item) cardMark {
 		} else if label == "Size: M" {
 			color = "#FFD700"
 		}
-		size := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true).Render(label)
-		mark.text = size + " · " + mark.text
+		normal := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Foreground)).Bold(true)
+		colored := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true)
+		mark.rendered = normal.Render("Size: ") + colored.Render(strings.TrimPrefix(label, "Size: ")) + normal.Render(" · ") + mark.rendered
+		mark.text = label + " · " + mark.text
 		break
 	}
 
 	return mark
+}
+
+func isSizeLabel(label string) bool {
+	switch label {
+	case "Size: S", "Size: M", "Size: L", "Size: XL":
+		return true
+	default:
+		return false
+	}
 }
 
 func itemScoreColor(value int) string {
@@ -133,13 +156,13 @@ func itemScoreColor(value int) string {
 func (li listItem) Mark() cardMark {
 	switch {
 	case li.unsaved:
-		return cardMark{"unsaved", currentTheme.Warning}
+		return cardMark{text: "unsaved", color: currentTheme.Warning}
 	case li.Untriaged():
 		return cardMark{}
 	case li.ByAgent():
-		return cardMark{"agent", currentTheme.Warning}
+		return cardMark{text: "agent", color: currentTheme.Warning}
 	default:
-		return cardMark{"human", currentTheme.Info}
+		return cardMark{text: "human", color: currentTheme.Info}
 	}
 }
 

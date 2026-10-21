@@ -38,12 +38,21 @@ def read_github_labels(repo):
     if result.returncode:
         raise ValueError(f"could not read GitHub labels: {result.stderr.strip() or 'gh api failed'}")
 
+    try:
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+    except json.JSONDecodeError as error:
+        raise ValueError(f"invalid GitHub label response: {error}") from error
+
+    return normalize_github_labels(rows)
+
+
+def normalize_github_labels(rows):
+    """Validate a complete GitHub label list before saving it as the observed catalog."""
     labels = []
     seen_ids = set()
     seen_names = set()
     try:
-        for line in result.stdout.splitlines():
-            row = json.loads(line)
+        for row in rows:
             label_id, name = row["id"], row["name"]
             if type(label_id) is not int or label_id <= 0 or not isinstance(name, str) or not name:
                 raise ValueError("invalid label identity")

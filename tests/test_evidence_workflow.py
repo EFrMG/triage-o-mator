@@ -1212,9 +1212,9 @@ if method == "GET" and endpoint == "repos/owner/repo":
 elif method == "GET" and endpoint == "repos/owner/repo/labels?per_page=100&page=1":
     result = labels
 elif method == "POST" and endpoint == "repos/owner/repo/labels":
-    labels.append(body)
+    labels.append(dict(body, id=len(labels) + 1))
     labels_path.write_text(json.dumps(labels))
-    result = body
+    result = labels[-1]
 elif method == "GET" and endpoint == "repos/owner/repo/pulls/1":
     result = item
 elif method == "POST" and endpoint == "repos/owner/repo/issues/1/labels":
@@ -1236,6 +1236,8 @@ print(json.dumps(result))
         self.assertEqual(set(self.ledger()[("pr", 1)]["labels"]), {"keep", "Size: S"})
         definitions = json.loads((self.mock / "size-labels.json").read_text())
         self.assertEqual({row["name"]: row["color"] for row in definitions}, {"Size: S": "90EE90", "Size: M": "9ACD32", "Size: L": "FF4500", "Size: XL": "FF0000"})
+        saved_labels = json.loads((self.root / "config/taxonomy.json").read_text())["label_catalog"]["labels"]
+        self.assertEqual({row["name"] for row in saved_labels if row["name"].startswith("Size: ")}, {"Size: S", "Size: M", "Size: L", "Size: XL"})
         live["head"]["sha"] = "c" * 40
         (self.mock / "size-item.json").write_text(json.dumps(live))
         stale = self.json_cli("pr-size", "run", *args, "--corpus", corpus, "--apply")

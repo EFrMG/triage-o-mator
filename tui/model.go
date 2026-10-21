@@ -703,9 +703,18 @@ func (m model) itemView() string {
 	} else if it, ok := m.findItem(m.detail.key); ok {
 		title += " · " + it.Title
 		scoreMark = itemIndicatorsMark(it)
+		var visibleLabels []string
+		for _, label := range it.Labels {
+			if !isSizeLabel(label) {
+				visibleLabels = append(visibleLabels, label)
+			}
+		}
 		labels := "no labels"
-		if len(it.Labels) > 0 {
-			labels = strings.Join(it.Labels, ", ")
+		if len(it.Labels) > 0 && len(visibleLabels) == 0 {
+			labels = "no other labels"
+		}
+		if len(visibleLabels) > 0 {
+			labels = strings.Join(visibleLabels, ", ")
 		}
 
 		author := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Info)).Render(singleLine(orPlaceholder(it.Author, "?")))
@@ -744,8 +753,7 @@ func (m model) itemView() string {
 		heading = styled
 	}
 	if showScore {
-		badge := lipgloss.NewStyle().Foreground(lipgloss.Color(scoreMark.color)).Bold(true).Render(scoreMark.text)
-		heading += strings.Repeat(" ", maxInt(w-ansi.StringWidth(heading)-scoreWidth, 1)) + badge
+		heading += strings.Repeat(" ", maxInt(w-ansi.StringWidth(heading)-scoreWidth, 1)) + scoreMark.render(nil)
 	}
 	header := heading + "\n" + ansi.Truncate(strings.Join(meta, mutedText(" · ")), w, "…")
 	tabs := m.detail.TabBar(w, m.form.focused == fieldContent || m.detail.full)

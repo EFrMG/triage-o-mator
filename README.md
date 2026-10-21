@@ -36,19 +36,19 @@ Three kinds of local record carry the work:
 - **Groups** collect related items so maintainers can decide on them together.
 - The **cache** keeps versioned GitHub data for offline analysis.
 
-An agent reads the current guidance and evidence, then either explains why an item should stay open or saves an exact action proposal.
+People and agents use the saved evidence and current guidance to make local decisions, compare related items, review PRs, prepare briefs and propose actions. The local records feed maintainer handoffs; GitHub writes follow their own confirmation or automation settings.
 
 ```mermaid
 flowchart LR
-    HUMAN["Human decision<br/>and notes"] --> CONTEXT["Current guidance<br/>+ selected evidence"]
-    GROUP["Agent draft group"] --> EDIT["Human edits<br/>and selects members"] --> CONTEXT
-    CONTEXT --> AGENT{"Agent assessment"}
-    AGENT -->|"keep open"| OPEN["Reason and gaps<br/>for the maintainer"]
-    AGENT -->|"propose closure"| NOTICE["Notifications:<br/>exact comment and context"]
-    NOTICE -->|"edit"| REVIEW["Revised proposal<br/>needs fresh review"] --> NOTICE
-    NOTICE -->|"reject"| FEEDBACK["Attributed feedback<br/>for the next pass"] --> CONTEXT
-    NOTICE -->|"approve exact action"| WRITE["comment-plus<br/>publishes on GitHub"]
-    NOTICE -->|"eligible repository action pass"| WRITE
+    SOURCE["GitHub issues and PRs"] --> EVIDENCE["Selected, versioned evidence"]
+    GUIDANCE["Taxonomy and maintainer guidance"] --> WORK["Human and agent work"]
+    EVIDENCE --> WORK
+    WORK --> LOCAL["Local decisions, groups,<br/>reviews and briefs"]
+    LOCAL --> HANDOFF["Maintainer handoffs"]
+    WORK --> LABELS["Confirmed label selection<br/>or requested labeling pass"] --> LABEL_WRITE["GitHub labels"]
+    WORK --> PROPOSALS["Exact action proposals"] --> STAGED["Staged in Notifications"]
+    STAGED -->|"review and approve"| ACTION_WRITE["GitHub comment, closure<br/>or reopening"]
+    PROPOSALS -->|"configured action pass"| ACTION_WRITE
 ```
 
 A staged proposal appears in **Notifications** with its target, its exact comment, the human guidance it relied on and any gaps in its evidence.
@@ -172,8 +172,6 @@ These work the same wherever an item or a list is in front of you.
 - **Publish a GitHub action.** Compose a comment, or close or reopen an item with a comment that explains why. A bulk action shows every target before publishing, and an uncertain result stops the remaining ones for inspection.
 
   ![Publish a GitHub action](docs/captures/flow-15.webp)
-
-- **Report to maintainers.** `bin/report` gathers ready groups, Pending review requests and suggested actions into a dated Markdown report.
 
 ## Working from a fork
 
@@ -315,7 +313,12 @@ Candidate lists and `bin/next` counts do not show that the whole backlog was cov
 
 ### Working as a team
 
-Agents propose decisions and draft groups, contributors review them and mark groups ready, and lead maintainers read the brief. The ledger and groups travel through the repository's normal Git workflow. See the [team conventions](prompts/PLAYBOOK.md#working-as-a-team) and the [installation guide](docs/install.md#working-as-a-team-through-it) for setup and coordination.
+Agents propose decisions and draft groups, contributors review them and mark groups ready, and lead maintainers read briefs and execute staged action suggestions.
+
+The ledger and groups travel through the repository's normal Git workflow. See the [team conventions](prompts/PLAYBOOK.md#working-as-a-team) and the [installation guide](docs/install.md#working-as-a-team-through-it) for setup and coordination.
+
+> [!NOTE]
+> We will have a server setup soon!
 
 ### Notes on security
 

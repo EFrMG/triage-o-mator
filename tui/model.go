@@ -88,13 +88,16 @@ type model struct {
 	// activeBatch, when non-empty, is the data/<owner>/<repo>/batches/<id> whose items are loaded into list/detail instead of tabs[activeTab].
 	activeBatch string
 	// activePairs is set while the Possible Duplicates view is the displayed list; pairs holds bin/similar --pairs output (pairsLoaded once computed).
-	activePairs                              bool
-	pairs                                    []dupPair
-	pairsLoaded                              bool
-	detail                                   detailModel
-	evidenceLifecycle                        *readLifecycle
-	checksLifecycle                          *readLifecycle
-	checksRequest                            uint64
+	activePairs         bool
+	pairs               []dupPair
+	pairsLoaded         bool
+	detail              detailModel
+	evidenceLifecycle   *readLifecycle
+	checksLifecycle     *readLifecycle
+	checksRequest       uint64
+	workflowRunsRequest uint64
+	// checksOnLoad is the PR whose Checks tab opens once its CI loads, after Notifications → Workflows opened it.
+	checksOnLoad                             Key
 	checks                                   checksUI
 	corpus                                   corpusUI
 	corpusEpoch                              uint64
@@ -846,6 +849,9 @@ func (m model) viewContent() string {
 	}
 	if m.checks.picker != nil || m.checks.reader != nil {
 		body = m.checksLogsOverlay(body)
+	}
+	if m.checks.approval != nil {
+		body = m.workflowRunsOverlay(body)
 	}
 	if m.comment.open {
 		body = m.commentOverlay(body)

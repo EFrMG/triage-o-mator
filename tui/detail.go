@@ -271,6 +271,18 @@ func (d *detailModel) CycleSection(delta int) {
 	d.renderActive()
 }
 
+// JumpToChecks makes the Checks tab active when it is present.
+func (d *detailModel) JumpToChecks() bool {
+	for i := range d.sections {
+		if d.sections[i].kind == checksSection {
+			d.JumpSection(i)
+			return true
+		}
+	}
+
+	return false
+}
+
 // JumpSection makes tab i active (up to five tabs in the item view).
 func (d *detailModel) JumpSection(i int) {
 	if i >= 0 && i < len(d.sections) {

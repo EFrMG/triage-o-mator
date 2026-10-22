@@ -124,9 +124,6 @@ func (m model) footerGroups() []footerGroup {
 	for _, g := range groups {
 		var hints []hint
 		for _, h := range g.hints {
-			if h.keys == "Ctrl-R" && m.checksKeyScope() {
-				continue
-			}
 			secondary := h.keys == "g/G" || h.keys == "B" || g.name == "Menus" && (h.keys == "t" || h.keys == "R")
 			if m.width < 100 && secondary {
 				continue
@@ -219,6 +216,19 @@ func (m model) contextFooterGroups() []footerGroup {
 			edit.hints = append(edit.hints, bind("", keys.ComposerEditor))
 		}
 		return []footerGroup{edit}
+	case m.checks.approval != nil && m.checks.approval.reason != nil:
+		return []footerGroup{group("Hold runs", hint{"Enter", "hold"}, hint{"Esc", "cancel"})}
+	case m.checks.approval != nil && m.checks.approval.confirm != nil:
+		return []footerGroup{group("Confirm approval", hint{"a", "approve these runs"}, hint{"any other key", "cancel"})}
+	case m.checks.approval != nil && m.checks.approval.releasing:
+		return []footerGroup{group("Confirm release", hint{"u", "release holds"}, hint{"any other key", "cancel"})}
+	case m.checks.approval != nil:
+		approval := group("Workflow approval", hint{"j/k", "scroll"}, hint{"Ctrl-D/U", "page"}, hint{"g/G", "ends"}, hint{"n/p", "flagged hunks"})
+		if !m.checks.approval.fixed {
+			approval.hints = append(approval.hints, hint{"a a", "approve"}, hint{"d", "hold"}, hint{"u u", "release holds"}, hint{"c", "comment"}, hint{"r", "list again"})
+		}
+		approval.hints = append(approval.hints, hint{"Esc/q", "close"})
+		return []footerGroup{approval}
 	case m.checks.reader != nil:
 		return []footerGroup{group("Failure log", hint{"j/k", "scroll"}, hint{"Ctrl-D/U", "page"}, hint{"g/G", "ends"}, hint{"n/p", "retained context"}, hint{"Esc/q", "close"})}
 	case m.checks.picker != nil:
@@ -305,13 +315,13 @@ func (m model) contextFooterGroups() []footerGroup {
 				read.hints = append(read.hints, bind("", keys.Reopen, keys.ReopenEditor))
 			}
 		}
-		if m.prChecksKeyScope() {
-			read.hints = append(read.hints, bind("", keys.ChecksFocusedRefresh))
-		}
 		if m.checksKeyScope() {
 			read.hints = append(read.hints, bind("", keys.ChecksRefresh))
 			if m.canReadChecksLogs() {
 				read.hints = append(read.hints, bind("", keys.ChecksLogs))
+			}
+			if m.canOpenWorkflowRuns() {
+				read.hints = append(read.hints, bind("", keys.ChecksApproval))
 			}
 		}
 		return []footerGroup{read, group("Navigation", hint{"Esc/h", back}, hint{"q", "quit"})}
@@ -545,13 +555,13 @@ func (m model) itemFooter() []footerGroup {
 		tabAction = "tabs / form"
 	}
 	read := group("Read", bind(tabAction, keys.TabPrev, keys.TabNext), m.tabJumpHint(), bind("expand", keys.Enter), bind("scroll", keys.Down, keys.Up), bind("ends", keys.Top, keys.Bottom), bind("page", keys.HalfDown, keys.HalfUp))
-	if m.prChecksKeyScope() {
-		read.hints = append(read.hints, bind("", keys.ChecksFocusedRefresh))
-	}
 	if m.checksKeyScope() {
 		read.hints = append(read.hints, bind("", keys.ChecksRefresh))
 		if m.canReadChecksLogs() {
 			read.hints = append(read.hints, bind("", keys.ChecksLogs))
+		}
+		if m.canOpenWorkflowRuns() {
+			read.hints = append(read.hints, bind("", keys.ChecksApproval))
 		}
 	}
 	if m.detail.AnySectionFull() {

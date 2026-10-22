@@ -9,8 +9,10 @@ from _reader import read_evidence
 from _triage import REPO
 
 
-FAILURES = {"failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale"}
+FAILURES = {"failure", "timed_out", "cancelled", "startup_failure", "stale"}
 PENDING = {"queued", "in_progress", "waiting", "pending", "requested"}
+# A completed action_required conclusion waits on a person, such as a maintainer approving a fork PR's workflow runs; it is neither a failure nor a pass.
+AWAITING_ACTION = "action_required"
 
 
 def bounded(value, maximum=256):
@@ -79,9 +81,11 @@ def verify(evidence):
 
     descriptor = evidence["components"].get("checks")
     sha = descriptor["revision"]["head_sha"] if descriptor else None
+    # Bulk corpus checks come from one fixed GraphQL read: every envelope names that component resource, and statuses are identified by node ID.
+    graphql = bool(descriptor) and (descriptor.get("source") or {}).get("transport") == "graphql"
     suites, seen = {}, set()
     for entry in entries:
-        if not isinstance(entry, dict) or entry.get("kind") not in ("check_suite", "check_run", "status") or not isinstance(entry.get("data"), dict):
+        if not isinstance(entry, dict) or entry.get("kind") not in ("check_suite", "check_run", "workflow_run", "status") or not isinstance(entry.get("data"), dict):
             raise ValueError("invalid typed checks envelope")
 
         source = entry.get("repository")
@@ -95,9 +99,10 @@ def verify(evidence):
             raise ValueError("checks envelope has a mismatched head or invalid observation time")
 
         data, kind = entry["data"], entry["kind"]
-        identifier = data.get("id")
+        by_node = graphql and kind == "status"
+        identifier = data.get("node_id") if by_node else data.get("id")
         key = (source["full_name"], kind, identifier)
-        if type(identifier) is not int or identifier <= 0 or key in seen:
+        if (not isinstance(identifier, str) or not identifier if by_node else type(identifier) is not int or identifier <= 0) or key in seen:
             raise ValueError("checks envelope has an invalid or repeated source identity")
 
         seen.add(key)
@@ -107,12 +112,17 @@ def verify(evidence):
         elif kind == "check_suite":
             resource = f"{prefix}/commits/{sha}/check-suites"
             suites[(source["full_name"], identifier)] = data
+        elif kind == "workflow_run":
+            resource = f"{prefix}/actions/runs?head_sha={sha}&status=action_required"
         else:
             suite_id = object_field(data, "check_suite").get("id")
             if type(suite_id) is not int or suite_id <= 0:
                 raise ValueError("check run lacks its suite identity")
 
             resource = f"{prefix}/check-suites/{suite_id}/check-runs?filter=all"
+
+        if graphql:
+            resource = descriptor["source"]["resource"]
 
         if entry.get("resource") != resource or (kind != "status" and data.get("head_sha") != sha):
             raise ValueError("checks source resource or raw head differs from its envelope")
@@ -121,6 +131,9 @@ def verify(evidence):
             same_repository(expected, source_repository(data["repository"], expected["host"]))
 
     for entry in entries:
+        if entry["kind"] == "workflow_run" and (graphql or suites.get((entry["repository"]["full_name"], entry["data"].get("check_suite_id"))) is None):
+            raise ValueError("waiting workflow run names no retained suite")
+
         if entry["kind"] != "check_run":
             continue
 
@@ -153,16 +166,20 @@ def result(data, kind):
     if conclusion == "success":
         return "passed"
 
+    if conclusion == AWAITING_ACTION:
+        return "pending"
+
     if conclusion in FAILURES:
         return "failed"
 
     return "unknown"
 
 
-def row(entry, diagnostics=()):
+def row(entry, diagnostics=(), workflow=None):
     data, kind = entry["data"], entry["kind"]
     issues = list(diagnostics)
-    name = data.get("context") if kind == "status" else data.get("name") if kind == "check_run" else "Check suite"
+    # A suite carries its workflow's name when read through GraphQL, or from the waiting run that names it, such as a fork PR's run before any check run exists.
+    name = data.get("context") if kind == "status" else data.get("name") if kind == "check_run" else (data.get("workflow_run") or {}).get("name") or workflow or "Check suite"
     if not isinstance(name, str) or not name:
         name = "Unnamed observation"
         issues.append("source name missing")
@@ -198,6 +215,9 @@ def row(entry, diagnostics=()):
     if kind == "check_run" and data.get("status") == "completed" and times["completed_at"] is None:
         issues.append("completed_at is missing")
 
+    if kind != "status" and data.get("conclusion") == AWAITING_ACTION:
+        issues.append("action required: waiting for someone to act, such as a maintainer approving workflow runs for a fork PR; not a failure")
+
     app = object_field(data, "app")
     value = result(data, kind)
     if issues and any("missing" in issue or "ambiguous" in issue or "invalid" in issue for issue in issues):
@@ -232,13 +252,19 @@ def latest(groups, time_key):
 
 def summarize(entries, complete=True):
     runs, statuses, suites = {}, {}, []
+    workflows = {}
     for entry in entries:
         data, source = entry["data"], entry["repository"]["full_name"]
         kind = entry["kind"]
+        if kind == "workflow_run":
+            if isinstance(data.get("name"), str) and data["name"]:
+                workflows[(source, data["check_suite_id"])] = data["name"]
+            continue
+
         if kind == "status":
             name = data.get("context")
             if not isinstance(name, str) or not name:
-                name = ("unknown", data["id"])
+                name = ("unknown", data.get("id") or data.get("node_id"))
 
             statuses.setdefault((source, name.casefold() if isinstance(name, str) else name), []).append(entry)
             continue
@@ -275,19 +301,22 @@ def summarize(entries, complete=True):
             if suite_value["result"] == "failed" and any(value["result"] == "failed" and value["conclusion"] == suite_value["conclusion"] for value in suite_runs):
                 continue
 
-        notes = ["suite observation is not an individual test"]
-        if not suite_runs:
-            notes.append("suite has no selected retained runs")
-        elif entry["data"].get("status") == "completed":
-            notes.append("suite conclusion is unresolved by the selected individual results or coverage")
+        # A suite waiting for approval has no jobs until someone approves it; the Awaiting approval group already says so.
+        notes = []
+        if entry["data"].get("conclusion") != AWAITING_ACTION or suite_runs:
+            notes.append("whole workflow run, not a single job")
+            if not suite_runs:
+                notes.append("no jobs reported for it yet")
+            elif entry["data"].get("status") == "completed":
+                notes.append("its conclusion isn't explained by the jobs shown")
 
-        suite_row = row(entry, notes)
+        suite_row = row(entry, notes, workflows.get((entry["repository"]["full_name"], entry["data"]["id"])))
         if suite_row["result"] not in ("pending", "unknown"):
             suite_row["result"] = "unknown"
 
         rows.append(suite_row)
 
-    rows.sort(key=lambda value: (value["result"] != "failed", value["repository"], value["source"], value["app"] or "", value["name"], value["internal_id"]))
+    rows.sort(key=lambda value: (value["result"] != "failed", value["repository"], value["source"], value["app"] or "", value["name"], value["internal_id"] or 0))
     results = {value["result"] for value in rows}
     observed = "failed" if "failed" in results else "pending" if "pending" in results else "unknown" if "unknown" in results else "passed" if rows else "empty"
     return rows, observed

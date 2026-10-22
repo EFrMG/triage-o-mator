@@ -172,7 +172,7 @@ def pages(reader, resource, collection=None):
 
 def collect_checks(reader, repo, summary, revision, payloads):
     sha = revision["head_sha"]
-    component = descriptor(f"head {sha}: base/head repositories, check-suites -> check-runs(filter=all), commit statuses", revision)
+    component = descriptor(f"head {sha}: base/head repositories, check-suites -> check-runs(filter=all), runs awaiting approval, commit statuses", revision)
     component.update(received_count=0, pagination_complete=False)
     values, errors = [], []
     repositories = [repo]
@@ -204,10 +204,12 @@ def collect_checks(reader, repo, summary, revision, payloads):
 
                 values.append(dict(kind=kind, repository=source_repo, head_sha=sha, fetched_at=now(), resource=resource, data=row))
 
+        awaiting = set()
         try:
             suites = f"{prefix}/commits/{sha}/check-suites"
             for rows in pages(reader, suites, "check_suites"):
                 retain("check_suite", rows, suites)
+                awaiting |= {suite.get("id") for suite in rows if suite.get("conclusion") == "action_required"}
                 for suite in rows:
                     runs = f"{prefix}/check-suites/{suite['id']}/check-runs?filter=all"
                     for run_rows in pages(reader, runs, "check_runs"):
@@ -217,6 +219,15 @@ def collect_checks(reader, repo, summary, revision, payloads):
                         retain("check_run", run_rows, runs)
         except ReadFailure as error:
             errors.append(str(error))
+
+        # A run waiting for approval has no check runs yet, so nothing names its suite; one listing of the waiting runs does.
+        if awaiting:
+            try:
+                waiting = f"{prefix}/actions/runs?head_sha={sha}&status=action_required"
+                for rows in pages(reader, waiting, "workflow_runs"):
+                    retain("workflow_run", [run for run in rows if run.get("check_suite_id") in awaiting], waiting)
+            except ReadFailure as error:
+                errors.append(str(error))
 
         try:
             statuses = f"{prefix}/commits/{sha}/statuses"

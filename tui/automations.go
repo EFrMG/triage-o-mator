@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -16,9 +17,10 @@ type automationsUI struct {
 	actions                 []automationAction
 	verification            verificationStatus
 	ci                      ciPolicyStatus
+	workflow                workflowModeStatus
 }
 
-// automationCard is one row of Settings → Automations: Labeling, Scoring, Agentic verification, CI for readiness, the Pending review hold, then one card per action type.
+// automationCard is one row of Settings → Automations: Labeling, Scoring, Agentic verification, CI for readiness, the Pending review hold, one card per action type, then Workflow approval.
 type automationCard struct {
 	kind   string
 	action automationAction
@@ -29,8 +31,11 @@ func (m model) automationCards() []automationCard {
 	for _, action := range m.settings.automations.actions {
 		cards = append(cards, automationCard{kind: "action", action: action})
 	}
-	return cards
+	return append(cards, automationCard{kind: "workflow"})
 }
+
+// workflowModes is the order Enter cycles Workflow approval through; off is the default.
+var workflowModes = []string{"off", "stage", "execute"}
 
 func (m model) automationCard() automationCard {
 	cards := m.automationCards()
@@ -91,6 +96,12 @@ type ciPolicyStatus struct {
 	Revision   string `json:"revision"`
 }
 
+type workflowModeStatus struct {
+	Repository string `json:"repository"`
+	Mode       string `json:"mode"`
+	Revision   string `json:"revision"`
+}
+
 type automationMsg struct {
 	root, repo, operation string
 	request               uint64
@@ -98,6 +109,7 @@ type automationMsg struct {
 	actions               actionPolicyStatus
 	verification          verificationStatus
 	ci                    ciPolicyStatus
+	workflow              workflowModeStatus
 	err                   error
 }
 
@@ -127,7 +139,14 @@ func readAutomationStatus(root, repo string, msg *automationMsg) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal([]byte(out), &msg.ci)
+	if err := json.Unmarshal([]byte(out), &msg.ci); err != nil {
+		return err
+	}
+	out, err = runScript(root, "workflow-runs", "mode", "--expected-repo", repo)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(out), &msg.workflow)
 }
 
 func automationStatusCmd(root, repo string, request uint64) tea.Cmd {
@@ -287,6 +306,25 @@ func ciPolicyToggleCmd(root, repo string, request uint64, revision string, enabl
 	}
 }
 
+func workflowModeCmd(root, repo string, request uint64, revision, mode string) tea.Cmd {
+	return func() tea.Msg {
+		msg := automationMsg{root: root, repo: repo, request: request, operation: "workflow"}
+		if _, err := runScript(root, "workflow-runs", "mode", "--expected-repo", repo, "--set", mode, "--expected-revision", revision); err != nil {
+			msg.err = err
+			return msg
+		}
+		msg.err = readAutomationStatus(root, repo, &msg)
+		return msg
+	}
+}
+
+func (m model) workflowApprovalPrompt() string {
+	return fmt.Sprintf(`Workflow approval pass for %s, from the install at %s.
+
+Follow prompts/workflow-approval.md. Ask me for the PR numbers when the scope is unclear. List each PR's runs with bin/workflow-runs list --acquire, then assess them. Read the diff behind every normal run before the pass; add a concern with bin/workflow-runs hold and a reason whenever something worries you. You cannot remove a flag, release a hold or approve a suspicious run. Preview the pass, then run that exact preview; it approves only what this repository's Workflow approval setting allows and stages the rest for a person. Stop and report if an outcome is uncertain.
+`, m.repo, m.installRoot)
+}
+
 func (m model) automationsView() string {
 	state := "Loading…"
 	labeling := "Reading repository setting…"
@@ -331,6 +369,16 @@ func (m model) automationsView() string {
 				summary = "ON · Pending review stages otherwise executable actions"
 			}
 			cards = append(cards, [2]string{"Hold actions for Pending review", summary})
+		case "workflow":
+			summary := map[string]string{
+				"off":     "OFF · Runs awaiting approval are listed and assessed only · y copies the pass prompt",
+				"stage":   "STAGE · A pass stages every waiting run for a person in Notifications",
+				"execute": "EXECUTE NORMAL RUNS · A pass may approve runs with no flags, holds or concerns; suspicious runs stage",
+			}[m.settings.automations.workflow.Mode]
+			if m.settings.automations.workflow.Mode == "execute" && m.settings.automations.pendingReviewHold {
+				summary += " · Pending review PRs stage"
+			}
+			cards = append(cards, [2]string{"Workflow approval", summary})
 		default:
 			summary := "STAGE · Suggested " + card.action.Operation + " waits in Notifications"
 			if card.action.Mode == "execute" {
@@ -440,6 +488,16 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			before := m.settings.automations.pendingReviewHold
 			return m, automationReviewHoldCmd(m.installRoot, m.repo, m.settings.request, before, !before)
 		}
+		if card.kind == "workflow" {
+			current := m.settings.automations.workflow
+			after := workflowModes[0]
+			for index, mode := range workflowModes {
+				if mode == current.Mode {
+					after = workflowModes[(index+1)%len(workflowModes)]
+				}
+			}
+			return m, workflowModeCmd(m.installRoot, m.repo, m.settings.request, current.Revision, after)
+		}
 		before := m.settings.automations.labelingEnabled
 		return m, automationToggleCmd(m.installRoot, m.repo, m.settings.request, before, !before)
 	case "y":
@@ -459,6 +517,10 @@ func (m model) handleAutomationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if card.kind == "review-hold" {
 			m.status = "This repository's Pending review action hold is shown on the card."
 			return m, nil
+		}
+		if card.kind == "workflow" {
+			m.status = "Taking Workflow approval prompt…"
+			return m, yankCmd(m.installRoot, m.repo, "Workflow approval prompt", m.workflowApprovalPrompt())
 		}
 		if !m.settings.automations.loaded {
 			m.status = "Reading this repository's automation setting…"
@@ -483,7 +545,7 @@ func (m model) finishAutomation(msg automationMsg) (tea.Model, tea.Cmd) {
 		m.failErr("Couldn't update Automations", msg.err)
 		return m, nil
 	}
-	if msg.status.Repository != m.repo || msg.actions.Repository != m.repo || msg.verification.Repository != m.repo || msg.ci.Repository != m.repo {
+	if msg.status.Repository != m.repo || msg.actions.Repository != m.repo || msg.verification.Repository != m.repo || msg.ci.Repository != m.repo || msg.workflow.Repository != m.repo {
 		m.fail("Automation status belongs to another repository.")
 		return m, nil
 	}
@@ -497,13 +559,18 @@ func (m model) finishAutomation(msg automationMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if _, err := hex.DecodeString(msg.workflow.Revision); err != nil || len(msg.workflow.Revision) != 64 || !slices.Contains(workflowModes, msg.workflow.Mode) {
+		m.fail("Workflow approval status is invalid; refresh Automations.")
+		return m, nil
+	}
+
 	actions := []automationAction{}
 	for _, action := range msg.actions.Actions {
 		if action.Writable {
 			actions = append(actions, action)
 		}
 	}
-	m.settings.automations = automationsUI{loaded: true, labelingEnabled: msg.status.Enabled, pendingReviewHold: msg.actions.PendingReviewHold, pending: msg.status.Pending, paused: msg.status.Paused, actions: actions, verification: msg.verification, ci: msg.ci}
+	m.settings.automations = automationsUI{loaded: true, labelingEnabled: msg.status.Enabled, pendingReviewHold: msg.actions.PendingReviewHold, pending: msg.status.Pending, paused: msg.status.Paused, actions: actions, verification: msg.verification, ci: msg.ci, workflow: msg.workflow}
 	m.settings.selected = minInt(m.settings.selected, len(m.automationCards())-1)
 	if msg.operation == "verification" {
 		if m.settings.editor != nil && m.settings.editor.row.kind == "verification" {
@@ -522,6 +589,8 @@ func (m model) finishAutomation(msg automationMsg) (tea.Model, tea.Cmd) {
 		m.status = "Action policy updated for " + m.repo + "."
 	} else if msg.operation == "review-hold" {
 		m.status = "Pending review action hold updated for " + m.repo + "."
+	} else if msg.operation == "workflow" {
+		m.status = "Workflow approval is " + map[string]string{"off": "OFF", "stage": "STAGE", "execute": "EXECUTE NORMAL RUNS"}[msg.workflow.Mode] + " for " + m.repo + "."
 	}
 	return m, nil
 }

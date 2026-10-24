@@ -1,5 +1,6 @@
 """Fixed, bounded GraphQL pages and budgeted Git transfers per corpus batch."""
 
+import copy
 import os
 import re
 import subprocess
@@ -13,13 +14,28 @@ from _triage import WORK_ROOT
 
 BATCH_SIZE = 80
 QUERY_WIDTHS = (1, 2, 4, 5, 8, 10, 16, 20, 32, 40, 64, 80)
+CHECK_SUITES = 20
+CHECK_RUNS = 50
+# Check suites, check runs and statuses for one commit. Measured at 18 GraphQL points per 80 same-repository PRs; a fork's own commit adds about as much again, and only for forks.
+CHECKS = f"""fragment Checks on Commit {{ oid
+  checkSuites(first: {CHECK_SUITES}) {{ totalCount pageInfo {{ hasNextPage }} nodes {{ databaseId status conclusion createdAt updatedAt
+    app {{ databaseId slug name }} repository {{ id databaseId nameWithOwner }} workflowRun {{ databaseId event workflow {{ name }} }}
+    checkRuns(first: {CHECK_RUNS}, filterBy: {{ checkType: ALL }}) {{ totalCount pageInfo {{ hasNextPage }} nodes {{ databaseId name status conclusion startedAt completedAt detailsUrl url }} }} }} }}
+  status {{ contexts {{ id context state targetUrl createdAt }} }} }}"""
 
 
 def query(kind, phase, slots):
-    # The operation shape is fixed at import time; item numbers are always variables.
-    variables = ", ".join(["$owner: String!", "$repo: String!"] + [f"$n{i}: Int!" for i in range(slots)])
+    # The operation shape is fixed at import time; item numbers, fork flags and head commits are always variables.
+    checks = kind == "pr" and phase == "final"
+    names = ["$owner: String!", "$repo: String!"] + [f"$n{i}: Int!" for i in range(slots)]
+    if checks:
+        names += [f"$f{i}: Boolean!" for i in range(slots)] + [f"$h{i}: GitObjectID!" for i in range(slots)]
+
+    variables = ", ".join(names)
     field = "pullRequest" if kind == "pr" else "issue"
-    aliases = "\n".join(f"p{i}: {field}(number: $n{i}) {{ ...Detail }}" for i in range(slots))
+    # The final read also observes checks: through the PR's last commit, and for a fork through the fork's own commit, as the REST collector reads both repositories.
+    fork = (lambda i: f" forkCommit: headRepository @include(if: $f{i}) {{ object(oid: $h{i}) {{ ... on Commit {{ ...Checks }} }} }}") if checks else (lambda i: "")
+    aliases = "\n".join(f"p{i}: {field}(number: $n{i}) {{ ...Detail{fork(i)} }}" for i in range(slots))
     common = "id databaseId number url state updatedAt"
     if kind == "pr":
         common += " baseRefOid headRefOid baseRefName headRefName baseRepository { id databaseId nameWithOwner } headRepository { id databaseId nameWithOwner } changedFiles additions deletions isDraft mergeable"
@@ -30,21 +46,31 @@ def query(kind, phase, slots):
             common += " files(first: 100) { totalCount pageInfo { hasNextPage endCursor } nodes { path additions deletions changeType } }"
     else:
         common += " comments(first: 1) { totalCount }"
+        if kind == "pr":
+            common += " commits(last: 1) { nodes { commit { ...Checks } } }"
 
     if kind == "pr":
         common += " closingIssuesReferences(first: 100) { totalCount pageInfo { hasNextPage endCursor } nodes { id number url state updatedAt repository { id nameWithOwner } } }" if phase == "initial" else " closingIssuesReferences(first: 1) { totalCount }"
 
-    return f"query BulkCorpus({variables}) {{ repository(owner: $owner, name: $repo) {{ id databaseId nameWithOwner {aliases} }} rateLimit {{ remaining resetAt }} }} fragment Detail on {'PullRequest' if kind == 'pr' else 'Issue'} {{ {common} }}"
+    text = f"query BulkCorpus({variables}) {{ repository(owner: $owner, name: $repo) {{ id databaseId nameWithOwner {aliases} }} rateLimit {{ remaining resetAt }} }} fragment Detail on {'PullRequest' if kind == 'pr' else 'Issue'} {{ {common} }}"
+    return text + " " + CHECKS if checks else text
 
 
 QUERIES = {(kind, phase, slots): query(kind, phase, slots) for kind in ("pr", "issue") for phase in ("initial", "final") for slots in QUERY_WIDTHS}
 
 
-def response(reader, cache, kind, phase, members):
+def response(reader, cache, kind, phase, members, initial=None):
     owner, name = cache.identity["full_name"].split("/", 1)
     slots = next(width for width in QUERY_WIDTHS if width >= len(members))
     variables = dict(owner=owner, repo=name)
     variables.update({f"n{i}": members[min(i, len(members) - 1)]["number"] for i in range(slots)})
+    if kind == "pr" and phase == "final":
+        for i in range(slots):
+            node = initial[members[min(i, len(members) - 1)]["number"]]
+            head = node.get("headRepository") or {}
+            variables[f"f{i}"] = head.get("nameWithOwner") not in (None, cache.identity["full_name"])
+            variables[f"h{i}"] = node["headRefOid"]
+
     body, _ = reader._request("graphql", graphql_query=QUERIES[kind, phase, slots], graphql_variables=variables)
     data = reader._json(body)
     if not isinstance(data, dict) or not isinstance(data.get("data"), dict):
@@ -265,6 +291,63 @@ def listed_files(node):
     return rows, complete
 
 
+def lower(value):
+    return value.lower() if isinstance(value, str) else None
+
+
+def check_envelopes(node, observed, fetched_at):
+    """Map the final read's checks into the typed envelopes bin/_checks.py verifies, with REST field names. Returns the envelopes and every reason coverage is incomplete."""
+    sha, host, gaps = node["headRefOid"], observed["host"], []
+    head = node.get("headRepository")
+    allowed = {observed["full_name"]: observed}
+    commits = [(observed, ((node.get("commits") or {}).get("nodes") or [{}])[-1].get("commit"))]
+    if not isinstance(head, dict) or not head.get("nameWithOwner"):
+        gaps.append("head repository unavailable; fork check coverage is unknown")
+    elif head["nameWithOwner"] != observed["full_name"]:
+        fork = repository(head["nameWithOwner"], host, head.get("databaseId"), head.get("id"))
+        allowed[fork["full_name"]] = fork
+        commits.append((fork, ((node.get("forkCommit") or {}).get("object"))))
+
+    envelopes, seen = [], set()
+    for source, commit in commits:
+        if not isinstance(commit, dict) or commit.get("oid") != sha:
+            gaps.append(f"{source['full_name']}: checks for the PR head commit are unavailable")
+            continue
+
+        suites = commit["checkSuites"]
+        if suites["pageInfo"]["hasNextPage"] or suites["totalCount"] != len(suites["nodes"]):
+            gaps.append(f"{source['full_name']}: more than {CHECK_SUITES} check suites")
+
+        for suite in suites["nodes"]:
+            owner = allowed.get((suite.get("repository") or {}).get("nameWithOwner"))
+            if owner is None or (owner["full_name"], "check_suite", suite["databaseId"]) in seen:
+                if owner is None:
+                    gaps.append("a check suite belongs to another repository")
+                continue
+
+            seen.add((owner["full_name"], "check_suite", suite["databaseId"]))
+            app = dict(id=(suite.get("app") or {}).get("databaseId"), slug=(suite.get("app") or {}).get("slug"), name=(suite.get("app") or {}).get("name"))
+            run = suite.get("workflowRun")
+            data = dict(id=suite["databaseId"], head_sha=sha, app=app, status=lower(suite["status"]), conclusion=lower(suite["conclusion"]), created_at=suite["createdAt"], updated_at=suite["updatedAt"],
+                        workflow_run=dict(id=run["databaseId"], event=run["event"], name=(run.get("workflow") or {}).get("name")) if isinstance(run, dict) else None)
+            envelopes.append(dict(kind="check_suite", repository=owner, head_sha=sha, fetched_at=fetched_at, data=data))
+            runs = suite["checkRuns"]
+            if runs["pageInfo"]["hasNextPage"] or runs["totalCount"] != len(runs["nodes"]):
+                gaps.append(f"{owner['full_name']}: a check suite has more than {CHECK_RUNS} check runs")
+
+            for value in runs["nodes"]:
+                data = dict(id=value["databaseId"], head_sha=sha, app=app, check_suite=dict(id=suite["databaseId"]), name=value["name"], status=lower(value["status"]), conclusion=lower(value["conclusion"]),
+                            started_at=value["startedAt"], completed_at=value["completedAt"], details_url=value["detailsUrl"], html_url=value["url"])
+                envelopes.append(dict(kind="check_run", repository=owner, head_sha=sha, fetched_at=fetched_at, data=data))
+
+        # Commit statuses have no database ID in GraphQL; their node ID identifies them instead.
+        for context in (commit.get("status") or {}).get("contexts") or []:
+            data = dict(id=None, node_id=context["id"], context=context["context"], state=lower(context["state"]), target_url=context["targetUrl"], created_at=context["createdAt"])
+            envelopes.append(dict(kind="status", repository=source, head_sha=sha, fetched_at=fetched_at, data=data))
+
+    return envelopes, gaps
+
+
 def component(resource, revision, data, payloads, *, transport, complete=True, error=None, count=None, expected=None, format="json"):
     value = descriptor(resource, revision, "complete" if complete else "partial", None if complete else error)
     value["source"] = dict(transport=transport, resource=resource)
@@ -294,7 +377,8 @@ def acquire_batch(cache, reader, kind, members):
             except ReadFailure as error:
                 git_error = str(error)
 
-        final_repo, final = response(reader, cache, kind, "final", members)
+        final_repo, final = response(reader, cache, kind, "final", members, initial)
+        checks_observed = now()
         if git_error:
             reader.stopped = git_error
 
@@ -337,6 +421,12 @@ def acquire_batch(cache, reader, kind, members):
                     components["closing_issues"] = component(resource + "/closing-issues", revision, closing, payloads, transport="graphql",
                                                               complete=stable and closing_stable and closing_complete, error=closing_reason,
                                                               count=len(closing), expected=closing_count)
+                envelopes, gaps = check_envelopes(last, observed, checks_observed) if last["headRefOid"] == first["headRefOid"] else ([], ["PR head changed during batch acquisition"])
+                checks_resource = resource + "/checks"
+                for envelope in envelopes:
+                    envelope["resource"] = checks_resource
+                components["checks"] = component(checks_resource, revision, envelopes, payloads, transport="graphql", complete=stable and not gaps,
+                                                 error="; ".join(gaps) or "item changed during batch acquisition", count=len(envelopes))
                 diff = None
                 reason = git_error
                 if reason is None:
@@ -360,13 +450,16 @@ def acquire_batch(cache, reader, kind, members):
                     components["diff"] = component(resource + "/git-diff", revision, diff or "", payloads, transport="git", complete=False,
                                                     error=reason, format="diff")
             else:
-                for name in ("files", "diff", "closing_issues"):
+                for name in ("files", "diff", "checks", "closing_issues"):
                     value = descriptor(resource, revision, "not_applicable", None)
                     value.update(fetched_at=None, source=None)
                     components[name] = value
 
+            # Keep components this batch does not acquire, such as checks read when a PR was opened, as acquire() does; their own revisions and timestamps still decide reuse.
+            carried = [name for name in latest[1]["components"] if name not in components] if latest else []
+            components.update({name: copy.deepcopy(latest[1]["components"][name]) for name in carried})
             manifest = seal_snapshot(dict(schema_version=1, artifact="evidence-snapshot", repository=observed, started_at=started,
-                                          completed_at=now(), requested_components=["summary", "comments", "files", "diff", "closing_issues"],
+                                          completed_at=now(), requested_components=["summary", "comments", "files", "diff", "checks", "closing_issues"] + carried,
                                           items=[dict(identity=identity, revision=revision, components=components)]))
             cache.publish(manifest, payloads)
             results.append((member, manifest))

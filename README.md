@@ -165,7 +165,7 @@ These work the same wherever an item or a list is in front of you.
 
   ![Copy context for an Agent](docs/captures/flow-13.webp)
 
-- **Build the local dataset.** Press `f`, then turn automatic download **ON**. It freezes the list of open items and downloads their descriptions, discussions, PR files, diffs and closing links, now and again after each startup or backlog refresh. An agent can then search the saved evidence, and earlier saved observations, instead of fetching from GitHub item by item, which is slower and fills its context with data it does not need. Missing, partial or old evidence stays registered.
+- **Build the local dataset.** Press `f`, then turn automatic download **ON**. It freezes the list of open items and downloads their descriptions, discussions, PR files, diffs, checks and closing links, now and again after each startup or backlog refresh. An agent can then search the saved evidence, and earlier saved observations, instead of fetching from GitHub item by item, which is slower and fills its context with data it does not need. Missing, partial or old evidence stays registered.
 
   ![Build the local dataset](docs/captures/flow-14.webp)
 
@@ -210,23 +210,24 @@ bin/briefs list
 bin/briefs plan --all
 ```
 
-| Task                                            | Commands                                                                                            |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Install and refresh                             | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                                      |
-| Prepare and edit decisions                      | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv`                      |
-| Flag items for human attention                  | `bin/review-request`                                                                                |
-| Compare and group                               | `bin/similar`, `bin/duplicate-assessment`, `bin/not-duplicate`, `bin/group`, `bin/group-assessment` |
-| Read PR checks and focused failure context      | `bin/pr-checks`, `bin/pr-check-log`                                                                 |
-| Read guidance and evidence                      | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`                             |
-| Edit action settings                            | `bin/taxonomy-settings`, `bin/action-policy`                                                        |
-| Configure agent-led local verification          | `bin/verification-settings`                                                                         |
-| Configure CI requirements for ready assessments | `bin/ci-policy`                                                                                     |
-| Preview, initialize and reconcile GitHub labels | `bin/label-definitions`                                                                             |
-| Record no-fit assessments and apply labels      | `bin/label-assessment`, `bin/item-labels`                                                           |
-| Assess, propose and publish actions             | `bin/action-assessment`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus`              |
-| Label PR size deterministically                 | `bin/pr-size`                                                                                       |
-| Score and review selected issues and PRs        | `bin/item-score`, `bin/pr-assessment`                                                               |
-| See progress and handoffs                       | `bin/stats`, `bin/next`, `bin/report`, `bin/briefs`                                                 |
+| Task                                                         | Commands                                                                                            |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Install and refresh                                          | `bin/install-to`, `bin/label-catalog`, `bin/fetch`, `bin/sync`                                      |
+| Prepare and edit decisions                                   | `bin/batch`, `bin/read-batch`, `bin/apply`, `bin/export-csv`, `bin/import-csv`                      |
+| Flag items for human attention                               | `bin/review-request`                                                                                |
+| Compare and group                                            | `bin/similar`, `bin/duplicate-assessment`, `bin/not-duplicate`, `bin/group`, `bin/group-assessment` |
+| Read PR checks and focused failure context                   | `bin/pr-checks`, `bin/pr-check-log`                                                                 |
+| List, flag, hold and approve workflow runs awaiting approval | `bin/workflow-runs`                                                                                 |
+| Read guidance and evidence                                   | `bin/item-context`, `bin/cache`, `bin/enrich-one`, `bin/reposition-env`                             |
+| Edit action settings                                         | `bin/taxonomy-settings`, `bin/action-policy`                                                        |
+| Configure agent-led local verification                       | `bin/verification-settings`                                                                         |
+| Configure CI requirements for ready assessments              | `bin/ci-policy`                                                                                     |
+| Preview, initialize and reconcile GitHub labels              | `bin/label-definitions`                                                                             |
+| Record no-fit assessments and apply labels                   | `bin/label-assessment`, `bin/item-labels`                                                           |
+| Assess, propose and publish actions                          | `bin/action-assessment`, `bin/action-proposals`, `bin/action-pass`, `bin/comment-plus`              |
+| Label PR size deterministically                              | `bin/pr-size`                                                                                       |
+| Score and review selected issues and PRs                     | `bin/item-score`, `bin/pr-assessment`                                                               |
+| See progress and handoffs                                    | `bin/stats`, `bin/next`, `bin/report`, `bin/briefs`                                                 |
 
 #### Briefs from the command line
 
@@ -286,6 +287,7 @@ The [local verification guide](docs/local-verification.md) explains environment 
 | “label the backlog”                                    | [Label items](prompts/label-items.md)                                                             | Bounded proposed-label pass                 |
 | “score these items” or “run a scoring pass”            | [Score selected items](prompts/score-items.md)                                                    | A bounded, source-bound quality score       |
 | “run an action pass”                                   | [Automated actions](prompts/automated-actions.md)                                                 | Staged proposals or recorded write outcomes |
+| “run a workflow approval pass”                         | [Workflow approval](prompts/workflow-approval.md)                                                 | Agent concerns, staged runs or approvals    |
 | “prepare offline analysis”                             | [Prepare analysis](prompts/prepare-analysis.md)                                                   | A scoped cache handoff with gaps            |
 | “is #N a duplicate?”                                   | [Find duplicates](prompts/find-duplicates.md)                                                     | A sourced comparison or proposal            |
 | “review PR #N”                                         | [Review PR](prompts/review-pr.md)                                                                 | Code review notes and a local decision      |

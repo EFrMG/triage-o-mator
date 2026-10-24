@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""List a PR's workflow runs awaiting approval and flag them offline as normal or suspicious; hold them, approve exact reviewed runs, or run a bounded approval pass."""
+
+import argparse
+import json
+import sys
+import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))
+from _acquire import ReadFailure
+from _triage import REPO
+from _workflow_approval import TargetChanged, approval_plan, approve, hold, inbox, local_view, pass_preview, pass_run, policy_status, release, set_mode
+from _workflow_runs import assess, list_runs
+
+# Exit status for a refusal made before any write because the runs, their PR or their holds no longer match what was reviewed.
+TARGET_CHANGED_STATUS = 3
+
+
+def main():
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--expected-repo", required=True)
+    common.add_argument("--host", default="github.com")
+    numbered = argparse.ArgumentParser(add_help=False, parents=[common])
+    numbered.add_argument("--number", type=int, required=True)
+    aged = argparse.ArgumentParser(add_help=False)
+    aged.add_argument("--max-age", type=int, default=3600, help="seconds before the saved run listing counts as stale")
+
+    parser = argparse.ArgumentParser(description=__doc__, epilog="Examples: bin/workflow-runs list --expected-repo OWNER/REPO --number 123 --acquire; bin/workflow-runs assess --expected-repo OWNER/REPO --number 123; bin/workflow-runs approve ... --run ID --by NAME (a dry run), then again with --publish --request-id ID --approve HASH.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    listing = commands.add_parser("list", parents=[numbered], help="read the runs awaiting approval for the PR's head (GitHub reads only)")
+    listing.add_argument("--snapshot", help="the PR snapshot whose diff and head the runs are bound to (pr-code profile)")
+    listing.add_argument("--acquire", action="store_true", help="reuse or acquire a pr-code snapshot instead, refreshing it once if the live head has moved")
+    listing.add_argument("--request-budget", type=int, default=6, help="GitHub reads allowed, including any snapshot acquisition, 2 to 100")
+    assessing = commands.add_parser("assess", parents=[numbered, aged], help="flag the saved runs offline; adds this head's local holds and outcomes outside the checksum")
+    assessing.add_argument("--include-hunks", action="store_true", help="add the snapshot's diff hunks behind each flag, for display; they are not part of the checksum")
+    approving = commands.add_parser("approve", parents=[numbered, aged], help="preview, then publish, an approval of exact listed runs")
+    approving.add_argument("--run", type=int, action="append", required=True, help="a listed run ID; repeat for several")
+    approving.add_argument("--by", required=True, help="the person approving, or the agent with --automation")
+    approving.add_argument("--automation", action="store_true", help="approve as the pass would: only normal, unheld runs, and only in Execute normal runs mode")
+    approving.add_argument("--request-id", help="reuse the dry run's request ID when publishing")
+    approving.add_argument("--publish", action="store_true")
+    approving.add_argument("--approve", help="SHA-256 from the reviewed dry run")
+    holding = commands.add_parser("hold", parents=[numbered], help="hold one listed run locally; an agent's hold is a concern and needs a reason")
+    holding.add_argument("--run", type=int, required=True)
+    holding.add_argument("--head", required=True, help="the head SHA the hold applies to")
+    holding.add_argument("--by", required=True)
+    holding.add_argument("--reason")
+    releasing = commands.add_parser("release", parents=[numbered], help="a person releases a hold or concern; it stays as history")
+    releasing.add_argument("--note", required=True, help="the hold or concern ID")
+    releasing.add_argument("--by", required=True)
+    previewing = commands.add_parser("pass-preview", parents=[common, aged], help="offline: which listed runs a pass would approve and which it stages")
+    previewing.add_argument("--number", type=int, action="append", required=True)
+    running = commands.add_parser("pass-run", parents=[common, aged], help="run an exact previewed pass")
+    running.add_argument("--number", type=int, action="append", required=True)
+    running.add_argument("--by", required=True)
+    running.add_argument("--preview-sha256", required=True)
+    inboxing = commands.add_parser("inbox", parents=[common], help="offline rows for Notifications → Workflows")
+    inboxing.add_argument("--offset", type=int, default=0)
+    inboxing.add_argument("--limit", type=int, default=20)
+    mode = commands.add_parser("mode", parents=[common], help="read, or change with --set and --expected-revision, Settings → Automations → Workflow approval")
+    mode.add_argument("--set", choices=("off", "stage", "execute"))
+    mode.add_argument("--expected-revision")
+    args = parser.parse_args()
+    if args.expected_repo != REPO:
+        parser.error("selected repository changed")
+
+    if args.command == "list":
+        if bool(args.snapshot) == args.acquire:
+            parser.error("list requires exactly one of --snapshot or --acquire")
+        result = list_runs(args.number, args.snapshot or None, host=args.host, budget=args.request_budget)
+    elif args.command == "assess":
+        result = assess(args.number, host=args.host, max_age=args.max_age, include_hunks=args.include_hunks)
+        result["local"] = local_view(args.number, result["head_sha"])
+    elif args.command == "approve":
+        if args.publish != bool(args.request_id and args.approve):
+            parser.error("--publish requires the dry run's --request-id and --approve hash, and they apply only to --publish")
+        if args.publish:
+            result = approve(args.number, args.run, args.by, args.automation, args.request_id, args.approve, args.host, args.max_age)
+        else:
+            plan, approval = approval_plan(args.number, args.run, args.by, args.automation, str(uuid.uuid4()), args.host, args.max_age)
+            result = dict(plan=plan, approval=approval, requests=0)
+    elif args.command == "hold":
+        result = hold(args.number, args.run, args.head, args.by, args.reason, args.host)
+    elif args.command == "release":
+        result = release(args.number, args.note, args.by)
+    elif args.command == "pass-preview":
+        result = pass_preview(args.number, args.host, args.max_age)
+    elif args.command == "pass-run":
+        result = pass_run(args.number, args.by, args.preview_sha256, args.host, args.max_age)
+    elif args.command == "inbox":
+        result = inbox(args.host, args.offset, args.limit)
+    elif args.set:
+        result = set_mode(args.set, args.expected_revision)
+    else:
+        if args.expected_revision:
+            parser.error("--expected-revision applies to --set")
+        result = policy_status()
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result.get("stopped"):
+        sys.exit("error: an approval outcome is unknown; inspect the run on GitHub before trying again")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except TargetChanged as error:
+        print(f"error: {error}", file=sys.stderr)
+        sys.exit(TARGET_CHANGED_STATUS)
+    except (OSError, ValueError, KeyError, TypeError, ReadFailure) as error:
+        sys.exit(f"error: {error}")

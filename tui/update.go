@@ -61,6 +61,10 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.finishItemEdit(msg)
 	case checksLogMsg:
 		return m.finishChecksLog(msg)
+	case workflowRunsMsg:
+		return m.finishWorkflowRuns(msg)
+	case workflowActionMsg:
+		return m.finishWorkflowAction(msg)
 	case checksMsg:
 		return m.finishChecks(msg)
 	case commentEditorMsg:
@@ -106,6 +110,7 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.resizeChecksLogReader()
+		m.resizeWorkflowReader()
 		m.ready = true
 
 		return m, nil
@@ -476,6 +481,9 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	if m.checks.approval != nil {
+		return m.handleWorkflowReader(msg)
+	}
 	if m.checks.picker != nil {
 		return m.handleChecksLogPicker(msg)
 	}

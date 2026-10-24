@@ -123,6 +123,7 @@ type checksPage struct {
 type checksUI struct {
 	picker          *checksLogPicker
 	reader          *checksLogReader
+	approval        *workflowReader
 	loaded, busy    bool
 	snapshot        string
 	pendingSnapshot string
@@ -289,7 +290,11 @@ func (m *model) stopChecks() {
 			m.checks.reader.process.stop()
 		}
 	}
-	m.checks.picker, m.checks.reader = nil, nil
+	if m.checks.approval != nil && m.checks.approval.process != nil {
+		m.checks.approval.process.stop()
+	}
+	m.checks.picker, m.checks.reader, m.checks.approval = nil, nil, nil
+	m.workflowRunsRequest++
 }
 
 func (m *model) checksPageText(page checksPage) {
@@ -403,11 +408,15 @@ func checksBlocks(page checksPage) []checksBlock {
 		}
 		blocks = append(blocks, checksBlock{spans: []checksSpan{{text: message}}})
 	}
+	blocks = append(blocks, awaitingApprovalBlocks(page)...)
 	var compact []checksSpan
 	for _, row := range page.Rows {
 		name := singleLine(row.Name)
 		if name == "" {
 			name = "Unnamed check"
+		}
+		if awaitingApproval(row) {
+			continue
 		}
 		if row.Result != "failed" {
 			if len(compact) > 0 {
@@ -451,6 +460,54 @@ func checksBlocks(page checksPage) []checksBlock {
 		blocks = append(blocks, checksBlock{spans: compact})
 	}
 	return blocks
+}
+
+// awaitingApproval reports a pending row whose source concluded action_required, such as a fork PR's workflow runs waiting for a maintainer.
+func awaitingApproval(row checkRow) bool {
+	return row.Result == "pending" && row.Conclusion == "action_required"
+}
+
+// awaitingApprovalBlocks groups those rows above failures, since they wait on a person rather than on CI or the contributor.
+func awaitingApprovalBlocks(page checksPage) []checksBlock {
+	var rows []checkRow
+	for _, row := range page.Rows {
+		if awaitingApproval(row) {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	blocks := []checksBlock{
+		{spans: []checksSpan{{text: fmt.Sprintf("Awaiting approval (%d)", len(rows)), role: currentTheme.Warning, bold: true}}},
+		{spans: []checksSpan{{text: "These runs wait for someone to act, usually a maintainer approving workflows for a fork PR. They are not failures, and readiness cannot pass until they run.", role: currentTheme.Muted}}},
+	}
+	var spans []checksSpan
+	for _, row := range rows {
+		if len(spans) > 0 {
+			spans = append(spans, checksSpan{text: "\n"})
+		}
+		name := singleLine(row.Name)
+		if name == "" {
+			name = "Unnamed check"
+		}
+		spans = append(spans, checksSpan{text: name, role: currentTheme.Accent, bold: true})
+		if row.App != "" {
+			spans = append(spans, checksSpan{text: " · " + singleLine(row.App)})
+		}
+		if row.Repository != page.Repository.FullName {
+			spans = append(spans, checksSpan{text: " · " + singleLine(row.Repository)})
+		}
+		for _, problem := range row.Problems {
+			// bin/_checks.py explains action_required on every such row; the group heading already says it once.
+			if !strings.HasPrefix(problem, "action required:") {
+				spans = append(spans, checksSpan{text: "\n" + singleLine(problem), role: currentTheme.Warning})
+			}
+		}
+	}
+
+	return append(blocks, checksBlock{spans: spans})
 }
 
 // renderChecks exports plain source, without terminal styling.
@@ -562,13 +619,13 @@ func (m model) finishChecks(msg checksMsg) (tea.Model, tea.Cmd) {
 
 			m.checks.page.Problems = append(m.checks.page.Problems, notice)
 			m.checksPageText(m.checks.page)
-			m.status = "CI continuation unavailable. ! shows details; Ctrl-R retries focused CI."
+			m.status = "CI continuation unavailable. ! shows details."
 			m.recordError("Checks continuation unavailable", msg.err)
 			return m, nil
 		}
 		m.checks.page = checksPage{}
 		m.detail.setChecksPage(nil)
-		m.status = "CI read unavailable. ! shows details; Ctrl-R retries focused CI."
+		m.status = "CI read unavailable. ! shows details."
 		m.recordError("Checks unavailable", msg.err)
 		return m, nil
 	}
@@ -597,11 +654,18 @@ func (m model) finishChecks(msg checksMsg) (tea.Model, tea.Cmd) {
 	if msg.data.Pagination.Total > 0 {
 		m.checksPageText(m.checks.page)
 		m.status = "Focused CI loaded."
+		if m.checksOnLoad == m.detail.key && !m.notificationPR.open && m.detail.JumpToChecks() {
+			m.checksOnLoad = Key{}
+			m.form.FocusField(fieldContent)
+			if m.awaitingApprovalRows() > 0 {
+				m.status = "Focused CI loaded, with runs awaiting approval."
+			}
+		}
 	} else {
 		m.detail.setChecksPage(nil)
-		m.status = "No CI check or status observations. Ctrl-R refreshes focused CI."
+		m.status = "No CI check or status observations."
 		if msg.data.Coverage == "failed" || msg.data.Coverage == "unavailable" || len(msg.data.Problems) > 0 {
-			m.status = "CI observations unavailable. ! shows details; Ctrl-R retries focused CI."
+			m.status = "CI observations unavailable. ! shows details."
 			m.recordError("Checks unavailable", fmt.Errorf("%s: %s", msg.data.Coverage, strings.Join(msg.data.Problems, "; ")))
 		}
 	}
@@ -647,15 +711,15 @@ func (m model) checksKeyScope() bool {
 }
 
 func (m model) handleChecksKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd, bool) {
-	if m.prChecksKeyScope() && key.Matches(msg, keys.ChecksFocusedRefresh) {
-		return m, m.readChecks("refresh", 0), true
-	}
 	if !m.checksKeyScope() {
 		return m, nil, false
 	}
 	switch {
 	case key.Matches(msg, keys.ChecksLogs):
 		next, cmd := m.openChecksLogs()
+		return next, cmd, true
+	case key.Matches(msg, keys.ChecksApproval):
+		next, cmd := m.openWorkflowRuns()
 		return next, cmd, true
 	case key.Matches(msg, keys.ChecksRefresh):
 		cmd := m.readChecks("refresh", 0)

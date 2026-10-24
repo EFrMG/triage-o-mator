@@ -17,6 +17,7 @@ type notificationsUI struct {
 	tracked          *trackedPage
 	attention        *attentionPage
 	closures         *actionHistoryPage
+	workflows        workflowInbox
 	actions          actionProposalList
 	suggestions      []Item
 	suggestionOffset int
@@ -56,6 +57,7 @@ type notificationsMsg struct {
 	tracked    trackedPage
 	attention  attentionPage
 	closures   actionHistoryPage
+	workflows  workflowInbox
 	actions    actionProposalList
 	state      notificationState
 	unreadKeys []Key
@@ -66,10 +68,11 @@ type notificationChoice struct {
 	kind                                                    string
 	key                                                     Key
 	actionProposal, suggestion, tracked, attention, closure int
+	workflow                                                int
 }
 
 func itemChoice(key Key) notificationChoice {
-	return notificationChoice{kind: "item", key: key, actionProposal: -1, suggestion: -1, tracked: -1, attention: -1, closure: -1}
+	return notificationChoice{kind: "item", key: key, actionProposal: -1, suggestion: -1, tracked: -1, attention: -1, closure: -1, workflow: -1}
 }
 
 // proposalOutOfDate is the local note left when GitHub refused a pending proposal before any write because the item had changed.
@@ -362,6 +365,9 @@ func notificationsCommand(root, repo string, generation uint64, trackedAt, atten
 		if err == nil {
 			err = json.Unmarshal([]byte(out), &msg.state)
 		}
+		if err == nil {
+			msg.workflows, err = readWorkflowInbox(process, root, repo)
+		}
 		if err != nil {
 			msg.err = err
 			return msg
@@ -438,6 +444,7 @@ func (m model) finishNotifications(msg notificationsMsg) (tea.Model, tea.Cmd) {
 	}
 	m.notifications.attention = &msg.attention
 	m.notifications.closures = &msg.closures
+	m.notifications.workflows = msg.workflows
 	m.notifications.actions = msg.actions
 	m.notifications.suggestions = suggestedActions(m.items, m.taxonomy, msg.actions)
 	if m.notifications.suggestionOffset >= len(m.notifications.suggestions) {
@@ -594,6 +601,9 @@ func (n notificationsUI) choices() []notificationChoice {
 		if n.choiceNeeds(item) {
 			choices = append(choices, item)
 		}
+	}
+	for i, row := range n.workflows.Rows {
+		choices = append(choices, workflowChoice(row.Number, i))
 	}
 	if n.attention != nil {
 		if n.attention.Pagination.Offset > 0 {
@@ -874,6 +884,8 @@ func (m model) handleNotificationsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		switch choice.kind {
 		case "item":
 			return m.openNotificationChoice(choice)
+		case "workflow":
+			return m.openWorkflowNotification(choice.key.Number)
 		case "tracked-more":
 			return m.pageNotifications("tracked", *m.notifications.tracked.Next)
 		case "tracked-prev":
@@ -972,13 +984,24 @@ func (m model) notificationsView() string {
 			renderNotificationChoice(n, choice, card)
 		}
 	}
+	if len(n.workflows.Rows) > 0 {
+		fmt.Fprintf(&b, "\n%s\n%s\n", inset(heading.Render("Workflows")), inset(mutedText("Fork PR runs awaiting approval. Opening one approves nothing.")))
+		for _, choice := range choices {
+			if choice.kind == "workflow" {
+				renderWorkflowChoice(n, choice, card)
+			}
+		}
+		if more := n.workflows.Pagination.Total - len(n.workflows.Rows); more > 0 {
+			fmt.Fprintf(&b, "%s\n", inset(mutedText(fmt.Sprintf("%d more PRs; bin/workflow-runs inbox lists them.", more))))
+		}
+	}
 	fmt.Fprintf(&b, "\n%s\n", inset(heading.Render("Past actions")))
 	if n.tracked.Total == 0 {
 		fmt.Fprintf(&b, "%s\n", inset(mutedText("Track an issue or PR to see its comment activity here.")))
 	}
 	hasPast := false
 	for _, choice := range choices {
-		if !n.choiceNeeds(choice) && !n.choiceSuggested(choice) {
+		if !n.choiceNeeds(choice) && !n.choiceSuggested(choice) && choice.kind != "workflow" {
 			hasPast = true
 			renderNotificationChoice(n, choice, card)
 		}

@@ -14,7 +14,7 @@ from _storage import locked
 from _jobs import Cooldown, PageJob, page_keys
 
 PROFILES = {
-    "backlog": ["summary", "comments", "files", "diff", "closing_issues"],
+    "backlog": ["summary", "comments", "files", "diff", "checks", "closing_issues"],
     "closure-watch": ["summary", "comments", "timeline"],
     "discussion": ["summary", "comments"],
     "pr-context": ["summary", "comments", "files", "reviews", "review_comments"],

@@ -318,7 +318,7 @@ func (m model) handleMouseClick(event tea.Mouse) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.checks.picker != nil || m.checks.reader != nil {
+	if m.checks.picker != nil || m.checks.reader != nil || m.checks.approval != nil {
 		return m, nil
 	}
 	if m.confirmQuit {
@@ -846,6 +846,13 @@ func (m model) handleMouseWheel(event tea.Mouse) (tea.Model, tea.Cmd) {
 	if event.Button == tea.MouseWheelUp {
 		name = "up"
 	} else if event.Button != tea.MouseWheelDown {
+		return m, nil
+	}
+	if m.checks.approval != nil {
+		for range 3 {
+			next, _ := m.handleWorkflowReader(mouseKey(name))
+			m = next.(model)
+		}
 		return m, nil
 	}
 	if m.checks.reader != nil {

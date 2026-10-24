@@ -144,6 +144,19 @@ def suggestions(ledger):
             "prompts/automated-actions.md (select exact keys; reuse cached evidence first)",
             "each action follows its repository policy; incomplete or disputed cases stay staged")
 
+    # Only runs someone has listed are known here; reading the saved listings is offline, and an unreadable one never hides the other suggestions.
+    try:
+        from _workflow_approval import inbox
+
+        waiting = [row["number"] for row in inbox("github.com", 0, 50)["rows"] if row["waiting"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        waiting = []
+
+    if waiting:
+        add("agent", f"Review workflow runs awaiting approval on {len(waiting)} listed PRs",
+            "prompts/workflow-approval.md (e.g. " + ", ".join(f"#{number}" for number in waiting[:5]) + ")",
+            "flagged runs always wait for a person; the pass approves normal ones only when Settings → Automations → Workflow approval allows it")
+
     # Both numeric and unassessed results cover one recorded source revision; a changed item returns to the queue.
     # An unassessed result also returns once complete evidence for its item is saved.
     from _assessment_evidence import unassessed_with_new_evidence

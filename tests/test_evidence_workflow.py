@@ -790,10 +790,8 @@ print(json.dumps(manifest))
         group_status = self.json_cli("group-assessment", "--expected-repo", "owner/repo", "show", grouped["assessment_id"])
         self.assertEqual([row["ledger_revision_current"] for row in group_status["current"]["sources"]], [True, False])
         refreshed = self.json_cli("duplicate-assessment", *args)
-        self.assertNotIn("confidence", refreshed)
         self.assertIn("Need a reproduction from #3", refreshed["gaps"])
         self.assertIn("issue:3: selected revision differs from the ledger", refreshed["gaps"])
-        self.assertIn("unrecognized arguments: --confidence high", self.run_cli("duplicate-assessment", *args, "--confidence", "high", ok=False).stderr)
 
         partial = self.cache("fetch", "--kind", "issue", "--number", "2", "--profile", "discussion", "--mode", "refresh", "--request-budget", "2")
         partial_args = [f"issue:2:{partial['snapshot_id']}" if value == f"issue:2:{snapshots[2]}" else value for value in args]

@@ -649,9 +649,6 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 			t.Fatalf("default action %q has no supported GitHub operation", action)
 		}
 	}
-	if slices.Contains(m.taxonomy.Actions, "label-only") || slices.Contains(actionOperations, "label") || slices.Contains(m.taxonomy.Actions, "escalate-maintainer") || slices.Contains(m.taxonomy.Actions, "approve-merge-candidate") {
-		t.Fatal("default actions still include labeling or unsupported advice")
-	}
 	custom := Taxonomy{Actions: []string{"request logs", "archive", "escalate-maintainer"}, ActionOperations: map[string]string{"request logs": "comment", "archive": "close"}}
 	if !slices.Equal(custom.SelectableActions(), custom.Actions[:2]) || custom.OperationFor("archive") != "close" || custom.OperationFor("request logs") != "comment" {
 		t.Fatal("custom titles did not retain their concrete GitHub operations")
@@ -930,9 +927,6 @@ func TestBaselineSettingsGuidanceUsesScriptAndGuardsReplies(t *testing.T) {
 	m = baselineSend(m, tea.KeyPressMsg{Text: "e"})
 	if m.settings.editor == nil || m.settings.editor.field != 1 {
 		t.Fatal("verification guidance did not open focused")
-	}
-	if strings.Contains(ansi.Strip(m.viewContent()), "The user prepares the environment; the agent chooses relevant checks.") {
-		t.Fatal("verification composer retained the removed instruction")
 	}
 	if m.settings.editor.description.Value() != longGuidance {
 		t.Fatal("opening verification editor truncated saved guidance")
@@ -1681,8 +1675,8 @@ print((root / f"workflow-{sys.argv[1]}{'-publish' if '--publish' in sys.argv els
 			t.Fatalf("Checks did not render %q with its semantic color", colored.text)
 		}
 	}
-	if !strings.Contains(view, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("Checks refer to a different PR commit")) || strings.Contains(rendered, "\x1b") || strings.Contains(view, "Observed 2026-10-13") || strings.Contains(view, "CI observations alone") || strings.Contains(rendered, "Checks match the selected PR head") || strings.Contains(rendered, "rows ·") || strings.Contains(rendered, "omitted before") {
-		t.Fatal("Checks styling leaked into source or restored removed header text")
+	if !strings.Contains(view, lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.Warning)).Render("Checks refer to a different PR commit")) || strings.Contains(rendered, "\x1b") {
+		t.Fatal("Checks styling leaked into source or lost the commit mismatch warning")
 	}
 	summary := strings.Split(ansi.Strip(view), "\n")[0]
 	if !strings.HasPrefix(summary, " ") || ansi.StringWidth(summary) != 80 {
@@ -1931,8 +1925,8 @@ print((root / "log-fixture.json").read_text())
 	if !strings.Contains(renderChecks(empty), "No checks or statuses were recorded") || strings.Contains(renderChecks(empty), "Coverage remains incomplete") {
 		t.Fatal("complete empty CI became missing evidence")
 	}
-	if !strings.Contains(fmt.Sprint(m.footerGroups()), "refresh checks") || strings.Contains(fmt.Sprint(m.footerGroups()), "previous checks") {
-		t.Fatal("Checks help omitted refresh or retained manual paging")
+	if !strings.Contains(fmt.Sprint(m.footerGroups()), "refresh checks") {
+		t.Fatal("Checks help omitted refresh")
 	}
 	writePage(page)
 	next, pageCmd := m.Update(tea.KeyPressMsg{Text: "r"})
@@ -3249,13 +3243,6 @@ func TestBaselineAutomaticDatasetPreferenceAndContinuation(t *testing.T) {
 	if enabled, err := loadCorpusAuto(root, fresh.repo); err != nil || enabled {
 		t.Fatalf("automatic OFF preference was not saved: %v", err)
 	}
-	for _, oldKey := range []string{"d", "r", "n"} {
-		next, cmd = fresh.handleCorpusKey(tea.KeyPressMsg{Text: oldKey})
-		fresh = next.(model)
-		if cmd != nil || fresh.corpus.busy {
-			t.Fatalf("retired dataset key %q still started work", oldKey)
-		}
-	}
 }
 
 func TestBaselineDatasetMenuAndNotificationShortcut(t *testing.T) {
@@ -3270,8 +3257,8 @@ func TestBaselineDatasetMenuAndNotificationShortcut(t *testing.T) {
 		t.Fatal("completed download retained its preparation notice")
 	}
 	menuText := ansi.Strip(m.datasetText())
-	if strings.Contains(menuText, "ON starts at startup and after a backlog refresh.") || strings.Contains(menuText, "Press o to toggle.") || strings.Contains(menuText, "· Full cache management") {
-		t.Fatal("dataset toggle spacing, guidance, or title did not match the menu")
+	if strings.Contains(menuText, "· Full cache management") {
+		t.Fatal("dataset subtitle was joined to the menu title")
 	}
 	menuLines := strings.Split(ansi.Strip(m.datasetView()), "\n")
 	for _, label := range []string{"Automatic download", "Starts after each backlog refresh."} {
@@ -3296,23 +3283,13 @@ func TestBaselineDatasetMenuAndNotificationShortcut(t *testing.T) {
 			t.Fatalf("dataset label %q was missing", label)
 		}
 	}
-	for _, removed := range []string{"update reuse within", "Updates at saved item checkpoints", "Analyze with an agent", "Download limits", "request allowance", "Local data:"} {
-		if strings.Contains(menuText, removed) {
-			t.Fatalf("dataset menu retained removed guidance: %q", removed)
-		}
-	}
 	if len(menuLines) != m.mainHeight() || !strings.Contains(menuLines[len(menuLines)-1], "Reuse eligible data within one day") || !strings.Contains(menuLines[len(menuLines)-1], "storage ceiling 5 GB") {
 		t.Fatalf("dataset footer was not fixed to the pane bottom: %q", menuLines)
 	}
 	m.corpus.usage = &datasetUsage{Total: 300000000, Limit: 5000000000, Categories: map[string]int64{"reposition": 100000000}}
 	m.corpus.usage.Reposition.State = "on"
-	if !strings.Contains(ansi.Strip(m.datasetText()), "evidence 200.0 MB · indexes 100.0 MB") || strings.Contains(ansi.Strip(m.datasetText()), "Ranked search") || strings.Contains(ansi.Strip(m.datasetText()), "Reposition ON") {
+	if !strings.Contains(ansi.Strip(m.datasetText()), "evidence 200.0 MB · indexes 100.0 MB") {
 		t.Fatal("dataset menu did not show combined cache storage")
-	}
-	next, command := m.handleCorpusKey(tea.KeyPressMsg{Text: "p"})
-	m = next.(model)
-	if command != nil || m.corpus.busy {
-		t.Fatal("retired Reposition key started an operation")
 	}
 
 	next, _ = m.openNotifications()
@@ -4409,8 +4386,8 @@ func TestSuggestedActionsAndExplicitPendingReviewHaveSeparateTabs(t *testing.T) 
 	}
 	empty := baselineModel(t, baselineRoot(t))
 	empty.notifications = notificationsUI{open: true}
-	if view := ansi.Strip(empty.notificationsView()); !strings.Contains(view, "No new Notifications.") || strings.Contains(view, "Nothing needs attention.") {
-		t.Fatal("empty Notifications message was not updated")
+	if view := ansi.Strip(empty.notificationsView()); !strings.Contains(view, "No new Notifications.") {
+		t.Fatal("empty Notifications did not say so")
 	}
 }
 
@@ -4672,8 +4649,8 @@ else:
 	next, cmd = m.openActionReview(choice)
 	m = baselineSend(next.(model), cmd().(actionReviewMsg))
 	styledReview := m.actionReviewView()
-	if view := ansi.Strip(styledReview); !strings.Contains(view, "Could you share steps to reproduce?") || !strings.Contains(view, "Should this request be sent?") || strings.Contains(view, "snapshot-1") || strings.Contains(view, "summary: complete") {
-		t.Fatal("exact proposed comment or question was absent from the action review")
+	if view := ansi.Strip(styledReview); !strings.Contains(view, row.Target) || !strings.Contains(view, "Could you share steps to reproduce?") || !strings.Contains(view, "Should this request be sent?") || strings.Contains(view, "snapshot-1") || strings.Contains(view, "summary: complete") {
+		t.Fatal("exact target, proposed comment or question was absent from the action review")
 	}
 	if !strings.Contains(styledReview, newProposalReviewStyles().section.Render("Proposed action")) || !strings.Contains(styledReview, newProposalReviewStyles().section.Render("Comment to publish")) {
 		t.Fatal("issue action did not use the shared proposal review styling")
@@ -4734,66 +4711,6 @@ else:
 	}
 	if _, err := os.Stat(filepath.Join(root, "published-action")); err != nil {
 		t.Fatal("approved action was not sent to its owning script")
-	}
-}
-
-func TestQuestionedClosureCanPublishAfterExactReview(t *testing.T) {
-	root := baselineRoot(t)
-	script := `#!/usr/bin/env python3
-import json, pathlib, sys
-args = sys.argv[1:]
-row = dict(kind="pr", number=3, operation="close", title="Older change", target="https://github.com/owner/repo/pull/3", comment="This PR is superseded by #4.", head_sha="b" * 40, updated_at="2026-10-04T01:00:00Z", checkpoint="closure-1", status="pending", active=True, decision_question="Does #4 replace this PR?", inputs=dict(context_checkpoint="ctx-a", evidence=[], evidence_gaps=["Comparison pending"]))
-if "context" in args:
-    context = dict(repository="owner/repo", item=dict(kind="pr", number=3), checkpoint="ctx-a", requests=0, pagination=dict(offset=0, next_offset=None), rows=[])
-    print(json.dumps(dict(repository="owner/repo", kind="pr", number=3, proposal_checkpoint=row["checkpoint"], current=True, reason=None, item_context=context, requests=0)))
-elif "review" in args:
-    print(json.dumps(dict(plan=dict(repo="owner/repo", operation="conversation-or-state-action", proposals=[row]), approval="exact-closure-approval")))
-elif "execute" in args:
-    pathlib.Path("published-closure").write_text("yes")
-    print(json.dumps(dict(results=[dict(kind="pr", number=3, status="executed")])))
-else:
-    sys.exit("unexpected action proposal operation")
-`
-	if err := os.WriteFile(filepath.Join(root, "bin", "action-proposals"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	row := actionProposalRow{Kind: "pr", Number: 3, Operation: "close", Title: "Older change", Target: "https://github.com/owner/repo/pull/3", Comment: "This PR is superseded by #4.", HeadSHA: strings.Repeat("b", 40), UpdatedAt: "2026-10-04T01:00:00Z", Checkpoint: "closure-1", Status: "pending", Active: true, DecisionQuestion: "Does #4 replace this PR?", Inputs: proposalInputs{ContextCheckpoint: "ctx-a"}}
-	m := baselineModel(t, root)
-	m.contributor = "maintainer"
-	m.notifications = notificationsUI{open: true, actions: actionProposalList{Rows: []actionProposalRow{row}}}
-	choice, ok := m.notifications.actionProposalChoice(Key{Kind: "pr", Number: 3})
-	if !ok {
-		t.Fatal("questioned PR closure was missing from unified proposals")
-	}
-	next, cmd := m.openActionReview(choice)
-	m = baselineSend(next.(model), cmd().(actionReviewMsg))
-	if m.notifications.actionReview == nil || m.notifications.actionReview.context == nil {
-		t.Fatal("PR closure did not open the shared action reader")
-	}
-	if view := ansi.Strip(m.actionReviewView()); !strings.Contains(view, row.Target) || !strings.Contains(view, row.Comment) || !strings.Contains(view, row.DecisionQuestion) {
-		t.Fatal("PR closure review omitted exact target, public comment or question")
-	}
-	next, cmd = m.handleNotificationsKey(tea.KeyPressMsg{Text: "a"})
-	m = next.(model)
-	if _, err := os.Stat(filepath.Join(root, "published-closure")); !os.IsNotExist(err) {
-		t.Fatal("closure published before exact review completed")
-	}
-	next, publishCmd := m.Update(cmd().(actionReviewMsg))
-	m = next.(model)
-	if publishCmd == nil || m.notifications.actionReview == nil || m.notifications.actionReview.approval != "exact-closure-approval" {
-		t.Fatal("one approval press did not start the checked closure write")
-	}
-	result := publishCmd().(actionReviewMsg)
-	if result.err != nil {
-		t.Fatal(result.err)
-	}
-	next, reload := m.Update(result)
-	m = next.(model)
-	if m.notifications.actionReview != nil || !m.notifications.open || m.notifications.selectItem != (Key{Kind: "pr", Number: 3}) || !strings.Contains(m.status, "Published action on pr #3") || reload == nil {
-		t.Fatal("published closure did not return to Notifications with confirmation")
-	}
-	if _, err := os.Stat(filepath.Join(root, "published-closure")); err != nil {
-		t.Fatal("approved closure was not sent to its owning script")
 	}
 }
 

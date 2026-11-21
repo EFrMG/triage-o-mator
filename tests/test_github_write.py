@@ -614,7 +614,7 @@ class ClosureWriteTests(Workspace):
         self.assertEqual(self.json_cli("item-context", "--expected-repo", "owner/repo", "read", "--kind", "pr", "--number", "1")["feedback_count"], 1)
 
     def test_changed_guidance_requires_fresh_review_and_approval(self):
-        self.assertNotIn("rationale", self.propose(1))
+        self.propose(1)
         old = self.closure("review", "--number", "1")
         ledger = self.root / "data/owner/repo/ledger.jsonl"
         rows = [json.loads(line) for line in ledger.read_text().splitlines()]

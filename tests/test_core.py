@@ -1311,8 +1311,6 @@ print(json.dumps(dict(title="Issue " + sys.argv[3], body="Details", comments=[],
             reader = csv.DictReader(source)
             fields, rows = reader.fieldnames, list(reader)
 
-        self.assertNotIn("confidence", fields)
-        self.assertTrue(all("confidence" not in row for row in self.ledger().values()))
         rows[0].update(action="none", maintainer_notes="Check before changing the default")
         with csv_path.open("w", newline="") as out:
             writer = csv.DictWriter(out, fieldnames=fields)

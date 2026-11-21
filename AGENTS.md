@@ -34,8 +34,8 @@ The maintainer item form confirms one exact GitHub label set when its picker is 
 ## Working here
 
 ```sh
-mise exec -- make format
-mise exec -- make check # Python and Go tests, vet, gopls, gofmt, Prettier
+mise exec -- make ready # format, then check
+mise exec -- make check # read-only gate CI also runs: lint (vet, gopls, gofmt, Prettier), then Python and Go tests
 mise exec -- make build
 mise exec -- make run ROOT=/path/to/repository/triage-o-mator
 ```
